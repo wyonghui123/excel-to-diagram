@@ -60,6 +60,10 @@ CREATE TABLE IF NOT EXISTS type_definitions (
     delivery_relevant INTEGER DEFAULT 1,
     number_sequence_id INTEGER,
     default_type_id INTEGER,
+    document_role VARCHAR(32),
+    direction INTEGER NOT NULL DEFAULT 1,
+    reversal_type_id INTEGER,
+    is_default INTEGER NOT NULL DEFAULT 0,
     status VARCHAR(20) DEFAULT 'active',
     description TEXT,
     created_at DATETIME
@@ -236,6 +240,23 @@ class MemoryDataSource:
     def execute(self, sql, params=None):
         return self.conn.execute(sql, list(params or ()))
 
+    def table_exists(self, table_name):
+        rows = self.query(
+            "SELECT name FROM sqlite_master WHERE type IN ('table', 'view') "
+            'AND name = ?', [table_name])
+        return bool(rows)
+
+    def get_table_columns(self, table_name):
+        columns = {}
+        for row in self.query('PRAGMA table_info("%s")' % table_name):
+            columns[row['name']] = {
+                'type': row['type'],
+                'required': bool(row['notnull']),
+                'default': row['dflt_value'],
+                'primary_key': bool(row['pk']),
+            }
+        return columns
+
     def commit(self):
         self.conn.commit()
 
@@ -281,7 +302,12 @@ def _init(conn, *, shipment_qty: float = 40.0,
           payment_term_lines=None) -> None:
     line_ddl = LINE_DDL_WITH_RETURN if with_return_source else LINE_DDL
     conn.executescript(
-        HEADER_DDL + ';' + line_ddl + ';' + SCHEDULE_DDL + ';' + _UPSTREAM_DDL)
+        HEADER_DDL + ';' + line_ddl + ';' + SCHEDULE_DDL + ';'
+        + _UPSTREAM_DDL)
+    # v243：单据方向快照列（真实库由迁移添加，夹具在此补列）
+    conn.execute(
+        'ALTER TABLE customer_invoices ADD COLUMN direction INTEGER '
+        'NOT NULL DEFAULT 1')
     _seed_types(conn)
     _seed_sequences(conn)
     _seed_order(conn)
@@ -577,28 +603,69 @@ def type_id(conn, code):
     return int(row[0])
 
 
+def type_identity(conn, code):
+    """读取头类型身份元数据（v243 四列）；不存在返回 None。"""
+    row = conn.execute(
+        'SELECT id, document_role, direction, reversal_type_id, is_default '
+        "FROM type_definitions WHERE scope_bo = 'customer_invoice' "
+        "AND level = 'header' AND code = ?", [code]).fetchone()
+    if row is None:
+        return None
+    keys = ('id', 'document_role', 'direction', 'reversal_type_id',
+            'is_default')
+    return dict(zip(keys, row))
+
+
+def set_type_identity(conn, code, **fields):
+    """故障注入：改写头类型身份字段（status / document_role / direction）。"""
+    allowed = ('status', 'document_role', 'direction')
+    unknown = set(fields) - set(allowed)
+    if unknown:
+        raise ValueError('unsupported identity fields: %s' % sorted(unknown))
+    assignments = ', '.join('%s = ?' % key for key in fields)
+    conn.execute(
+        'UPDATE type_definitions SET %s '
+        "WHERE scope_bo = 'customer_invoice' AND level = 'header' "
+        'AND code = ?' % assignments,
+        list(fields.values()) + [code])
+    conn.commit()
+
+
 def _seed_types(conn: sqlite3.Connection) -> None:
+    # (code, level, document_category, line_category, document_role,
+    #  direction, is_default)
     rows = (
-        ('SINV', 'header', 'standard', None),
-        ('SCR', 'header', 'credit_memo', None),
-        ('SDN', 'header', 'debit_memo', None),
-        ('INV_ITEM', 'line', None, 'material'),
-        ('INV_SERVICE', 'line', None, 'service'),
-        ('INV_DISCOUNT', 'line', None, 'discount'),
+        ('SINV', 'header', 'standard', None, 'invoice', 1, 1),
+        ('SCR', 'header', 'credit_memo', None, 'credit_memo', -1, 0),
+        ('SDN', 'header', 'debit_memo', None, 'debit_memo', 1, 1),
+        ('SRV', 'header', 'standard', None, 'invoice', -1, 0),
+        ('INV_ITEM', 'line', None, 'material', None, 1, 0),
+        ('INV_SERVICE', 'line', None, 'service', None, 1, 0),
+        ('INV_DISCOUNT', 'line', None, 'discount', None, 1, 0),
     )
-    for code, level, document_category, line_category in rows:
+    for (code, level, document_category, line_category,
+         document_role, direction, is_default) in rows:
         conn.execute(
             'INSERT INTO type_definitions '
             '(code, name, scope_bo, level, document_category, line_category, '
-            ' delivery_relevant, status) '
-            "VALUES (?, ?, 'customer_invoice', ?, ?, ?, 1, 'active')",
-            [code, code, level, document_category, line_category])
+            ' delivery_relevant, document_role, direction, is_default, status) '
+            "VALUES (?, ?, 'customer_invoice', ?, ?, ?, 1, ?, ?, ?, 'active')",
+            [code, code, level, document_category, line_category,
+             document_role, direction, is_default])
+    srv_id = conn.execute(
+        "SELECT id FROM type_definitions WHERE scope_bo = 'customer_invoice' "
+        "AND level = 'header' AND code = 'SRV'").fetchone()[0]
+    conn.execute(
+        'UPDATE type_definitions SET reversal_type_id = ? '
+        "WHERE scope_bo = 'customer_invoice' AND level = 'header' "
+        "AND code = 'SINV'", [srv_id])
 
 
 def _seed_sequences(conn: sqlite3.Connection) -> None:
     for code, name in (('SINV', '销售发票编号'),
                        ('SCR', '红字销售发票编号'),
-                       ('SDN', '销售借项通知单编号')):
+                       ('SDN', '销售借项通知单编号'),
+                       ('SRV', '销售红字发票编号')):
         conn.execute(
             'INSERT INTO number_sequences '
             '(code, name, pattern, date_field, start_value, on_exhaust, status) '
@@ -824,6 +891,38 @@ def set_doc_flow_rule_status(path, rule_id, status):
 
 
 # ---------------------------------------------------------------- v242 迁移辅助
+
+# ---------------------------------------------------------------- doc_flow 血缘夹具
+
+def ensure_doc_flow_edges(conn):
+    """在内存库建 doc_flow_edges 边表 + 索引 + 消耗视图（供 FR-9 诊断测试）。"""
+    from meta.core.doc_flow_schema import ensure_doc_flow_edge_tables
+    ensure_doc_flow_edge_tables(make_ds(conn))
+    conn.commit()
+
+
+def insert_doc_flow_edge(conn, *, rule_id, source_bo, source_id, target_id,
+                         target_bo='customer_invoice_line', source_item='',
+                         target_item='', quantity=1.0, amount=0.0,
+                         status='active', quantity_sign='normal',
+                         edge_kind='normal'):
+    """插入一条血缘边（attach 口径：target_id = 目标行 ID）。"""
+    count = fetch_one(conn, 'SELECT COUNT(*) AS n FROM doc_flow_edges')['n']
+    edge_id = 'edge-%d' % (count + 1)
+    conn.execute(
+        'INSERT INTO doc_flow_edges (id, source_bo, source_id, source_item, '
+        'target_bo, target_id, target_item, quantity, amount, currency, unit, '
+        'quantity_sign, rule_id, derived_at, derived_by, status, pool, '
+        'source_instance_id, target_instance_id, derive_key, edge_kind, '
+        'reverses_edge_id) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, '
+        '?, ?, ?, ?, ?, ?, ?, ?)',
+        [edge_id, source_bo, str(source_id), source_item, target_bo,
+         str(target_id), target_item or str(target_id), float(quantity),
+         float(amount), '', '', quantity_sign, rule_id,
+         '2026-11-10 00:00:00', 'test', status, 'billing', '', '', '',
+         edge_kind, ''])
+    conn.commit()
+    return edge_id
 
 _BILLING_PLAN_FIELDS = {
     'billing_period_count', 'billing_interval_months', 'billing_anchor_date',

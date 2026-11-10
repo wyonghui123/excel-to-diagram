@@ -132,6 +132,7 @@ def register_all_bo_actions(registry=None):
         customer_invoice_return_credit_handler,
         create_credit_on_account_handler as
         customer_invoice_on_account_handler,
+        create_debit_memo_handler as customer_invoice_debit_memo_handler,
         list_due_schedules_handler as customer_invoice_due_list_handler,
         submit_handler as customer_invoice_submit_handler,
         post_handler as customer_invoice_post_handler,
@@ -1566,6 +1567,33 @@ def register_all_bo_actions(registry=None):
                 'invoice_date': {'type': 'string'},
                 'reason': {'type': 'string'},
                 'remark': {'type': 'string'},
+                'lines': {'type': 'array', 'items': {'type': 'object'}},
+            },
+            'required': ['lines'],
+        },
+        output_schema=_customer_invoice_output_schema,
+        requires_auth=True,
+        idempotent=False,
+    )
+    # S8 Wave D D2: 手工借项通知单（spec-s8-customer-invoice-wave-d §6.2）
+    registry.register(
+        'customer_invoice.create_debit_memo',
+        customer_invoice_debit_memo_handler,
+        description='生成手工借项通知单草稿（正数行，订单行只读引用）',
+        object_type='customer_invoice',
+        category='business',
+        permission_required='customer_invoice:customer_invoice_debit_memo',
+        input_schema={
+            'type': 'object',
+            'properties': {
+                'customer_id': {'type': 'integer'},
+                'customer_account_id': {'type': 'integer'},
+                'currency_id': {'type': 'integer'},
+                'org_id': {'type': 'integer'},
+                'invoice_date': {'type': 'string'},
+                'reason': {'type': 'string'},
+                'remark': {'type': 'string'},
+                'source_invoice_id': {'type': 'integer'},
                 'lines': {'type': 'array', 'items': {'type': 'object'}},
             },
             'required': ['lines'],

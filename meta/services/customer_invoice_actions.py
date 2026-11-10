@@ -209,6 +209,34 @@ def create_credit_on_account_handler(params: Dict[str, Any],
     return _ok(data, '已生成贷项单 %s（草稿）' % data.get('invoice_no', ''))
 
 
+def create_debit_memo_handler(params: Dict[str, Any],
+                              context: Any = None) -> Dict[str, Any]:
+    """`customer_invoice.create_debit_memo`（Wave D D2，正数金额）。"""
+    _set_user_context()
+    params = dict(params or {})
+
+    lines = list(params.get('lines') or [])
+    if not lines:
+        return _fail('缺少 lines（借项行）', 'INVALID_ARGUMENT')
+
+    payload = {key: params.get(key) for key in (
+        'invoice_date', 'remark', 'reason', 'lines', 'customer_id',
+        'customer_account_id', 'currency_id', 'exchange_rate', 'org_id',
+        'sales_org_id', 'payment_term_id', 'bill_to_account_id',
+        'payer_account_id', 'source_invoice_id') if not _blank(params.get(key))}
+    payload['lines'] = lines
+    payload.setdefault('invoice_date', date.today().strftime('%Y-%m-%d'))
+
+    try:
+        data = _service().create_debit_memo(payload)
+    except CustomerInvoiceError as exc:
+        return _fail(str(exc), getattr(exc, 'rule', '') or 'INVOICE_INVALID')
+
+    logger.info('[customer_invoice_action] debit memo=%s',
+                data.get('invoice_no'))
+    return _ok(data, '已生成借项通知单 %s（草稿）' % data.get('invoice_no', ''))
+
+
 def create_credit_from_return_shipment_handler(params: Dict[str, Any],
                                                context: Any = None
                                                ) -> Dict[str, Any]:

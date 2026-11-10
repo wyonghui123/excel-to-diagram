@@ -12,8 +12,12 @@ import pytest
 pytestmark = pytest.mark.unit
 
 from meta.core.exceptions import ValidationFailedError
+from meta.core.interceptors import (
+    customer_invoice_guard_interceptor as guard_interceptor,
+)
 from meta.core.interceptors.customer_invoice_guard_interceptor import (
     CustomerInvoiceGuardInterceptor,
+    state_readonly_fields,
 )
 from meta.services.customer_invoice_service import (
     EPSILON,
@@ -173,6 +177,84 @@ def test_submitted_same_frozen_value_allowed():
     assert params['remark'] == '备注可改'
 
 
+def test_submitted_same_month_invoice_date_allowed():
+    """AC-7.3：submitted 仍允许同月调整 invoice_date（号码一致性补丁兼容）。"""
+    conn = build_conn()
+    created = _submitted_invoice(conn)
+    params = {'id': created['id'], 'invoice_date': '2026-11-20'}
+
+    _INTERCEPTOR.before_action(_ctx(
+        conn, 'customer_invoice', 'crud_update', params,
+        old_data=get_header(conn, created['id'])))
+    assert params['invoice_date'] == '2026-11-20'
+
+
+def _yaml_submitted_readonly():
+    from meta.core.yaml_loader import (
+        get_meta_object,
+        get_yaml_schema_dir,
+        register_from_directory,
+    )
+
+    meta = get_meta_object('customer_invoice')
+    if meta is None:
+        register_from_directory(get_yaml_schema_dir())
+        meta = get_meta_object('customer_invoice')
+    return tuple(meta.state_field_policies['submitted'].readonly)
+
+
+def _changed_value(field, header):
+    old = header.get(field)
+    if field in ('customer_account_id', 'currency_id', 'org_id',
+                 'sales_org_id', 'bill_to_account_id', 'payer_account_id'):
+        return (old or 0) + 1
+    if field == 'document_type_id':
+        return int(old) + 1000
+    if field == 'exchange_rate':
+        return 2.0
+    if field == 'direction':
+        return -1 if int(old) == 1 else 1
+    return 'CHANGED-%s' % field
+
+
+def test_yaml_submitted_readonly_matches_interceptor():
+    """AC-7.2：YAML 声明的 submitted 只读集合 == 内核实际拦截集合。"""
+    conn = build_conn()
+    created = _submitted_invoice(conn)
+    header = get_header(conn, created['id'])
+    declared = _yaml_submitted_readonly()
+
+    # 内核读取的就是同一份 YAML 声明
+    assert declared == tuple(state_readonly_fields('submitted'))
+    # direction 全状态只读；invoice_date 不在其中（AC-7.3 同月可调）
+    assert 'direction' in declared
+    assert 'invoice_no' in declared
+    assert 'invoice_date' not in declared
+
+    for field in declared:
+        params = {'id': created['id'], field: _changed_value(field, header)}
+        with pytest.raises(ValidationFailedError) as error:
+            _INTERCEPTOR.before_action(_ctx(
+                conn, 'customer_invoice', 'crud_update', params,
+                old_data=header))
+        _expect(error, 'INVOICE_POSTED_READONLY')
+
+
+def test_frozen_policy_follows_yaml_declaration(monkeypatch):
+    """AC-7.1：冻结集合随 YAML 解析结果变化，无需改 Python。"""
+    conn = build_conn()
+    created = _submitted_invoice(conn)
+    header = get_header(conn, created['id'])
+
+    monkeypatch.setattr(
+        guard_interceptor, 'state_readonly_fields', lambda state: ('remark',))
+    with pytest.raises(ValidationFailedError) as error:
+        _INTERCEPTOR.before_action(_ctx(
+            conn, 'customer_invoice', 'crud_update',
+            {'id': created['id'], 'remark': 'YAML 声明为只读'}, old_data=header))
+    _expect(error, 'INVOICE_POSTED_READONLY')
+
+
 def test_document_category_is_immutable():
     conn = build_conn()
     created = _draft_invoice(conn)
@@ -275,7 +357,7 @@ def test_posted_to_reversed_delegates_reverse():
     _INTERCEPTOR.after_action(context)
 
     assert get_header(conn, created['id'])['status'] == 'reversed'
-    assert context.result.data['red_invoice_no'] == 'SCR-202611-00001'
+    assert context.result.data['red_invoice_no'] == 'SRV-202611-00001'
     assert params == {'id': created['id'], 'status': 'reversed'}
 
 

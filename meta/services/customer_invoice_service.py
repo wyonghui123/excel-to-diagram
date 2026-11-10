@@ -42,6 +42,7 @@ PAYMENT_TERM_TABLE = 'payment_terms'
 PAYMENT_TERM_LINE_TABLE = 'payment_term_lines'
 TYPE_TABLE = 'type_definitions'
 ALLOCATION_TABLE = 'payment_allocations'
+SCOPE_BO = 'customer_invoice'
 
 STATUS_DRAFT = 'draft'
 STATUS_SUBMITTED = 'submitted'
@@ -62,13 +63,6 @@ DOCUMENT_CATEGORIES = (
     DOCUMENT_CATEGORY_INVOICE, DOCUMENT_CATEGORY_CREDIT_MEMO,
     DOCUMENT_CATEGORY_DEBIT_MEMO, DOCUMENT_CATEGORY_CANCELLATION,
 )
-
-#: type_definitions.document_category → customer_invoices.document_category
-_TYPE_CATEGORY_TO_DOCUMENT_CATEGORY = {
-    'standard': DOCUMENT_CATEGORY_INVOICE,
-    'credit_memo': DOCUMENT_CATEGORY_CREDIT_MEMO,
-    'debit_memo': DOCUMENT_CATEGORY_DEBIT_MEMO,
-}
 
 SOURCE_SHIPMENT = 'shipment'
 SOURCE_ORDER = 'sales_order'
@@ -140,18 +134,10 @@ PERCENT_TAIL_TOLERANCE = Decimal('0.01')
 EDITABLE_STATUSES = (STATUS_DRAFT,)
 LINE_EDITABLE_STATUSES = (STATUS_DRAFT,)
 
-#: submitted 冻结的头字段（守卫与服务共用）
-SUBMITTED_FROZEN_FIELDS = (
-    'invoice_no', 'document_type_id', 'customer_account_id',
-    'bill_to_account_id', 'payer_account_id', 'currency_id',
-    'exchange_rate', 'exchange_rate_type', 'exchange_rate_date',
-    'org_id', 'sales_org_id',
-)
-
 #: 可写入 customer_invoices 的头字段白名单（过滤调用方携带的 lines / 临时键）
 HEADER_FIELDS = (
-    'invoice_no', 'document_type_id', 'document_category', 'invoice_date',
-    'posting_date', 'status',
+    'invoice_no', 'document_type_id', 'document_category', 'direction',
+    'invoice_date', 'posting_date', 'status',
     'customer_account_id', 'bill_to_account_id', 'payer_account_id',
     'bill_to_address_text', 'tax_registration_no', 'currency_id',
     'exchange_rate', 'exchange_rate_type', 'exchange_rate_date',
@@ -210,6 +196,147 @@ def _date_text(value: Any) -> str:
     return str(value or '')[:10]
 
 
+# ---------------------------------------------------------------- 行来源策略
+# [S8 Wave D FR-8] 取值与 customer_invoice.yaml `line_source_policy` 一致
+LINE_SOURCE_SHIPMENT = 'shipment_line'
+LINE_SOURCE_INVOICE = 'invoice_line'
+LINE_SOURCE_RETURN = 'return_line'
+LINE_SOURCE_ORDER = 'order_line'
+LINE_SOURCE_ORDER_READONLY = 'order_line_readonly'
+LINE_SOURCE_PLAN = 'plan'
+LINE_SOURCE_MANUAL = 'manual'
+
+
+def _line_source_kind(line: Dict[str, Any], role: str) -> str:
+    """识别行来源种类（优先级：退货 > 原票行 > 发货行 > 计划期次 > 订单行 > 手工）。"""
+    source_type = str(line.get('source_doc_type') or '')
+    if source_type == SOURCE_RETURN_SHIPMENT:
+        return LINE_SOURCE_RETURN
+    if not _blank(line.get('original_invoice_line_id')):
+        return LINE_SOURCE_INVOICE
+    if not _blank(line.get('shipment_line_id')):
+        return LINE_SOURCE_SHIPMENT
+    if not _blank(line.get('schedule_id')) or source_type == SOURCE_PLAN:
+        return LINE_SOURCE_PLAN
+    if not _blank(line.get('order_line_id')) or source_type == SOURCE_ORDER:
+        return (LINE_SOURCE_ORDER_READONLY if role == 'debit_memo'
+                else LINE_SOURCE_ORDER)
+    return LINE_SOURCE_MANUAL
+
+
+def _check_line_source_policy(role: Any, direction: Any,
+                              lines: List[Dict[str, Any]],
+                              policy: Dict[str, List[str]]) -> None:
+    """按头表角色校验行来源组合；声明了策略但缺少角色时默认拒绝（fail-closed）。
+
+    红字镜像行（角色 invoice 且 direction=-1）由内核从原发票行生成，
+    其来源天然是原票行，不适用用户可选的来源策略。
+    """
+    if str(role or '') == 'invoice' and int(direction or 1) < 0:
+        return
+    if not policy:
+        return
+    allowed = policy.get(str(role or ''))
+    if allowed is None:
+        raise CustomerInvoiceError(
+            '单据角色 %s 未声明行来源策略' % role,
+            field_name='document_type_id',
+            rule='INVOICE_LINE_SOURCE_POLICY_VIOLATION')
+    for index, line in enumerate(lines or [], start=1):
+        kind = _line_source_kind(line, str(role or ''))
+        if kind not in allowed:
+            raise CustomerInvoiceError(
+                '第 %d 行来源 %s 不被角色 %s 允许（允许：%s）' % (
+                    index, kind, role, ', '.join(allowed)),
+                field_name='source_doc_type',
+                rule='INVOICE_LINE_SOURCE_POLICY_VIOLATION')
+
+
+# ---------------------------------------------------------------- 血缘诊断
+#: doc_flow 边表（与 doc_flow_schema 同名）
+DOC_FLOW_EDGE_TABLE = 'doc_flow_edges'
+#: 发票行的 doc_flow 目标 BO（attach 模式 target_id = 行 ID）
+LINEAGE_TARGET_BO = 'customer_invoice_line'
+
+
+def expected_lineage_edges(line: Dict[str, Any]) -> List[Dict[str, Any]]:
+    """推导某发票行应存在的血缘边（口径与 `_write_doc_flow_edges` 一致）。
+
+    优先级：原发票行（含退货发货行双写）> 计划期次 > 发货行 > 手工（无边）。
+    """
+    original_line_id = line.get('original_invoice_line_id')
+    if not _blank(original_line_id):
+        edges: List[Dict[str, Any]] = [{
+            'field': 'original_invoice_line_id',
+            'rule_id': CREDIT_DOC_FLOW_RULE_ID,
+            'source_bo': 'customer_invoice_line',
+            'source_id': str(original_line_id),
+        }]
+        if (str(line.get('source_doc_type') or '') == SOURCE_RETURN_SHIPMENT
+                and not _blank(line.get('source_line_id'))):
+            edges.append({
+                'field': 'source_line_id',
+                'rule_id': RETURN_DOC_FLOW_RULE_ID,
+                'source_bo': 'shipment_line',
+                'source_id': str(line.get('source_line_id')),
+            })
+        return edges
+    schedule_id = line.get('schedule_id')
+    if not _blank(schedule_id):
+        return [{
+            'field': 'schedule_id',
+            'rule_id': PLAN_DOC_FLOW_RULE_ID,
+            'source_bo': 'sales_order_schedule',
+            'source_id': str(schedule_id),
+        }]
+    shipment_line_id = line.get('shipment_line_id')
+    if not _blank(shipment_line_id):
+        return [{
+            'field': 'shipment_line_id',
+            'rule_id': DOC_FLOW_RULE_ID,
+            'source_bo': 'shipment_line',
+            'source_id': str(shipment_line_id),
+        }]
+    return []
+
+
+def lineage_violations(ds, invoice_id: Any) -> List[Dict[str, Any]]:
+    """只读血缘诊断：行来源外键 ⇒ 存在对应 active doc_flow 边（反向不强制）。
+
+    [S8 Wave D FR-9] 仅用于测试 / 诊断查询，不进入过账事务（AC-9.2）；
+    边表缺失或库不可读时返回单条诊断而不抛异常（不阻塞历史数据）。
+    """
+    try:
+        exists = bool(ds.query(
+            "SELECT name FROM sqlite_master WHERE type = 'table' AND name = ?",
+            [DOC_FLOW_EDGE_TABLE]))
+    except Exception:  # noqa: BLE001 - 库不可读按缺表处理
+        exists = False
+    if not exists:
+        return [{
+            'line_id': None, 'field': '', 'rule_id': '', 'source_bo': '',
+            'source_id': '', 'reason': 'DOC_FLOW_EDGE_TABLE_MISSING',
+        }]
+
+    lines = ds.query(
+        'SELECT id, original_invoice_line_id, source_doc_type, source_line_id, '
+        'schedule_id, shipment_line_id FROM %s WHERE invoice_id = ? '
+        'ORDER BY line_no, id' % LINE_TABLE, [invoice_id])
+    violations: List[Dict[str, Any]] = []
+    for line in lines:
+        for edge in expected_lineage_edges(line):
+            rows = ds.query(
+                'SELECT id FROM %s WHERE rule_id = ? AND source_bo = ? '
+                'AND source_id = ? AND target_bo = ? AND target_id = ? '
+                "AND status = 'active'" % DOC_FLOW_EDGE_TABLE,
+                [edge['rule_id'], edge['source_bo'], edge['source_id'],
+                 LINEAGE_TARGET_BO, str(line['id'])])
+            if not rows:
+                violations.append(dict(edge, line_id=line['id'],
+                                       reason='DOC_FLOW_EDGE_MISSING'))
+    return violations
+
+
 @contextmanager
 def _atomic(ds):
     """服务层事务包裹：数据源实现 transaction() 时进入，否则透传。"""
@@ -228,6 +355,8 @@ class CustomerInvoiceService:
         self.ds = data_source
         # 平台库（doc_flow_rule）数据源；单库部署时与 self.ds 相同
         self.platform_ds = platform_data_source
+        #: 单据类型身份元数据缓存：document_type_id → meta（实例级，避免逐行查询）
+        self._document_meta_cache: Dict[str, Dict[str, Any]] = {}
 
     # ================================================================ 建单
 
@@ -482,6 +611,49 @@ class CustomerInvoiceService:
                 'status': header['status'], 'line_ids': line_ids,
                 'amounts': totals}
 
+    def create_debit_memo(self, payload: Dict[str, Any]) -> Dict[str, Any]:
+        """D2：手工借项通知单草稿（正数金额，订单行只读引用，不进逆向链）。
+
+        类型由平台元数据解析：`scope_bo=customer_invoice, level=header,
+        document_role=debit_memo, is_default=1`；缺失 → `INVOICE_TYPE_UNKNOWN`。
+        `source_invoice_id` 仅作留痕引用，不改变原发票状态。
+        """
+        payload = dict(payload or {})
+        raw_lines = list(payload.get('lines') or [])
+        if not raw_lines:
+            raise CustomerInvoiceError(
+                '借项通知单至少需要一行', field_name='lines',
+                rule='INVOICE_DEBIT_LINE_SOURCE_INVALID')
+
+        header_payload = dict(payload)
+        header_payload['customer_account_id'] = (
+            payload.get('customer_account_id') or payload.get('customer_id'))
+        header_payload.pop('lines', None)
+        header_payload['document_type_id'] = self._default_type_by_role(
+            DOCUMENT_CATEGORY_DEBIT_MEMO)
+        header_payload['reversal_of_invoice_id'] = payload.get(
+            'source_invoice_id')
+        header_payload['reversal_reason'] = payload.get('reason') or '借项通知单'
+        header = self.prepare_header(header_payload)
+        meta = self._resolve_document_meta(header['document_type_id'])
+        if (meta['document_role'] != DOCUMENT_CATEGORY_DEBIT_MEMO
+                or int(meta['direction']) != 1):
+            raise CustomerInvoiceError(
+                '借项通知单的单据类型必须是 debit_memo / direction=+1',
+                field_name='document_type_id', rule='INVOICE_TYPE_UNKNOWN')
+
+        normalized = [self._build_debit_line(item, index, header)
+                      for index, item in enumerate(raw_lines, start=1)]
+        with _atomic(self.ds):
+            invoice_id = self._insert_header(header)
+            line_ids = self._insert_lines(invoice_id, normalized)
+            totals = self._recalc_impl(invoice_id)
+        logger.info('[customer_invoice] create_debit_memo id=%s no=%s lines=%s',
+                    invoice_id, header['invoice_no'], len(line_ids))
+        return {'id': invoice_id, 'invoice_no': header['invoice_no'],
+                'status': header['status'], 'line_ids': line_ids,
+                'amounts': totals}
+
     def create_credit_from_invoice(self, payload: Dict[str, Any]) -> Dict[str, Any]:
         """B5 / C4：按已过账原发票生成独立贷项草稿（支持部分数量 / 金额、多次贷项）。
 
@@ -499,6 +671,15 @@ class CustomerInvoiceService:
                 '缺少原发票', field_name='source_invoice_id',
                 rule='INVOICE_SOURCE_INVALID')
         source = self._require_header(source_id)
+        source_role = self._resolve_document_meta(
+            source.get('document_type_id')).get('document_role')
+        # AC-5.2：贷项来源仅允许正向发票 / 借项单；贷项不得再开贷项
+        if source_role not in (DOCUMENT_CATEGORY_INVOICE,
+                               DOCUMENT_CATEGORY_DEBIT_MEMO):
+            raise CustomerInvoiceError(
+                '单据角色 %s 不能作为贷项来源（仅 invoice / debit_memo）'
+                % source_role, field_name='source_invoice_id',
+                rule='INVOICE_CREDIT_SOURCE_ROLE_INVALID')
         if source.get('status') != STATUS_POSTED:
             raise CustomerInvoiceError(
                 '仅已过账发票可创建贷项', field_name='source_invoice_id',
@@ -522,14 +703,17 @@ class CustomerInvoiceService:
         requests = self._normalize_credit_requests(payload, lines)
         credited = self._credited_totals_by_line(
             [line['id'] for line, _, _ in requests])
+        credit_type_id = self._default_type_id(RED_INVOICE_TYPE_CODE, 'header')
+        credit_direction = self._resolve_document_meta(
+            credit_type_id)['direction']
         credit_lines = []
         for index, (line, qty, amount) in enumerate(requests, start=1):
             qty, amount = self._assert_credit_quota(
                 line, qty, amount, credited)
             credit_lines.append(self._negate_line(
-                line, index, qty=qty, amount=amount))
+                line, index, qty=qty, amount=amount,
+                direction=credit_direction))
 
-        credit_type_id = self._default_type_id(RED_INVOICE_TYPE_CODE, 'header')
         credit_no = self._allocate_number(credit_date, credit_type_id)
 
         header = dict(source)
@@ -745,9 +929,10 @@ class CustomerInvoiceService:
                 RED_INVOICE_TYPE_CODE if for_reversal
                 else DEFAULT_INVOICE_TYPE_CODE, 'header')
 
-        # 单据类别一律由单据类型派生，调用方传入值不生效（Fusion 口径）
-        row['document_category'] = self._resolve_document_category(
-            row['document_type_id'])
+        # 单据类别 / 方向由类型身份元数据派生，调用方传入值不生效（Fusion 口径）
+        meta = self._resolve_document_meta(row['document_type_id'])
+        row['document_category'] = meta['document_role']
+        row['direction'] = meta['direction']
 
         if _blank(row.get('invoice_no')):
             row['invoice_no'] = self._allocate_number(
@@ -1011,7 +1196,9 @@ class CustomerInvoiceService:
                 raise CustomerInvoiceError('发票没有任何行，禁止提交',
                                            field_name='lines',
                                            rule='INVOICE_SOURCE_INVALID')
-            if not self._is_red(header):
+            role = self._resolve_document_meta(
+                header.get('document_type_id'))['document_role']
+            if role == DOCUMENT_CATEGORY_INVOICE and not self._is_red(header):
                 self._assert_lines_available(lines)
             self._write_status(invoice_id, STATUS_SUBMITTED)
         return {'id': int(invoice_id), 'status': STATUS_SUBMITTED}
@@ -1040,7 +1227,11 @@ class CustomerInvoiceService:
                 raise CustomerInvoiceError('发票没有任何行，禁止过账',
                                            field_name='lines',
                                            rule='INVOICE_SOURCE_INVALID')
-            if not self._is_red(header):
+            role = self._resolve_document_meta(
+                header.get('document_type_id'))['document_role']
+            is_invoice = role == DOCUMENT_CATEGORY_INVOICE
+            is_red = self._is_red(header)
+            if is_invoice and not is_red:
                 self._assert_lines_available(lines)
             totals = self._assert_header_totals(header, lines)
 
@@ -1052,11 +1243,22 @@ class CustomerInvoiceService:
                     field_name='posting_date',
                     rule='INVOICE_POSTING_DATE_INVALID')
 
-            if not self._is_red(header):
+            if not is_red:
                 self._generate_schedules(header, totals['gross_amount'])
 
-            self._apply_billed(lines, sign=-1 if self._is_red(header) else 1)
-            self._write_doc_flow_edges(header, lines)
+            if is_red:
+                self._apply_billed(lines, sign=-1)
+                self._write_doc_flow_edges(header, lines)
+            elif is_invoice:
+                self._apply_billed(lines, sign=1)
+                self._write_doc_flow_edges(header, lines)
+            elif any(not _blank(line.get('shipment_line_id'))
+                     or not _blank(line.get('schedule_id')) for line in lines):
+                # 借项等非发票正向单据不得回写开票进度（防御性 fail-closed）
+                raise CustomerInvoiceError(
+                    '非发票正向单据不得引用发货行 / 开票计划期次',
+                    field_name='document_type_id',
+                    rule='INVOICE_DEBIT_BILLED_WRITEBACK_FORBIDDEN')
 
             self.ds.execute(
                 'UPDATE %s SET status = ?, posting_date = ?, '
@@ -1066,7 +1268,8 @@ class CustomerInvoiceService:
                  self._db_value(totals['net_amount']),
                  self._db_value(totals['tax_amount']),
                  self._db_value(totals['gross_amount']), _now(), invoice_id])
-            self._recompute_orders_for_lines(lines)
+            if is_invoice or is_red:
+                self._recompute_orders_for_lines(lines)
         self._emit_accounting_event_hook(header)
         logger.info('[customer_invoice] posted id=%s no=%s gross=%s',
                     invoice_id, header.get('invoice_no'),
@@ -1082,7 +1285,8 @@ class CustomerInvoiceService:
                                        rule='INVOICE_REVERSE_INVALID')
         # 取号必须在独立事务外（NumberSequenceEngine 硬约束），先做只读预检
         pre_header = self._require_header(invoice_id)
-        self._assert_reversible(pre_header)
+        red_type_id = self._assert_reversible(pre_header)
+        red_direction = self._resolve_document_meta(red_type_id)['direction']
         red_date = invoice_date or _today()
         original_posting = _date_text(pre_header.get('posting_date')
                                       or pre_header.get('invoice_date'))
@@ -1091,69 +1295,155 @@ class CustomerInvoiceService:
                 '红字发票日期不能早于原过账日期 %s' % original_posting,
                 field_name='invoice_date',
                 rule='INVOICE_POSTING_DATE_INVALID')
-        red_no = self._allocate_number(
-            red_date, self._default_type_id(RED_INVOICE_TYPE_CODE, 'header'))
+        # 统一逆向引擎：副作用顺序 / 事务 / 状态推进由 doc_effect.reversal 声明，
+        # 本服务只负责事务外预检与取号（NumberSequenceEngine 硬约束）。
+        from meta.core import reversal_orchestrator
+        from meta.core.reversal_orchestrator import ReversalError
 
-        with _atomic(self.ds):
-            header = self._require_header(invoice_id)
-            self._assert_reversible(header)
+        red_no = self._allocate_number(red_date, red_type_id)
 
-            lines = self._load_invoice_lines(invoice_id)
-            if not lines:
-                raise CustomerInvoiceError('原发票没有行，无法红冲',
-                                           field_name='lines',
-                                           rule='INVOICE_SOURCE_INVALID')
+        try:
+            outcome = reversal_orchestrator.execute(
+                self.ds, schema_id=SCOPE_BO, doc_id=invoice_id, reason=reason,
+                params={'invoice_no': red_no, 'invoice_date': red_date,
+                        'direction': red_direction})
+        except ReversalError as error:
+            raise CustomerInvoiceError(
+                str(error), field_name=error.field_name,
+                rule=error.rule or error.code) from error
 
-            red_header = dict(header)
-            for key in ('id', 'created_at', 'updated_at', 'created_by',
-                        'updated_by', 'invoice_no', 'status'):
-                red_header.pop(key, None)
-            red_header.update({
-                'invoice_no': red_no,
-                'document_type_id': self._default_type_id(
-                    RED_INVOICE_TYPE_CODE, 'header'),
-                'invoice_date': red_date,
-                'posting_date': max(red_date, original_posting),
-                'reversal_of_invoice_id': header['id'],
-                'reversal_reason': reason,
-                'status': STATUS_DRAFT,
-            })
-            red_header = self.prepare_header(red_header, for_reversal=True)
-
-            red_header_id = self._insert_header(red_header)
-            red_lines = [self._negate_line(line, index + 1)
-                         for index, line in enumerate(lines)]
-            red_line_ids = self._insert_lines(red_header_id, red_lines)
-            totals = self._recalc_impl(red_header_id)
-
-            self._apply_billed(red_lines, sign=-1)
-            now = _now()
-            self.ds.execute(
-                "UPDATE %s SET status = 'cancelled', updated_at = ? "
-                'WHERE invoice_id = ?' % SCHEDULE_TABLE,
-                [now, invoice_id])
-            self.ds.execute(
-                'UPDATE %s SET status = ?, updated_at = ? WHERE id = ?'
-                % HEADER_TABLE,
-                [STATUS_POSTED, now, red_header_id])
-            self.ds.execute(
-                'UPDATE %s SET status = ?, updated_at = ? WHERE id = ?'
-                % HEADER_TABLE,
-                [STATUS_REVERSED, now, invoice_id])
-            self._recompute_orders_for_lines(lines)
-            self._write_doc_flow_edges(red_header, red_lines)
+        document = dict(outcome.document or {})
+        red_header_id = document.get('id')
         logger.info('[customer_invoice] reversed id=%s -> red=%s no=%s',
-                    invoice_id, red_header_id, red_header['invoice_no'])
+                    invoice_id, red_header_id,
+                    document.get('invoice_no') or red_no)
         return {'id': int(invoice_id), 'status': STATUS_REVERSED,
                 'red_invoice_id': red_header_id,
-                'red_invoice_no': red_header['invoice_no'],
-                'red_line_ids': red_line_ids,
+                'red_invoice_no': document.get('invoice_no') or red_no,
+                'red_line_ids': list(document.get('line_ids') or []),
+                'amounts': dict(document.get('amounts') or {})}
+
+    # ================================================================ 逆向平台
+
+    def create_red_document(self, invoice_id: Any, *, invoice_no: str,
+                            invoice_date: Any,
+                            reason: str) -> Dict[str, Any]:
+        """红字单创建器：镜像原发票 + 负数量/负金额行，直接置 posted。
+
+        单号与业务日期由调用方在事务外预分配后经 ``params`` 透传；
+        状态推进（原单 → reversed）由编排器统一执行。
+        """
+        if _blank(invoice_no):
+            raise CustomerInvoiceError(
+                '红字发票单号未由调用方预分配', field_name='invoice_no',
+                rule='INVOICE_NUMBER_UNAVAILABLE')
+        header = self._require_header(invoice_id)
+        red_type_id = self._assert_reversible(header)
+        red_direction = self._resolve_document_meta(red_type_id)['direction']
+        lines = self._load_invoice_lines(invoice_id)
+        if not lines:
+            raise CustomerInvoiceError('原发票没有行，无法红冲',
+                                       field_name='lines',
+                                       rule='INVOICE_SOURCE_INVALID')
+
+        original_posting = _date_text(header.get('posting_date')
+                                      or header.get('invoice_date'))
+        red_header = dict(header)
+        for key in ('id', 'created_at', 'updated_at', 'created_by',
+                    'updated_by', 'invoice_no', 'status'):
+            red_header.pop(key, None)
+        red_header.update({
+            'invoice_no': invoice_no,
+            'document_type_id': red_type_id,
+            'invoice_date': invoice_date,
+            'posting_date': max(_date_text(invoice_date), original_posting),
+            'reversal_of_invoice_id': header['id'],
+            'reversal_reason': reason,
+            'status': STATUS_DRAFT,
+        })
+        red_header = self.prepare_header(red_header, for_reversal=True)
+
+        red_header_id = self._insert_header(red_header)
+        red_lines = [self._negate_line(line, index + 1,
+                                       direction=red_direction)
+                     for index, line in enumerate(lines)]
+        red_line_ids = self._insert_lines(red_header_id, red_lines)
+        totals = self._recalc_impl(red_header_id)
+        self._write_status(red_header_id, STATUS_POSTED)
+        logger.info('[customer_invoice] red letter id=%s no=%s <- %s',
+                    red_header_id, red_header['invoice_no'], invoice_id)
+        return {'id': red_header_id, 'invoice_no': red_header['invoice_no'],
+                'line_ids': red_line_ids, 'direction': red_direction,
+                'reversal_of_invoice_id': int(invoice_id),
                 'amounts': totals}
+
+    def release_billed_for_invoice(self, invoice_id: Any,
+                                   sign: int = -1) -> Dict[str, Any]:
+        """按发票行回滚/回写开票进度（发货行 / 订单行 / 计划期次累计）。"""
+        lines = self._load_invoice_lines(invoice_id)
+        if lines:
+            self._apply_billed(lines, sign=sign)
+        return {'count': len(lines)}
+
+    def cancel_schedules_for_invoice(self, invoice_id: Any) -> Dict[str, Any]:
+        """取消原发票的全部应收期次（红冲后不再计划收款）。"""
+        cursor = self.ds.execute(
+            "UPDATE %s SET status = 'cancelled', updated_at = ? "
+            'WHERE invoice_id = ?' % SCHEDULE_TABLE, [_now(), invoice_id])
+        return {'count': int(getattr(cursor, 'rowcount', 0) or 0)}
+
+    def write_doc_flow_for_invoice(self, invoice_id: Any) -> Dict[str, Any]:
+        """写该发票行的转单事实边（红字口径为反向引用边，幂等）。"""
+        header = self._require_header(invoice_id)
+        lines = self._load_invoice_lines(invoice_id)
+        if lines:
+            self._write_doc_flow_edges(header, lines)
+        return {'count': len(lines)}
+
+    def recompute_billing_for_invoice(self, invoice_id: Any) -> Dict[str, Any]:
+        """按该发票行重算关联销售订单的派生开票状态。"""
+        lines = self._load_invoice_lines(invoice_id)
+        if lines:
+            self._recompute_orders_for_lines(lines)
+        return {'count': len(lines)}
 
     # ================================================================ 期次
 
-    def _assert_reversible(self, header: Dict[str, Any]) -> None:
-        """红冲前置条件：无既有红字、仅已过账、无活跃核销。"""
+    def _assert_reversible(self, header: Dict[str, Any]) -> int:
+        """红冲前置条件：仅正向发票、无既有红字、仅已过账、无活跃核销。
+
+        返回红字单据类型 id（源类型 `reversal_type_id`）。角色不合法时
+        一律 `INVOICE_REVERSE_ROLE_UNSUPPORTED`，不做兜底猜测。
+        """
+        meta = self._resolve_document_meta(header.get('document_type_id'))
+        reversal_type_id = meta.get('reversal_type_id')
+        if (meta.get('document_role') != DOCUMENT_CATEGORY_INVOICE
+                or int(meta.get('direction') or 0) != 1
+                or _blank(reversal_type_id)):
+            raise CustomerInvoiceError(
+                '单据类型 %s 不支持红冲（仅正向发票且配置 reversal_type_id）'
+                % (meta.get('code') or header.get('document_type_id')),
+                field_name='document_type_id',
+                rule='INVOICE_REVERSE_ROLE_UNSUPPORTED')
+        red_meta = self._resolve_document_meta(reversal_type_id)
+        if int(red_meta.get('direction') or 0) != -1:
+            raise CustomerInvoiceError(
+                '红冲目标类型 %s 方向必须为 -1'
+                % (red_meta.get('code') or reversal_type_id),
+                field_name='document_type_id',
+                rule='INVOICE_REVERSE_ROLE_UNSUPPORTED')
+        # 一致性（AC-10.3）：类型元数据声明可红冲 ⇔ YAML 声明 doc_effect.reversal，
+        # 任一缺失均 fail-closed，不做兜底猜测。
+        from meta.core import reversal_orchestrator
+
+        if not reversal_orchestrator.supports(SCOPE_BO):
+            raise CustomerInvoiceError(
+                '单据类型 %s 配置了 reversal_type_id=%s，但 customer_invoice.yaml '
+                '未声明 doc_effect.reversal'
+                % (meta.get('code') or header.get('document_type_id'),
+                   reversal_type_id),
+                field_name='document_type_id',
+                rule='REVERSAL_NOT_DECLARED')
         if self._find_red_invoice(header['id']):
             raise CustomerInvoiceError(
                 '该发票已存在红字发票，禁止重复红冲',
@@ -1164,6 +1454,7 @@ class CustomerInvoiceService:
                 '仅已过账发票可红冲', field_name='status',
                 rule='INVOICE_STATE_INVALID')
         self._assert_no_active_allocation(header['id'])
+        return int(reversal_type_id)
 
     def _allocate_number(self, invoice_date: Any,
                          document_type_id: Any) -> str:
@@ -1934,9 +2225,13 @@ class CustomerInvoiceService:
         return None, amount
 
     def _negate_line(self, line: Dict[str, Any], line_no: int,
-                     *, qty: Any = None, amount: Any = None
-                     ) -> Dict[str, Any]:
-        """原发票行 → 负数贷项行；支持按数量 / 金额部分冲销（R-INV-24）。"""
+                     *, qty: Any = None, amount: Any = None,
+                     direction: int = -1) -> Dict[str, Any]:
+        """原发票行 → 逆向行；符号由单据 direction 决定（<0 为负数）。
+
+        支持按数量 / 金额部分冲销（R-INV-24）。
+        """
+        sign = -1 if int(direction or 1) < 0 else 1
         orig_qty = _to_decimal(line.get('qty'))
         orig_net = _to_decimal(line.get('net_amount'))
         orig_tax = _to_decimal(line.get('tax_amount'))
@@ -1993,14 +2288,14 @@ class CustomerInvoiceService:
             'item_id': line.get('item_id'),
             'description': line.get('description'),
             'uom_id': line.get('uom_id'),
-            'qty': -credit_qty,
+            'qty': sign * credit_qty,
             'billing_basis': line.get('billing_basis') or 'quantity',
             'unit_price': unit_price,
-            'net_amount': -credit_net,
+            'net_amount': sign * credit_net,
             'tax_code_id': line.get('tax_code_id'),
             'tax_rate_percent': _to_decimal(line.get('tax_rate_percent')),
-            'tax_amount': -credit_tax,
-            'gross_amount': -credit_gross,
+            'tax_amount': sign * credit_tax,
+            'gross_amount': sign * credit_gross,
             'project_id': line.get('project_id'),
             'project_task_id': line.get('project_task_id'),
             'billing_percent': percent,
@@ -2009,7 +2304,7 @@ class CustomerInvoiceService:
             'order_unit_price': line.get('order_unit_price'),
             'price_change_reason': line.get('price_change_reason'),
             'price_change_approved_by': line.get('price_change_approved_by'),
-            'price_diff_amount': -credit_diff,
+            'price_diff_amount': sign * credit_diff,
             'original_invoice_line_id': line.get('id'),
         }
         return row
@@ -2084,6 +2379,94 @@ class CustomerInvoiceService:
             'original_invoice_line_id': None,
         }
 
+    def _build_debit_line(self, item: Dict[str, Any], line_no: int,
+                          header: Dict[str, Any]) -> Dict[str, Any]:
+        """借项行：正数金额 + 可选订单行只读引用（不校验/不消耗开票额度）。"""
+        item = dict(item or {})
+        if _blank(item.get('description')):
+            raise CustomerInvoiceError(
+                '借项行必须填写描述', field_name='description',
+                rule='INVOICE_DEBIT_LINE_SOURCE_INVALID')
+        if _blank(item.get('uom_id')):
+            raise CustomerInvoiceError(
+                '借项行必须填写计量单位', field_name='uom_id',
+                rule='INVOICE_DEBIT_LINE_SOURCE_INVALID')
+        if _blank(item.get('tax_code_id')):
+            raise CustomerInvoiceError(
+                '借项行必须填写税码', field_name='tax_code_id',
+                rule='INVOICE_DEBIT_LINE_SOURCE_INVALID')
+
+        order_line_id = None
+        if not _blank(item.get('order_line_id')):
+            order_line = self._load_order_line(item['order_line_id'])
+            order = (self._load_order(order_line.get('order_id'))
+                     if order_line else None)
+            if (order is None
+                    or str(order.get('customer_account_id'))
+                    != str(header.get('customer_account_id'))
+                    or str(order.get('currency_id'))
+                    != str(header.get('currency_id'))):
+                raise CustomerInvoiceError(
+                    '借项引用的订单行不存在或与客户 / 币种不一致',
+                    field_name='order_line_id',
+                    rule='INVOICE_DEBIT_LINE_SOURCE_INVALID')
+            order_line_id = order_line['id']
+
+        qty = _to_decimal(item.get('qty') if not _blank(item.get('qty')) else 1)
+        if qty <= 0:
+            raise CustomerInvoiceError('借项行数量必须大于 0', field_name='qty',
+                                       rule='INVOICE_QTY_EXCEEDED')
+        unit_price = item.get('unit_price')
+        if _blank(unit_price):
+            unit_price = _to_decimal(item.get('net_amount')) / qty
+        # 入参兼容 `tax_rate`（0.13 小数口径）与 `tax_rate_percent`（13）
+        rate = item.get('tax_rate_percent')
+        if _blank(rate):
+            rate = _to_decimal(item.get('tax_rate') or 0)
+            if rate <= 1:
+                rate = rate * Decimal('100')
+        else:
+            rate = _to_decimal(rate)
+
+        line = {
+            'line_no': line_no,
+            'line_type_id': self._default_type_id(DEFAULT_LINE_TYPE_CODE,
+                                                  'line'),
+            'source_doc_type': SOURCE_MANUAL,
+            'source_doc_id': None,
+            'source_line_id': None,
+            'shipment_line_id': None,
+            'schedule_id': None,
+            'order_line_id': order_line_id,
+            'item_id': item.get('item_id'),
+            'description': item.get('description'),
+            'uom_id': item.get('uom_id'),
+            'qty': qty,
+            'billing_basis': 'amount',
+            'unit_price': _to_decimal(unit_price),
+            'net_amount': Decimal('0'),
+            'tax_code_id': item.get('tax_code_id'),
+            'tax_rate_percent': rate,
+            'tax_amount': Decimal('0'),
+            'gross_amount': Decimal('0'),
+            'project_id': item.get('project_id') or header.get('project_id'),
+            'project_task_id': None,
+            'billing_percent': None,
+            'billing_base_amount': None,
+            'price_source': 'manual',
+            'order_unit_price': None,
+            'price_change_reason': item.get('price_change_reason'),
+            'price_change_approved_by': None,
+            'price_diff_amount': Decimal('0'),
+            'original_invoice_line_id': None,
+        }
+        line = self._finalize_line(line, validate=True)
+        if _to_decimal(line['net_amount']) <= 0:
+            raise CustomerInvoiceError(
+                '借项行金额必须为正', field_name='net_amount',
+                rule='INVOICE_LINE_AMOUNT_INVALID')
+        return line
+
     # ================================================================ 持久化
 
     def _insert_header(self, row: Dict[str, Any]) -> int:
@@ -2095,8 +2478,39 @@ class CustomerInvoiceService:
         row['id'] = invoice_id
         return invoice_id
 
+    def _line_source_policy(self) -> Dict[str, List[str]]:
+        """[FR-8] 读取 YAML `line_source_policy`（元数据单一事实源）。"""
+        from meta.core.yaml_loader import (
+            get_meta_object,
+            get_yaml_schema_dir,
+            register_from_directory,
+        )
+
+        meta = get_meta_object('customer_invoice')
+        if meta is None:
+            try:
+                register_from_directory(get_yaml_schema_dir())
+            except Exception:  # pragma: no cover - 元数据损坏属部署故障
+                logger.exception('加载 customer_invoice 元数据失败，行来源策略未启用')
+            meta = get_meta_object('customer_invoice')
+        return (dict(getattr(meta, 'line_source_policy', None) or {})
+                if meta else {})
+
+    def _assert_line_source_policy(self, invoice_id: int,
+                                   lines: List[Dict[str, Any]]) -> None:
+        """按头表角色快照校验行来源组合（与 YAML 声明一致）。"""
+        rows = self.ds.query(
+            'SELECT document_category, direction FROM %s WHERE id = ?'
+            % HEADER_TABLE, [invoice_id])
+        if not rows:
+            return
+        _check_line_source_policy(
+            rows[0].get('document_category'), rows[0].get('direction'),
+            lines, self._line_source_policy())
+
     def _insert_lines(self, invoice_id: int,
                       lines: List[Dict[str, Any]]) -> List[int]:
+        self._assert_line_source_policy(invoice_id, lines)
         now = _now()
         line_ids = []
         for index, line in enumerate(lines, start=1):
@@ -2604,7 +3018,7 @@ class CustomerInvoiceService:
     def _find_red_invoice(self, invoice_id: Any) -> Optional[Dict[str, Any]]:
         rows = self.ds.query(
             'SELECT id, invoice_no, status FROM %s '
-            'WHERE reversal_of_invoice_id = ? AND status != ?'
+            'WHERE reversal_of_invoice_id = ? AND direction < 0 AND status != ?'
             % HEADER_TABLE, [invoice_id, STATUS_CANCELLED])
         return rows[0] if rows else None
 
@@ -2618,14 +3032,59 @@ class CustomerInvoiceService:
                 field_name='document_type_id', rule='INVOICE_TYPE_MISSING')
         return int(rows[0]['id'])
 
-    def _resolve_document_category(self, document_type_id: Any) -> str:
-        """由单据类型派生单据类别；类型缺失时回落到标准发票。"""
+    def _default_type_by_role(self, role: str,
+                              level: str = 'header') -> int:
+        """按平台角色取默认类型（is_default=1），缺失 fail-closed。"""
         rows = self.ds.query(
-            'SELECT document_category FROM %s WHERE id = ?' % TYPE_TABLE,
-            [document_type_id])
-        raw = (rows[0].get('document_category') if rows else '') or ''
-        return _TYPE_CATEGORY_TO_DOCUMENT_CATEGORY.get(
-            raw, DOCUMENT_CATEGORY_INVOICE)
+            'SELECT id FROM %s WHERE scope_bo = ? AND level = ? '
+            'AND document_role = ? AND is_default = 1 AND status = ? '
+            'ORDER BY id LIMIT 1' % TYPE_TABLE,
+            ['customer_invoice', level, role, 'active'])
+        if not rows:
+            raise CustomerInvoiceError(
+                '缺少角色 %s 的默认单据类型' % role,
+                field_name='document_type_id', rule='INVOICE_TYPE_UNKNOWN')
+        return int(rows[0]['id'])
+
+    def _resolve_document_meta(self, document_type_id: Any) -> Dict[str, Any]:
+        """由单据类型解析身份元数据：角色 / 方向 / 红冲类型 / 是否默认。
+
+        fail-closed：类型不存在、非 active、document_role 缺失或非法、
+        direction 非 ±1 时一律报 INVOICE_TYPE_UNKNOWN，不做任何兜底猜测。
+        """
+        key = str(document_type_id)
+        cached = self._document_meta_cache.get(key)
+        if cached is not None:
+            return cached
+        rows = self.ds.query(
+            'SELECT id, code, document_role, direction, reversal_type_id, '
+            'is_default, status FROM %s WHERE id = ? AND scope_bo = ?'
+            % TYPE_TABLE, [document_type_id, SCOPE_BO])
+        if not rows:
+            raise CustomerInvoiceError(
+                '单据类型 %s 不存在' % document_type_id,
+                field_name='document_type_id', rule='INVOICE_TYPE_UNKNOWN')
+        row = rows[0]
+        role = str(row.get('document_role') or '').strip().lower()
+        direction = int(row.get('direction') or 0)
+        if (str(row.get('status') or '') != 'active'
+                or role not in DOCUMENT_CATEGORIES
+                or direction not in (1, -1)):
+            raise CustomerInvoiceError(
+                '单据类型 %s 身份元数据不合法（role=%s direction=%s）'
+                % (row.get('code') or document_type_id,
+                   row.get('document_role'), row.get('direction')),
+                field_name='document_type_id', rule='INVOICE_TYPE_UNKNOWN')
+        meta = {
+            'id': row.get('id'),
+            'code': row.get('code'),
+            'document_role': role,
+            'direction': direction,
+            'reversal_type_id': row.get('reversal_type_id'),
+            'is_default': bool(row.get('is_default')),
+        }
+        self._document_meta_cache[key] = meta
+        return meta
 
     def _available_shipment_qty(self, shipment_line: Dict[str, Any]) -> Decimal:
         return (_to_decimal(shipment_line.get('qty'))
@@ -2660,9 +3119,11 @@ class CustomerInvoiceService:
 
     @staticmethod
     def _is_red(header: Dict[str, Any]) -> bool:
-        """红字口径：贷项通知单或引用原单的冲销单（含 on-account 贷项）。"""
-        return (header.get('document_category') == DOCUMENT_CATEGORY_CREDIT_MEMO
-                or not _blank(header.get('reversal_of_invoice_id')))
+        """红字口径：仅由头 direction 决定（direction < 0 即逆向单据）。"""
+        try:
+            return int(header.get('direction')) < 0
+        except (TypeError, ValueError):
+            return False
 
     def _table_exists(self, table: str) -> bool:
         try:

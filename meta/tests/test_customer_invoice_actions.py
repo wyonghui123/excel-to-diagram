@@ -421,7 +421,7 @@ def test_action_reverse_ok(monkeypatch):
     assert result['success'] is True
     assert result['data']['status'] == 'reversed'
     assert result['data']['original_invoice_id'] == invoice_id
-    assert result['data']['red_invoice_no'].startswith('SCR-')
+    assert result['data']['red_invoice_no'].startswith('SRV-')
     assert _red_count(conn, invoice_id) == 1
 
 

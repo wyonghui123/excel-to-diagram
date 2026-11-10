@@ -183,6 +183,24 @@ fields:
       widget: select
       editable: false
 
+  - id: direction
+    name: 单据方向
+    type: integer
+    db_column: direction
+    required: true
+    default: 1
+    description: 单据方向（1 正向 / -1 逆向，由单据类型派生，生成后不可修改）
+    semantics:
+      meaning: 单据方向，驱动行金额符号与红字口径
+      immutable: true
+      filterable: true
+      filter_type: enum
+      filter_label: 单据方向
+      filter_scope: local
+    ui:
+      widget: select
+      editable: false
+
   - id: invoice_date
     name: 发票日期
     type: date
@@ -661,11 +679,15 @@ fields:
       audit_field: true
 
 state_field_policies:
+  draft:
+    readonly:
+      - direction
   submitted:
     readonly:
       - invoice_no
       - document_type_id
       - document_category
+      - direction
       - customer_account_id
       - bill_to_account_id
       - payer_account_id
@@ -680,6 +702,7 @@ state_field_policies:
       - invoice_no
       - document_type_id
       - document_category
+      - direction
       - invoice_date
       - posting_date
       - customer_account_id
@@ -704,6 +727,7 @@ state_field_policies:
       - invoice_no
       - document_type_id
       - document_category
+      - direction
       - invoice_date
       - posting_date
       - customer_account_id
@@ -730,6 +754,7 @@ state_field_policies:
       - invoice_no
       - document_type_id
       - document_category
+      - direction
       - invoice_date
       - posting_date
       - customer_account_id
@@ -807,6 +832,48 @@ rules:
           type: textarea
           required: true
           placeholder: 请填写红冲原因
+
+# 逆向声明（平台统一逆向引擎）：红冲 = 建红字发票 + 回滚开票进度 +
+# 取消原期次 + 写反向事实边 + 重算订单开票状态，由 reversal_orchestrator
+# 按固定 7 步执行（自持事务，调用方只预取号）。
+doc_effect:
+  posting:
+    event_key: "customer_invoice:{id}:post"
+    direction_field: direction
+  faces:
+    - id: billed_release
+      primitive: invoice_billed_release
+      args:
+        doc_id: "{reversal.doc.id}"
+    - id: schedule_cancel
+      primitive: invoice_schedule_cancel
+      args:
+        doc_id: "{id}"
+    - id: doc_flow
+      primitive: invoice_doc_flow_red_edge
+      args:
+        doc_id: "{reversal.doc.id}"
+  projections:
+    - id: billing_status
+      primitive: recompute_customer_billing_status
+      args:
+        doc_id: "{reversal.doc.id}"
+  reversal:
+    from_states: [posted]
+    to_state: reversed
+    idempotent_states: [reversed]
+    order: declared
+    create_document:
+      primitive: customer_invoice_red_letter
+    write_audit_fields:
+      updated_at: "{now}"
+
+# [S8 Wave D FR-8] 行来源策略：document_role → 允许的行来源种类
+# 内核在插入行时按头表角色校验；声明了策略但角色缺失 → 默认拒绝（fail-closed）
+line_source_policy:
+  invoice: [shipment_line, order_line, plan, manual]
+  credit_memo: [invoice_line, return_line, manual]
+  debit_memo: [manual, order_line_readonly]
 
 indexes:
   - fields: [invoice_no]
@@ -955,6 +1022,13 @@ ui_view_config:
         variant: secondary
         permission: customer_invoice:customer_invoice_credit_memo
         action: customer_invoice.create_credit_on_account
+      # [S8 Wave D D2] 手工借项通知单：正数金额，订单行只读引用（不消耗开票额度）
+      - id: create_debit_memo
+        label: 创建借项通知单
+        icon: plus
+        variant: secondary
+        permission: customer_invoice:customer_invoice_debit_memo
+        action: customer_invoice.create_debit_memo
       - id: print
         label: 打印
         icon: print

@@ -46,6 +46,16 @@ REVERSAL_PROFILES = {
         'reason_required': True,
         'edges': (),
     },
+    'customer_invoice': {
+        'mode': MODE_RED_REVERSE,
+        'commitment': 'release_remaining',
+        'close_guard': True,
+        'reason_required': True,
+        'edges': ({
+            'rule_id': 'customer_invoice_to_credit_memo',
+            'source_bo': 'customer_invoice_line',
+        },),
+    },
 }
 
 

@@ -36,7 +36,6 @@ from meta.services.customer_invoice_service import (
     STATUS_POSTED,
     STATUS_REVERSED,
     STATUS_SUBMITTED,
-    SUBMITTED_FROZEN_FIELDS,
     CustomerInvoiceError,
     CustomerInvoiceService,
 )
@@ -54,7 +53,8 @@ _RESULT_KEY = 'customer_invoice_result'
 
 #: 创建时由服务归一化后回填到写入口径的抬头列
 _CREATE_SYNC_KEYS = (
-    'invoice_no', 'document_type_id', 'document_category', 'invoice_date',
+    'invoice_no', 'document_type_id', 'document_category', 'direction',
+    'invoice_date',
     'status',
     'customer_account_id', 'bill_to_account_id', 'payer_account_id',
     'bill_to_address_text', 'tax_registration_no', 'currency_id',
@@ -104,6 +104,33 @@ def _to_param(value: Any) -> Any:
     if isinstance(value, date) and not isinstance(value, str):
         return value.strftime('%Y-%m-%d')
     return value
+
+
+def state_readonly_fields(state: str) -> tuple:
+    """读取 customer_invoice.yaml 中某状态的只读字段集合。
+
+    [S8 Wave D FR-7] 冻结策略唯一事实源 = YAML `state_field_policies`；
+    Python 不再维护镜像常量（AC-7.1/7.2）。注册表未初始化时按需加载
+    schema 目录，兼容直接调用拦截器的单元测试。
+    """
+    from meta.core.yaml_loader import (
+        get_meta_object,
+        get_yaml_schema_dir,
+        register_from_directory,
+    )
+
+    meta = get_meta_object(HEADER_OBJECT)
+    if meta is None:
+        try:
+            register_from_directory(get_yaml_schema_dir())
+        except Exception:  # pragma: no cover - 元数据损坏属部署故障
+            logger.exception('加载 customer_invoice 元数据失败，冻结策略降级为空')
+        meta = get_meta_object(HEADER_OBJECT)
+    policies = (getattr(meta, 'state_field_policies', None) or {}) if meta else {}
+    policy = policies.get(state)
+    if not policy:
+        return ()
+    return tuple(getattr(policy, 'readonly', None) or ())
 
 
 def _same_value(left: Any, right: Any) -> bool:
@@ -285,8 +312,8 @@ class CustomerInvoiceGuardInterceptor(Interceptor):
     @staticmethod
     def _assert_not_frozen(params: Dict[str, Any],
                            old_data: Dict[str, Any]) -> None:
-        """submitted：冻结源字段，值变化即拒绝；同值回传放行。"""
-        for field in SUBMITTED_FROZEN_FIELDS:
+        """submitted：冻结 YAML 声明的只读字段，值变化即拒绝；同值回传放行。"""
+        for field in state_readonly_fields(STATUS_SUBMITTED):
             if field not in params:
                 continue
             if not _same_value(params.get(field), old_data.get(field)):

@@ -534,12 +534,13 @@ def test_reverse_creates_red_invoice_and_rolls_back_progress():
 
     reversed_result = service.reverse(original['id'], '客户退货')
 
-    assert reversed_result['red_invoice_no'] == 'SCR-202611-00001'
+    assert reversed_result['red_invoice_no'] == 'SRV-202611-00001'
     assert reversed_result['status'] == 'reversed'
     assert get_header(conn, original['id'])['status'] == 'reversed'
     red = get_header(conn, reversed_result['red_invoice_id'])
     assert red['status'] == 'posted'
-    assert red['document_category'] == 'credit_memo'
+    assert red['document_category'] == 'invoice'
+    assert red['direction'] == -1
     assert get_header(conn, original['id'])['document_category'] == 'invoice'
     assert red['reversal_of_invoice_id'] == original['id']
     assert Decimal(str(red['gross_amount'])) == Decimal('-452')
@@ -850,15 +851,17 @@ def test_credit_on_account_missing_customer_rejected():
     _expect(error, 'INVOICE_SOURCE_INVALID')
 
 
-def test_is_red_detects_on_account():
+def test_is_red_uses_direction():
     service = _service(build_conn())
 
-    assert service._is_red({'document_category': 'credit_memo',
-                           'reversal_of_invoice_id': None}) is True
-    assert service._is_red({'document_category': 'invoice',
-                           'reversal_of_invoice_id': None}) is False
-    assert service._is_red({'document_category': 'invoice',
-                           'reversal_of_invoice_id': 9}) is True
+    assert service._is_red({'direction': -1}) is True
+    assert service._is_red({'direction': 1}) is False
+    assert service._is_red({'direction': None}) is False
+    # 仅方向驱动：类别 / 反转指针不再影响判定（AC-3.2）
+    assert service._is_red({'direction': 1,
+                            'document_category': 'credit_memo'}) is False
+    assert service._is_red({'direction': 1,
+                            'reversal_of_invoice_id': 9}) is False
 
 
 def test_credit_amount_epsilon_boundary():
