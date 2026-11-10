@@ -10,6 +10,9 @@ YAML 元模型加载器
 
 import os
 import re
+import sys
+import pickle
+import hashlib
 import logging
 from meta.core import yaml_compat as yaml
 from typing import List, Dict, Any, Optional
@@ -2982,6 +2985,78 @@ def ensure_crud_actions(obj: 'MetaObject') -> 'MetaObject':
     return obj
 
 
+# [TEST-EFF P1-4] 目录级解析缓存
+# load_yaml_directory 每个进程约 1s（实测 203 个对象 1.05s），pickle 命中路径
+# 约 0.16s（含内容哈希 0.02s + 磁盘读 0.00s + loads 0.14s）。缓存键 =
+# 目录下所有 *.yaml 内容哈希 + Python 版本 + 本文件/models.py mtime：
+#   - YAML 内容变化（含新增/删除文件）→ 重建
+#   - 解析逻辑（本文件）或数据模型（models.py）变化 → 重建
+#   - 缓存损坏 / 跨解释器不兼容 → 异常降级为重建，不影响启动
+# 缓存写 <dir>/.cache/（.gitignore 已忽略 .cache/），临时文件 + os.replace
+# 原子替换，避免并发进程读到半成品。持久化结构变化时 _DIR_CACHE_VERSION +1。
+_DIR_CACHE_VERSION = 1
+
+
+def _dir_dependency_stamp() -> str:
+    """解析逻辑 + 数据模型的变更戳，用于缓存失效。"""
+    try:
+        loader_mtime = str(Path(__file__).stat().st_mtime)
+    except Exception:
+        loader_mtime = 'unknown'
+    try:
+        models_mtime = str((Path(__file__).parent / 'models.py').stat().st_mtime)
+    except Exception:
+        models_mtime = 'unknown'
+    return "py{0}.{1}|loader={2}|models={3}".format(
+        sys.version_info[0], sys.version_info[1], loader_mtime, models_mtime)
+
+
+def _dir_declaration_hash(dir_path: Path) -> str:
+    """目录声明的 sha256：覆盖全部 *.yaml 内容 + 依赖变更戳。"""
+    hasher = hashlib.sha256()
+    hasher.update(("v{0}|".format(_DIR_CACHE_VERSION)
+                   + _dir_dependency_stamp()).encode('utf-8'))
+    for yaml_file in sorted(dir_path.glob("*.yaml"), key=lambda p: p.name):
+        hasher.update(b"\0" + yaml_file.name.encode('utf-8') + b"\0")
+        hasher.update(yaml_file.read_bytes())
+    return hasher.hexdigest()
+
+
+def _dir_cache_path(dir_path: Path) -> Path:
+    return dir_path / ".cache" / "objects_v{0}.pkl".format(_DIR_CACHE_VERSION)
+
+
+def _read_dir_cache(dir_path: Path, decl_hash: str) -> Optional[List[MetaObject]]:
+    try:
+        with _dir_cache_path(dir_path).open('rb') as f:
+            payload = pickle.load(f)
+        if (isinstance(payload, dict)
+                and payload.get('version') == _DIR_CACHE_VERSION
+                and payload.get('declaration_hash') == decl_hash
+                and isinstance(payload.get('objects'), list)):
+            return payload['objects']
+    except Exception:
+        return None
+    return None
+
+
+def _write_dir_cache(dir_path: Path, decl_hash: str,
+                     objects: List[MetaObject]) -> None:
+    try:
+        cache_path = _dir_cache_path(dir_path)
+        cache_path.parent.mkdir(parents=True, exist_ok=True)
+        tmp_path = cache_path.with_name(
+            cache_path.name + ".{0}.tmp".format(os.getpid()))
+        with tmp_path.open('wb') as f:
+            pickle.dump({'version': _DIR_CACHE_VERSION,
+                         'declaration_hash': decl_hash,
+                         'objects': objects}, f,
+                        protocol=pickle.HIGHEST_PROTOCOL)
+        os.replace(str(tmp_path), str(cache_path))
+    except Exception as exc:
+        _info("[YAML Loader] Directory cache write skipped: {0}".format(exc))
+
+
 def load_yaml_directory(dir_path: str) -> List[MetaObject]:
     objects = []
     dir_path = Path(dir_path)
@@ -2992,6 +3067,22 @@ def load_yaml_directory(dir_path: str) -> List[MetaObject]:
     
     shared_path = dir_path / "shared_properties.yaml"
     aspects_path = dir_path / "aspects.yaml"
+
+    # [TEST-EFF P1-4] 目录级缓存命中：跳过 200+ 文件解析
+    decl_hash = None
+    try:
+        decl_hash = _dir_declaration_hash(dir_path)
+    except Exception:
+        decl_hash = None
+    if decl_hash:
+        cached = _read_dir_cache(dir_path, decl_hash)
+        if cached is not None:
+            # 保持与全量解析一致的全局副作用（共享文件失效检查 + _TYPE_SPECS）
+            _check_and_invalidate_shared_cache(shared_path, aspects_path)
+            load_type_specs(str(dir_path))
+            _info("[YAML Loader] Loaded {0} objects from directory cache".format(
+                len(cached)))
+            return cached
 
     _check_and_invalidate_shared_cache(shared_path, aspects_path)
     
@@ -3025,6 +3116,9 @@ def load_yaml_directory(dir_path: str) -> List[MetaObject]:
 
     # [M4] 行级策略的跨对象校验（child_object / parent_field / 清单字段）
     validate_line_policies(objects)
+
+    if decl_hash:
+        _write_dir_cache(dir_path, decl_hash, objects)
 
     return objects
 
