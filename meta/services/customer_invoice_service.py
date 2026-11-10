@@ -75,6 +75,8 @@ SOURCE_ORDER = 'sales_order'
 SOURCE_MANUAL = 'manual'
 SOURCE_PLAN = 'billing_schedule'
 SOURCE_SERVICE = 'service_confirmation'
+#: Wave C：退货发货单来源（贷项行的 source_doc_type）
+SOURCE_RETURN_SHIPMENT = 'return_shipment'
 
 SOURCE_TYPES = (SOURCE_SHIPMENT, SOURCE_ORDER, SOURCE_MANUAL)
 
@@ -116,6 +118,9 @@ PLAN_LINE_LOCKED_FIELDS = (
 
 #: 贷项 / 红字行引用原发票行的反向事实边规则（B7）
 CREDIT_DOC_FLOW_RULE_ID = 'customer_invoice_to_credit_memo'
+
+#: Wave C：退货发货行 → 贷项行（v242 播种）
+RETURN_DOC_FLOW_RULE_ID = 'return_shipment_line_to_credit_memo'
 
 #: 数值容差（4 位小数金额）
 EPSILON = Decimal('0.0001')
@@ -220,6 +225,12 @@ class CustomerInvoiceService:
         payload = dict(payload or {})
         shipment_id = payload.get('shipment_id')
         shipment = self._require_shipment(shipment_id)
+        # R-INV-19：退货发货单禁止正向开票，只能走退货贷项
+        if self._shipment_document_category(shipment) == 'return':
+            raise CustomerInvoiceError(
+                '退货发货单不能正向开票，请使用 create_credit_from_return_shipment',
+                field_name='shipment_id',
+                rule='INVOICE_RETURN_SHIPMENT_NOT_BILLABLE')
         if shipment.get('status') not in SHIPMENT_BILLABLE_STATUSES:
             raise CustomerInvoiceError(
                 '仅已发运 / 已签收的发货单可开票（当前状态：%s）'
@@ -538,6 +549,128 @@ class CustomerInvoiceService:
                     source['id'], credit_id, header['invoice_no'])
         return {'id': credit_id, 'invoice_no': header['invoice_no'],
                 'status': STATUS_DRAFT, 'source_invoice_id': source['id'],
+                'line_ids': line_ids, 'amounts': totals}
+
+    def create_credit_from_return_shipment(self,
+                                           payload: Dict[str, Any]
+                                           ) -> Dict[str, Any]:
+        """C3：退货发货单 → 贷项通知单草稿（spec §6.3）。
+
+        退货发货行 → 退货订单行 `reference_line_id` 原订单行 → 已过账正数
+        发票行按 FIFO 分配数量 → 负数贷项行；找不到原票行拒绝（R-INV-22）。
+        """
+        payload = dict(payload or {})
+        shipment = self._require_return_shipment(
+            payload.get('return_shipment_id')
+            or payload.get('shipment_id')
+            or payload.get('source_doc_id'))
+        return_lines = self._load_return_lines(
+            shipment, payload.get('return_line_ids'))
+        self._assert_return_lines_not_credited(return_lines)
+
+        origins = []  # [(退货发货行, 原订单行, 数量)]
+        requested = {}
+        for return_line in return_lines:
+            qty = _to_decimal(return_line.get('qty'))
+            if qty <= 0:
+                raise CustomerInvoiceError(
+                    '退货行数量必须大于 0', field_name='return_line_ids',
+                    rule='INVOICE_CREDIT_AMOUNT_INVALID')
+            order_line = self._load_order_line(return_line.get('order_line_id'))
+            if order_line is None or _blank(order_line.get('reference_line_id')):
+                raise CustomerInvoiceError(
+                    '退货行未引用原销售订单行', field_name='return_line_ids',
+                    rule='INVOICE_RETURN_ORIGIN_MISSING')
+            original = self._load_order_line(order_line.get('reference_line_id'))
+            if original is None:
+                raise CustomerInvoiceError(
+                    '退货行引用的原订单行不存在',
+                    field_name='return_line_ids',
+                    rule='INVOICE_RETURN_ORIGIN_MISSING')
+            origins.append((return_line, original, qty))
+            requested[original['id']] = (
+                requested.get(original['id'], Decimal('0')) + qty)
+
+        # R-INV-22：先确认能追溯到已过账原票行，再校验累计退货量
+        candidates = self._creditable_candidates(
+            list(requested.keys()), payload)
+        for original_id, qty in requested.items():
+            if not candidates['lines'].get(str(original_id)):
+                raise CustomerInvoiceError(
+                    '退货行找不到已过账的原发票行',
+                    field_name='return_line_ids',
+                    rule='INVOICE_RETURN_ORIGIN_MISSING')
+            invoiced = self._invoiced_qty_for_order_line(original_id)
+            returned = self._returned_qty_for_order_line(original_id)
+            if returned + qty > invoiced + EPSILON:
+                raise CustomerInvoiceError(
+                    '退货数量累计超过原行已开票数量（已退 %s / 已开 %s / 本次 %s）'
+                    % (returned, invoiced, qty),
+                    field_name='return_line_ids',
+                    rule='INVOICE_CREDIT_EXCEEDED')
+
+        source_header = self._require_header(candidates['source_invoice_id'])
+        credit_date = _date_text(payload.get('invoice_date') or _today())
+        source_posting = _date_text(source_header.get('posting_date')
+                                    or source_header['invoice_date'])
+        if credit_date < source_posting:
+            raise CustomerInvoiceError(
+                '贷项日期不能早于原过账日期 %s' % source_posting,
+                field_name='invoice_date', rule='INVOICE_POSTING_DATE_INVALID')
+
+        credit_type_id = self._default_type_id(RED_INVOICE_TYPE_CODE, 'header')
+        credit_no = self._allocate_number(credit_date, credit_type_id)
+
+        header = dict(source_header)
+        for key in ('id', 'created_at', 'updated_at', 'created_by',
+                    'updated_by', 'invoice_no', 'status', 'posting_date'):
+            header.pop(key, None)
+        header.update({
+            'invoice_no': credit_no,
+            'document_type_id': credit_type_id,
+            'invoice_date': credit_date,
+            'reversal_of_invoice_id': source_header['id'],
+            'reversal_reason': payload.get('reason') or '客户退货',
+            'remark': payload.get('remark'),
+            'status': STATUS_DRAFT,
+        })
+        header = self.prepare_header(header, for_reversal=True)
+
+        credited = self._credited_qty_by_line(
+            [item['id'] for rows in candidates['lines'].values()
+             for item in rows])
+        credit_lines = []
+        for return_line, original, qty in origins:
+            remaining = qty
+            for candidate in candidates['lines'].get(str(original['id']), ()):
+                available = (_to_decimal(candidate.get('qty'))
+                             - credited.get(str(candidate['id']),
+                                            Decimal('0')))
+                if available <= EPSILON:
+                    continue
+                take = min(remaining, available)
+                credit_lines.append(self._build_return_credit_line(
+                    return_line, candidate, shipment, original['id'], take,
+                    len(credit_lines) + 1))
+                remaining -= take
+                if remaining <= EPSILON:
+                    break
+            if remaining > EPSILON:
+                raise CustomerInvoiceError(
+                    '可贷原票行数量不足（剩余 %s）' % remaining,
+                    field_name='return_line_ids',
+                    rule='INVOICE_CREDIT_EXCEEDED')
+
+        with _atomic(self.ds):
+            credit_id = self._insert_header(header)
+            line_ids = self._insert_lines(credit_id, credit_lines)
+            totals = self._recalc_impl(credit_id)
+        logger.info('[customer_invoice] return credit shipment=%s -> id=%s no=%s',
+                    shipment['id'], credit_id, header['invoice_no'])
+        return {'id': credit_id, 'invoice_no': header['invoice_no'],
+                'status': STATUS_DRAFT,
+                'return_shipment_id': shipment['id'],
+                'source_invoice_id': source_header['id'],
                 'line_ids': line_ids, 'amounts': totals}
 
     def prepare_header(self, payload: Dict[str, Any],
@@ -1230,6 +1363,17 @@ class CustomerInvoiceService:
                     unit=str(line.get('uom_id') or ''),
                     amount=abs(float(_to_decimal(line.get('net_amount')))),
                     derived_by='customer_invoice_service')
+                # Wave C C3：退货发货行 → 贷项行（与上面原票反向边并存）
+                if (str(line.get('source_doc_type') or '') == SOURCE_RETURN_SHIPMENT
+                        and not _blank(line.get('source_line_id'))):
+                    attach_edge(
+                        self.ds, self.platform_ds, RETURN_DOC_FLOW_RULE_ID,
+                        line.get('source_line_id'), line['id'],
+                        abs(float(_to_decimal(line.get('qty')))),
+                        target_item=str(line['id']),
+                        unit=str(line.get('uom_id') or ''),
+                        amount=abs(float(_to_decimal(line.get('net_amount')))),
+                        derived_by='customer_invoice_service')
                 continue
             schedule_id = line.get('schedule_id')
             if not _blank(schedule_id):
@@ -1765,6 +1909,204 @@ class CustomerInvoiceService:
             raise CustomerInvoiceError('发货行不存在', field_name='shipment_line_id',
                                        rule='INVOICE_SOURCE_MISMATCH')
         return rows[0]
+
+    # ------------------------------------------------ 退货贷项（Wave C C3）
+
+    def _shipment_document_category(self, shipment: Dict[str, Any]) -> str:
+        """发货单业务类别：优先直读列，否则 document_type_id → 类型定义。"""
+        category = shipment.get('document_category')
+        if _blank(category) and not _blank(shipment.get('document_type_id')):
+            rows = self.ds.query(
+                'SELECT document_category FROM type_definitions WHERE id = ?',
+                [shipment['document_type_id']])
+            category = (rows[0].get('document_category') if rows else '') or ''
+        return str(category or '').strip().lower()
+
+    def _require_return_shipment(self, shipment_id: Any) -> Dict[str, Any]:
+        shipment = self._require_shipment(shipment_id)
+        if self._shipment_document_category(shipment) != 'return':
+            raise CustomerInvoiceError(
+                '发货单不是退货发货单，不能生成退货贷项',
+                field_name='return_shipment_id',
+                rule='INVOICE_RETURN_ORIGIN_MISSING')
+        if shipment.get('status') not in SHIPMENT_BILLABLE_STATUSES:
+            raise CustomerInvoiceError(
+                '退货发货单状态 %s 不可生成贷项' % shipment.get('status'),
+                field_name='return_shipment_id',
+                rule='INVOICE_RETURN_ORIGIN_MISSING')
+        return shipment
+
+    def _load_return_lines(self, shipment: Dict[str, Any],
+                           line_ids: Any = None) -> List[Dict[str, Any]]:
+        rows = self._load_shipment_lines(shipment['id'])
+        wanted = {str(item) for item in (line_ids or []) if not _blank(item)}
+        if wanted:
+            selected = [row for row in rows if str(row.get('id')) in wanted]
+            if len(selected) != len(wanted):
+                raise CustomerInvoiceError(
+                    '退货行不属于该发货单', field_name='return_line_ids',
+                    rule='INVOICE_SOURCE_MISMATCH')
+            rows = selected
+        if not rows:
+            raise CustomerInvoiceError(
+                '退货发货单没有可贷行', field_name='return_line_ids',
+                rule='INVOICE_RETURN_ORIGIN_MISSING')
+        return rows
+
+    def _assert_return_lines_not_credited(self,
+                                          return_lines: List[Dict[str, Any]]) -> None:
+        ids = [row['id'] for row in return_lines]
+        if not ids:
+            return
+        placeholders = ','.join('?' for _ in ids)
+        rows = self.ds.query(
+            'SELECT DISTINCT l.source_line_id FROM %s l '
+            'JOIN %s h ON h.id = l.invoice_id '
+            'WHERE h.status <> ? AND l.source_doc_type = ? '
+            'AND l.source_line_id IN (%s)' % (LINE_TABLE, HEADER_TABLE,
+                                              placeholders),
+            [STATUS_CANCELLED, SOURCE_RETURN_SHIPMENT] + ids)
+        if rows:
+            raise CustomerInvoiceError(
+                '退货行已生成贷项，不能重复提交', field_name='return_line_ids',
+                rule='INVOICE_CREDIT_EXCEEDED')
+
+    def _invoiced_qty_for_order_line(self, order_line_id: Any) -> Decimal:
+        rows = self.ds.query(
+            'SELECT COALESCE(SUM(l.qty), 0) AS qty FROM %s l '
+            'JOIN %s h ON h.id = l.invoice_id '
+            'WHERE h.status = ? AND l.original_invoice_line_id IS NULL '
+            'AND l.qty > 0 AND COALESCE(l.order_line_id, '
+            '(SELECT sl.order_line_id FROM %s sl '
+            ' WHERE sl.id = l.shipment_line_id)) = ?'
+            % (LINE_TABLE, HEADER_TABLE, SHIPMENT_LINE_TABLE),
+            [STATUS_POSTED, order_line_id])
+        return _to_decimal(rows[0]['qty'] if rows else 0)
+
+    def _returned_qty_for_order_line(self, order_line_id: Any) -> Decimal:
+        rows = self.ds.query(
+            'SELECT COALESCE(SUM(ABS(l.qty)), 0) AS qty FROM %s l '
+            'JOIN %s h ON h.id = l.invoice_id '
+            'WHERE h.status <> ? AND l.source_doc_type = ? '
+            'AND l.order_line_id = ?' % (LINE_TABLE, HEADER_TABLE),
+            [STATUS_CANCELLED, SOURCE_RETURN_SHIPMENT, order_line_id])
+        return _to_decimal(rows[0]['qty'] if rows else 0)
+
+    def _load_creditable_invoice_lines(self, order_line_id: Any
+                                       ) -> List[Dict[str, Any]]:
+        """原订单行对应的已过账、非红字、正数发票行（FIFO 顺序）。"""
+        return self.ds.query(
+            'SELECT l.*, h.invoice_date AS invoice_date, '
+            'h.invoice_no AS invoice_no, h.posting_date AS posting_date '
+            'FROM %s l JOIN %s h ON h.id = l.invoice_id '
+            'WHERE h.status = ? AND l.original_invoice_line_id IS NULL '
+            'AND l.qty > 0 AND COALESCE(l.order_line_id, '
+            '(SELECT sl.order_line_id FROM %s sl '
+            ' WHERE sl.id = l.shipment_line_id)) = ? '
+            'ORDER BY h.invoice_date, l.id'
+            % (LINE_TABLE, HEADER_TABLE, SHIPMENT_LINE_TABLE),
+            [STATUS_POSTED, order_line_id])
+
+    def _creditable_candidates(self, original_ids: List[str],
+                               payload: Dict[str, Any]) -> Dict[str, Any]:
+        explicit_invoice = (payload.get('source_invoice_id')
+                            or payload.get('invoice_id'))
+        explicit_lines = (payload.get('invoice_line_ids')
+                          or payload.get('line_ids'))
+        auto_fifo = str(payload.get('auto_allocate') or '').lower() == 'fifo'
+        wanted = {str(item) for item in (explicit_lines or [])
+                  if not _blank(item)}
+        grouped = {}
+        for original_id in original_ids:
+            rows = self._load_creditable_invoice_lines(original_id)
+            if not _blank(explicit_invoice):
+                rows = [row for row in rows
+                        if str(row['invoice_id']) == str(explicit_invoice)]
+            if wanted:
+                rows = [row for row in rows if str(row['id']) in wanted]
+            grouped[str(original_id)] = rows
+        candidates = [row for rows in grouped.values() for row in rows]
+        if not candidates:
+            raise CustomerInvoiceError(
+                '找不到可贷的已过账发票行', field_name='return_line_ids',
+                rule='INVOICE_RETURN_ORIGIN_MISSING')
+        invoices = {str(row['invoice_id']) for row in candidates}
+        if (len(invoices) > 1 and _blank(explicit_invoice) and not wanted
+                and not auto_fifo):
+            raise CustomerInvoiceError(
+                '存在多张可贷原票，请指定 source_invoice_id / invoice_line_ids '
+                '或 auto_allocate="fifo"',
+                field_name='return_line_ids',
+                rule='INVOICE_RETURN_ORIGIN_AMBIGUOUS')
+        candidates.sort(key=lambda row: (str(row.get('invoice_date') or ''),
+                                         int(row['id'])))
+        return {'lines': grouped,
+                'source_invoice_id': candidates[0]['invoice_id']}
+
+    def _credited_qty_by_line(self, line_ids: List[Any]) -> Dict[str, Decimal]:
+        ids = [item for item in line_ids if not _blank(item)]
+        if not ids:
+            return {}
+        placeholders = ','.join('?' for _ in ids)
+        rows = self.ds.query(
+            'SELECT l.original_invoice_line_id AS original_line_id, '
+            'COALESCE(SUM(ABS(l.qty)), 0) AS qty FROM %s l '
+            'JOIN %s h ON h.id = l.invoice_id '
+            'WHERE h.status = ? AND l.original_invoice_line_id IN (%s) '
+            'GROUP BY l.original_invoice_line_id'
+            % (LINE_TABLE, HEADER_TABLE, placeholders),
+            [STATUS_POSTED] + ids)
+        return {str(row['original_line_id']): _to_decimal(row['qty'])
+                for row in rows}
+
+    def _build_return_credit_line(self, return_line: Dict[str, Any],
+                                  candidate: Dict[str, Any],
+                                  shipment: Dict[str, Any],
+                                  original_line_id: Any,
+                                  qty: Decimal,
+                                  line_no: int) -> Dict[str, Any]:
+        unit_price = _to_decimal(candidate.get('unit_price'))
+        net_amount = _round(qty * unit_price, 4)
+        candidate_net = _to_decimal(candidate.get('net_amount'))
+        percent = None
+        base_amount = None
+        if abs(candidate_net) > EPSILON:
+            if not _blank(candidate.get('billing_percent')):
+                percent = _round(
+                    _to_decimal(candidate['billing_percent'])
+                    * abs(net_amount) / abs(candidate_net), 4)
+            if not _blank(candidate.get('billing_base_amount')):
+                base_amount = _round(
+                    _to_decimal(candidate['billing_base_amount'])
+                    * abs(net_amount) / abs(candidate_net), 4)
+        return {
+            'line_no': line_no,
+            'line_type_id': (candidate.get('line_type_id')
+                             or self._default_type_id(DEFAULT_LINE_TYPE_CODE,
+                                                      'line')),
+            'source_doc_type': SOURCE_RETURN_SHIPMENT,
+            'source_doc_id': shipment['id'],
+            'source_line_id': return_line['id'],
+            'shipment_line_id': candidate.get('shipment_line_id'),
+            'schedule_id': candidate.get('schedule_id'),
+            'order_line_id': original_line_id,
+            'item_id': candidate.get('item_id'),
+            'description': candidate.get('description'),
+            'uom_id': candidate.get('uom_id'),
+            'qty': -qty,
+            'billing_basis': candidate.get('billing_basis') or 'quantity',
+            'unit_price': unit_price,
+            'net_amount': -net_amount,
+            'tax_code_id': candidate.get('tax_code_id'),
+            'tax_rate_percent': candidate.get('tax_rate_percent'),
+            'project_id': candidate.get('project_id'),
+            'project_task_id': candidate.get('project_task_id'),
+            'billing_percent': percent,
+            'billing_base_amount': base_amount,
+            'price_source': candidate.get('price_source'),
+            'order_unit_price': candidate.get('order_unit_price'),
+            'original_invoice_line_id': candidate['id'],
+        }
 
     def _require_order(self, order_id: Any) -> Dict[str, Any]:
         rows = self.ds.query(

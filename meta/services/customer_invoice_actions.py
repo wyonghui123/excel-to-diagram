@@ -180,6 +180,35 @@ def create_credit_from_invoice_handler(params: Dict[str, Any],
     return _ok(data, '已生成贷项单 %s（草稿）' % data.get('invoice_no', ''))
 
 
+def create_credit_from_return_shipment_handler(params: Dict[str, Any],
+                                               context: Any = None
+                                               ) -> Dict[str, Any]:
+    """`customer_invoice.create_credit_from_return_shipment`（Wave C C3）。"""
+    _set_user_context()
+    params = dict(params or {})
+
+    shipment_id = (params.get('return_shipment_id') or params.get('shipment_id')
+                   or params.get('source_doc_id'))
+    if _blank(shipment_id):
+        return _fail('缺少 shipment_id（退货发货单 id）', 'INVALID_ARGUMENT')
+
+    payload = {key: params.get(key) for key in (
+        'invoice_date', 'remark', 'reason', 'return_line_ids',
+        'source_invoice_id', 'invoice_line_ids', 'auto_allocate')
+        if not _blank(params.get(key))}
+    payload['return_shipment_id'] = shipment_id
+    payload.setdefault('invoice_date', date.today().strftime('%Y-%m-%d'))
+
+    try:
+        data = _service().create_credit_from_return_shipment(payload)
+    except CustomerInvoiceError as exc:
+        return _fail(str(exc), getattr(exc, 'rule', '') or 'INVOICE_INVALID')
+
+    logger.info('[customer_invoice_action] return credit shipment=%s credit=%s',
+                shipment_id, data.get('invoice_no'))
+    return _ok(data, '已生成贷项单 %s（草稿）' % data.get('invoice_no', ''))
+
+
 # --------------------------------------------------------- 单据动作（Wave C）
 
 def _invoice_id(params: Dict[str, Any]) -> Any:

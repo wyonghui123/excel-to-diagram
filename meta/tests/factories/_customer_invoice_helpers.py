@@ -15,6 +15,13 @@ from contextlib import contextmanager
 from meta.migrations.v236__customer_invoice import (
     HEADER_DDL, LINE_DDL, SCHEDULE_DDL)
 
+# v242 重建表后 CHECK 才允许 return_shipment；服务层测试直接按新口径建表，
+# 迁移测试传 with_return_source=False 以覆盖 v236 旧约束下的重建分支。
+LINE_DDL_WITH_RETURN = LINE_DDL.replace(
+    "'service_confirmation'", "'service_confirmation', 'return_shipment'").replace(
+    "'shipment', 'billing_schedule')",
+    "'shipment', 'billing_schedule', 'return_shipment')")
+
 INVOICE_DATE = '2026-11-09'
 CUSTOMER_ID = 900
 CURRENCY_ID = 1
@@ -28,6 +35,13 @@ ORDER_LINE_NONE = 13
 SHIPMENT_ID = 1
 SHIP_LINE_ID = 81
 SHIP_LINE_SECOND = 82
+
+# Wave C C3：退货发货单夹具（由 make_return_shipment 播种）
+RETURN_ORDER_ID = 2
+RETURN_ORDER_LINE_ID = 21
+RETURN_SHIPMENT_ID = 2
+RETURN_SHIP_LINE_ID = 91
+RETURN_SHIP_LINE_SECOND = 92
 
 DELIVERY_SCHEDULE_ID = 71
 BILLING_SCHEDULE_ID = 72
@@ -92,6 +106,7 @@ CREATE TABLE IF NOT EXISTS sales_orders (
 CREATE TABLE IF NOT EXISTS sales_order_lines (
     id INTEGER PRIMARY KEY,
     order_id INTEGER,
+    reference_line_id INTEGER,
     line_no INTEGER,
     item_id INTEGER,
     description VARCHAR(512),
@@ -127,6 +142,7 @@ CREATE TABLE IF NOT EXISTS shipments (
     id INTEGER PRIMARY KEY,
     delivery_no VARCHAR(30),
     order_id INTEGER,
+    document_type_id INTEGER,
     status VARCHAR(20)
 );
 
@@ -261,9 +277,11 @@ def build_file(path, **kwargs) -> sqlite3.Connection:
 def _init(conn, *, shipment_qty: float = 40.0,
           with_shipment: bool = True,
           with_payment_term: bool = True,
+          with_return_source: bool = True,
           payment_term_lines=None) -> None:
+    line_ddl = LINE_DDL_WITH_RETURN if with_return_source else LINE_DDL
     conn.executescript(
-        HEADER_DDL + ';' + LINE_DDL + ';' + SCHEDULE_DDL + ';' + _UPSTREAM_DDL)
+        HEADER_DDL + ';' + line_ddl + ';' + SCHEDULE_DDL + ';' + _UPSTREAM_DDL)
     _seed_types(conn)
     _seed_sequences(conn)
     _seed_order(conn)
@@ -463,6 +481,77 @@ def make_billing_schedule(conn, schedule_id, *, order_id=ORDER_ID,
         [schedule_id, order_id, line_id,
          schedule_no or 'BS-%03d' % schedule_id, 'billing', status,
          promised_date, percent, billed_amount, billing_status])
+
+
+def make_return_shipment(conn, *, shipment_id=RETURN_SHIPMENT_ID,
+                         return_order_id=RETURN_ORDER_ID,
+                         status='shipped',
+                         document_category='return',
+                         reference_line_id=ORDER_LINE_DELIVERY,
+                         lines=None):
+    """播种退货发货单（Wave C C3）。
+
+    退货订单行通过 `reference_line_id` 回指原销售订单行；
+    `lines` 形如 [(shipment_line_id, return_order_line_id, qty), ...]。
+    默认一条 (91, 21, 5)：原行 11 已开票 40，可退 5。
+    """
+    type_code = 'RTN' if document_category == 'return' else 'SDN_SHIP'
+    row = conn.execute(
+        "SELECT id FROM type_definitions WHERE scope_bo = 'shipment' "
+        'AND code = ?', [type_code]).fetchone()
+    if row is None:
+        cur = conn.execute(
+            'INSERT INTO type_definitions (code, name, scope_bo, level, '
+            'document_category, delivery_relevant, status) '
+            "VALUES (?, ?, 'shipment', 'header', ?, 1, 'active')",
+            [type_code, '退货发货' if document_category == 'return' else '发货',
+             document_category])
+        type_id = cur.lastrowid
+    else:
+        type_id = row[0]
+
+    exists = conn.execute('SELECT 1 FROM sales_orders WHERE id = ?',
+                          [return_order_id]).fetchone()
+    if not exists:
+        conn.execute(
+            'INSERT INTO sales_orders (id, order_no, customer_account_id, '
+            'bill_to_account_id, payer_account_id, bill_to_address_text, '
+            'tax_registration_no, currency_id, exchange_rate, '
+            'exchange_rate_type, payment_term_id, org_id, sales_org_id, '
+            'billing_status, status) '
+            'VALUES (?, ?, ?, ?, ?, ?, ?, ?, 1.0, ?, ?, ?, ?, ?, ?)',
+            [return_order_id, 'SO-RT%03d' % return_order_id, CUSTOMER_ID,
+             CUSTOMER_ID, CUSTOMER_ID, '上海市浦东新区世纪大道 100 号',
+             '91310000TEST', CURRENCY_ID, 'spot', PAYMENT_TERM_ID, ORG_ID,
+             ORG_ID, 'none', 'confirmed'])
+    conn.execute(
+        'INSERT INTO shipments (id, delivery_no, order_id, document_type_id, '
+        'status) VALUES (?, ?, ?, ?, ?)',
+        [shipment_id, 'RTN-%04d' % shipment_id, return_order_id, type_id,
+         status])
+    rows = lines or [(RETURN_SHIP_LINE_ID, RETURN_ORDER_LINE_ID, 5.0)]
+    for index, (ship_line_id, return_line_id, qty) in enumerate(rows):
+        line_exists = conn.execute(
+            'SELECT 1 FROM sales_order_lines WHERE id = ?',
+            [return_line_id]).fetchone()
+        if not line_exists:
+            conn.execute(
+                'INSERT INTO sales_order_lines (id, order_id, line_no, '
+                'item_id, description, uom_id, qty, unit_price, net_amount, '
+                'tax_code_id, tax_rate_percent, reference_line_id, '
+                'billing_relevance, billed_qty, billed_amount) '
+                'VALUES (?, ?, ?, ?, ?, 21, ?, 10.0, ?, 31, 13.0, ?, '
+                "'delivery', 0, 0)",
+                [return_line_id, return_order_id, index + 1,
+                 500 + return_line_id, '退货行%s' % return_line_id, qty,
+                 round(qty * 10.0, 4), reference_line_id])
+        conn.execute(
+            'INSERT INTO shipment_lines (id, delivery_id, order_line_id, '
+            'schedule_id, item_id, uom_id, qty, billed_qty) '
+            'VALUES (?, ?, ?, NULL, ?, 21, ?, 0)',
+            [ship_line_id, shipment_id, return_line_id, 500 + return_line_id,
+             qty])
+    conn.commit()
 
 
 def enable_allocation_table(conn):

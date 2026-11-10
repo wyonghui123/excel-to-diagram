@@ -13,6 +13,8 @@ pytestmark = pytest.mark.unit
 from meta.services.customer_invoice_service import (
     CREDIT_DOC_FLOW_RULE_ID,
     PLAN_DOC_FLOW_RULE_ID,
+    RETURN_DOC_FLOW_RULE_ID,
+    SOURCE_RETURN_SHIPMENT,
     CustomerInvoiceError,
     CustomerInvoiceService,
 )
@@ -26,6 +28,9 @@ from meta.tests.factories._customer_invoice_helpers import (
     ORDER_LINE_NONE,
     ORDER_LINE_PLAN,
     ORG_ID,
+    RETURN_ORDER_LINE_ID,
+    RETURN_SHIPMENT_ID,
+    RETURN_SHIP_LINE_ID,
     SHIPMENT_ID,
     SHIP_LINE_ID,
     add_allocation,
@@ -39,6 +44,7 @@ from meta.tests.factories._customer_invoice_helpers import (
     make_ds,
     make_order,
     make_order_line,
+    make_return_shipment,
     set_header_amounts,
     set_order_line_billed,
     set_order_line_item,
@@ -990,3 +996,207 @@ def test_plan_post_rejects_stale_schedule_after_concurrent_billing():
     _expect(error, 'INVOICE_PLAN_EXCEEDED')
     assert get_header(conn, created['id'])['status'] == 'submitted'
     assert Decimal(str(_schedule_row(conn)['billed_amount'])) == Decimal('1000')
+
+
+# ---------------------------------------------------------------- Wave C C3 退货 → 贷项
+
+def _posted_partial_invoice(conn, qty):
+    service = _service(conn)
+    created = _from_shipment(
+        conn, lines=[{'shipment_line_id': SHIP_LINE_ID, 'qty': qty}])
+    service.submit(created['id'])
+    service.post(created['id'])
+    return service, created
+
+
+def test_return_shipment_forward_billing_rejected():
+    """R-INV-19：退货发货单禁止正向开票。"""
+    conn = build_conn()
+    make_return_shipment(conn)
+
+    with pytest.raises(CustomerInvoiceError) as error:
+        _from_shipment(conn, shipment_id=RETURN_SHIPMENT_ID)
+    _expect(error, 'INVOICE_RETURN_SHIPMENT_NOT_BILLABLE')
+
+
+def test_return_credit_single_invoice():
+    """退货行 → 原订单行 → 已过账发票行，生成负数贷项。"""
+    conn = build_conn()
+    service, original = _posted_invoice(conn)
+    make_return_shipment(conn)
+
+    result = service.create_credit_from_return_shipment(
+        {'return_shipment_id': RETURN_SHIPMENT_ID, 'invoice_date': INVOICE_DATE})
+
+    assert result['return_shipment_id'] == RETURN_SHIPMENT_ID
+    assert result['source_invoice_id'] == original['id']
+    assert result['amounts'] == {'net_amount': -50.0, 'tax_amount': -6.5,
+                                 'gross_amount': -56.5}
+    header = get_header(conn, result['id'])
+    assert header['document_category'] == 'credit_memo'
+    assert header['reversal_of_invoice_id'] == original['id']
+    assert header['reversal_reason'] == '客户退货'
+    lines = get_lines(conn, result['id'])
+    assert len(lines) == 1
+    assert Decimal(str(lines[0]['qty'])) == Decimal('-5')
+    assert Decimal(str(lines[0]['net_amount'])) == Decimal('-50')
+    assert lines[0]['original_invoice_line_id'] == get_lines(
+        conn, original['id'])[0]['id']
+
+
+def test_return_credit_fifo_across_two_invoices():
+    """D42：多候选默认拒绝歧义，显式 fifo 才按最早发票拆分。"""
+    conn = build_conn()
+    _posted_partial_invoice(conn, 15)
+    service = _service(conn)
+    second = _service(conn).create_from_shipment(dict(
+        BASE_HEADER, shipment_id=SHIPMENT_ID,
+        lines=[{'shipment_line_id': SHIP_LINE_ID, 'qty': 20}]))
+    service.submit(second['id'])
+    service.post(second['id'])
+    make_return_shipment(conn, lines=[(RETURN_SHIP_LINE_ID,
+                                       RETURN_ORDER_LINE_ID, 25.0)])
+
+    with pytest.raises(CustomerInvoiceError) as error:
+        service.create_credit_from_return_shipment(
+            {'return_shipment_id': RETURN_SHIPMENT_ID,
+             'invoice_date': INVOICE_DATE})
+    _expect(error, 'INVOICE_RETURN_ORIGIN_AMBIGUOUS')
+
+    result = service.create_credit_from_return_shipment(
+        {'return_shipment_id': RETURN_SHIPMENT_ID,
+         'invoice_date': INVOICE_DATE, 'auto_allocate': 'fifo'})
+
+    lines = get_lines(conn, result['id'])
+    assert [Decimal(str(line['qty'])) for line in lines] == [
+        Decimal('-15'), Decimal('-10')]
+    assert len({line['original_invoice_line_id'] for line in lines}) == 2
+
+
+def test_return_credit_partial_qty():
+    """只选部分退货行时，按选中行生成贷项。"""
+    conn = build_conn()
+    service, _ = _posted_invoice(conn)
+    make_return_shipment(conn, lines=[
+        (RETURN_SHIP_LINE_ID, RETURN_ORDER_LINE_ID, 5.0),
+        (92, 22, 4.0),
+    ])
+
+    result = service.create_credit_from_return_shipment(
+        {'return_shipment_id': RETURN_SHIPMENT_ID,
+         'invoice_date': INVOICE_DATE,
+         'return_line_ids': [RETURN_SHIP_LINE_ID]})
+
+    lines = get_lines(conn, result['id'])
+    assert len(lines) == 1
+    assert lines[0]['source_line_id'] == RETURN_SHIP_LINE_ID
+    assert Decimal(str(lines[0]['qty'])) == Decimal('-5')
+    assert Decimal(str(shipment_billed(conn))) == Decimal('40')
+
+
+def test_return_credit_missing_origin_rejected():
+    """R-INV-22：找不到已过账原票行时拒绝。"""
+    conn = build_conn()
+    make_return_shipment(conn)
+    service = _service(conn)
+
+    with pytest.raises(CustomerInvoiceError) as error:
+        service.create_credit_from_return_shipment(
+            {'return_shipment_id': RETURN_SHIPMENT_ID})
+    _expect(error, 'INVOICE_RETURN_ORIGIN_MISSING')
+
+
+def test_return_credit_exceeds_billed_qty_rejected():
+    """R-RET-10：退货数量不得大于原行已开票数量。"""
+    conn = build_conn()
+    _posted_partial_invoice(conn, 15)
+    make_return_shipment(conn, lines=[(RETURN_SHIP_LINE_ID,
+                                       RETURN_ORDER_LINE_ID, 20.0)])
+    service = _service(conn)
+
+    with pytest.raises(CustomerInvoiceError) as error:
+        service.create_credit_from_return_shipment(
+            {'return_shipment_id': RETURN_SHIPMENT_ID})
+    _expect(error, 'INVOICE_CREDIT_EXCEEDED')
+
+
+def test_return_credit_accumulated_exceeds_rejected():
+    """R-RET-10：跨退货单累计退货量不得超过已开票量。"""
+    conn = build_conn()
+    service, _ = _posted_invoice(conn)
+    make_return_shipment(conn, lines=[(RETURN_SHIP_LINE_ID,
+                                       RETURN_ORDER_LINE_ID, 30.0)])
+    first = service.create_credit_from_return_shipment(
+        {'return_shipment_id': RETURN_SHIPMENT_ID, 'invoice_date': INVOICE_DATE})
+    service.submit(first['id'])
+    service.post(first['id'])
+
+    make_return_shipment(conn, shipment_id=3, return_order_id=3,
+                         lines=[(93, 23, 15.0)])
+    with pytest.raises(CustomerInvoiceError) as error:
+        service.create_credit_from_return_shipment(
+            {'return_shipment_id': 3})
+    _expect(error, 'INVOICE_CREDIT_EXCEEDED')
+
+
+def test_return_credit_line_keeps_source_keys():
+    """红字行来源键：退货发货单 + 退货行 + 原发票行 + 原订单行。"""
+    conn = build_conn()
+    service, original = _posted_invoice(conn)
+    make_return_shipment(conn)
+
+    result = service.create_credit_from_return_shipment(
+        {'return_shipment_id': RETURN_SHIPMENT_ID, 'invoice_date': INVOICE_DATE})
+
+    line = get_lines(conn, result['id'])[0]
+    assert line['source_doc_type'] == SOURCE_RETURN_SHIPMENT
+    assert line['source_doc_id'] == RETURN_SHIPMENT_ID
+    assert line['source_line_id'] == RETURN_SHIP_LINE_ID
+    assert line['order_line_id'] == ORDER_LINE_DELIVERY
+    assert line['original_invoice_line_id'] == get_lines(
+        conn, original['id'])[0]['id']
+    assert line['billing_basis'] == 'quantity'
+    assert line['price_source'] == 'order'
+
+
+def test_return_credit_writes_two_doc_flow_edges(monkeypatch):
+    """过账同时写「原票行 → 贷项行」与「退货发货行 → 贷项行」两条边。"""
+    conn = build_conn()
+    service, _ = _posted_invoice(conn)
+    make_return_shipment(conn)
+    created = service.create_credit_from_return_shipment(
+        {'return_shipment_id': RETURN_SHIPMENT_ID, 'invoice_date': INVOICE_DATE})
+    credit_line_id = get_lines(conn, created['id'])[0]['id']
+    calls = _capture_attach_edges(monkeypatch)
+
+    service.submit(created['id'])
+    service.post(created['id'])
+
+    assert len(calls) == 2
+    credit_args = calls[0][0]
+    assert credit_args[2] == CREDIT_DOC_FLOW_RULE_ID
+    assert credit_args[4] == credit_line_id
+    return_args, return_kwargs = calls[1]
+    assert return_args[2] == RETURN_DOC_FLOW_RULE_ID
+    assert return_args[3] == RETURN_SHIP_LINE_ID
+    assert return_args[4] == credit_line_id
+    assert return_args[5] == 5.0
+    assert return_kwargs['amount'] == 50.0
+    assert return_kwargs['derived_by'] == 'customer_invoice_service'
+
+
+def test_return_credit_duplicate_return_line_rejected():
+    """同一退货行已生成贷项后不得重复提交。"""
+    conn = build_conn()
+    service, _ = _posted_invoice(conn)
+    make_return_shipment(conn)
+    created = service.create_credit_from_return_shipment(
+        {'return_shipment_id': RETURN_SHIPMENT_ID, 'invoice_date': INVOICE_DATE})
+    service.submit(created['id'])
+    service.post(created['id'])
+
+    with pytest.raises(CustomerInvoiceError) as error:
+        service.create_credit_from_return_shipment(
+            {'return_shipment_id': RETURN_SHIPMENT_ID,
+             'invoice_date': INVOICE_DATE})
+    _expect(error, 'INVOICE_CREDIT_EXCEEDED')

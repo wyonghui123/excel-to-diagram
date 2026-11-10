@@ -8,11 +8,15 @@
   3. doc_flow 规则 `return_shipment_line_to_credit_memo`
      （shipment_line → customer_invoice_line，pool=billing）。
   4. 索引 idx_sol_billing_plan / idx_cil_original_line（先查后建）。
+  5. 重建 `customer_invoice_lines`：`source_doc_type` CHECK 扩展 `return_shipment`
+     （SQLite 无 ALTER CHECK；数据与既有索引原样保留）。
 
 幂等：列先查后加；权限 INSERT OR IGNORE；规则 ON CONFLICT DO UPDATE；
-      索引 CREATE INDEX IF NOT EXISTS；菜单 JSON 按值合并。
+      索引 CREATE INDEX IF NOT EXISTS；菜单 JSON 按值合并；
+      重建前先查 CHECK 是否已含 return_shipment。
 
 回滚：删规则 / 索引 / 授权 / 权限；菜单 JSON 移除 submit；尽力删除 5 列。
+      重建后的 CHECK 为超集（保留 return_shipment），不回退，避免丢数据。
 """
 
 import json
@@ -107,6 +111,18 @@ def _index_covers(conn, table, column):
     return False
 
 
+def _table_sql(conn, table):
+    row = conn.execute(
+        "SELECT sql FROM sqlite_master WHERE type = 'table' AND name = ?",
+        [table]).fetchone()
+    return row[0] if row else None
+
+
+def _source_type_supported(conn):
+    """CHECK 是否已允许 return_shipment（迁移幂等判据）。"""
+    return 'return_shipment' in (_table_sql(conn, LINE_TABLE) or '')
+
+
 def _load_json_list(raw):
     try:
         values = json.loads(raw or '[]')
@@ -136,6 +152,47 @@ def _do_columns(conn):
         added += 1
         print('[v242] ALTER: 列 %s.%s' % (ORDER_LINE_TABLE, column))
     return added
+
+
+def _do_rebuild_lines(conn):
+    """SQLite 无 ALTER CHECK：重建 customer_invoice_lines 扩展来源类型。"""
+    if not _table_exists(conn, LINE_TABLE):
+        print('[v242] SKIP: %s 表不存在（未扩展来源类型）' % LINE_TABLE)
+        return False
+    if _source_type_supported(conn):
+        print('[v242] SKIP: %s 已允许 return_shipment' % LINE_TABLE)
+        return False
+    old_sql = _table_sql(conn, LINE_TABLE)
+    tmp = LINE_TABLE + '__v242'
+    old_columns = [row[1] for row in conn.execute(
+        'PRAGMA table_info(%s)' % LINE_TABLE)]
+    count = conn.execute('SELECT COUNT(*) FROM %s' % LINE_TABLE).fetchone()[0]
+    index_sql = [row[0] for row in conn.execute(
+        "SELECT sql FROM sqlite_master WHERE type = 'index' AND tbl_name = ? "
+        'AND sql IS NOT NULL', [LINE_TABLE]).fetchall()]
+
+    new_sql = old_sql.replace(
+        "'service_confirmation'", "'service_confirmation', 'return_shipment'")
+    # 互斥 CHECK 的第二个枚举（shipment / billing_schedule）也要放行退货来源
+    new_sql = new_sql.replace(
+        "'shipment', 'billing_schedule')",
+        "'shipment', 'billing_schedule', 'return_shipment')")
+    new_sql = new_sql.replace(LINE_TABLE, tmp, 1)
+    conn.execute('DROP TABLE IF EXISTS %s' % tmp)
+    conn.execute(new_sql)
+    new_columns = [row[1] for row in conn.execute(
+        'PRAGMA table_info(%s)' % tmp)]
+    shared = [column for column in new_columns if column in old_columns]
+    columns = ', '.join(shared)
+    conn.execute('INSERT INTO %s (%s) SELECT %s FROM %s'
+                 % (tmp, columns, columns, LINE_TABLE))
+    conn.execute('DROP TABLE %s' % LINE_TABLE)
+    conn.execute('ALTER TABLE %s RENAME TO %s' % (tmp, LINE_TABLE))
+    for statement in index_sql:
+        conn.execute(statement)
+    print('[v242] REBUILD: %s 来源类型扩展 return_shipment（保留 %s 行）'
+          % (LINE_TABLE, count))
+    return True
 
 
 def _do_permission(conn):
@@ -306,6 +363,7 @@ def upgrade(db_path, skip_backup=True):
             print('[v242] SKIP: %s 表不存在' % ORDER_LINE_TABLE)
             return False
         _do_columns(conn)
+        _do_rebuild_lines(conn)
         _do_permission(conn)
         _do_grants(conn)
         _do_menu(conn)
@@ -457,6 +515,16 @@ def _verify_values(conn):
     return ok
 
 
+def _verify_source_type(conn):
+    if not _table_exists(conn, LINE_TABLE):
+        print('[v242] verify: 缺表 %s' % LINE_TABLE)
+        return False
+    if not _source_type_supported(conn):
+        print('[v242] verify: %s 来源类型缺 return_shipment' % LINE_TABLE)
+        return False
+    return True
+
+
 def verify(db_path):
     path = Path(db_path)
     if not path.exists():
@@ -466,6 +534,7 @@ def verify(db_path):
     try:
         checks = (
             _verify_columns(conn),
+            _verify_source_type(conn),
             _verify_permission(conn),
             _verify_menu(conn),
             _verify_rule(conn),

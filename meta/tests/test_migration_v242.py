@@ -1,9 +1,12 @@
+# ALLOW_RAW_SQL: 本文件含裸 SQL 构造迁移前后数据与 CHECK 约束校验，守卫豁免
 # -*- coding: utf-8 -*-
 """v242 开票完备性迁移测试 —— 5 列 / 权限 / 菜单 / doc_flow / 索引 / 回滚。
 
 依据: docs/specs/s8-customer-invoice-wave-c/spec.md §4
 夹具: meta/tests/factories/_customer_invoice_helpers.py（build_file）
 """
+import sqlite3
+
 import pytest
 
 pytestmark = pytest.mark.unit
@@ -27,10 +30,20 @@ NEW_COLUMNS = {name for name, _ddl in v242.NEW_COLUMNS}
 
 def _db_file(tmp_path):
     path = tmp_path / 'app.db'
-    conn = build_file(path)
+    conn = build_file(path, with_return_source=False)
     seed_permission_sets(conn)
     conn.close()
     return path
+
+
+def _insert_line(conn, source_doc_type, line_no=1):
+    """最小发票行：只填 NOT NULL 列，来源类型由参数控制。"""
+    conn.execute(
+        'INSERT INTO customer_invoice_lines (invoice_id, line_no, line_type_id, '
+        'source_doc_type, shipment_line_id, description, uom_id, qty, '
+        'unit_price, tax_code_id, tax_rate_percent) '
+        "VALUES (1, ?, 4, ?, 81, '退货', 21, -5, 10, 31, 13)",
+        [line_no, source_doc_type])
 
 
 def test_upgrade_adds_columns_permission_rule_indexes(tmp_path):
@@ -103,3 +116,28 @@ def test_rollback_removes_all(tmp_path):
 
     # 回滚幂等
     assert v242.rollback(path) is True
+
+
+def test_upgrade_rebuilds_line_table_for_return_shipment_source(tmp_path):
+    """v236 的 CHECK 不含 return_shipment：升级重建表并保留既有行。"""
+    path = _db_file(tmp_path)
+
+    conn = sqlite3.connect(str(path))
+    _insert_line(conn, 'shipment')
+    conn.commit()
+    with pytest.raises(sqlite3.IntegrityError):
+        _insert_line(conn, 'return_shipment')
+    conn.rollback()
+    conn.close()
+
+    assert v242.migrate(path, skip_backup=True) is True
+    assert v242.verify(path) is True
+
+    conn = sqlite3.connect(str(path))
+    _insert_line(conn, 'return_shipment', line_no=2)
+    conn.commit()
+    rows = conn.execute(
+        'SELECT source_doc_type FROM customer_invoice_lines ORDER BY id'
+    ).fetchall()
+    conn.close()
+    assert [row[0] for row in rows] == ['shipment', 'return_shipment']
