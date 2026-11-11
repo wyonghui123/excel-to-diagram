@@ -1961,7 +1961,9 @@ def init_menu_permissions(db_path):
             'color': '#f59e0b',
             'sort_order': 30,
             'parent_menu': '',
-            'page_type': '',
+            # [v257 CHECK] 顶层分组容器统一用 multi_object_hub（同 user-permission / 库存域），
+            #   空串不在 menus.page_type 的枚举 CHECK 内，会在启动同步时触发 IntegrityError。
+            'page_type': 'multi_object_hub',
             'primary_object_type': '',
             'object_types': json.dumps([]),
             'bo_bindings': json.dumps([]),
