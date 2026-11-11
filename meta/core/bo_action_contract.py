@@ -29,6 +29,7 @@
 from __future__ import annotations
 
 import logging
+import os
 import re
 from typing import Any, Dict, List, Optional, Tuple
 
@@ -44,6 +45,15 @@ ACTION_ID_PATTERN = re.compile(r"^[a-z][a-z0-9_]*(\.[a-z][a-z0-9_]*)*$")
 OPERATION_TYPES = ("action", "function")
 VISIBILITIES = ("normal", "important", "internal")
 PRECONDITION_KINDS = ("input_present", "input_equals", "input_in")
+
+# [E3 2026-11-11] 治理级别；灰度模式 warn=不阻断（放行），strict=阻断
+GOVERNANCE_LEVELS = ("none", "audit", "audit_scope")
+_GOVERNANCE_MODE = os.getenv("BO_ACTION_GOVERNANCE", "warn").strip().lower()
+
+
+def governance_enforce() -> bool:
+    """是否阻断违规调用（仅 `BO_ACTION_GOVERNANCE=strict`）。"""
+    return _GOVERNANCE_MODE == "strict"
 
 # 布尔型契约字段
 _BOOL_FIELDS = ("requires_auth", "requires_admin", "idempotent",
@@ -112,6 +122,38 @@ def validate_preconditions(preconditions: Any) -> List[str]:
     return errors
 
 
+def _check_governance(meta: Any) -> List[str]:
+    """治理声明形状校验（级别合法 / audit_scope 的 param_field 必须在入参 schema 内）。"""
+    errors: List[str] = []
+    governance = getattr(meta, "governance", "none")
+    if governance not in GOVERNANCE_LEVELS:
+        return [f"governance 非法：{governance!r}（允许 {GOVERNANCE_LEVELS}）"]
+
+    org_scope = getattr(meta, "org_scope", None)
+    if governance == "audit_scope":
+        if not isinstance(org_scope, dict):
+            return ["governance='audit_scope' 时必须声明 org_scope={'param_field': ...}"]
+        field = org_scope.get("param_field")
+        if not isinstance(field, str) or not field:
+            errors.append("org_scope.param_field 不得为空")
+        else:
+            input_schema = getattr(meta, "input_schema", None)
+            props = input_schema.get("properties") if isinstance(input_schema, dict) else None
+            if not isinstance(props, dict) or field not in props:
+                errors.append(
+                    f"org_scope.param_field={field!r} 未在 input_schema.properties 中声明"
+                )
+    elif org_scope is not None:
+        errors.append("org_scope 仅在 governance='audit_scope' 时允许声明")
+    return errors
+
+
+def _validate_governance(meta: Any) -> List[str]:
+    """灰度口径：warn 不报违规（放行），strict 才计入。"""
+    errors = _check_governance(meta)
+    return errors if _GOVERNANCE_MODE == "strict" else []
+
+
 def validate_action_meta(meta: Any) -> List[str]:
     """校验单个 `BusinessActionMeta` 是否满足固化契约；返回违规清单（空 = 合规）。"""
     errors: List[str] = []
@@ -151,6 +193,7 @@ def validate_action_meta(meta: Any) -> List[str]:
         errors.append("cacheable=True 时 cache_ttl 必须 > 0")
 
     errors.extend(validate_preconditions(getattr(meta, "preconditions", None)))
+    errors.extend(_validate_governance(meta))
     return errors
 
 

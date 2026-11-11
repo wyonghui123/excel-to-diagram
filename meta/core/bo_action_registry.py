@@ -13,12 +13,86 @@ BO 业务 Action 注册表
 - 可扩展: 业务 Action 可按需注册/注销
 - 可观测: 每个 Action 都有元数据(描述、权限、是否异步)
 """
+import hashlib
+import json
 import logging
 import threading
+import uuid
 from typing import Any, Callable, Dict, List, Optional
 from dataclasses import dataclass, field
 
 logger = logging.getLogger(__name__)
+
+
+def _governance_enforce() -> bool:
+    """治理灰度：strict 才阻断（warn 放行并告警）。"""
+    from meta.core.bo_action_contract import governance_enforce
+    return governance_enforce()
+
+
+def _params_hash(params: Optional[Dict[str, Any]]) -> str:
+    """入参摘要（审计只存哈希，不落业务参数原文）。"""
+    payload = json.dumps(params or {}, sort_keys=True, default=str, ensure_ascii=False)
+    return hashlib.sha256(payload.encode('utf-8')).hexdigest()
+
+
+def _resolve_object_id(meta: 'BusinessActionMeta', params: Dict[str, Any]) -> Any:
+    """审计 object_id：优先 `{object_type}_id`，其次 `id`，缺失记 0（NOT NULL）。"""
+    object_type = getattr(meta, 'object_type', None)
+    candidates = []
+    if object_type and object_type != '*':
+        candidates.append(f'{object_type}_id')
+    candidates.append('id')
+    for key in candidates:
+        value = (params or {}).get(key)
+        if value not in (None, ''):
+            return value
+    return 0
+
+
+def _check_org_scope(meta: 'BusinessActionMeta', params: Dict[str, Any],
+                     context: Optional[Dict[str, Any]]) -> Optional[str]:
+    """组织范围校验；返回拒绝原因（None=通过/无需校验）。"""
+    scope = getattr(meta, 'org_scope', None) or {}
+    field = scope.get('param_field')
+    if not field:
+        return None
+
+    raw = (params or {}).get(field)
+    if raw in (None, ''):
+        return None  # 参数未提供，交由 handler 解析默认组织
+
+    ctx = context or {}
+    user_id = ctx.get('user_id')
+    if user_id is None:
+        return None  # 无身份信息（内部调用），不做组织判定
+
+    try:
+        org_id = int(raw)
+    except (TypeError, ValueError):
+        return f'组织参数 {field} 非法：{raw!r}'
+
+    permissions = ctx.get('permissions') or []
+    is_admin = bool(ctx.get('is_admin')) or '*' in permissions
+
+    try:
+        data_source = ctx.get('data_source')
+        if data_source is None:
+            from meta.services.action_audit import resolve_action_data_source
+            data_source = resolve_action_data_source()
+        if data_source is None:
+            logger.warning('[BoActionRegistry] 组织范围校验缺少数据源，跳过 %s', meta.action_id)
+            return None
+
+        from meta.services.org_scope_service import OrgScopeService
+        visible = OrgScopeService(data_source).visible_org_ids(int(user_id), is_admin=is_admin)
+        if visible is None:
+            return None  # None = 管理员豁免
+        if org_id not in visible:
+            return f'无权访问组织 {org_id}（{field}）'
+    except Exception as exc:  # noqa: BLE001 - 校验异常不阻断业务
+        logger.warning('[BoActionRegistry] 组织范围校验失败，跳过 %s: %s', meta.action_id, exc)
+    return None
 
 
 @dataclass
@@ -44,6 +118,10 @@ class BusinessActionMeta:
     cache_ttl: int = 0                   # Function 缓存秒数 (0=不缓存)
     # [B1 2026-10-02] 前置条件（声明式、机器可查；调用 handler 前统一拦截，见 bo_action_contract）
     preconditions: Optional[List[Dict[str, Any]]] = None
+    # [E3 2026-11-11] 治理级别：none=只读 / audit=写审计 / audit_scope=写审计+组织范围校验
+    governance: str = 'none'
+    # 仅 governance='audit_scope' 使用：{'param_field': 'org_id'}
+    org_scope: Optional[Dict[str, Any]] = None
 
 
 class BoActionRegistry:
@@ -84,6 +162,9 @@ class BoActionRegistry:
         cache_ttl: int = 0,
         # [B1 2026-10-02] 前置条件（声明式；形状与求值见 meta.core.bo_action_contract）
         preconditions: Optional[List[Dict[str, Any]]] = None,
+        # [E3 2026-11-11] 治理级别与组织范围声明（形状校验见 bo_action_contract）
+        governance: str = 'none',
+        org_scope: Optional[Dict[str, Any]] = None,
     ) -> 'BoActionRegistry':
         """注册一个业务 Action
 
@@ -114,11 +195,14 @@ class BoActionRegistry:
             cacheable=cacheable,
             cache_ttl=cache_ttl,
             preconditions=preconditions,
+            governance=governance,
+            org_scope=org_scope,
         )
         logger.info(
             f"[BoActionRegistry] Registered: {action_id} "
             f"(object_type={object_type}, perm={permission_required}, "
-            f"admin={requires_admin}, idempotent={idempotent})"
+            f"admin={requires_admin}, idempotent={idempotent}, "
+            f"governance={governance})"
         )
         return self
 
@@ -157,6 +241,9 @@ class BoActionRegistry:
                 'cache_ttl': meta.cache_ttl,
                 # [B1 2026-10-02] 前置条件属固化契约的一部分，随 schema 一并输出
                 'preconditions': meta.preconditions or [],
+                # [E3 2026-11-11] 治理声明随 schema 输出（OpenAPI 消费方可感知）
+                'governance': meta.governance,
+                'org_scope': meta.org_scope or {},
             }
             for meta in self.list_all()
         ]
@@ -199,38 +286,81 @@ class BoActionRegistry:
                 'message': f'Unknown action: {action_id}',
             }
 
-        # 简单权限检查
-        # [M3 T5] `'*'` 通配（is_admin 口径：拥有 '*' 即管理员）同样放行，
-        # 否则 admin 兜底的 action 在 HTTP 端点/决策链路会被永久 403。
-        if meta.permission_required:
-            ctx = context or {}
-            user_perms = ctx.get('permissions', []) or []
-            if meta.permission_required not in user_perms \
-                    and '*' not in user_perms:
-                return {
-                    'success': False,
-                    'data': None,
-                    'message': f'Permission denied: {meta.permission_required} required',
-                }
+        ctx = context or {}
+        governance = getattr(meta, 'governance', 'none') or 'none'
 
-        # [B1 2026-10-02] 前置条件统一拦截（声明式契约；既有 action 默认空 → 零行为变化）
-        from meta.core.bo_action_contract import check_preconditions
-        unmet = check_preconditions(meta, params, context or {})
-        if unmet:
-            return {
-                'success': False,
-                'data': None,
-                'message': '前置条件未满足：' + '；'.join(unmet),
-                'code': 'PRECONDITION_FAILED',
+        # [E3 2026-11-11] 写类 action 审计上下文（none=只读，不落审计）
+        audit_ctx: Optional[Dict[str, Any]] = None
+        if governance in ('audit', 'audit_scope'):
+            audit_ctx = {
+                'action_id': action_id,
+                'object_type': meta.object_type or '_unknown',
+                'object_id': _resolve_object_id(meta, params or {}),
+                'params_hash': _params_hash(params),
+                'user_id': ctx.get('user_id'),
+                'user_name': ctx.get('user_name'),
+                'ip_address': ctx.get('ip_address'),
+                'trace_id': ctx.get('trace_id') or uuid.uuid4().hex,
+                'governance': governance,
+                'status': 'ok',
+                'data_source': ctx.get('data_source'),
             }
 
         try:
-            result = meta.handler(params, context or {})
+            # 简单权限检查
+            # [M3 T5] `'*'` 通配（is_admin 口径：拥有 '*' 即管理员）同样放行，
+            # 否则 admin 兜底的 action 在 HTTP 端点/决策链路会被永久 403。
+            if meta.permission_required:
+                user_perms = ctx.get('permissions', []) or []
+                if meta.permission_required not in user_perms \
+                        and '*' not in user_perms:
+                    if audit_ctx is not None:
+                        audit_ctx['status'] = 'denied'
+                    return {
+                        'success': False,
+                        'data': None,
+                        'message': f'Permission denied: {meta.permission_required} required',
+                    }
+
+            # [E3 2026-11-11] 组织范围校验（audit_scope；strict 拦截 / warn 告警放行）
+            if governance == 'audit_scope':
+                org_error = _check_org_scope(meta, params, ctx)
+                if org_error:
+                    if _governance_enforce():
+                        if audit_ctx is not None:
+                            audit_ctx['status'] = 'denied'
+                        return {
+                            'success': False,
+                            'data': None,
+                            'message': org_error,
+                            'code': 'ORG_SCOPE_DENIED',
+                        }
+                    logger.warning(
+                        '[BoActionRegistry] 组织范围告警（warn 放行）%s: %s',
+                        action_id, org_error,
+                    )
+
+            # [B1 2026-10-02] 前置条件统一拦截（声明式契约；既有 action 默认空 → 零行为变化）
+            from meta.core.bo_action_contract import check_preconditions
+            unmet = check_preconditions(meta, params, ctx)
+            if unmet:
+                if audit_ctx is not None:
+                    audit_ctx['status'] = 'denied'
+                return {
+                    'success': False,
+                    'data': None,
+                    'message': '前置条件未满足：' + '；'.join(unmet),
+                    'code': 'PRECONDITION_FAILED',
+                }
+
+            result = meta.handler(params, ctx)
             # [DECORATIVE] v3.1: 兼容 ActionResult (文件流支持)
             from meta.api.bo_action_api import ActionResult
             if isinstance(result, ActionResult):
                 return result  # 直接返回, 由 API 层处理
             if not isinstance(result, dict):
+                if audit_ctx is not None:
+                    audit_ctx['status'] = 'error'
                 return {
                     'success': False,
                     'data': None,
@@ -238,8 +368,12 @@ class BoActionRegistry:
                 }
             if 'success' not in result:
                 result['success'] = True
+            if audit_ctx is not None:
+                audit_ctx['status'] = 'ok' if result.get('success') else 'error'
             return result
         except Exception as e:
+            if audit_ctx is not None:
+                audit_ctx['status'] = 'error'
             logger.exception(
                 f"[BoActionRegistry] Error executing {action_id}: {e}"
             )
@@ -248,6 +382,10 @@ class BoActionRegistry:
                 'data': None,
                 'message': str(e),
             }
+        finally:
+            if audit_ctx is not None:
+                from meta.services.action_audit import write_action_audit
+                write_action_audit(audit_ctx)
 
 
 bo_action_registry = BoActionRegistry()
