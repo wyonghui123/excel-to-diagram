@@ -237,10 +237,10 @@ fields:
     type: string
     db_column: match_policy_used
     required: true
-    default: no
+    default: 'no'
     description: 求解时实际使用的匹配策略
     enum_values:
-      - value: no
+      - value: 'no'
         label: 不匹配
       - value: one_time_standard
         label: 一次性标准

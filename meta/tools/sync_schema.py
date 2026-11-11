@@ -23,7 +23,7 @@ from meta.core.datasource import DataSource, DataSourceType, get_data_source, Da
 from meta.core.schema_generator import (
     SchemaGenerator, SchemaMigrator, sync_schema_from_meta,
     allowed_check_values, normalize_sql_type, parse_schema_text,
-    rebuild_table_with_checks,
+    rebuild_table_with_checks, sqlite_type_affinity,
 )
 from meta.core.models import MetaObject, MetaField, FieldType, ObjectType
 from meta.core.yaml_loader import register_from_directory, get_yaml_schema_dir
@@ -371,7 +371,12 @@ def load_db_schema(ds: DataSource) -> Dict[str, Dict[str, Any]]:
 
 def compare_schema(expected: Dict[str, Dict[str, Any]],
                    actual: Dict[str, Dict[str, Any]]) -> Dict[str, List[str]]:
-    """比对期望与实际：表缺失 / 列缺失 / 类型不符 / CHECK 缺失或不一致。"""
+    """比对期望与实际：表缺失 / 列缺失 / 类型亲和性不符 / CHECK 缺失或不一致。
+
+    类型按 SQLite 亲和性比较：`VARCHAR(10)` 与 `VARCHAR(200)` 视为同型
+    （SQLite 不强制长度，应用层 max_length 才是实际约束），只有亲和性
+    变化（如 TEXT→INTEGER）才计入漂移。
+    """
     report = {
         "missing_tables": [],
         "missing_columns": [],
@@ -391,7 +396,7 @@ def compare_schema(expected: Dict[str, Dict[str, Any]],
                 report["missing_columns"].append("{0}.{1}".format(table, column))
                 continue
             have = got_columns[column]
-            if normalize_sql_type(have.get("type")) != normalize_sql_type(want.get("type")):
+            if sqlite_type_affinity(have.get("type")) != sqlite_type_affinity(want.get("type")):
                 report["type_mismatches"].append(
                     "{0}.{1}: 期望 {2} / 实际 {3}".format(
                         table, column, want.get("type"), have.get("type")))
@@ -441,9 +446,13 @@ def print_schema_report(report: Dict[str, List[str]], source_label: str) -> int:
 
 def apply_schema_fixes(db_path: str, report: Dict[str, List[str]],
                        expected: Dict[str, Dict[str, Any]]) -> int:
-    """按报告补齐：仅 ADD COLUMN 与 CHECK 重建；DROP/类型变更一律拒绝。"""
-    if report["missing_tables"] or report["type_mismatches"]:
-        print("! 存在表缺失或类型不符，需人工处理（--apply 不处理这两类）")
+    """按报告补齐：ADD COLUMN / 类型亲和性对齐 / CHECK 重建。
+
+    表缺失一律拒绝（--apply 不建表）；纯 VARCHAR 长度差异不会进入报告，
+    因此不会触发重建。
+    """
+    if report["missing_tables"]:
+        print("! 存在表缺失，需人工处理（--apply 不建表）")
 
     applied = 0
     # 1) ADD COLUMN
@@ -462,18 +471,32 @@ def apply_schema_fixes(db_path: str, report: Dict[str, List[str]],
         finally:
             conn.close()
 
-    # 2) CHECK 补齐（按表聚合，一次重建）
+    # 2) 类型 + CHECK 按表聚合，一次重建完成
     per_table = {}
+
+    def _plan(table: str) -> Dict[str, Dict[str, str]]:
+        return per_table.setdefault(table, {"types": {}, "checks": {}})
+
+    for entry in report["type_mismatches"]:
+        key = entry.split(":", 1)[0]
+        table, _, column = key.partition(".")
+        col_def = expected.get(table, {}).get("columns", {}).get(column)
+        if col_def:
+            _plan(table)["types"][column] = col_def["type"]
     for entry in report["check_missing"]:
         key = entry.split(":", 1)[0]
         table, _, column = key.partition(".")
         values = expected.get(table, {}).get("columns", {}).get(column, {}).get("check")
         if values:
-            per_table.setdefault(table, {})[column] = values
-    for table, checks in per_table.items():
-        if rebuild_table_with_checks(db_path, table, checks):
+            _plan(table)["checks"][column] = values
+
+    for table, plan in per_table.items():
+        if rebuild_table_with_checks(
+                db_path, table, plan["checks"], types=plan["types"]):
             applied += 1
-            print("  + CHECK {0}: {1}".format(table, ", ".join(sorted(checks))))
+            print("  + REBUILD {0}: 类型 {1} / CHECK {2}".format(
+                table, ", ".join(sorted(plan["types"])) or "-",
+                ", ".join(sorted(plan["checks"])) or "-"))
 
     print("  --apply 完成，共 {0} 项".format(applied))
     return applied

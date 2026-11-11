@@ -126,6 +126,9 @@ fields:
       - value: platform
         label: 平台
         color: info
+      - value: demand
+        label: 需求
+        color: info
     semantics:
       meaning: 参数字典的作用域
       filterable: true
@@ -154,6 +157,8 @@ fields:
         label: 整数
       - value: decimal
         label: 小数
+      - value: number
+        label: 数值
       - value: string
         label: 文本
       - value: ref

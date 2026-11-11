@@ -101,7 +101,7 @@ fields:
     type: string
     db_column: code
     required: true
-    max_length: 10
+    max_length: 32
     pattern: "^[A-Z][A-Z0-9_]*$"
     description: 类型唯一编码（同一 scope_bo + level 内唯一，如 TA / RE / STD）
     semantics:
@@ -202,6 +202,12 @@ fields:
       - value: loan
         label: 借出
         color: success
+      - value: invoice
+        label: 发票
+        color: info
+      - value: cancellation
+        label: 取消单
+        color: danger
     semantics:
       meaning: 单据类型的方向与流程分类（仅 header）
       filterable: true
@@ -405,6 +411,15 @@ fields:
         color: warning
       - value: misc
         label: 杂费行
+        color: default
+      - value: asset
+        label: 资产行
+        color: info
+      - value: expense
+        label: 费用行
+        color: warning
+      - value: subcontract
+        label: 委外行
         color: default
     semantics:
       meaning: 行类型的性质分类（仅 line）

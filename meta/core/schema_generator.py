@@ -39,15 +39,37 @@ def _field_max_length(field: MetaField) -> int:
             or DEFAULT_STRING_LENGTH)
 
 
+_BOOL_TRUE_LITERALS = {"true", "1", "yes", "on", "y", "t"}
+_BOOL_FALSE_LITERALS = {"false", "0", "no", "off", "n", "f"}
+
+
+def _boolean_check_literal(value) -> str:
+    """BOOLEAN 枚举值 → '1'/'0'。
+
+    SQLite 中布尔列实际写入的是 0/1；若把 YAML 里的 true/false 直接渲染成
+    'True'/'False'，CHECK 会拦住所有正常写入（enum_values.is_active 存量 336 行
+    就是 0/1）。
+    """
+    if isinstance(value, bool):
+        return "1" if value else "0"
+    text = str(value).strip().lower()
+    if text in _BOOL_TRUE_LITERALS:
+        return "1"
+    if text in _BOOL_FALSE_LITERALS:
+        return "0"
+    return str(value)
+
+
 def enum_check_values(field: MetaField) -> List[str]:
-    """枚举列的候选值（按声明顺序去重）。"""
+    """枚举列的候选值（按声明顺序去重；BOOLEAN 归一为 1/0）。"""
     enum_values = getattr(field, "enum_values", None) or []
     values = []
     for item in enum_values:
         value = item.get("value") if isinstance(item, dict) else item
         if value is None:
             continue
-        text = str(value)
+        text = (_boolean_check_literal(value)
+                if field.field_type == FieldType.BOOLEAN else str(value))
         if text not in values:
             values.append(text)
     return values
@@ -55,7 +77,16 @@ def enum_check_values(field: MetaField) -> List[str]:
 
 # 运行时内部状态（审计成败 / 账号冻结）由业务代码写入，不受 YAML 枚举约束；
 # 若自动生成 CHECK，会拦截 success/failure/denied 等合法写入，故豁免。
-CHECK_EXEMPT_COLUMNS = {("users", "status"), ("audit_logs", "status")}
+CHECK_EXEMPT_COLUMNS = {
+    ("users", "status"),
+    ("audit_logs", "status"),
+    # 审计日志的分类字段由调用方自由写入：object_type 覆盖 54 张表名，
+    # log_level 含 WARN 等内部级别，action / log_category 同理无法穷举。
+    ("audit_logs", "action"),
+    ("audit_logs", "log_category"),
+    ("audit_logs", "log_level"),
+    ("audit_logs", "object_type"),
+}
 
 
 def allowed_check_values(table_name: Optional[str], field: MetaField) -> List[str]:
@@ -80,6 +111,28 @@ def normalize_sql_type(raw: Optional[str]) -> str:
     if not raw:
         return ""
     return re.sub(r"\s+", "", str(raw).upper())
+
+
+def sqlite_type_affinity(raw: Optional[str]) -> str:
+    """SQLite 类型亲和性（忽略声明长度 / 精度）。
+
+    SQLite 的 `VARCHAR(n)` 不强制长度，存储与比较只取决于亲和性；
+    因此 DDL 漂移按亲和性判定「真实类型变化」，纯长度/精度差异不算漂移。
+    规则顺序与 SQLite 官方文档一致：INT → CHAR/CLOB/TEXT → BLOB →
+    REAL/FLOA/DOUB → NUMERIC。
+    """
+    text = normalize_sql_type(raw)
+    if not text:
+        return "BLOB"
+    if "INT" in text:
+        return "INTEGER"
+    if "CHAR" in text or "CLOB" in text or "TEXT" in text:
+        return "TEXT"
+    if "BLOB" in text:
+        return "BLOB"
+    if "REAL" in text or "FLOA" in text or "DOUB" in text:
+        return "REAL"
+    return "NUMERIC"
 
 
 def iter_create_table_blocks(text: str):
@@ -160,14 +213,49 @@ def parse_schema_text(text: str) -> Dict[str, Dict[str, Any]]:
     return schema
 
 
+_TRAILING_KEYWORDS = {
+    "NOT", "NULL", "PRIMARY", "KEY", "UNIQUE", "DEFAULT", "CHECK",
+    "REFERENCES", "COLLATE", "GENERATED", "CONSTRAINT", "AUTOINCREMENT",
+}
+
+
+def _replace_column_type(definition: str, column: str, target_type: str) -> str:
+    """替换单条列定义的类型片段，保留其后所有约束。
+
+    列名支持裸名 / 双引号 / 反引号 / 方括号；类型片段取「列名之后、
+    第一个约束关键字之前」的部分（可含 `(n,m)`）。
+    """
+    match = re.match(
+        r'^\s*("[^"]+"|`[^`]+`|\[[^\]]+\]|[A-Za-z_]\w*)(\s+)(.*)$',
+        definition, re.DOTALL)
+    if not match:
+        return definition
+    if match.group(1).strip('"`[]') != column:
+        return definition
+    tokens = match.group(3).split()
+    cut = len(tokens)
+    for index, token in enumerate(tokens):
+        if token.upper().strip(",") in _TRAILING_KEYWORDS:
+            cut = index
+            break
+    if cut == 0:
+        return definition
+    return "{0}\t{1}".format(
+        match.group(1), " ".join([target_type] + tokens[cut:]))
+
+
 def rebuild_table_with_checks(db_path: str, table: str, checks: Dict[str, List[str]],
+                              types: Optional[Dict[str, str]] = None,
                               conn: Optional[sqlite3.Connection] = None) -> bool:
-    """SQLite：重建表并补齐列级 CHECK，保留原列定义 / 索引 / 触发器。
+    """SQLite：重建表，同时对齐列类型并补齐列级 CHECK。
+
+    类型/CHECK 在同一次 CREATE ... __new 中完成，避免同一张表重建两遍。
 
     Args:
         db_path: SQLite 数据库路径
         table: 目标表
         checks: {列名: 允许值列表}；已带 CHECK 的列跳过
+        types: {列名: 目标类型}；归一化后与现类型相同则不替换
         conn: 可选复用连接（须为 autocommit：isolation_level=None）
 
     Returns:
@@ -200,9 +288,19 @@ def rebuild_table_with_checks(db_path: str, table: str, checks: Dict[str, List[s
 
         changed = False
         updated = []
+        types = types or {}
         for definition in definitions:
             name, info = parse_column_definition(definition)
-            if name and name in checks and not (info and info.get("check")):
+            if not name:
+                updated.append(definition)
+                continue
+            target_type = types.get(name)
+            if target_type and (info or {}).get("type") != normalize_sql_type(target_type):
+                replaced = _replace_column_type(definition, name, target_type)
+                if replaced != definition:
+                    definition = replaced
+                    changed = True
+            if name in checks and not (info and info.get("check")):
                 quoted = ", ".join("'{0}'".format(v.replace("'", "''")) for v in checks[name])
                 definition = definition.rstrip() + " CHECK ({0} IN ({1}))".format(name, quoted)
                 changed = True
