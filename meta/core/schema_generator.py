@@ -12,16 +12,214 @@ Schema 生成器 - 从元数据对象生成数据库 Schema
 """
 
 import logging
+import re
+import sqlite3
+from pathlib import Path
 
 logger = logging.getLogger(__name__)
 
-from typing import List, Dict, Tuple, Optional
+from typing import Any, List, Dict, Tuple, Optional
 from meta.core.models import (
     MetaObject, MetaField, MetaRelation, FieldType, RelationType,
     ObjectType, FieldStorage, ViewConfig, IndexType, IndexSource, MetaIndex
 )
 from meta.core.datasource import DataSource, DataSourceType, get_data_source
 from meta.core.sql_adapters import SQLDataSource
+
+
+# [E2 2026-11-11] STRING 缺省长度；CHECK 只渲染小枚举（大枚举走值帮助）
+DEFAULT_STRING_LENGTH = 200
+MAX_ENUM_CHECK_VALUES = 50
+
+
+def _field_max_length(field: MetaField) -> int:
+    """字段长度：semantics.max_length 优先，其次顶层 max_length，缺省 200。"""
+    return (getattr(field.semantics, 'max_length', None)
+            or getattr(field, 'max_length', None)
+            or DEFAULT_STRING_LENGTH)
+
+
+def enum_check_values(field: MetaField) -> List[str]:
+    """枚举列的候选值（按声明顺序去重）。"""
+    enum_values = getattr(field, "enum_values", None) or []
+    values = []
+    for item in enum_values:
+        value = item.get("value") if isinstance(item, dict) else item
+        if value is None:
+            continue
+        text = str(value)
+        if text not in values:
+            values.append(text)
+    return values
+
+
+# ==================== DDL 比对 / CHECK 补齐 ====================
+
+_CREATE_TABLE_RE = re.compile(
+    r"CREATE\s+TABLE(?:\s+IF\s+NOT\s+EXISTS)?\s+[\"'`\[]?([A-Za-z_][\w]*)[\"'`\]]?",
+    re.IGNORECASE)
+_COLUMN_CHECK_RE = re.compile(
+    r"CHECK\s*\(\s*\"?([A-Za-z_]\w*)\"?\s+IN\s*\(([^)]*)\)\s*\)", re.IGNORECASE)
+_NON_COLUMN_PREFIXES = ("PRIMARY KEY", "UNIQUE", "FOREIGN KEY", "CONSTRAINT", "CHECK")
+
+
+def normalize_sql_type(raw: Optional[str]) -> str:
+    """类型归一化：去空白 + 大写，便于跨 DDL 风格比较。"""
+    if not raw:
+        return ""
+    return re.sub(r"\s+", "", str(raw).upper())
+
+
+def iter_create_table_blocks(text: str):
+    """依次产出 (表名, 括号内 body)，支持嵌套括号（CHECK IN (...)）。"""
+    position = 0
+    while True:
+        match = _CREATE_TABLE_RE.search(text, position)
+        if not match:
+            return
+        start = text.find("(", match.end())
+        if start < 0:
+            return
+        depth, index = 0, start
+        while index < len(text):
+            char = text[index]
+            if char == "(":
+                depth += 1
+            elif char == ")":
+                depth -= 1
+                if depth == 0:
+                    break
+            index += 1
+        yield match.group(1), text[start + 1:index]
+        position = index + 1
+
+
+def split_top_level(text: str) -> List[str]:
+    """按顶层逗号切分（括号内的逗号不切）。"""
+    parts, depth, current = [], 0, []
+    for char in text:
+        if char == "(":
+            depth += 1
+        elif char == ")":
+            depth -= 1
+        if char == "," and depth == 0:
+            parts.append("".join(current))
+            current = []
+            continue
+        current.append(char)
+    if current:
+        parts.append("".join(current))
+    return parts
+
+
+def parse_column_definition(definition: str) -> Tuple[Optional[str], Optional[Dict[str, Any]]]:
+    """解析单条列定义 → (列名, {type, check})；表级约束返回 (None, None)。"""
+    line = definition.strip()
+    if not line:
+        return None, None
+    upper = line.upper()
+    for prefix in _NON_COLUMN_PREFIXES:
+        if upper.startswith(prefix):
+            return None, None
+    tokens = line.split()
+    if len(tokens) < 2:
+        return None, None
+    name = tokens[0].strip('"`[]')
+    col_type = tokens[1]
+    if len(tokens) > 2 and tokens[2].startswith("("):
+        col_type = col_type + tokens[2]
+    checks = {}
+    for match in _COLUMN_CHECK_RE.finditer(line):
+        column = match.group(1).strip('"`[]')
+        checks[column] = [item.strip().strip("'\"") for item in match.group(2).split(",")]
+    return name, {"type": normalize_sql_type(col_type), "check": checks.get(name)}
+
+
+def parse_schema_text(text: str) -> Dict[str, Dict[str, Any]]:
+    """解析 DDL 文本 → {表名: {columns: {列名: {type, check}}}}。"""
+    schema = {}
+    for table, body in iter_create_table_blocks(text):
+        columns = {}
+        for definition in split_top_level(body):
+            name, info = parse_column_definition(definition)
+            if name:
+                columns[name] = info
+        schema[table] = {"columns": columns}
+    return schema
+
+
+def rebuild_table_with_checks(db_path: str, table: str, checks: Dict[str, List[str]],
+                              conn: Optional[sqlite3.Connection] = None) -> bool:
+    """SQLite：重建表并补齐列级 CHECK，保留原列定义 / 索引 / 触发器。
+
+    Args:
+        db_path: SQLite 数据库路径
+        table: 目标表
+        checks: {列名: 允许值列表}；已带 CHECK 的列跳过
+        conn: 可选复用连接（须为 autocommit：isolation_level=None）
+
+    Returns:
+        是否发生重建
+    """
+    owns_conn = conn is None
+    if owns_conn:
+        conn = sqlite3.connect(str(Path(db_path)), timeout=30)
+        conn.isolation_level = None
+    try:
+        row = conn.execute(
+            "SELECT sql FROM sqlite_master WHERE type='table' AND name=?", (table,)).fetchone()
+        if not row or not row[0]:
+            return False
+        create_sql = row[0]
+        start = create_sql.find("(")
+        if start < 0:
+            return False
+        depth, index = 0, start
+        while index < len(create_sql):
+            char = create_sql[index]
+            if char == "(":
+                depth += 1
+            elif char == ")":
+                depth -= 1
+                if depth == 0:
+                    break
+            index += 1
+        definitions = split_top_level(create_sql[start + 1:index])
+
+        changed = False
+        updated = []
+        for definition in definitions:
+            name, info = parse_column_definition(definition)
+            if name and name in checks and not (info and info.get("check")):
+                quoted = ", ".join("'{0}'".format(v.replace("'", "''")) for v in checks[name])
+                definition = definition.rstrip() + " CHECK ({0} IN ({1}))".format(name, quoted)
+                changed = True
+            updated.append(definition)
+        if not changed:
+            return False
+
+        index_sqls = [item[0] for item in conn.execute(
+            "SELECT sql FROM sqlite_master WHERE type IN ('index','trigger') "
+            "AND tbl_name=? AND sql IS NOT NULL", (table,))]
+        conn.execute("PRAGMA foreign_keys=OFF")
+        try:
+            conn.execute("BEGIN")
+            conn.execute("CREATE TABLE {0}__new ({1})".format(table, ",".join(updated)))
+            conn.execute("INSERT INTO {0}__new SELECT * FROM {0}".format(table))
+            conn.execute("DROP TABLE {0}".format(table))
+            conn.execute("ALTER TABLE {0}__new RENAME TO {0}".format(table))
+            for sql in index_sqls:
+                conn.execute(sql)
+            conn.execute("COMMIT")
+        except Exception:
+            conn.execute("ROLLBACK")
+            raise
+        finally:
+            conn.execute("PRAGMA foreign_keys=ON")
+        return True
+    finally:
+        if owns_conn:
+            conn.close()
 
 
 class SchemaGenerator:
@@ -39,6 +237,25 @@ class SchemaGenerator:
     
     def __init__(self, dialect: str = "sqlite"):
         self.dialect = dialect
+
+    def _sql_type(self, field: MetaField) -> str:
+        """列类型：STRING 按声明长度渲染（其余沿用静态映射）。"""
+        if field.field_type == FieldType.STRING:
+            return "VARCHAR({0})".format(_field_max_length(field))
+        return self.TYPE_MAPPING.get(field.field_type, "TEXT")
+
+    def _sql_check(self, field: MetaField) -> Optional[str]:
+        """列级 CHECK：enum_values 非空且 <=50 时渲染 `CHECK (col IN (...))`。
+
+        本轮只对 SQLite 生效（MySQL/PG 的 CHECK 语法差异留待后续）。
+        """
+        if self.dialect != "sqlite":
+            return None
+        values = enum_check_values(field)
+        if not values or len(values) > MAX_ENUM_CHECK_VALUES:
+            return None
+        quoted = ", ".join("'{0}'".format(v.replace("'", "''")) for v in values)
+        return "CHECK ({0} IN ({1}))".format(field.db_column, quoted)
     
     def generate_create_table(self, meta_object: MetaObject) -> str:
         """生成 CREATE TABLE 或 CREATE VIEW 语句"""
@@ -165,7 +382,7 @@ class SchemaGenerator:
         """生成列定义"""
         parts = [field.db_column]
         
-        col_type = self.TYPE_MAPPING.get(field.field_type, "TEXT")
+        col_type = self._sql_type(field)
         parts.append(col_type)
         
         if field.unique and field.id == "id":
@@ -186,7 +403,11 @@ class SchemaGenerator:
                 parts.append("DEFAULT '{0}'".format(field.default))
             else:
                 parts.append("DEFAULT {0}".format(field.default))
-        
+
+        check = self._sql_check(field)
+        if check:
+            parts.append(check)
+
         return " ".join(parts)
     
     def _generate_foreign_key(self, relation: MetaRelation) -> Optional[str]:
@@ -323,7 +544,7 @@ class SchemaGenerator:
     def generate_column_dict(self, field: MetaField) -> Dict:
         """将 MetaField 转换为 DataSource 使用的列定义字典"""
         return {
-            "type": self.TYPE_MAPPING.get(field.field_type, "TEXT"),
+            "type": self._sql_type(field),
             "required": field.required,
             "unique": field.unique,
             "default": field.default,
