@@ -2058,7 +2058,6 @@ def init_menu_permissions(db_path):
                 'project_task:read',
                 'project_task:update',
                 'project_task:delete',
-                'project_task:list',
             ]),
             'description': '项目活动：计划层 WBS 节点（阶段 / 工作包 / 活动），只产需求不产动作',
             'show_in_sidebar': 1,
@@ -3145,12 +3144,69 @@ def init_menu_permissions(db_path):
     conn.close()
 
 
+def check_menu_permissions(db_path):
+    """只读体检（E1 门禁）：不重建菜单，只校验 DB 现状。
+
+    校验项：
+      1. menu_permissions 表存在
+      2. 菜单 required_permissions 引用的每个码都在 permissions 表（既不 403）
+      3. menu_sync_guard 的 menu_declaration 记录存在（声明同步跑过）
+
+    返回：0 = 一致 / 1 = 不一致 / 2 = 无法检查（库或表缺失）。
+    """
+    if not os.path.exists(db_path):
+        print(f'[check] FAIL: DB 不存在: {db_path}')
+        return 2
+
+    conn = sqlite3.connect(db_path)
+    try:
+        cursor = conn.cursor()
+        try:
+            cursor.execute('SELECT COUNT(*) FROM menu_permissions')
+        except sqlite3.Error:
+            print('[check] FAIL: menu_permissions 表不存在（菜单尚未初始化）')
+            return 2
+
+        stored = {row[0] for row in cursor.execute('SELECT code FROM permissions')}
+        missing = []
+        for menu_code, raw in cursor.execute(
+                'SELECT menu_code, required_permissions FROM menu_permissions'):
+            try:
+                values = json.loads(raw) if raw else []
+            except (TypeError, ValueError):
+                values = [part.strip() for part in str(raw).split(',') if part.strip()]
+            for code in values or []:
+                if code and code != '*' and code not in stored:
+                    missing.append(f'{menu_code} -> {code}')
+
+        guard_table = cursor.execute(
+            "SELECT 1 FROM sqlite_master WHERE type='table' AND name='menu_sync_guard'"
+        ).fetchone()
+        has_guard = bool(guard_table) and bool(cursor.execute(
+            "SELECT 1 FROM menu_sync_guard WHERE guard_key = 'menu_declaration'").fetchone())
+
+        print(f"[check] menu_permissions: {cursor.execute('SELECT COUNT(*) FROM menu_permissions').fetchone()[0]} 条"
+              f" / permissions: {len(stored)} 条")
+        if not has_guard:
+            print('[check] WARN: menu_sync_guard 缺 menu_declaration 记录（声明同步未跑过）')
+        if missing:
+            print(f'[check] FAIL: 菜单引用但未入库 {len(missing)} 条')
+            for item in missing[:50]:
+                print(f'  - {item}')
+            return 1
+        print('[check] PASS: 菜单引用码全部已入库')
+        return 0
+    finally:
+        conn.close()
+
+
 if __name__ == '__main__':
     # [H14.1] 支持通过环境变量指定 db_path (与 server.py:455-456 行为一致)
     # 优先级: CLI 参数 > ARCH_DB_PATH > SQLITE_DB_PATH > meta/architecture.db
-    db_path = None
-    if len(sys.argv) > 1:
-        db_path = sys.argv[1]
+    # 附加: `--check` 走只读体检（不重建菜单），用于 E1 门禁/CI
+    argv = [arg for arg in sys.argv[1:] if arg != '--check']
+    check_only = len(argv) != len(sys.argv[1:])
+    db_path = argv[0] if argv else None
     if not db_path:
         db_path = os.environ.get('ARCH_DB_PATH')
     if not db_path:
@@ -3158,4 +3214,6 @@ if __name__ == '__main__':
     if not db_path:
         db_path = os.path.join(os.path.dirname(os.path.dirname(__file__)), 'architecture.db')
     print(f"数据库路径: {db_path}")
+    if check_only:
+        sys.exit(check_menu_permissions(db_path))
     init_menu_permissions(db_path)

@@ -37,6 +37,34 @@ logger = logging.getLogger(__name__)
 _STANDARD_CRUD_SUFFIXES = ('create', 'read', 'update', 'delete')
 
 
+def derive_object_permissions(obj: MetaObject) -> List[str]:
+    """推导一个 BO 应入库的全部权限码（E1 单源入口，纯函数）。
+
+    口径（统一为单段 ``{bo}:{suffix}``）：
+      1. ``authorization.permissions`` 声明的码（运行时优先使用）
+      2. 顶层 ``actions`` 的动作码（自定义动作）
+      3. 标准 CRUD 码（create/read/update/delete）始终补齐
+
+    脚本、门禁、同步服务都必须走这里，禁止各自复制推导逻辑。
+    """
+    perms: List[str] = []
+
+    auth = getattr(obj, 'authorization', None)
+    if isinstance(auth, dict) and auth.get('check') is True:
+        declared = auth.get('permissions')
+        if isinstance(declared, dict):
+            perms.extend(code for code in declared.values() if isinstance(code, str) and code)
+
+    for action in obj.actions:
+        perms.append(action.get_permission_code(obj.id))
+
+    for suffix in _STANDARD_CRUD_SUFFIXES:
+        perms.append(f'{obj.id}:{suffix}')
+
+    seen = set()
+    return [p for p in perms if not (p in seen or seen.add(p))]
+
+
 class PermissionSyncService:
 
     _last_synced_mtime = None
@@ -203,7 +231,7 @@ class PermissionSyncService:
         if not meta_obj:
             return {'error': f'Object not found: {object_id}', 'created': [], 'existing': [], 'total': 0}
 
-        perms = self._derive_from_object(meta_obj)
+        perms = derive_object_permissions(meta_obj)
         existing = self._load_existing_permissions()
         
         created = []
@@ -373,32 +401,8 @@ class PermissionSyncService:
         return all_perms
 
     def _derive_from_object(self, obj: MetaObject) -> List[str]:
-        """推导一个 BO 应入库的全部权限码。
-
-        [T2] 口径（统一为单段 ``{bo}:{suffix}``）：
-          1. ``authorization.permissions`` 声明的码（运行时优先使用）
-          2. 顶层 ``actions`` 的动作码（自定义动作）
-          3. 标准 CRUD 码（create/read/update/delete）始终补齐
-
-        旧实现只遍历 ``obj.actions``：228 个对象中仅 46 个声明了顶层 actions，
-        其余 182 个对象从未被自动播种，导致 strict 模式下大量 403。
-        """
-        perms: List[str] = []
-
-        auth = getattr(obj, 'authorization', None)
-        if isinstance(auth, dict) and auth.get('check') is True:
-            declared = auth.get('permissions')
-            if isinstance(declared, dict):
-                perms.extend(code for code in declared.values() if isinstance(code, str) and code)
-
-        for action in obj.actions:
-            perms.append(action.get_permission_code(obj.id))
-
-        for suffix in _STANDARD_CRUD_SUFFIXES:
-            perms.append(f'{obj.id}:{suffix}')
-
-        seen = set()
-        return [p for p in perms if not (p in seen or seen.add(p))]
+        """兼容包装：推导逻辑已收归模块级 ``derive_object_permissions``。"""
+        return derive_object_permissions(obj)
 
     def _load_existing_permissions(self) -> Set[str]:
         try:
