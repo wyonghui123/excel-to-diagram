@@ -477,6 +477,97 @@ Response:
 
 ---
 
+## 7. 2026-11-11 深化：机制级复核与本仓取舍
+
+> 本节是对 §3 能力横评的**机制级下钻**，目标不是再列一遍功能，而是回答：
+> 头部产品在「元数据 → 运行时」这条链上，**哪些地方用声明替代了代码**，以及我们 9 项待办（E1-E9）
+> 应该采用 / 裁剪 / 拒绝哪一部分。
+> 证据分两类：① 官方文档（见 §7.1 来源）；② 本仓代码事实（见 `spec-bo-metadata-single-source-2026-11-11.md` §4-§6）。
+
+### 7.1 五个可复用的机制事实
+
+| # | 产品 | 机制事实（官方文档口径） | 对我们的意义 |
+|---|---|---|---|
+| M1 | Salesforce | `PermissionSet` 的对象权限是**结构化布尔**（`allowCreate/allowRead/allowEdit/allowDelete`），字段权限独立（`fieldPermissions`），**授予**由 `PermissionSetAssignment` 承担 | 权限 = 定义（对象×动作） + 授予（主体×集合）两层，**码串只是投影** |
+| M2 | Salesforce | 部署前可 `validate`（只验证不落地，同时跑测试），部署时按修改时间做**冲突检测** | 门禁应"只读 + 可预演"，且要能发现**环境漂移**，而不只是语法错 |
+| M3 | SAP CAP | CDS 模型由 `cds build` / `cds deploy` **编译出数据库工件**，人不再手写 DDL | DDL 应由模型生成；但我们仍需历史 ALTER 能力 → 迁移为合同、快照为期望 |
+| M4 | ServiceNow | 表/字段/枚举分别是 `sys_db_object` / `sys_dictionary` / `sys_choice`；访问控制是 ACL；状态模型对每个状态声明 `readRoles/writeRoles` 与 `availableFor/writableFor` | 状态不是"边表"，是**状态 × 角色 × 可写性**的模型 |
+| M5 | Palantir | 动作类型有三件套：**permissions**（谁能执行）、**submission criteria**（什么数据条件下可执行）、**action log**（执行留痕）；action log 可被强制为"该对象类型的编辑只允许带 action log 的 action" | "轻链路"应是**显式治理等级**，不是注释；审计可被强制而非可选 |
+| M6 | Dataverse | 小数精度挂在**货币记录**上（0-4），列本身也有 precision；解决方案（solution）是分层可部署包 | 精度要有**优先级链**，且不能散落在业务 SQL |
+
+### 7.2 五条收敛规律（头部产品的共同最小公分母）
+
+1. **元数据是可部署、可校验的工件**，不是散落在代码里的常量。Salesforce 走 Metadata API + source tracking，
+   Dataverse 走 solution，ServiceNow 走 update set，CAP 走 CDS build。→ 我们的 YAML 目前只是"启动期输入"，
+   缺"发布包 + 预演校验"这一层（对应 E9 的边界，见 §7.5）。
+2. **权限原语是结构化的，码串是视图**。没人把 `"order:create"` 字符串当唯一事实写进七八处；
+   字符串只出现在 Token / 声明层，由结构化定义投影出来。→ E1/E7 的方向正确，但要明确"码串永远可重算"。
+3. **动作拆成"许可 / 前置条件 / 留痕"三个正交关注点**。把三者压成一个 `lightweight` 布尔，
+   等价于把"谁能做、什么条件下能做、做完记不记账"绑死，后续任一维变化都要改语义。
+4. **状态是模型，不是转移边表**。边表只回答"能不能从 A 到 B"，回答不了"在 B 状态下哪些字段可写、哪些角色可读"。
+   我们 §3 已标"状态×字段矩阵 空转"，根因就在这里。
+5. **精度/取号这类数值语义挂在数据类型的元数据上**，业务代码只读不写死。头部产品没有一处业务 SQL 里写
+   `ROUND(x, 4)`。
+
+### 7.3 E1-E9 逐项裁决
+
+| 项 | 头部依据 | 裁决 | 落地点 / 需修正处 |
+|---|---|---|---|
+| **E1** 权限码对齐 | M1 | **采用**：结构化派生 → 码串；新增 MENU 集合 | 唯一生成函数 `derive_object_permissions()`；补 `permission_aliases`（旧双段→新单段）只读过渡表，见 TBD-1 |
+| **E2** DDL 单源 | M3 + M2 | **采用方案 A（裁剪）**：迁移=合同，`generated_schema.sql`=期望快照，`--diff --against db` 自检 | 不做 CAP 式"全量由模型重生成"——SQLite 无历史 ALTER 语义，会丢存量数据修复 |
+| **E3** `call()` 治理 | M5 | **采用，但改字段形态**：`lightweight: bool` → `governance: none\|audit\|audit_scope` | 布尔会在 Step2 逼出二次迁移；三值枚举一次到位，Step1 只填 `none`/`audit` 并跑 `warn` |
+| **E4** 状态机单源 | M4 | **采用（第一层）**：只派生"边"；**明确不假装**覆盖状态级可写性 | 新增 `state_machine.py` 的 API 命名要预留 `editable_fields_in_state()`，避免 E4 完成后又改签名 |
+| **E5** 金额精度 | M6 | **采用 + 修正优先级**：`field.semantics.precision` > `currency.decimal_places` > `DEFAULT_AMOUNT_DECIMALS` | 精度是"字段 > 货币 > 对象默认"，不是"对象 > 字段"；SQL 侧只允许占位符参数，不允许字面量 |
+| **E6** 取号 | M6 同类（数值语义属元数据） | **采用**：`registry` 中 `numbering` 为唯一源 | 缺键 `WARNING` 不猜测，避免"猜错序列"比"报错"更贵 |
+| **E7** 声明收敛 | M1 + M2 | **采用**：YAML 唯一人工声明位，其余生成；但要显式区分**声明 ≠ 授予** | 授予仍走 `org_permission_sets`（与 `PermissionSetAssignment` 同构），生成器不得写授予 |
+| **E8** `actions:` 加载 | M5 反例（见 §7.4-A3） | **采用 + 加固**：`handler` 必须限定在允许的模块命名空间，且与 `permission` 同处一条声明 | 只做 dotted-path 解析不够；YAML 可编辑者不应能"把 handler 指向任意函数" |
+| **E9** CI 门禁 | M2 | **采用**：对齐 validate-only——门禁只读、不改库、可本地预演 | 三 job 保持；`--diff` 必须能对"真实 DB"跑，否则只是元模型自证 |
+
+### 7.4 四个「不要照搬」的反模式
+
+- **A1 运行时改元数据**：APEX / ServiceNow 允许管理员在 UI 里直接改表结构与策略。我们**拒绝**：
+  YAML 在 git 中，改元数据必须走 PR，否则 E1/E2 的可校验性、回滚与测试可复现性全部失效。
+- **A2 脚本式 ACL**：ServiceNow 支持 scripted ACL（脚本判定）。我们**拒绝**：判定不可静态枚举，
+  E1 的四集合一致性检查会直接失效，且排障成本极高。数据权限继续走声明式 `data_permission_rules`。
+- **A3 动作与处理器权限脱钩**：Palantir 官方文档明确警告——函数级编辑权限不跟随动作权限，
+  改函数即可改动作行为。投影到我们：**`handler` 是字符串，改 YAML 就能换实现**。
+  → E8 必须同时做「命名空间白名单 + 加载期校验 + 权限配置变更审计」，三者缺一不可。
+- **A4 每对象一个 Permission Set**：Salesforce 实践中常见的权限集爆炸。我们**拒绝**：
+  继续保持角色包（bundle），不按对象生成权限集，否则 228 个对象会产生同名权限集矩阵，运维不可承受。
+
+### 7.5 头部有、我们还没有的第 10 项（本轮不做）
+
+**MetaBundle：可发布、可预演的元数据包。** 头部四家都有"元数据 = 可部署工件"这一层
+（update set / solution / Metadata API / CDS build），我们只有"启动期加载 YAML"。
+E9 的 CI 门禁只是它的一个子集。建议单列为 **E10（P1，E9 之后）**：
+
+```
+scripts/metadata_bundle.py build   → 产出 bundle/（yaml 清单 + 生成 DDL + 生成权限码 + 生成菜单种子 + 版本号）
+scripts/metadata_bundle.py validate --against db → 只读预演：结构差异 / 权限四集合差异 / 动作契约，退出码 0|1
+```
+
+边界声明：我们**不做**多环境分层包（managed/unmanaged solution 那套），单库单环境不需要；
+只做"包清单 + 漂移报告"，即 M2 的 validate 语义。
+
+### 7.6 TBD 裁决建议
+
+| TBD | 建议 | 理由 |
+|---|---|---|
+| TBD-1 单段 vs 双段 | **单段定型**；双段进 `permission_aliases` 只读表，resolver 先单段后 alias，禁止新增双段 | 头部权限原语是"对象 + 动作"（M1/M4），双段 `{bo}:{bo}_{action}` 是把对象名写了两遍；运行时已按单段实现，回退成本高于收敛成本 |
+| TBD-2 `lightweight` 范围 | **本轮只 Step1**，但字段改为三值 `governance` | Step2 要碰 Flask 上下文与 `data_source`，与本轮"纯声明收敛"不同风险级；三值枚举避免 Step2 再迁移一次 |
+| TBD-3 `generated_schema.sql` | **保留**为期望快照；文件头标注"非运行输入"，并加测试断言无运行时代码读取它 | 与 M2 的 validate 语义一致；删除会失去"期望 vs 实际"的第二方 |
+| TBD-4 菜单种子真源 | **DB 为运行时真源，脚本为种子生成器 + `--check`** | 与 E1 的 MENU 集合闭环；单独一个"常量即真源"会退回七处声明位 |
+| TBD-5 字段命名 | `handler` / `permission` 无冲突；`lightweight` 按 TBD-2 调整为 `governance` | `behavior` 是 UI 行为，不与治理等级同义 |
+| TBD-6 隐式转移差集 | 用 **import + 内省**生成差集，不用 grep；约束方向为「服务表 ⊆ YAML 边」 | grep 会被注释/别名骗过；"YAML 可多、服务不可多"是单向收敛 |
+| TBD-7 Wave 0 是否先 commit | **先 commit**（T2/T4 + v249/v250） | 生成器会重写 YAML 行，若不先落基线，diff 里存量改动与生成结果不可分离；同时满足切会话前必须提交的规则 |
+
+### 7.7 一句话结论
+
+头部产品的护城河不是"元数据表"，而是**「声明 → 生成 → 校验 → 发布」这条闭环**。
+我们当前 9 项把前三段补齐了，第四段（包与漂移预演）应显式记为 E10，而不是塞进 E9。
+
+---
+
 ## 附录 A：七大产品架构速查
 
 | 产品 | 元数据模型 | API 模式 | AI 集成 | 独特价值 |
