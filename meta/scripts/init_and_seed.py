@@ -297,7 +297,6 @@ def insert_data():
         ('客户信用', 'CUSTOMER_CREDIT',  '销售管理.客户管理'),
         ('应收发票', 'AR_INVOICE',       '财务管理.应收管理'),
         ('收款核销', 'AR_RECEIPT',       '财务管理.应收管理'),
-        ('应付发票', 'AP_INVOICE',       '财务管理.应付管理'),
         ('付款计划', 'AP_PAYMENT',       '财务管理.应付管理'),
     ]
 
@@ -339,10 +338,8 @@ def insert_data():
         ('销售发票', 'BO_SALES_INV', '销售发票'),
         ('应收发票', 'BO_AR_INV', '应收发票'),
         ('收款单', 'BO_AR_RECEIPT', '收款单'),
-        ('应付发票', 'BO_AP_INV', '应付发票'),
         ('付款单', 'BO_AP_PAYMENT', '付款单'),
         ('付款凭单', 'BO_PAYMENT_VOUCHER', '付款凭单'),
-        ('付款申请', 'BO_PAYMENT_REQ', '付款申请单'),
     ]
 
     bo_ids = {}
@@ -374,10 +371,8 @@ def insert_data():
             'BO_SALES_INV': 'AR_INVOICE',
             'BO_AR_INV': 'AR_INVOICE',
             'BO_AR_RECEIPT': 'AR_RECEIPT',
-            'BO_AP_INV': 'AP_INVOICE',
             'BO_AP_PAYMENT': 'AP_PAYMENT',
             'BO_PAYMENT_VOUCHER': 'AP_PAYMENT',
-            'BO_PAYMENT_REQ': 'AP_PAYMENT',
         }
 
         sm_code = sm_code_map.get(code, 'ORDER_MNG')
@@ -422,9 +417,6 @@ def insert_data():
         ('BO_INBOUND_L', 'BO_INVENTORY', 'INCREASES', '入库增加库存', 'UPDATES', 'PUSH'),
         ('BO_OUTBOUND', 'BO_OUTBOUND_L', 'CONTAINS', '出库单包含明细', 'REFERENCES', 'PUSH'),
         ('BO_OUTBOUND_L', 'BO_INVENTORY', 'DECREASES', '出库减少库存', 'UPDATES', 'PUSH'),
-        ('BO_SUPPLIER', 'BO_AP_INV', 'RECEIVES', '供应商收到应付发票', 'REFERENCES', 'PUSH'),
-        ('BO_AP_INV', 'BO_PAYMENT_REQ', 'CREATES', '应付发票创建付款申请', 'GENERATES', 'PUSH'),
-        ('BO_PAYMENT_REQ', 'BO_PAYMENT_VOUCHER', 'APPROVES', '付款申请审批生成凭单', 'TRIGGERS', 'PUSH'),
         ('BO_PAYMENT_VOUCHER', 'BO_AP_PAYMENT', 'CREATES', '凭单创建付款单', 'GENERATES', 'PUSH'),
         ('BO_AP_PAYMENT', 'BO_SUPPLIER', 'PAYS', '付款单支付供应商', 'TRIGGERS', 'PUSH'),
     ]
@@ -455,16 +447,16 @@ def insert_data():
         elif len(rel_tuple) == 6:
             source_code, target_code, rel_code, rel_desc, relation_type, relation_direction = rel_tuple
         else:
-            print(f"  ⚠ 跳过关系 (元组长度错误 {len(rel_tuple)}): {rel_tuple}")
+            print(f"  [!] 跳过关系 (元组长度错误 {len(rel_tuple)}): {rel_tuple}")
             continue
 
         # [v34] enum 校验
         if relation_type not in VALID_RELATION_TYPES:
-            print(f"  ⚠ 跳过关系 (relation_type '{relation_type}' 不在 enum 中): {rel_code} {source_code}->{target_code}")
+            print(f"  [!] 跳过关系 (relation_type '{relation_type}' 不在 enum 中): {rel_code} {source_code}->{target_code}")
             skipped_invalid_enum += 1
             continue
         if relation_direction is not None and relation_direction not in VALID_DIRECTIONS:
-            print(f"  ⚠ 跳过关系 (relation_direction '{relation_direction}' 不在 enum 中): {rel_code} {source_code}->{target_code}")
+            print(f"  [!] 跳过关系 (relation_direction '{relation_direction}' 不在 enum 中): {rel_code} {source_code}->{target_code}")
             skipped_invalid_enum += 1
             continue
 
@@ -481,7 +473,7 @@ def insert_data():
             # 二次校验: 整库唯一
             if rel_unique_code in used_codes:
                 duplicate_codes.add(rel_unique_code)
-                print(f"  ⚠ 重复 code: {rel_unique_code}")
+                print(f"  [!] 重复 code: {rel_unique_code}")
                 continue
             used_codes.add(rel_unique_code)
 
@@ -494,9 +486,9 @@ def insert_data():
             print(f"创建关系{rel_code}{dir_str}: {source_code} -> {target_code} (code={rel_unique_code})")
 
     if skipped_invalid_enum > 0:
-        print(f"  ⚠ 共跳过 {skipped_invalid_enum} 条 (enum 校验失败)")
+        print(f"  [!] 共跳过 {skipped_invalid_enum} 条 (enum 校验失败)")
     if duplicate_codes:
-        print(f"  ⚠ 检测到重复 code: {duplicate_codes}")
+        print(f"  [!] 检测到重复 code: {duplicate_codes}")
 
     conn.commit()
     conn.close()

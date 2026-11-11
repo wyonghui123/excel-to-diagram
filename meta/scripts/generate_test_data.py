@@ -239,7 +239,6 @@ def generate_test_data():
         ('销售管理.客户管理', '客户信用', 'CUSTOMER_CREDIT'),
         ('财务管理.应收管理', '应收发票', 'AR_INVOICE'),
         ('财务管理.应收管理', '收款核销', 'AR_RECEIPT'),
-        ('财务管理.应付管理', '应付发票', 'AP_INVOICE'),
         ('财务管理.应付管理', '付款计划', 'AP_PAYMENT'),
     ]
     bo_codes = {}
@@ -272,10 +271,8 @@ def generate_test_data():
         ('销售发票', 'BO_SALES_INV', '销售发票'),
         ('应收发票', 'BO_AR_INV', '应收发票'),
         ('收款单', 'BO_AR_RECEIPT', '收款单'),
-        ('应付发票', 'BO_AP_INV', '应付发票'),
         ('付款单', 'BO_AP_PAYMENT', '付款单'),
         ('付款凭单', 'BO_PAYMENT_VOUCHER', '付款凭单'),
-        ('付款申请', 'BO_PAYMENT_REQ', '付款申请单'),
     ]
 
     sm_mapping = {
@@ -301,10 +298,8 @@ def generate_test_data():
         'BO_SALES_INV': 'ORDER_MNG',
         'BO_AR_INV': 'AR_INVOICE',
         'BO_AR_RECEIPT': 'AR_RECEIPT',
-        'BO_AP_INV': 'AP_INVOICE',
         'BO_AP_PAYMENT': 'AP_PAYMENT',
         'BO_PAYMENT_VOUCHER': 'AP_PAYMENT',
-        'BO_PAYMENT_REQ': 'AP_PAYMENT',
     }
 
     for name, code, desc in bo_data:
@@ -355,9 +350,6 @@ def generate_test_data():
         ('BO_INBOUND_L', 'BO_INVENTORY', 'INCREASES', '入库增加库存'),
         ('BO_OUTBOUND', 'BO_OUTBOUND_L', 'CONTAINS', '出库单包含明细'),
         ('BO_OUTBOUND_L', 'BO_INVENTORY', 'DECREASES', '出库减少库存'),
-        ('BO_SUPPLIER', 'BO_AP_INV', 'RECEIVES', '供应商收到应付发票'),
-        ('BO_AP_INV', 'BO_PAYMENT_REQ', 'CREATES', '应付发票创建付款申请'),
-        ('BO_PAYMENT_REQ', 'BO_PAYMENT_VOUCHER', 'APPROVES', '付款申请审批生成凭单'),
         ('BO_PAYMENT_VOUCHER', 'BO_AP_PAYMENT', 'CREATES', '凭单创建付款单'),
         ('BO_AP_PAYMENT', 'BO_SUPPLIER', 'PAYS', '付款单支付供应商'),
         ('BO_AR_INV', 'BO_AR_RECEIPT', 'MATCHES', '应收与收款匹配'),
