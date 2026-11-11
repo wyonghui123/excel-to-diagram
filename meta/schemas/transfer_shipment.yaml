@@ -308,7 +308,7 @@ ui_view_config:
         label: 新建发货单
         icon: plus
         type: primary
-        permission: transfer_shipment:transfer_shipment_create
+        permission: transfer_shipment:create
       - id: export
         label: 导出
         icon: download

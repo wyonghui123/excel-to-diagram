@@ -668,7 +668,7 @@ ui_view_config:
         label: 按期次开票
         icon: plus
         variant: secondary
-        permission: customer_invoice:customer_invoice_create
+        permission: customer_invoice:create
         action: customer_invoice.create_from_schedule
         visible_when: "schedule_kind == 'billing' and status in ['planned', 'confirmed']"
       # TBD-11 A：服务计划期次「按确认开票」，派发 service_confirmation 动作
@@ -676,6 +676,6 @@ ui_view_config:
         label: 按服务确认开票
         icon: plus
         variant: secondary
-        permission: customer_invoice:customer_invoice_create
+        permission: customer_invoice:create
         action: customer_invoice.create_from_service_confirmation
         visible_when: "schedule_kind == 'service' and status == 'completed'"

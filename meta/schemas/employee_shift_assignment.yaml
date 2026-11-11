@@ -414,7 +414,7 @@ ui_view_config:
         label: 新建排班
         icon: plus
         type: primary
-        permission: employee_shift_assignment:employee_shift_assignment_create
+        permission: employee_shift_assignment:create
     defaultSort:
       field: effective_from
       order: desc
@@ -447,7 +447,7 @@ ui_view_config:
                  note]
 
 category_config:
-  create_permission: employee_shift_assignment:employee_shift_assignment_create
-  update_permission: employee_shift_assignment:employee_shift_assignment_update
-  delete_permission: employee_shift_assignment:employee_shift_assignment_delete
+  create_permission: employee_shift_assignment:create
+  update_permission: employee_shift_assignment:update
+  delete_permission: employee_shift_assignment:delete
   owner_auto_permission: false

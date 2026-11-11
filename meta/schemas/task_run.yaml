@@ -1,0 +1,194 @@
+# 后台任务执行记录（P3 只读账本）
+# 依据：docs/specs/spec-background-job-infrastructure-2026-11-10.md §4–§5
+# 纪律：状态机由 JobRunStore / JobDispatcher 专属写入；本对象只开放通用 API 读，
+#       写操作（claim/finish/retry/cancel）一律走专属端点，不允许通用 CRUD 直改。
+id: task_run
+name: 后台任务执行记录
+table_name: task_runs
+description: 后台作业每次执行尝试的账本（claim/lease/结果/重试，只读）
+module: task
+generic_api_mode: read_only
+
+fields:
+  - id: id
+    name: ID
+    type: integer
+    db_column: id
+    required: true
+    unique: true
+    description: 执行记录 ID
+    semantics:
+      meaning: 自增主键
+      primary_key: true
+  - id: run_key
+    name: 幂等键
+    type: string
+    db_column: run_key
+    required: true
+    unique: true
+    description: '<trigger_id>:<scheduled_for>，保证同一排期只建一条 run'
+  - id: job_id
+    name: 作业 ID
+    type: integer
+    db_column: job_id
+    required: true
+    description: 所属作业定义 ID
+  - id: trigger_id
+    name: 触发器 ID
+    type: integer
+    db_column: trigger_id
+    description: 来源触发器 ID（手动触发为空）
+  - id: task_id
+    name: 领域任务 ID
+    type: integer
+    db_column: task_id
+    description: 关联的领域任务 ID（弱引用）
+  - id: status
+    name: 状态
+    type: string
+    db_column: status
+    required: true
+    description: pending / claimed / running / succeeded / failed / retrying / dead / cancelled / skipped
+  - id: params
+    name: 参数
+    type: json
+    db_column: params
+    description: 本次执行参数快照
+  - id: attempt
+    name: 第几次尝试
+    type: integer
+    db_column: attempt
+    description: 当前尝试序号（从 1 开始）
+  - id: max_attempts
+    name: 最大尝试次数
+    type: integer
+    db_column: max_attempts
+    description: 失败重试上限
+  - id: scheduled_for
+    name: 计划时间
+    type: number
+    db_column: scheduled_for
+    description: 排期时间（UTC epoch 秒）
+  - id: claimed_at
+    name: 领取时间
+    type: number
+    db_column: claimed_at
+    description: claim 时间（UTC epoch 秒）
+  - id: started_at
+    name: 开始时间
+    type: number
+    db_column: started_at
+    description: 开始执行时间（UTC epoch 秒）
+  - id: finished_at
+    name: 结束时间
+    type: number
+    db_column: finished_at
+    description: 执行结束时间（UTC epoch 秒）
+  - id: lease_until
+    name: 租约到期
+    type: number
+    db_column: lease_until
+    description: 租约到期时间（UTC epoch 秒）
+  - id: worker_id
+    name: 执行者
+    type: string
+    db_column: worker_id
+    description: 持有租约的 worker 标识
+  - id: duration_ms
+    name: 耗时(ms)
+    type: integer
+    db_column: duration_ms
+    description: 执行耗时毫秒
+  - id: result
+    name: 结果
+    type: json
+    db_column: result
+    description: handler 返回结果（JSON）
+  - id: error
+    name: 错误
+    type: string
+    db_column: error
+    description: 失败原因
+  - id: next_retry_at
+    name: 下次重试
+    type: number
+    db_column: next_retry_at
+    description: 下次重试时间（UTC epoch 秒）
+  - id: created_at
+    name: 创建时间
+    type: datetime
+    db_column: created_at
+    description: 落账时间
+  - id: updated_at
+    name: 更新时间
+    type: datetime
+    db_column: updated_at
+    description: 最后更新时间
+
+ui_view_config:
+  # 菜单由 meta/scripts/init_task_menus.py 显式登记（/system/task-runs），
+  # 不走 auto menu，避免出现两条指向同一对象的路由。
+  skip_auto_menu: true
+  list:
+    detail_mode: drawer
+    title: 后台任务执行记录
+    description: 每次执行尝试的状态、耗时与失败原因（只读）
+    columns:
+      - field: status
+        width: 110
+        filterable: true
+        filter_type: select
+      - field: job_id
+        width: 100
+        filterable: true
+        filter_type: select
+      - field: attempt
+        width: 90
+      - field: worker_id
+        width: 180
+        type: ellipsis
+      - field: duration_ms
+        width: 110
+      - field: error
+        width: 240
+        type: ellipsis
+      - field: created_at
+        width: 160
+        format: datetime
+        sortable: true
+    selection:
+      enabled: false
+    searchFields:
+      - run_key
+      - worker_id
+      - error
+    defaultSort:
+      field: created_at
+      order: desc
+
+  detail:
+    layout: tabs
+    title: "执行记录 #{record.id}"
+    tabs:
+      - id: basic
+        label: 概览
+        type: fields
+        fields:
+          - status
+          - job_id
+          - trigger_id
+          - task_id
+          - attempt
+          - max_attempts
+          - worker_id
+          - duration_ms
+          - run_key
+          - created_at
+          - updated_at
+      - id: io
+        label: 参数与结果
+        type: fields
+        fields:
+          - params
+          - result
+          - error

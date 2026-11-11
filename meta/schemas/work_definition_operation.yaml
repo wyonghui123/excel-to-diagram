@@ -506,7 +506,7 @@ ui_view_config:
         label: 新建工序
         icon: plus
         type: primary
-        permission: work_definition_operation:work_definition_operation_create
+        permission: work_definition_operation:create
     defaultSort:
       field: seq
       order: asc
@@ -538,7 +538,7 @@ ui_view_config:
                  qty_per, status]
 
 category_config:
-  create_permission: work_definition_operation:work_definition_operation_create
-  update_permission: work_definition_operation:work_definition_operation_update
-  delete_permission: work_definition_operation:work_definition_operation_delete
+  create_permission: work_definition_operation:create
+  update_permission: work_definition_operation:update
+  delete_permission: work_definition_operation:delete
   owner_auto_permission: false

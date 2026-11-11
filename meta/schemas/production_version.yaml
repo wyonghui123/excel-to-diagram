@@ -544,7 +544,7 @@ ui_view_config:
         label: 新建生产版本
         icon: plus
         type: primary
-        permission: production_version:production_version_create
+        permission: production_version:create
     defaultSort:
       field: code
       order: asc
@@ -576,7 +576,7 @@ ui_view_config:
                  valid_to, lot_min, lot_max, priority, locked, status, description]
 
 category_config:
-  create_permission: production_version:production_version_create
-  update_permission: production_version:production_version_update
-  delete_permission: production_version:production_version_delete
+  create_permission: production_version:create
+  update_permission: production_version:update
+  delete_permission: production_version:delete
   owner_auto_permission: false

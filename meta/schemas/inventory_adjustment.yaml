@@ -26,17 +26,17 @@ aspects: [audit_aspect]
 authorization:
   check: true
   permissions:
-    read: inventory_adjustment:inventory_adjustment_read
-    list: inventory_adjustment:inventory_adjustment_list
-    create: inventory_adjustment:inventory_adjustment_create
-    update: inventory_adjustment:inventory_adjustment_update
+    read: inventory_adjustment:read
+    list: inventory_adjustment:read
+    create: inventory_adjustment:create
+    update: inventory_adjustment:update
     # 草稿删除复用编辑权限，不新增权限码（Spec FR-011 只列 9 条）
-    delete: inventory_adjustment:inventory_adjustment_update
-    release: inventory_adjustment:inventory_adjustment_release
-    post: inventory_adjustment:inventory_adjustment_post
-    reverse: inventory_adjustment:inventory_adjustment_reverse
-    cancel: inventory_adjustment:inventory_adjustment_cancel
-    opening: inventory_adjustment:inventory_adjustment_opening
+    delete: inventory_adjustment:update
+    release: inventory_adjustment:release
+    post: inventory_adjustment:post
+    reverse: inventory_adjustment:reverse
+    cancel: inventory_adjustment:cancel
+    opening: inventory_adjustment:opening
 
 import_export:
   auto_crud: false
@@ -396,7 +396,7 @@ rules:
     state_field: status
     from_states: [draft]
     to_state: released
-    action_ref: inventory_adjustment:inventory_adjustment_release
+    action_ref: inventory_adjustment:release
     triggers: [before_update]
     ui_hints:
       label: 下达
@@ -409,7 +409,7 @@ rules:
     state_field: status
     from_states: [draft, released]
     to_state: posted
-    action_ref: inventory_adjustment:inventory_adjustment_post
+    action_ref: inventory_adjustment:post
     triggers: [before_update]
     ui_hints:
       label: 过账
@@ -423,7 +423,7 @@ rules:
     state_field: status
     from_states: [posted]
     to_state: reversed
-    action_ref: inventory_adjustment:inventory_adjustment_reverse
+    action_ref: inventory_adjustment:reverse
     triggers: [before_update]
     ui_hints:
       label: 红冲
@@ -436,7 +436,7 @@ rules:
     state_field: status
     from_states: [draft, released]
     to_state: cancelled
-    action_ref: inventory_adjustment:inventory_adjustment_cancel
+    action_ref: inventory_adjustment:cancel
     triggers: [before_update]
     ui_hints:
       label: 取消
@@ -530,7 +530,7 @@ ui_view_config:
         label: 新建调整单
         icon: plus
         type: primary
-        permission: inventory_adjustment:inventory_adjustment_create
+        permission: inventory_adjustment:create
       - id: export
         label: 导出
         icon: download

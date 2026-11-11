@@ -661,7 +661,7 @@ def register_all_bo_actions(registry=None):
         description='为已确认订单补生成 billing 开票计划期次（幂等，不重算已开票金额）',
         object_type='sales_order',
         category='business',
-        permission_required='sales_order:sales_order_update',
+        permission_required='sales_order:update',
         input_schema={
             'type': 'object',
             'properties': {
@@ -821,7 +821,7 @@ def register_all_bo_actions(registry=None):
         description='采购订单审批通过（submitted → confirmed，approval_status=approved）',
         object_type='purchase_order',
         category='business',
-        permission_required='purchase_order:purchase_order_approve',
+        permission_required='purchase_order:approve',
         input_schema={
             'type': 'object',
             'properties': {
@@ -840,7 +840,7 @@ def register_all_bo_actions(registry=None):
         description='采购订单审批驳回（submitted → draft，approval_status=rejected）',
         object_type='purchase_order',
         category='business',
-        permission_required='purchase_order:purchase_order_reject',
+        permission_required='purchase_order:reject',
         input_schema={
             'type': 'object',
             'properties': {
@@ -861,7 +861,7 @@ def register_all_bo_actions(registry=None):
         description='采购申请转采购订单（approved 申请 → 草稿 PO + 需求分配）',
         object_type='purchase_order',
         category='business',
-        permission_required='purchase_order:purchase_order_create',
+        permission_required='purchase_order:create',
         input_schema={
             'type': 'object',
             'required': ['requisition_id'],
@@ -905,7 +905,7 @@ def register_all_bo_actions(registry=None):
         description='由采购订单计划行批量生成草稿收货单（取号 + 收货行冗余列反查）',
         object_type='receipt',
         category='business',
-        permission_required='receipt:receipt_create',
+        permission_required='receipt:create',
         input_schema={
             'type': 'object',
             'properties': {
@@ -935,7 +935,7 @@ def register_all_bo_actions(registry=None):
         description='由已过账收货单生成退货采购单 + 采购退货出库草稿（D6）',
         object_type='receipt',
         category='business',
-        permission_required='receipt:receipt_create_vendor_return',
+        permission_required='receipt:create_vendor_return',
         input_schema={
             'type': 'object',
             'properties': {
@@ -965,7 +965,7 @@ def register_all_bo_actions(registry=None):
         description='收货单过账（draft → posted：分配 / 计划行回写 / 履约派生）',
         object_type='receipt',
         category='business',
-        permission_required='receipt:receipt_post',
+        permission_required='receipt:post',
         input_schema={
             'type': 'object',
             'properties': {
@@ -984,7 +984,7 @@ def register_all_bo_actions(registry=None):
         description='收货单整单红冲（posted → reversed，新建红字单并过账）',
         object_type='receipt',
         category='business',
-        permission_required='receipt:receipt_reverse',
+        permission_required='receipt:reverse',
         input_schema={
             'type': 'object',
             'properties': {
@@ -1004,7 +1004,7 @@ def register_all_bo_actions(registry=None):
         description='收货单取消（draft → cancelled，行一并取消）',
         object_type='receipt',
         category='business',
-        permission_required='receipt:receipt_cancel',
+        permission_required='receipt:cancel',
         input_schema={
             'type': 'object',
             'properties': {
@@ -1043,7 +1043,7 @@ def register_all_bo_actions(registry=None):
         description='调拨单下达（draft → released，校验组织 / 法人 / 行完整性）',
         object_type='transfer_order',
         category='business',
-        permission_required='transfer_order:transfer_order_release',
+        permission_required='transfer_order:release',
         input_schema={
             'type': 'object',
             'required': ['transfer_order_id'],
@@ -1062,7 +1062,7 @@ def register_all_bo_actions(registry=None):
         description='调拨单发货（released 下累加行 qty_shipped，不建发货单 / 不碰库存）',
         object_type='transfer_order',
         category='business',
-        permission_required='transfer_order:transfer_order_ship',
+        permission_required='transfer_order:ship',
         input_schema={
             'type': 'object',
             'required': ['transfer_order_id', 'lines'],
@@ -1095,7 +1095,7 @@ def register_all_bo_actions(registry=None):
         description='调拨单收货（按发运余量生成 TO 来源草稿收货单）',
         object_type='transfer_order',
         category='business',
-        permission_required='transfer_order:transfer_order_receive',
+        permission_required='transfer_order:receive',
         input_schema={
             'type': 'object',
             'required': ['transfer_order_id'],
@@ -1115,7 +1115,7 @@ def register_all_bo_actions(registry=None):
         description='调拨单取消（draft / released → cancelled，已发货拒绝取消）',
         object_type='transfer_order',
         category='business',
-        permission_required='transfer_order:transfer_order_cancel',
+        permission_required='transfer_order:cancel',
         input_schema={
             'type': 'object',
             'required': ['transfer_order_id'],
@@ -1134,7 +1134,7 @@ def register_all_bo_actions(registry=None):
         description='调拨单关闭（released → closed，在途量为 0 且已收货）',
         object_type='transfer_order',
         category='business',
-        permission_required='transfer_order:transfer_order_close',
+        permission_required='transfer_order:close',
         input_schema={
             'type': 'object',
             'required': ['transfer_order_id'],
@@ -1153,7 +1153,7 @@ def register_all_bo_actions(registry=None):
         description='调拨发货红冲（released → reversed，原地回退库存/序列号/容器/边）',
         object_type='transfer_order',
         category='business',
-        permission_required='transfer_order:transfer_order_reverse_shipment',
+        permission_required='transfer_order:reverse_shipment',
         input_schema={
             'type': 'object',
             'required': ['transfer_order_id'],
@@ -1174,7 +1174,7 @@ def register_all_bo_actions(registry=None):
         description='调拨单提交审批（草稿态；按策略落 pending 并建审批任务）',
         object_type='transfer_order',
         category='business',
-        permission_required='transfer_order:transfer_order_submit',
+        permission_required='transfer_order:submit',
         input_schema={
             'type': 'object',
             'required': ['transfer_order_id'],
@@ -1193,7 +1193,7 @@ def register_all_bo_actions(registry=None):
         description='调拨单撤回审批（pending → not_required，关闭在途审批任务）',
         object_type='transfer_order',
         category='business',
-        permission_required='transfer_order:transfer_order_withdraw',
+        permission_required='transfer_order:withdraw',
         input_schema={
             'type': 'object',
             'required': ['transfer_order_id'],
@@ -1212,7 +1212,7 @@ def register_all_bo_actions(registry=None):
         description='调拨单审批通过（pending → approved，任务归位 done）',
         object_type='transfer_order',
         category='business',
-        permission_required='transfer_order:transfer_order_approve',
+        permission_required='transfer_order:approve',
         input_schema={
             'type': 'object',
             'required': ['transfer_order_id'],
@@ -1231,7 +1231,7 @@ def register_all_bo_actions(registry=None):
         description='调拨单审批驳回（pending → rejected，任务归位 failed）',
         object_type='transfer_order',
         category='business',
-        permission_required='transfer_order:transfer_order_reject',
+        permission_required='transfer_order:reject',
         input_schema={
             'type': 'object',
             'required': ['transfer_order_id'],
@@ -1246,7 +1246,7 @@ def register_all_bo_actions(registry=None):
     )
 
     # ==================== 42: 调拨单需求转单（M4 / TBD-4） ====================
-    # 复用创建权限 `transfer_order:transfer_order_create`；不写库存台账 / 在途。
+    # 复用创建权限 `transfer_order:create`；不写库存台账 / 在途。
     _transfer_order_from_allocation_output_schema = {
         'type': 'object',
         'properties': {
@@ -1271,7 +1271,7 @@ def register_all_bo_actions(registry=None):
         description='需求分配转调拨单（active 分配 → 草稿 TO + 分配回写）',
         object_type='transfer_order',
         category='business',
-        permission_required='transfer_order:transfer_order_create',
+        permission_required='transfer_order:create',
         input_schema={
             'type': 'object',
             'required': ['allocation_ids', 'from_org_id', 'to_org_id',
@@ -1315,7 +1315,7 @@ def register_all_bo_actions(registry=None):
         description='调拨发货单建单（released 调拨单下建草稿发货单，取号 + 行校验）',
         object_type='transfer_shipment',
         category='business',
-        permission_required='transfer_shipment:transfer_shipment_create',
+        permission_required='transfer_shipment:create',
         input_schema={
             'type': 'object',
             'required': ['transfer_order_id', 'ship_date', 'lines'],
@@ -1348,7 +1348,7 @@ def register_all_bo_actions(registry=None):
         description='调拨发货单过账（调 TO ship 累加调拨行 qty_shipped，失败保持草稿）',
         object_type='transfer_shipment',
         category='business',
-        permission_required='transfer_shipment:transfer_shipment_post',
+        permission_required='transfer_shipment:post',
         input_schema={
             'type': 'object',
             'required': ['shipment_id'],
@@ -1368,7 +1368,7 @@ def register_all_bo_actions(registry=None):
         description='调拨发货单取消（draft → cancelled，不触碰调拨单数量）',
         object_type='transfer_shipment',
         category='business',
-        permission_required='transfer_shipment:transfer_shipment_cancel',
+        permission_required='transfer_shipment:cancel',
         input_schema={
             'type': 'object',
             'required': ['shipment_id'],
@@ -1454,7 +1454,7 @@ def register_all_bo_actions(registry=None):
         description='由已发运/已签收发货单生成草稿销售发票（可按行部分开票）',
         object_type='customer_invoice',
         category='business',
-        permission_required='customer_invoice:customer_invoice_create',
+        permission_required='customer_invoice:create',
         input_schema={
             'type': 'object',
             'properties': {
@@ -1479,7 +1479,7 @@ def register_all_bo_actions(registry=None):
         description='按开票计划期次生成草稿销售发票（支持一期分次 / 多期合并）',
         object_type='customer_invoice',
         category='business',
-        permission_required='customer_invoice:customer_invoice_create',
+        permission_required='customer_invoice:create',
         input_schema={
             'type': 'object',
             'properties': {
@@ -1505,7 +1505,7 @@ def register_all_bo_actions(registry=None):
         description='按已兑现服务计划期次生成草稿销售发票（服务确认）',
         object_type='customer_invoice',
         category='business',
-        permission_required='customer_invoice:customer_invoice_create',
+        permission_required='customer_invoice:create',
         input_schema={
             'type': 'object',
             'properties': {
@@ -1531,7 +1531,7 @@ def register_all_bo_actions(registry=None):
         description='查询到期开票计划期次（只读，不产生写操作）',
         object_type='customer_invoice',
         category='query',
-        permission_required='customer_invoice:customer_invoice_view',
+        permission_required='customer_invoice:read',
         input_schema={
             'type': 'object',
             'properties': {
@@ -1560,7 +1560,7 @@ def register_all_bo_actions(registry=None):
         description='按已过账发票生成独立贷项草稿（引用原单，可按行/数量/金额部分冲销）',
         object_type='customer_invoice',
         category='business',
-        permission_required='customer_invoice:customer_invoice_credit_memo',
+        permission_required='customer_invoice:credit_memo',
         input_schema={
             'type': 'object',
             'properties': {
@@ -1584,7 +1584,7 @@ def register_all_bo_actions(registry=None):
         description='生成不引用来源单据的 on-account 贷项草稿（负数行）',
         object_type='customer_invoice',
         category='business',
-        permission_required='customer_invoice:customer_invoice_credit_memo',
+        permission_required='customer_invoice:credit_memo',
         input_schema={
             'type': 'object',
             'properties': {
@@ -1610,7 +1610,7 @@ def register_all_bo_actions(registry=None):
         description='生成手工借项通知单草稿（正数行，订单行只读引用）',
         object_type='customer_invoice',
         category='business',
-        permission_required='customer_invoice:customer_invoice_debit_memo',
+        permission_required='customer_invoice:debit_memo',
         input_schema={
             'type': 'object',
             'properties': {
@@ -1637,7 +1637,7 @@ def register_all_bo_actions(registry=None):
         description='退货发货单追溯原发票行生成贷项草稿（FIFO 分配，负数行）',
         object_type='customer_invoice',
         category='business',
-        permission_required='customer_invoice:customer_invoice_credit_memo',
+        permission_required='customer_invoice:credit_memo',
         input_schema={
             'type': 'object',
             'properties': {
@@ -1665,7 +1665,7 @@ def register_all_bo_actions(registry=None):
         description='提交销售发票（draft → submitted；幂等）',
         object_type='customer_invoice',
         category='business',
-        permission_required='customer_invoice:customer_invoice_submit',
+        permission_required='customer_invoice:submit',
         input_schema={
             'type': 'object',
             'properties': {
@@ -1683,7 +1683,7 @@ def register_all_bo_actions(registry=None):
         description='过账销售发票（submitted → posted；幂等）',
         object_type='customer_invoice',
         category='business',
-        permission_required='customer_invoice:customer_invoice_post',
+        permission_required='customer_invoice:post',
         input_schema={
             'type': 'object',
             'properties': {
@@ -1702,7 +1702,7 @@ def register_all_bo_actions(registry=None):
         description='红冲已过账销售发票（posted → 红字 posted；幂等）',
         object_type='customer_invoice',
         category='business',
-        permission_required='customer_invoice:customer_invoice_reverse',
+        permission_required='customer_invoice:reverse',
         input_schema={
             'type': 'object',
             'required': ['reason'],

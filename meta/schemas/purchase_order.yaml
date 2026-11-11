@@ -1438,7 +1438,7 @@ ui_view_config:
         label: 新建采购订单
         icon: plus
         type: primary
-        permission: purchase_order:purchase_order_create
+        permission: purchase_order:create
       - id: export
         label: 导出
         icon: download

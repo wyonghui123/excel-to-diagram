@@ -1133,27 +1133,27 @@ ui_view_config:
         label: 创建贷项
         icon: plus
         variant: secondary
-        permission: customer_invoice:customer_invoice_credit_memo
+        permission: customer_invoice:credit_memo
         action: customer_invoice.create_credit_from_invoice
       # [S8 Wave C C4] 无原票贷项（on-account）：不引用任何来源行，行由用户手工填写
       - id: create_credit_on_account
         label: 创建无票贷项
         icon: plus
         variant: secondary
-        permission: customer_invoice:customer_invoice_credit_memo
+        permission: customer_invoice:credit_memo
         action: customer_invoice.create_credit_on_account
       # [S8 Wave D D2] 手工借项通知单：正数金额，订单行只读引用（不消耗开票额度）
       - id: create_debit_memo
         label: 创建借项通知单
         icon: plus
         variant: secondary
-        permission: customer_invoice:customer_invoice_debit_memo
+        permission: customer_invoice:debit_memo
         action: customer_invoice.create_debit_memo
       - id: print
         label: 打印
         icon: print
         variant: secondary
-        permission: customer_invoice:customer_invoice_print
+        permission: customer_invoice:print
     facets:
       - title: 基本信息
         id: customer_invoice_basic

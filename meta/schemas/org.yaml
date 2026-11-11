@@ -773,12 +773,12 @@ ui_view_config:
         pageSize: 20
         # 创建入口（引导式）：AssociationSection 的 isPartyRelations 分支从
         #   section.actions 读 create，org 侧预绑 party1_id。
-        #   permission 用双段式（permissions 表实有 party_relation:party_relation_create）。
+        #   permission 用双段式（permissions 表实有 party_relation:create）。
         actions:
           - key: create
             label: 新建伙伴关系
             variant: primary
-            permission: party_relation:party_relation_create
+            permission: party_relation:create
 
 # ============================================
 # 9 模式 UI 测试配置 (auto-completed by enrich_schemas.py)

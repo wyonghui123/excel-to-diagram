@@ -25,9 +25,9 @@ from meta.tests.hu_test_doubles import (  # noqa: E402
     service,
 )
 
-PERM_READ = 'handling_unit:handling_unit_read'
-PERM_SEAL = 'handling_unit:handling_unit_seal'
-PERM_UNSEAL = 'handling_unit:handling_unit_unseal'
+PERM_READ = 'handling_unit:read'
+PERM_SEAL = 'handling_unit:seal'
+PERM_UNSEAL = 'handling_unit:unseal'
 
 
 class _FakeBlacklist:

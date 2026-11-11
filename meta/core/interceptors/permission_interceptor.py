@@ -13,6 +13,7 @@ from meta.core.interceptors.base import Interceptor
 from meta.core.permission_gate import (
     ACTION_PERMISSION_SUFFIX as _ACTION_PERMISSION_SUFFIX,
     evaluate,
+    evaluate_code,
     user_has_permission,
 )
 
@@ -117,9 +118,9 @@ class PermissionInterceptor(Interceptor):
         if not user_info:
             raise PermissionDenied('未登录')
 
-        # [DECORATIVE] M11 v1.1.0: AI Agent 角色自动识别（X-Agent-Id header → 'ai-agent' 角色）
-        user_info = inject_ai_agent_role(user_info, g)
-        g.current_user = user_info
+        # [T14] 不再依据未签名的 X-Agent-Id 请求头注入 'ai-agent' 角色。
+        # 该请求头由客户端任意构造，等同于角色自抬（可绕过 rls_rules 中的 role:ai-agent 放行）。
+        # AI Agent 的合法身份只来自 MCP 内部上下文（mcp/rls_integration._normalize_user_context）。
 
         if is_admin(user_info):
             return
@@ -142,10 +143,6 @@ class PermissionInterceptor(Interceptor):
         # [v1.0.1 D10] 链 read 类型级 audit-only (写操作触发)
         if context.action in ('crud_create', 'crud_update', 'crud_delete'):
             self._check_chain_read(context, user_info, target_id=getattr(context, 'target_id', None))
-
-        permissions = user_info.get('permissions', [])
-        if not isinstance(permissions, set):
-            permissions = set(permissions)
 
         suffix = self._get_permission_suffix(context.action)
         if not suffix:
@@ -188,7 +185,9 @@ class PermissionInterceptor(Interceptor):
                     parent_type = parent_type.split(' - ')[0].strip()
                 if parent_type:
                     parent_perm = f'{parent_type}:{suffix}'
-                    if user_has_permission(permissions, parent_perm):
+                    # [T14] 走 PermissionGate，而不是直接比对原始 JWT 列表：
+                    # 保证 shadow/off 门禁与 '*' 管理员语义一致，不再绕过 L1 判定。
+                    if evaluate_code(user_info, parent_perm):
                         logger.info(
                             f'PermissionInterceptor: annotation:{suffix} bypassed via '
                             f'parent perm {parent_perm} for user {user_info.get("username")}'
@@ -502,49 +501,6 @@ class PermissionInterceptor(Interceptor):
                         chain=[p['bo'] for p in actual_parents],
                         out_of_scope_parents=out_of_scope,
                     )
-
-
-def inject_ai_agent_role(user_info, flask_g=None):
-    """[DECORATIVE] M11 v1.1.0: AI Agent 角色自动识别
-
-    通过 X-Agent-Id header 识别 AI Agent 调用，向 user_info['roles'] 注入 'ai-agent' 角色。
-    与 rls YAML 中的 applies_to: [role:ai-agent] 协同。
-
-    Args:
-        user_info: dict（来自 g.current_user）
-        flask_g: flask.g（用于 setattr 回写，可选）
-
-    Returns:
-        修改后的 user_info（dict）。原 dict 不修改（浅拷贝）。
-
-    行为：
-    1. 无 X-Agent-Id header → 原样返回
-    2. 有 X-Agent-Id header + 无 'ai-agent' 角色 → 注入（深拷贝）
-    3. 有 X-Agent-Id header + 已有 'ai-agent' 角色 → 原样返回
-    4. flask_g 不为 None → 同时回写 g.current_user
-    """
-    if user_info is None:
-        return user_info
-    try:
-        from flask import request
-    except ImportError:
-        return user_info
-    if not request or not request.headers.get('X-Agent-Id'):
-        return user_info
-
-    existing_roles = user_info.get('roles', [])
-    if not isinstance(existing_roles, set):
-        existing_roles = set(existing_roles)
-    if 'ai-agent' in existing_roles:
-        if flask_g is not None:
-            flask_g.current_user = user_info
-        return user_info  # 已存在
-
-    new_user_info = dict(user_info)  # 浅拷贝，避免修改原 dict
-    new_user_info['roles'] = existing_roles | {'ai-agent'}
-    if flask_g is not None:
-        flask_g.current_user = new_user_info
-    return new_user_info
 
 
 def _check_yaml_permission(user_info, object_type, action_suffix):

@@ -17,8 +17,8 @@ display_name_field: doc_type
 authorization:
   check: true
   permissions:
-    read: document_serial_link:document_serial_link_read
-    list: document_serial_link:document_serial_link_list
+    read: document_serial_link:read
+    list: document_serial_link:read
 
 # 只读面：存在任意 {object}_read 动作时，ensure_crud_actions 不再补写动作；
 # auto_crud: false 为声明性意图（与 inventory_transaction.yaml 同口径）。

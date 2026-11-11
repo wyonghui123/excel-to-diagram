@@ -8,7 +8,7 @@
   · 不新增 View BO：余额行明细复用既有 /api/v1/inventory_balances
     （first_received_date 已自动生成 date_range 过滤器）；本蓝图只承载
     SQL 视图表达不了的运行时参数（as_of / bucket_edges / summary / 逐层重放）。
-  · 权限复用 inventory_balance:inventory_balance_read，不新增权限码。
+  · 权限复用 inventory_balance:read，不新增权限码。
   · 只读：无写路由；口径与 InventoryAgingService 单一实现，不在 SQL 里重写。
 """
 
@@ -27,7 +27,7 @@ logger = logging.getLogger(__name__)
 inventory_aging_bp = Blueprint(
     'inventory_aging', __name__, url_prefix='/api/v1/inventory-aging')
 
-READ_PERMISSION = 'inventory_balance:inventory_balance_read'
+READ_PERMISSION = 'inventory_balance:read'
 
 _service: Optional[InventoryAgingService] = None
 

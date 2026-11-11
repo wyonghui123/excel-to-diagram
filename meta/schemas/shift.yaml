@@ -385,7 +385,7 @@ ui_view_config:
         label: 新建班次
         icon: plus
         type: primary
-        permission: shift:shift_create
+        permission: shift:create
     defaultSort:
       field: code
       order: asc
@@ -415,7 +415,7 @@ ui_view_config:
                  break_minutes, shift_type, org_id, is_active, valid_from, valid_to]
 
 category_config:
-  create_permission: shift:shift_create
-  update_permission: shift:shift_update
-  delete_permission: shift:shift_delete
+  create_permission: shift:create
+  update_permission: shift:update
+  delete_permission: shift:delete
   owner_auto_permission: false

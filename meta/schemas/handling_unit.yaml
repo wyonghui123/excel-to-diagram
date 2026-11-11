@@ -21,10 +21,10 @@ aspects: [audit_aspect]
 authorization:
   check: true
   permissions:
-    read: handling_unit:handling_unit_read
-    create: handling_unit:handling_unit_create
-    update: handling_unit:handling_unit_update
-    delete: handling_unit:handling_unit_delete
+    read: handling_unit:read
+    create: handling_unit:create
+    update: handling_unit:update
+    delete: handling_unit:delete
 
 semantics:
   meaning: 包装容器

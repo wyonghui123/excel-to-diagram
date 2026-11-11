@@ -11,9 +11,11 @@ from meta.core.permission_gate import declare_permission
 MAX_USER_PAGE_SIZE = 500
 
 from meta.core.bo_framework import bo_framework
-from meta.core.models import registry, resolve_write_anchor
+from meta.core.models import registry, resolve_write_anchor, generic_api_allows, generic_api_mode_of
 from meta.core.rule_provider import get_rule_provider
-from meta.services.auth_middleware import login_required, get_current_user, require_permission
+from meta.services.auth_middleware import (
+    login_required, get_current_user, require_permission,
+    check_generic_read_permission)
 from meta.services.field_policy_engine import FieldPolicyEngine, PolicyContext, ObjectContext
 from meta.services.view_config_service import view_config_service
 from meta.services.computation_service import computation_service
@@ -37,16 +39,31 @@ def _reject_skip_generic_api_objects():
 
     路径形如 /api/v2/bo/<object_type>；仅对已注册且声明了该开关的对象返回 404。
     （/api/v2/bo/architecture/... 等非对象路径 registry 查不到，直接放行。）
+
+    [P3 2026-11-10] 新增 `generic_api_mode: read_only`：GET 放行，写操作 404。
+    只读档位不放宽读权限：read_only 对象还要过对象级功能权限
+    （canonical `<object_type>:read` 或 yaml authorization 声明）。
     """
     parts = (request.path or '').split('/')
     if len(parts) >= 5 and parts[1] == 'api' and parts[2] == 'v2' and parts[3] == 'bo':
         obj = registry.get(parts[4])
-        if obj is not None and getattr(obj, 'skip_generic_api', False):
-            return error_response(
-                f'对象 {parts[4]} 未开放通用 BO API',
-                error_code='GENERIC_API_DISABLED',
-                status=404,
-            )
+        if obj is not None:
+            mode = generic_api_mode_of(obj)
+            if not generic_api_allows(mode, request.method):
+                return error_response(
+                    f'对象 {parts[4]} 未开放通用 BO API',
+                    error_code=('GENERIC_API_READ_ONLY' if mode == 'read_only'
+                                else 'GENERIC_API_DISABLED'),
+                    status=404,
+                )
+            if mode == 'read_only':
+                denied = check_generic_read_permission(parts[4])
+                if denied is not None:
+                    return error_response(
+                        f'无权读取对象 {parts[4]}（需要权限 {denied.required}）',
+                        error_code='GENERIC_API_FORBIDDEN',
+                        status=403,
+                    )
     return None
 
 

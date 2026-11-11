@@ -352,7 +352,7 @@ ui_view_config:
         label: 新建区域分配
         icon: plus
         type: primary
-        permission: resource_territory_assignment:resource_territory_assignment_create
+        permission: resource_territory_assignment:create
     defaultSort:
       field: effective_from
       order: desc
@@ -378,7 +378,7 @@ ui_view_config:
                  effective_from, effective_to]
 
 category_config:
-  create_permission: resource_territory_assignment:resource_territory_assignment_create
-  update_permission: resource_territory_assignment:resource_territory_assignment_update
-  delete_permission: resource_territory_assignment:resource_territory_assignment_delete
+  create_permission: resource_territory_assignment:create
+  update_permission: resource_territory_assignment:update
+  delete_permission: resource_territory_assignment:delete
   owner_auto_permission: false

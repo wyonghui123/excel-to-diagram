@@ -94,7 +94,7 @@ def _int_param(name: str) -> Optional[int]:
 
 @engineering_change_bp.route('', methods=['GET'])
 @engineering_change_bp.route('/', methods=['GET'])
-@require_permission('engineering_change:engineering_change_view')
+@require_permission('engineering_change:read')
 def list_engineering_changes():
     service = _get_service()
     page = _int_param('page') or 1
@@ -117,7 +117,7 @@ def list_engineering_changes():
 
 
 @engineering_change_bp.route('/diff', methods=['POST'])
-@require_permission('engineering_change:engineering_change_view')
+@require_permission('engineering_change:read')
 def diff_engineering_change():
     payload = _payload()
     service = _get_service()
@@ -138,7 +138,7 @@ def diff_engineering_change():
 
 
 @engineering_change_bp.route('/<int:change_id>', methods=['GET'])
-@require_permission('engineering_change:engineering_change_view')
+@require_permission('engineering_change:read')
 def get_engineering_change(change_id):
     service = _get_service()
     try:
@@ -155,7 +155,7 @@ def get_engineering_change(change_id):
 
 @engineering_change_bp.route('', methods=['POST'])
 @engineering_change_bp.route('/', methods=['POST'])
-@require_permission('engineering_change:engineering_change_create')
+@require_permission('engineering_change:create')
 def create_engineering_change():
     payload = _payload()
     lines = payload.get('lines')
@@ -184,7 +184,7 @@ def create_engineering_change():
 
 
 @engineering_change_bp.route('/<int:change_id>/submit', methods=['POST'])
-@require_permission('engineering_change:engineering_change_create')
+@require_permission('engineering_change:create')
 def submit_engineering_change(change_id):
     payload = _payload()
     try:
@@ -196,7 +196,7 @@ def submit_engineering_change(change_id):
 
 
 @engineering_change_bp.route('/<int:change_id>/approve', methods=['POST'])
-@require_permission('engineering_change:engineering_change_approve')
+@require_permission('engineering_change:approve')
 def approve_engineering_change(change_id):
     payload = _payload()
     try:
@@ -208,7 +208,7 @@ def approve_engineering_change(change_id):
 
 
 @engineering_change_bp.route('/<int:change_id>/reject', methods=['POST'])
-@require_permission('engineering_change:engineering_change_approve')
+@require_permission('engineering_change:approve')
 def reject_engineering_change(change_id):
     payload = _payload()
     try:
@@ -220,7 +220,7 @@ def reject_engineering_change(change_id):
 
 
 @engineering_change_bp.route('/<int:change_id>/cancel', methods=['POST'])
-@require_permission('engineering_change:engineering_change_create')
+@require_permission('engineering_change:create')
 def cancel_engineering_change(change_id):
     payload = _payload()
     try:
@@ -232,7 +232,7 @@ def cancel_engineering_change(change_id):
 
 
 @engineering_change_bp.route('/<int:change_id>/apply', methods=['POST'])
-@require_permission('engineering_change:engineering_change_apply')
+@require_permission('engineering_change:apply')
 def apply_engineering_change(change_id):
     try:
         result = _get_service().apply(change_id, actor=_actor())
@@ -247,7 +247,7 @@ def apply_engineering_change(change_id):
 
 
 @engineering_change_bp.route('/<int:change_id>/where-used', methods=['GET'])
-@require_permission('engineering_change:engineering_change_view')
+@require_permission('engineering_change:read')
 def where_used_engineering_change(change_id):
     service = _get_service()
     try:

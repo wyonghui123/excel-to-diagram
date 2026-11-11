@@ -63,7 +63,7 @@ STATUS_LABELS = {
 }
 
 PARAM_RELEASE_REQUIRED = 'inventory_adjustment_release_required'
-OPENING_PERMISSION = 'inventory_adjustment:inventory_adjustment_opening'
+OPENING_PERMISSION = 'inventory_adjustment:opening'
 
 INV_ADJ_NOT_FOUND = 'INV_ADJ_NOT_FOUND'
 INV_ADJ_TYPE_INVALID = 'INV_ADJ_TYPE_INVALID'

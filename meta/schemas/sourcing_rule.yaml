@@ -297,7 +297,7 @@ ui_view_config:
         label: 新建供应来源规则
         icon: plus
         type: primary
-        permission: sourcing_rule:sourcing_rule_create
+        permission: sourcing_rule:create
       - id: export
         label: 导出
         icon: download
@@ -342,9 +342,9 @@ ui_view_config:
       rowMutability: fullEditable
 
 category_config:
-  create_permission: sourcing_rule:sourcing_rule_create
-  update_permission: sourcing_rule:sourcing_rule_update
-  delete_permission: sourcing_rule:sourcing_rule_delete
+  create_permission: sourcing_rule:create
+  update_permission: sourcing_rule:update
+  delete_permission: sourcing_rule:delete
   owner_auto_permission: false
 
 import_export:

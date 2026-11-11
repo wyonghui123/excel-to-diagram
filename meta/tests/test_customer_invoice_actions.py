@@ -90,7 +90,7 @@ def test_action_is_registered_with_permission():
     assert meta is not None
     assert meta.object_type == 'customer_invoice'
     assert meta.category == 'business'
-    assert meta.permission_required == 'customer_invoice:customer_invoice_create'
+    assert meta.permission_required == 'customer_invoice:create'
     assert meta.requires_auth is True
     assert meta.idempotent is False
 
@@ -145,7 +145,7 @@ def test_credit_action_is_registered_with_permission():
     assert meta.object_type == 'customer_invoice'
     assert meta.category == 'business'
     assert meta.permission_required == (
-        'customer_invoice:customer_invoice_credit_memo')
+        'customer_invoice:credit_memo')
     assert meta.requires_auth is True
     assert meta.idempotent is False
 
@@ -203,7 +203,7 @@ def test_on_account_action_is_registered_with_permission():
     assert meta.object_type == 'customer_invoice'
     assert meta.category == 'business'
     assert meta.permission_required == (
-        'customer_invoice:customer_invoice_credit_memo')
+        'customer_invoice:credit_memo')
     assert meta.requires_auth is True
     assert meta.idempotent is False
 
@@ -281,7 +281,7 @@ def test_plan_actions_registered_with_permission():
     assert create_meta.object_type == 'customer_invoice'
     assert create_meta.category == 'business'
     assert create_meta.permission_required == (
-        'customer_invoice:customer_invoice_create')
+        'customer_invoice:create')
     assert create_meta.idempotent is False
 
     due_meta = registry.get(DUE_ACTION_ID)
@@ -289,7 +289,7 @@ def test_plan_actions_registered_with_permission():
     assert due_meta.object_type == 'customer_invoice'
     assert due_meta.category == 'query'
     assert due_meta.permission_required == (
-        'customer_invoice:customer_invoice_view')
+        'customer_invoice:read')
     assert due_meta.requires_auth is True
     assert due_meta.idempotent is True
 
@@ -459,9 +459,9 @@ def test_action_register_submit_post_reverse():
     register_all_bo_actions(registry)
 
     expectations = (
-        (SUBMIT_ACTION_ID, 'customer_invoice:customer_invoice_submit'),
-        (POST_ACTION_ID, 'customer_invoice:customer_invoice_post'),
-        (REVERSE_ACTION_ID, 'customer_invoice:customer_invoice_reverse'),
+        (SUBMIT_ACTION_ID, 'customer_invoice:submit'),
+        (POST_ACTION_ID, 'customer_invoice:post'),
+        (REVERSE_ACTION_ID, 'customer_invoice:reverse'),
     )
     for action_id, permission in expectations:
         meta = registry.get(action_id)

@@ -7,7 +7,7 @@ from functools import wraps
 from flask import request, g, jsonify, make_response, current_app
 from meta.services.token_service import TokenService
 from meta.services.token_blacklist_service import token_blacklist_service
-from meta.core.permission_gate import evaluate_code
+from meta.core.permission_gate import evaluate_code, evaluate
 
 
 SELF_SERVICE_WHITELIST = {
@@ -162,6 +162,34 @@ def require_permission_unified(resource_type: str, action_code: str):
 
 def get_current_user():
     return getattr(g, 'current_user', None)
+
+
+def check_generic_read_permission(object_type: str):
+    """[P3 2026-11-10] 通用 BO 读接口（generic_api_mode=read_only）的对象级权限检查。
+
+    只读档位解决的是「通用写口子」，不解决「谁能读」：执行账本等对象含
+    params/result/error，必须按对象功能权限判定（canonical
+    `<object_type>:read`，或在 yaml 的 authorization.permissions.read 声明）。
+    管理员（'*'）始终放行。
+
+    可在 before_request 阶段调用：此阶段 login_required 尚未把用户写入
+    g.current_user，因此回落到自行验 token。
+
+    Returns:
+        None = 放行（含未登录/坏 token，交给 login_required 统一返回 401）；
+        否则返回 allowed=False 的 PermissionDecision，调用方据此返回 403。
+    """
+    user_info = get_current_user()
+    if user_info is None:
+        token = _extract_token()
+        if not token:
+            return None
+        try:
+            user_info = TokenService.verify_token(token)
+        except Exception:
+            return None
+    decision = evaluate(user_info, object_type, 'crud_read')
+    return None if decision.allowed else decision
 
 
 def is_admin(user_info=None):

@@ -524,7 +524,7 @@ ui_view_config:
         label: 新建资源要求
         icon: plus
         type: primary
-        permission: operation_resource_requirement:operation_resource_requirement_create
+        permission: operation_resource_requirement:create
     defaultSort:
       field: priority
       order: asc
@@ -556,7 +556,7 @@ ui_view_config:
                  substitute_group, replacement_group]
 
 category_config:
-  create_permission: operation_resource_requirement:operation_resource_requirement_create
-  update_permission: operation_resource_requirement:operation_resource_requirement_update
-  delete_permission: operation_resource_requirement:operation_resource_requirement_delete
+  create_permission: operation_resource_requirement:create
+  update_permission: operation_resource_requirement:update
+  delete_permission: operation_resource_requirement:delete
   owner_auto_permission: false

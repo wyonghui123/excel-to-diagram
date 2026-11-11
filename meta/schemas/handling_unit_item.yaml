@@ -17,8 +17,8 @@ display_name_field: content_type
 authorization:
   check: true
   permissions:
-    read: handling_unit_item:handling_unit_item_read
-    list: handling_unit_item:handling_unit_item_list
+    read: handling_unit_item:read
+    list: handling_unit_item:read
 
 # 只读面：内容行只由 handling_unit_service 写入。
 import_export:

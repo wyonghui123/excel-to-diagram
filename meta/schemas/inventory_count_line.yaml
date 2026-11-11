@@ -25,11 +25,11 @@ hierarchy:
 authorization:
   check: true
   permissions:
-    read: inventory_count:inventory_count_read
-    list: inventory_count:inventory_count_read
-    create: inventory_count:inventory_count_update
-    update: inventory_count:inventory_count_update
-    delete: inventory_count:inventory_count_update
+    read: inventory_count:read
+    list: inventory_count:read
+    create: inventory_count:update
+    update: inventory_count:update
+    delete: inventory_count:update
 
 import_export:
   auto_crud: false

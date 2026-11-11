@@ -723,7 +723,7 @@ ui_view_config:
         label: 新建调拨单
         icon: plus
         type: primary
-        permission: transfer_order:transfer_order_create
+        permission: transfer_order:create
       - id: export
         label: 导出
         icon: download

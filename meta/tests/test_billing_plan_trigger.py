@@ -165,6 +165,6 @@ def test_action_registered_with_permission():
     assert meta is not None
     assert meta.object_type == 'sales_order'
     assert meta.category == 'business'
-    assert meta.permission_required == 'sales_order:sales_order_update'
+    assert meta.permission_required == 'sales_order:update'
     assert meta.requires_auth is True
     assert meta.idempotent is True

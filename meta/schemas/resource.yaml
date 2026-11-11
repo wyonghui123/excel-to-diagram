@@ -726,7 +726,7 @@ ui_view_config:
         label: 新建资源
         icon: plus
         type: primary
-        permission: resource:resource_create
+        permission: resource:create
     defaultSort:
       field: code
       order: asc
@@ -766,7 +766,7 @@ ui_view_config:
                  timezone, is_active, valid_from, valid_to, description]
 
 category_config:
-  create_permission: resource:resource_create
-  update_permission: resource:resource_update
-  delete_permission: resource:resource_delete
+  create_permission: resource:create
+  update_permission: resource:update
+  delete_permission: resource:delete
   owner_auto_permission: false

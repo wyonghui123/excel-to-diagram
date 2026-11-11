@@ -16,8 +16,8 @@ display_name_field: txn_type
 authorization:
   check: true
   permissions:
-    read: serial_transaction:serial_transaction_read
-    list: serial_transaction:serial_transaction_list
+    read: serial_transaction:read
+    list: serial_transaction:read
 
 # 只读面：存在任意 {object}_read 动作时，ensure_crud_actions 不再补写动作；
 # auto_crud: false 为声明性意图（与 inventory_transaction.yaml 同口径）。

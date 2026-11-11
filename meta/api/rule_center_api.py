@@ -122,7 +122,7 @@ def get_rule(rule_key: str):
 
 @rule_center_bp.route('/simulate', methods=['POST'])
 @login_required
-@require_permission('rule_center:rule_center_read')
+@require_permission('rule_center:read')
 def simulate_rule():
     """规则试算（IF-008）：只读，不落库。"""
     payload = request.get_json(force=True, silent=True) or {}
@@ -148,7 +148,7 @@ def simulate_rule():
 
 @rule_center_bp.route('/config/history', methods=['GET'])
 @login_required
-@require_permission('rule_center:rule_center_read')
+@require_permission('rule_center:read')
 def get_config_history():
     """配置发布 / 回滚历史（来自 audit_logs，biz_type=rule_config）。"""
     args = request.args
@@ -168,7 +168,7 @@ def get_config_history():
 
 @rule_center_bp.route('/config/draft', methods=['POST'])
 @login_required
-@require_permission('rule_center:rule_center_write')
+@require_permission('rule_center:write')
 def save_config_draft():
     """保存配置草稿（只写 status=draft，生产解析不受影响）。"""
     payload = request.get_json(force=True, silent=True) or {}
@@ -187,7 +187,7 @@ def save_config_draft():
 
 @rule_center_bp.route('/config/publish', methods=['POST'])
 @login_required
-@require_permission('rule_center:rule_center_write')
+@require_permission('rule_center:write')
 def publish_config():
     """校验并发布草稿：draft → active，同键旧版本置 inactive。"""
     payload = request.get_json(force=True, silent=True) or {}
@@ -212,7 +212,7 @@ def publish_config():
 
 @rule_center_bp.route('/config/rollback', methods=['POST'])
 @login_required
-@require_permission('rule_center:rule_center_write')
+@require_permission('rule_center:write')
 def rollback_config():
     """按上一发布版本回滚；写入 ROLLBACK 审计。"""
     payload = request.get_json(force=True, silent=True) or {}
@@ -269,7 +269,7 @@ def explain_rule(object_type: str):
 
 @rule_trace_bp.route('/<object_type>/<record_id>/rule-trace', methods=['GET'])
 @login_required
-@require_permission('rule_center:rule_center_trace')
+@require_permission('rule_center:trace')
 def get_rule_trace(object_type: str, record_id: str):
     """单据推导链（IF-007）：返回各场景统一信封。"""
     args = request.args

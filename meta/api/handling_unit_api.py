@@ -11,7 +11,7 @@
 口径:
   · 预检与真封共用 HandlingUnitService.seal_check，规则不复制到前端。
   · 批量封箱逐箱独立事务：单箱失败不回滚已成功的箱子。
-  · 读接口沿用 handling_unit:handling_unit_read；封箱 / 解封各自独立权限。
+  · 读接口沿用 handling_unit:read；封箱 / 解封各自独立权限。
   · 三张 HU 表未就绪时列表返回空、扫码 404（不阻断页面渲染）。
 """
 
@@ -91,7 +91,7 @@ def _hu_row(service: HandlingUnitService, hu_id: int) -> Optional[Dict[str, Any]
 # 列表
 # ----------------------------------------------------------------------
 @handling_unit_bp.route('', methods=['GET'])
-@require_permission('handling_unit:handling_unit_read')
+@require_permission('handling_unit:read')
 def list_handling_units():
     service = _get_service()
     if not hu_schema_ready(service.ds):
@@ -132,7 +132,7 @@ def list_handling_units():
 # 扫码预检
 # ----------------------------------------------------------------------
 @handling_unit_bp.route('/scan', methods=['GET'])
-@require_permission('handling_unit:handling_unit_read')
+@require_permission('handling_unit:read')
 def scan_handling_unit():
     service = _get_service()
     if not hu_schema_ready(service.ds):
@@ -173,7 +173,7 @@ def scan_handling_unit():
 # 容器内容
 # ----------------------------------------------------------------------
 @handling_unit_bp.route('/<int:hu_id>/contents', methods=['GET'])
-@require_permission('handling_unit:handling_unit_read')
+@require_permission('handling_unit:read')
 def get_hu_contents(hu_id: int):
     service = _get_service()
     mode = request.args.get('mode', 'direct') or 'direct'
@@ -195,7 +195,7 @@ def get_hu_contents(hu_id: int):
 # 封箱 / 解封
 # ----------------------------------------------------------------------
 @handling_unit_bp.route('/<int:hu_id>/seal', methods=['POST'])
-@require_permission('handling_unit:handling_unit_seal')
+@require_permission('handling_unit:seal')
 def seal_handling_unit(hu_id: int):
     service = _get_service()
     try:
@@ -209,7 +209,7 @@ def seal_handling_unit(hu_id: int):
 
 
 @handling_unit_bp.route('/<int:hu_id>/unseal', methods=['POST'])
-@require_permission('handling_unit:handling_unit_unseal')
+@require_permission('handling_unit:unseal')
 def unseal_handling_unit(hu_id: int):
     service = _get_service()
     try:
@@ -226,7 +226,7 @@ def unseal_handling_unit(hu_id: int):
 # 批量封箱
 # ----------------------------------------------------------------------
 @handling_unit_bp.route('/batch-seal', methods=['POST'])
-@require_permission('handling_unit:handling_unit_seal')
+@require_permission('handling_unit:seal')
 def batch_seal_handling_units():
     service = _get_service()
     payload = request.get_json(silent=True) or {}

@@ -861,7 +861,7 @@ ui_view_config:
         label: 生成销售发票
         icon: plus
         variant: secondary
-        permission: customer_invoice:customer_invoice_create
+        permission: customer_invoice:create
         action: customer_invoice.create_from_shipment
         # [S8 Wave C T43] 退货交货单不显示「生成销售发票」（后端 R-INV-19 同样拒绝）
         visible_when: "document_category != 'return'"

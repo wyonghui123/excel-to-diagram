@@ -2809,6 +2809,11 @@ def parse_meta_object(data: Dict[str, Any], source_file: str = "") -> MetaObject
         addability=parse_addability(data),
         display_name_field=data.get("display_name_field"),
         skip_generic_api=data.get("skip_generic_api", False),
+        # [P3 2026-11-10] 通用 API 档位；skip_generic_api=True 时归一为 disabled
+        generic_api_mode=(
+            "disabled" if data.get("skip_generic_api", False)
+            else (data.get("generic_api_mode") or "full")
+        ),
         state_machine_required=data.get("requires_state_machine", False),
         # [Reversal Platform D1 2026-11-06] 逆向写面声明（规格 §7）
         doc_effect=data.get("doc_effect") or {},
@@ -3021,6 +3026,9 @@ def ensure_crud_actions(obj: 'MetaObject') -> 'MetaObject':
     # [G7 2026-11-02] 平台机制对象：不自动补通用 CRUD actions（写入口归专属服务）。
     if getattr(obj, 'skip_generic_api', False):
         return obj
+
+    # [P3 2026-11-10] 只读对象只补读动作，避免菜单/权限生成出写入口。
+    read_only_api = getattr(obj, 'generic_api_mode', 'full') == 'read_only'
     
     # 检查是否禁用自动添加 CRUD actions
     if hasattr(obj, 'import_export') and obj.import_export:
@@ -3048,6 +3056,8 @@ def ensure_crud_actions(obj: 'MetaObject') -> 'MetaObject':
     missing_actions = []
     
     for suffix, action_template in CRUD_ACTION_TEMPLATES.items():
+        if read_only_api and suffix not in ('_read', '_list'):
+            continue
         action_id = f'{obj.id}{suffix}'
         if action_id not in existing_ids:
             path = action_template["path"].format(object_id=obj.id)

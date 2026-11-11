@@ -25,11 +25,11 @@ hierarchy:
 authorization:
   check: true
   permissions:
-    read: inventory_adjustment:inventory_adjustment_read
-    list: inventory_adjustment:inventory_adjustment_read
-    create: inventory_adjustment:inventory_adjustment_update
-    update: inventory_adjustment:inventory_adjustment_update
-    delete: inventory_adjustment:inventory_adjustment_update
+    read: inventory_adjustment:read
+    list: inventory_adjustment:read
+    create: inventory_adjustment:update
+    update: inventory_adjustment:update
+    delete: inventory_adjustment:update
 
 import_export:
   auto_crud: false

@@ -415,7 +415,7 @@ ui_view_config:
         label: 新建产能
         icon: plus
         type: primary
-        permission: resource_capacity:resource_capacity_create
+        permission: resource_capacity:create
     defaultSort:
       field: valid_from
       order: desc
@@ -445,7 +445,7 @@ ui_view_config:
                  capacity_per_day, capacity_units, utilization_pct, valid_from, valid_to]
 
 category_config:
-  create_permission: resource_capacity:resource_capacity_create
-  update_permission: resource_capacity:resource_capacity_update
-  delete_permission: resource_capacity:resource_capacity_delete
+  create_permission: resource_capacity:create
+  update_permission: resource_capacity:update
+  delete_permission: resource_capacity:delete
   owner_auto_permission: false

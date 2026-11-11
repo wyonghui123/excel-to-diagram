@@ -137,3 +137,23 @@ class Test入口收敛:
         assert row[2] == 1, 'task-management 应 show_in_sidebar=1'
         assert row[3] == 0, 'task-management 应 auto_generated=0（人工维护）'
         assert row[1] == 'custom_page', 'task-management 应挂自定义页面（非遗留 hub）'
+
+
+@pytest.mark.unit
+class Test执行记录入口:
+    """[P3 2026-11-10] 执行记录 = 元数据驱动只读列表"""
+
+    def test_task_runs_menu_is_readonly_object_list(self, ds):
+        init_task_menus(ds)
+        row = _menu(ds, 'task-runs')
+        assert row[0] == '执行记录'
+        assert row[1] == 'object_list'
+        assert json.loads(row[4] or '[]') == ['task_run']
+        assert row[2] == 1, '执行记录应显示在侧栏'
+        assert row[3] == 0, '人工维护菜单，不标记 auto_generated'
+        assert json.loads(row[6] or '[]') == ['*'], '仅管理员可见'
+
+        perms = ds.query(
+            "SELECT menu_code FROM menu_permissions WHERE menu_code = ?",
+            ('task-runs',))
+        assert perms == [('task-runs',)]

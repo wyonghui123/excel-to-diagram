@@ -314,7 +314,7 @@ ui_view_config:
         label: 新建特性值
         icon: plus
         type: primary
-        permission: batch_attribute_value:batch_attribute_value_create
+        permission: batch_attribute_value:create
     defaultSort:
       field: attribute_id
       order: asc
@@ -347,9 +347,9 @@ ui_view_config:
                  value_boolean, value_date, value_datetime, description]
 
 category_config:
-  create_permission: batch_attribute_value:batch_attribute_value_create
-  update_permission: batch_attribute_value:batch_attribute_value_update
-  delete_permission: batch_attribute_value:batch_attribute_value_delete
+  create_permission: batch_attribute_value:create
+  update_permission: batch_attribute_value:update
+  delete_permission: batch_attribute_value:delete
   owner_auto_permission: false
 
 nested:

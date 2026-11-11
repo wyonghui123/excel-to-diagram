@@ -1726,7 +1726,7 @@ ui_view_config:
         label: 新建订单
         icon: plus
         type: primary
-        permission: sales_order:sales_order_create
+        permission: sales_order:create
       - id: export
         label: 导出
         icon: download
@@ -1794,7 +1794,7 @@ ui_view_config:
         label: 生成开票计划
         icon: calendar
         variant: secondary
-        permission: sales_order:sales_order_update
+        permission: sales_order:update
         action: sales_order.generate_billing_plan
         visible_when: "billing_status != 'full'"
     facets:
@@ -1806,13 +1806,13 @@ ui_view_config:
         readonly: true
         pageSize: 10
     # [v1.7 2026-11-07] 规则推导分区（A 入口）：展示本单据的规则因子快照与命中结论。
-    #   权限：rule_center:rule_center_trace（无权限时分区不显示）；
+    #   权限：rule_center:trace（无权限时分区不显示）；
     #   scenarios 缺省 5 个（default / control_parameter / line_type / approval / doc_flow），
     #   codes 为控制参数维度的预置编码（可在分区内改）。
     rule_trace:
       enabled: true
       label: 规则推导
-      permission: rule_center:rule_center_trace
+      permission: rule_center:trace
       scenarios: [default, control_parameter, line_type, approval, doc_flow]
       codes: [qty_required, price_required, default_incoterm]
 

@@ -7,6 +7,10 @@ import threading
 
 _M_LIST = list
 
+# [T1] 权限后缀同义归一：list/query/view 复用 read
+# （list/query 与 permission_gate.ACTION_PERMISSION_SUFFIX 同口径）
+_PERMISSION_SUFFIX_ALIASES = {'list': 'read', 'query': 'read', 'view': 'read'}
+
 from meta.core.action_constants import (
     CRUD_CREATE, CRUD_UPDATE, CRUD_DELETE,
     ASSOCIATE, DISSOCIATE,
@@ -707,7 +711,18 @@ class MetaAction:
         return StandardActionLoader.get_suffix_map().get(self.id, self.id)
     
     def get_permission_code(self, object_id: str) -> str:
-        return f"{object_id}:{self.get_permission_suffix()}"
+        """[T1] 权限码统一为单段 ``{object_id}:{action}``。
+
+        动作 id 可能冗余携带对象前缀（``ensure_crud_actions`` 自动补全产出
+        ``{bo}_create``，手写动作如 ``receipt_post``），这里统一剥掉，
+        避免出现 ``sales_order:sales_order_create`` 这类双段码。
+        ``list`` / ``query`` 与 ``read`` 同义（见 permission_gate）。
+        """
+        suffix = self.get_permission_suffix()
+        prefix = f"{object_id}_"
+        if suffix.startswith(prefix):
+            suffix = suffix[len(prefix):]
+        return f"{object_id}:{_PERMISSION_SUFFIX_ALIASES.get(suffix, suffix)}"
     
     def to_tool_schema(self) -> Dict[str, Any]:
         """转换为 LLM Tool Schema（OpenAI Function Calling 格式）"""
@@ -1184,6 +1199,13 @@ class MetaObject:
     # 用于 tasks / task_events 等必须由专属服务与状态机写入口的对象。
     skip_generic_api: bool = False
 
+    # [P3 2026-11-10] 通用 BO API 档位（替代「全开/全关」二值）：
+    #   full      = 通用读写（默认，向后兼容）
+    #   read_only = 通用列表/详情可读，写操作一律 404（执行账本等只读对象）
+    #   disabled  = 通用 API 全部 404（等价 skip_generic_api=True）
+    # 由 `generic_api_mode_of()` 归一，skip_generic_api 优先。
+    generic_api_mode: str = 'full'
+
     # [G7 2026-11-02] YAML 显式声明「需要状态机」：优先于分类模板的
     # default_state_machine；供通用更新路径做 status 迁移守卫。
     state_machine_required: bool = False
@@ -1510,6 +1532,29 @@ def migrate_to_unified_value_help(field: EnhancedMetaField) -> Optional[ValueHel
         return ValueHelpConfig(source=source, behavior=behavior, presentation=presentation)
 
     return None
+
+
+GENERIC_API_MODES = ('full', 'read_only', 'disabled')
+_READ_METHODS = frozenset({'GET', 'HEAD', 'OPTIONS'})
+
+
+def generic_api_mode_of(obj) -> str:
+    """归一对象声明的通用 API 档位；skip_generic_api 优先（向后兼容）。"""
+    if obj is None:
+        return 'disabled'
+    if getattr(obj, 'skip_generic_api', False):
+        return 'disabled'
+    mode = getattr(obj, 'generic_api_mode', 'full') or 'full'
+    return mode if mode in GENERIC_API_MODES else 'full'
+
+
+def generic_api_allows(mode: str, method: str) -> bool:
+    """给定档位与 HTTP 方法，判断通用 API 是否放行。"""
+    if mode == 'disabled':
+        return False
+    if mode == 'read_only':
+        return (method or '').upper() in _READ_METHODS
+    return True
 
 
 class MetaRegistry:

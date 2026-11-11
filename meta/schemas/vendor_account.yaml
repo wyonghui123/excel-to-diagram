@@ -303,7 +303,7 @@ actions:
     type: list
     path: /api/v1/vendor_accounts
     method: GET
-    permission: vendor_account:list
+    permission: vendor_account:read
     ui_hints:
       label: 供应商档案列表
       icon: list
@@ -352,7 +352,7 @@ ui_view_config:
         label: 新建供应商档案
         icon: plus
         type: primary
-        permission: vendor_account:vendor_account_create
+        permission: vendor_account:create
       - id: export
         label: 导出
         icon: download

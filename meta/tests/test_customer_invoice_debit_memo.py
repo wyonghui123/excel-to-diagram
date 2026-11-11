@@ -84,7 +84,7 @@ def test_debit_action_is_registered_with_permission():
     assert meta.object_type == 'customer_invoice'
     assert meta.category == 'business'
     assert meta.permission_required == (
-        'customer_invoice:customer_invoice_debit_memo')
+        'customer_invoice:debit_memo')
     assert meta.requires_auth is True
     assert meta.idempotent is False
     assert meta.input_schema['required'] == ['lines']

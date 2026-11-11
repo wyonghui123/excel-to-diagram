@@ -87,6 +87,8 @@ probe_*.py
 # scripts/debug/check_*.py 是基础设施工具（必须入仓）
 # 只有 root 目录下的 check_*.py 才被忽略
 !/scripts/debug/check_*.py
+# T4 权限四集合一致性校验（CI 门禁，必须入仓）
+!/scripts/check_permission_consistency.py
 !/scripts/debug/inspect/check_*.py
 !/scripts/check_rules_consistency.py
 

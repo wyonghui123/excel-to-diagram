@@ -41,10 +41,11 @@ class TestMenuBOLinker(unittest.TestCase):
         with patch.object(self.linker, '_schema_loader') as mock_loader:
             mock_loader.get_bo_schema.return_value = mock_schema
             perms = self.linker.get_default_bo_permissions('business_object')
-        self.assertIn('business_object:business_object_read', perms)
-        self.assertIn('business_object:business_object_list', perms)
-        # 不应包含 read（BO 实际叫 business_object_read）
-        self.assertNotIn('business_object:read', perms)
+        self.assertIn('business_object:read', perms)
+        self.assertIn('business_object:create', perms)
+        # 动作 id 自带的对象前缀必须剥离，且 list 与 read 同义
+        self.assertNotIn('business_object:business_object_read', perms)
+        self.assertNotIn('business_object:list', perms)
 
     def test_03_effective_permissions_for_menu(self):
         """菜单绑定多个 BO 时合并去重权限"""

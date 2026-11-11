@@ -370,9 +370,9 @@ ui_view_config:
           - fields: [effectivity_start, effectivity_end]
 
 category_config:
-  create_permission: sourcing_rule_line:sourcing_rule_line_create
-  update_permission: sourcing_rule_line:sourcing_rule_line_update
-  delete_permission: sourcing_rule_line:sourcing_rule_line_delete
+  create_permission: sourcing_rule_line:create
+  update_permission: sourcing_rule_line:update
+  delete_permission: sourcing_rule_line:delete
   owner_auto_permission: false
 
 import_export:

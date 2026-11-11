@@ -25,17 +25,17 @@ aspects: [audit_aspect]
 authorization:
   check: true
   permissions:
-    read: inventory_count:inventory_count_read
-    list: inventory_count:inventory_count_list
-    create: inventory_count:inventory_count_create
-    update: inventory_count:inventory_count_update
+    read: inventory_count:read
+    list: inventory_count:read
+    create: inventory_count:create
+    update: inventory_count:update
     # 草稿删除复用编辑权限，不新增权限码（Spec FR-011 只列 8 条）
-    delete: inventory_count:inventory_count_update
-    start: inventory_count:inventory_count_start
-    submit: inventory_count:inventory_count_submit
-    approve: inventory_count:inventory_count_approve
-    post: inventory_count:inventory_count_post
-    cancel: inventory_count:inventory_count_cancel
+    delete: inventory_count:update
+    start: inventory_count:start
+    submit: inventory_count:submit
+    approve: inventory_count:approve
+    post: inventory_count:post
+    cancel: inventory_count:cancel
 
 import_export:
   auto_crud: false
@@ -356,7 +356,7 @@ rules:
     state_field: status
     from_states: [draft]
     to_state: counting
-    action_ref: inventory_count:inventory_count_start
+    action_ref: inventory_count:start
     triggers: [before_update]
     ui_hints:
       label: 开始盘点
@@ -370,7 +370,7 @@ rules:
     state_field: status
     from_states: [counting]
     to_state: submitted
-    action_ref: inventory_count:inventory_count_submit
+    action_ref: inventory_count:submit
     triggers: [before_update]
     ui_hints:
       label: 提交
@@ -383,7 +383,7 @@ rules:
     state_field: status
     from_states: [submitted]
     to_state: approved
-    action_ref: inventory_count:inventory_count_approve
+    action_ref: inventory_count:approve
     triggers: [before_update]
     ui_hints:
       label: 审批
@@ -397,7 +397,7 @@ rules:
     state_field: status
     from_states: [approved]
     to_state: posted
-    action_ref: inventory_count:inventory_count_post
+    action_ref: inventory_count:post
     triggers: [before_update]
     ui_hints:
       label: 过账
@@ -411,7 +411,7 @@ rules:
     state_field: status
     from_states: [draft, counting, submitted, approved]
     to_state: cancelled
-    action_ref: inventory_count:inventory_count_cancel
+    action_ref: inventory_count:cancel
     triggers: [before_update]
     ui_hints:
       label: 取消
@@ -497,7 +497,7 @@ ui_view_config:
         label: 新建盘点单
         icon: plus
         type: primary
-        permission: inventory_count:inventory_count_create
+        permission: inventory_count:create
       - id: export
         label: 导出
         icon: download

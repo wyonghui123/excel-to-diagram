@@ -455,4 +455,4 @@ class TestRuleCenterEndpoints:
             conn.close()
 
         assert menu == ('rule_center', '/system/rule-center')
-        assert perm and 'rule_center:rule_center_read' in perm[0]
+        assert perm and 'rule_center:read' in perm[0]

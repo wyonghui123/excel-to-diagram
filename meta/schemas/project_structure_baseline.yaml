@@ -19,10 +19,10 @@ aspects: []
 authorization:
   check: true
   permissions:
-    read: project_structure_baseline:project_structure_baseline_read
-    list: project_structure_baseline:project_structure_baseline_list
-    create: project_structure_baseline:project_structure_baseline_create
-    update: project_structure_baseline:project_structure_baseline_update
+    read: project_structure_baseline:read
+    list: project_structure_baseline:read
+    create: project_structure_baseline:create
+    update: project_structure_baseline:update
 
 import_export:
   auto_crud: false

@@ -32,6 +32,10 @@ from meta.core.models import MetaObject, MetaAction, registry
 
 logger = logging.getLogger(__name__)
 
+# 标准 CRUD 权限后缀（与 permission_gate.ACTION_PERMISSION_SUFFIX 同口径；
+# list/query 复用 read，不单独播种）
+_STANDARD_CRUD_SUFFIXES = ('create', 'read', 'update', 'delete')
+
 
 class PermissionSyncService:
 
@@ -167,7 +171,7 @@ class PermissionSyncService:
         if orphaned:
             logger.warning("[PermissionSync] orphaned permissions detected: %s", orphaned)
 
-        return {
+        result = {
             'created': created,
             'updated': updated,
             'existing': list(to_update - set(updated)),
@@ -369,10 +373,32 @@ class PermissionSyncService:
         return all_perms
 
     def _derive_from_object(self, obj: MetaObject) -> List[str]:
-        perms = []
+        """推导一个 BO 应入库的全部权限码。
+
+        [T2] 口径（统一为单段 ``{bo}:{suffix}``）：
+          1. ``authorization.permissions`` 声明的码（运行时优先使用）
+          2. 顶层 ``actions`` 的动作码（自定义动作）
+          3. 标准 CRUD 码（create/read/update/delete）始终补齐
+
+        旧实现只遍历 ``obj.actions``：228 个对象中仅 46 个声明了顶层 actions，
+        其余 182 个对象从未被自动播种，导致 strict 模式下大量 403。
+        """
+        perms: List[str] = []
+
+        auth = getattr(obj, 'authorization', None)
+        if isinstance(auth, dict) and auth.get('check') is True:
+            declared = auth.get('permissions')
+            if isinstance(declared, dict):
+                perms.extend(code for code in declared.values() if isinstance(code, str) and code)
+
         for action in obj.actions:
             perms.append(action.get_permission_code(obj.id))
-        return perms
+
+        for suffix in _STANDARD_CRUD_SUFFIXES:
+            perms.append(f'{obj.id}:{suffix}')
+
+        seen = set()
+        return [p for p in perms if not (p in seen or seen.add(p))]
 
     def _load_existing_permissions(self) -> Set[str]:
         try:

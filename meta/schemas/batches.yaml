@@ -623,7 +623,7 @@ ui_view_config:
         label: 新建批次
         icon: plus
         type: primary
-        permission: batch:batch_create
+        permission: batch:create
     defaultSort:
       field: batch_no
       order: asc
@@ -662,7 +662,7 @@ ui_view_config:
                  expiry_date, potency_pct, description]
 
 category_config:
-  create_permission: batch:batch_create
-  update_permission: batch:batch_update
-  delete_permission: batch:batch_delete
+  create_permission: batch:create
+  update_permission: batch:update
+  delete_permission: batch:delete
   owner_auto_permission: false

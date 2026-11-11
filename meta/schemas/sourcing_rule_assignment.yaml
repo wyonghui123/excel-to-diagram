@@ -339,9 +339,9 @@ ui_view_config:
           - fields: [status]
 
 category_config:
-  create_permission: sourcing_rule_assignment:sourcing_rule_assignment_create
-  update_permission: sourcing_rule_assignment:sourcing_rule_assignment_update
-  delete_permission: sourcing_rule_assignment:sourcing_rule_assignment_delete
+  create_permission: sourcing_rule_assignment:create
+  update_permission: sourcing_rule_assignment:update
+  delete_permission: sourcing_rule_assignment:delete
   owner_auto_permission: false
 
 import_export:

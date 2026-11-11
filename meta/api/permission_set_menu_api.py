@@ -385,7 +385,7 @@ def _build_role_unified_data(permission_set_id):
                 return True
             if perm_code in role_function_perms:
                 return True
-            # [FIX 2026-06-08] 兼容 expanded 格式: scheduled_task:create -> scheduled_task:scheduled_task_create
+            # [FIX 2026-06-08] 兼容 expanded 格式: scheduled_task:create -> scheduled_task:create
             parts = perm_code.split(':')
             if len(parts) == 2:
                 expanded = f"{parts[0]}:{parts[0]}_{parts[1]}"
@@ -732,7 +732,7 @@ def update_permission_set_menu_permissions(permission_set_id):
                             pid = int(row[0])
                         perm_id_map[code] = pid
                 
-                # [FIX 2026-06-08] 补充 expanded 格式映射: scheduled_task:create -> scheduled_task:scheduled_task_create
+                # [FIX 2026-06-08] 补充 expanded 格式映射: scheduled_task:create -> scheduled_task:create
                 expanded_codes = set()
                 for code in auto_perm_codes:
                     if code not in perm_id_map:
@@ -753,7 +753,7 @@ def update_permission_set_menu_permissions(permission_set_id):
                         except (TypeError, IndexError, AttributeError):
                             ec = str(row[1])
                             epid = int(row[0])
-                        # 映射回原始 code: scheduled_task:scheduled_task_create -> scheduled_task:create
+                        # 映射回原始 code: scheduled_task:create -> scheduled_task:create
                         ec_parts = ec.split(':')
                         if len(ec_parts) == 2:
                             ec_action_parts = ec_parts[1].rsplit('_', 1)

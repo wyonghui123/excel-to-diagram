@@ -544,7 +544,7 @@ class TestRuleCenterP2Endpoints:
     # ------------------------------------------------------------------
 
     def test_trace_http_forbidden_without_permission(self, monkeypatch):
-        """trace 端点已挂 rule_center:rule_center_trace，无权限必须 403。"""
+        """trace 端点已挂 rule_center:trace，无权限必须 403。"""
         import meta.api.decorators as decorators
 
         monkeypatch.setattr(decorators, 'evaluate_code', lambda user, code: False)

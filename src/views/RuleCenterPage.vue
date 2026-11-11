@@ -502,7 +502,7 @@ const pagedHistory = computed(() => {
 
 const configTarget = computed(() => detailRow.value?.links?.edit?.target || '')
 
-const canWriteConfig = computed(() => auth.hasPermission('rule_center:rule_center_write'))
+const canWriteConfig = computed(() => auth.hasPermission('rule_center:write'))
 
 const canPublish = computed(() => {
   const latest = historyRows.value[0]

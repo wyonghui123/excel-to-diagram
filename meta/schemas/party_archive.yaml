@@ -239,7 +239,7 @@ ui_view_config:
     #     前端 authStore.hasPermission 是精确字符串匹配（perms.includes，无格式转换），
     #     写成单段式会导致非 admin 用户看不到按钮。
     #     登记缺陷（本次未改，勿照抄）：party_group.yaml:344 用的是单段式
-    #     `party_group:create`，而 permissions 表里只有 `party_group:party_group_create`
+    #     `party_group:create`，而 permissions 表里只有 `party_group:create`
     #     ⇒ 该按钮目前只对 admin（permissions=['*']）可见，非 admin 会丢失。
     #     另注：本面权限码用 party_archive:*（表内确有该 5 条），而菜单 required_permissions
     #     用的是 party:party_* —— 两者不同层：前者控按钮显隐（action 级），
@@ -249,7 +249,7 @@ ui_view_config:
         label: 新建业务伙伴
         icon: plus
         type: primary
-        permission: party_archive:party_archive_create
+        permission: party_archive:create
       - id: export
         label: 导出
         icon: download
@@ -296,7 +296,7 @@ ui_view_config:
         # [入口 2026-10-20] 声明创建入口（引导式）。AssociationSection 的
         #   isPartyRelations 分支从 section.actions 里读 create（annotation 分支同款先例）。
         #   DetailPage 已把 f.actions 透传（L890 `actions: f.actions || [...]`），故无需改 DetailPage。
-        #   permission 用双段式（permissions 表实有 party_relation:party_relation_create；
+        #   permission 用双段式（permissions 表实有 party_relation:create；
         #     单段式命中 0，口径同 party_relation.yaml L485-486 注）。
         #   readonly: true 保留 —— 语义是"本分区的行不可行内编辑"（两侧合并视图本就不该行内改），
         #     且编辑态可见性（shouldShowAssociation）依赖它；创建入口由 actions 单独承载。
@@ -304,7 +304,7 @@ ui_view_config:
           - key: create
             label: 新建伙伴关系
             variant: primary
-            permission: party_relation:party_relation_create
+            permission: party_relation:create
 
   # 税务登记子表（party_tax_registration，parent_field=party_id）
   #   与 calendar→calendar_day / items→item_uom_conversion 同一套 child_sections 机制，

@@ -11,9 +11,9 @@ title: 规则中心
 description: 统一展示、查询与管理所有可配置规则，并在单据详情展示规则推导过程。
 
 permission:
-  read: rule_center:rule_center_read
-  write: rule_center:rule_center_write
-  trace: rule_center:rule_center_trace
+  read: rule_center:read
+  write: rule_center:write
+  trace: rule_center:trace
 
 # 来源枚举：与 RuleCatalogService.SOURCES 保持一致；未知来源在加载期报错。
 sources:
@@ -151,7 +151,7 @@ tabs:
   - id: simulate
     label: 规则试算
     kind: simulate
-    require: rule_center:rule_center_read
+    require: rule_center:read
     sources: []
     columns: []
     filters: []
@@ -168,7 +168,7 @@ tabs:
   - id: trace
     label: 单据推导
     kind: rule_trace
-    require: rule_center:rule_center_trace
+    require: rule_center:trace
     sources: []
     columns: []
     filters: []
@@ -312,7 +312,7 @@ trace:
     failed: 推导失败
     factor_detail: 因子明细
     value_missing: 未提供
-    forbidden: '无权查看单据推导（缺少 rule_center:rule_center_trace）'
+    forbidden: '无权查看单据推导（缺少 rule_center:trace）'
     not_found: 单据不存在或超出数据范围
     all_codes_missing: 全部控制参数均未取到值
     # L1：规则全集表

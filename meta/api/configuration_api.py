@@ -27,7 +27,7 @@
          （参数没错，需改配置或补主数据后重试）
 
 权限：不新增对象，`price` / `match` / `solve` 同挂 `configuration` 的 read
-（双段式码 `configuration:configuration_read` 由 v117 落库）。
+（双段式码 `configuration:read` 由 v117 落库）。
 """
 import logging
 from typing import Any, Dict, Optional
@@ -360,7 +360,7 @@ def solve():
 # ----------------------------------------------------------------------
 @configuration_bp.route('/materialize', methods=['POST'])
 @login_required
-@require_permission('configuration:configuration_materialize')
+@require_permission('configuration:materialize')
 def materialize():
     """把已求解 / 已冻结的配置实例固化为变式物料。
 

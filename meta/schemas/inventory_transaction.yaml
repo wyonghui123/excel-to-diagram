@@ -18,8 +18,8 @@ display_name_field: transaction_no
 authorization:
   check: true
   permissions:
-    read: inventory_transaction:inventory_transaction_read
-    list: inventory_transaction:inventory_transaction_list
+    read: inventory_transaction:read
+    list: inventory_transaction:read
 
 # 只读面：显式声明 read/list 动作（存在任意 {object}_read 动作时，
 # yaml_loader.ensure_crud_actions 不再自动补 create/update/delete）；

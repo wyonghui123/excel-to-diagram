@@ -859,7 +859,7 @@ ui_view_config:
         label: 新建序列号
         icon: plus
         type: primary
-        permission: serial_number:serial_number_create
+        permission: serial_number:create
     defaultSort:
       field: serial_no
       order: asc
@@ -907,7 +907,7 @@ ui_view_config:
                  produced_at, remark]
 
 category_config:
-  create_permission: serial_number:serial_number_create
-  update_permission: serial_number:serial_number_update
-  delete_permission: serial_number:serial_number_delete
+  create_permission: serial_number:create
+  update_permission: serial_number:update
+  delete_permission: serial_number:delete
   owner_auto_permission: false

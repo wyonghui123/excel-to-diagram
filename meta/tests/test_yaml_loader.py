@@ -683,7 +683,7 @@ class TestDetailTabActionParsing:
                 "key": "create",
                 "label": "新建伙伴关系",
                 "variant": "primary",
-                "permission": "party_relation:party_relation_create",
+                "permission": "party_relation:create",
             }],
         })
 
@@ -691,7 +691,7 @@ class TestDetailTabActionParsing:
             "key": "create",
             "label": "新建伙伴关系",
             "variant": "primary",
-            "permission": "party_relation:party_relation_create",
+            "permission": "party_relation:create",
         }]
 
     def test_string_actions_are_unchanged(self):

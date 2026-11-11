@@ -1140,10 +1140,10 @@ const computedSections = computed(() => {
   }
 
   // [v1.7 2026-11-07] 规则推导分区：由 BO YAML 的 ui_view_config.detail.rule_trace 声明，
-  //   无权限时不显示分区（权限码缺省 rule_center:rule_center_trace）。
+  //   无权限时不显示分区（权限码缺省 rule_center:trace）。
   const traceSection = detailConfig?.rule_trace
   if (traceSection?.enabled && !isAddMode) {
-    const tracePermission = traceSection.permission || 'rule_center:rule_center_trace'
+    const tracePermission = traceSection.permission || 'rule_center:trace'
     if (authStore.hasPermission(tracePermission)) {
       sections.push({
         key: 'rule_trace',

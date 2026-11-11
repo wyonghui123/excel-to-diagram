@@ -549,7 +549,7 @@ ui_view_config:
         label: 新建服务请求
         icon: plus
         type: primary
-        permission: service_request:service_request_create
+        permission: service_request:create
       - id: export
         label: 导出
         icon: download
@@ -586,9 +586,9 @@ ui_view_config:
       rowMutability: fullEditable
 
 category_config:
-  create_permission: service_request:service_request_create
-  update_permission: service_request:service_request_update
-  delete_permission: service_request:service_request_delete
+  create_permission: service_request:create
+  update_permission: service_request:update
+  delete_permission: service_request:delete
   owner_auto_permission: false
 
 import_export:

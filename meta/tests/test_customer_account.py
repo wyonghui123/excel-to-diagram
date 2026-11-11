@@ -312,7 +312,7 @@ class TestNoStandaloneMenuButConfigComplete:
         """权限码取 permissions 表实际值（双段式 {bo}:{bo}_{action}）"""
         actions = _raw()['ui_view_config']['list']['actions']
         create = next(a for a in actions if a['id'] == 'create')
-        assert create['permission'] == 'customer_account:customer_account_create'
+        assert create['permission'] == 'customer_account:create'
 
 
 # ────────────────────────────────────────

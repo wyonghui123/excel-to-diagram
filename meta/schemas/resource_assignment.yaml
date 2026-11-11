@@ -360,7 +360,7 @@ ui_view_config:
         label: 新建分配
         icon: plus
         type: primary
-        permission: resource_assignment:resource_assignment_create
+        permission: resource_assignment:create
     defaultSort:
       field: planned_start
       order: asc
@@ -389,7 +389,7 @@ ui_view_config:
                  planned_qty, status, source]
 
 category_config:
-  create_permission: resource_assignment:resource_assignment_create
-  update_permission: resource_assignment:resource_assignment_update
-  delete_permission: resource_assignment:resource_assignment_delete
+  create_permission: resource_assignment:create
+  update_permission: resource_assignment:update
+  delete_permission: resource_assignment:delete
   owner_auto_permission: false

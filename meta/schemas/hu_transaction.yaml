@@ -16,8 +16,8 @@ display_name_field: txn_type
 authorization:
   check: true
   permissions:
-    read: hu_transaction:hu_transaction_read
-    list: hu_transaction:hu_transaction_list
+    read: hu_transaction:read
+    list: hu_transaction:read
 
 import_export:
   auto_crud: false

@@ -1,5 +1,5 @@
 -- 自动生成的 Schema
--- 生成时间: 2026-11-10 18:03:22.263308
+-- 生成时间: 2026-11-10 22:27:13.483852
 
 -- 地址: 结构化地址库（支持对象）：国家 / 省 / 市 / 区 / 街道 / 门牌 / 邮编分列 + 格式化全文；只被引用，不承载用途 / 角色
 CREATE TABLE IF NOT EXISTS addresses (
@@ -684,6 +684,116 @@ CREATE TABLE IF NOT EXISTS customer_accounts (
     FOREIGN KEY (tax_classification_id) REFERENCES tax_classifications(id),
     FOREIGN KEY (default_payment_term_id) REFERENCES payment_terms(id),
     FOREIGN KEY (default_rate_table_id) REFERENCES rate_tables(id)
+)
+
+-- 销售发票: 销售发票头（行见 customer_invoice_line，期次见 customer_invoice_schedule）
+CREATE TABLE IF NOT EXISTS customer_invoices (
+    created_by VARCHAR(200),
+    updated_by VARCHAR(200),
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    invoice_no VARCHAR(200) NOT NULL,
+    document_type_id INTEGER NOT NULL,
+    document_category VARCHAR(200) NOT NULL DEFAULT 'invoice',
+    direction INTEGER NOT NULL DEFAULT 1,
+    invoice_date DATETIME NOT NULL,
+    posting_date DATETIME,
+    status VARCHAR(200) NOT NULL DEFAULT 'draft',
+    customer_account_id INTEGER NOT NULL,
+    bill_to_account_id INTEGER,
+    payer_account_id INTEGER,
+    bill_to_address_text VARCHAR(200),
+    tax_registration_no VARCHAR(200),
+    currency_id INTEGER NOT NULL,
+    exchange_rate REAL,
+    exchange_rate_type VARCHAR(200),
+    exchange_rate_date DATETIME,
+    payment_term_id INTEGER,
+    incoterm_code VARCHAR(200),
+    net_amount REAL NOT NULL DEFAULT 0,
+    tax_amount REAL NOT NULL DEFAULT 0,
+    gross_amount REAL NOT NULL DEFAULT 0,
+    billing_pricing_mode VARCHAR(200) NOT NULL DEFAULT 'copy_frozen_redetermine_tax',
+    pricing_date DATETIME,
+    rounding_diff REAL NOT NULL DEFAULT 0,
+    header_discount_amount REAL NOT NULL DEFAULT 0,
+    header_surcharge_amount REAL NOT NULL DEFAULT 0,
+    org_id INTEGER NOT NULL,
+    sales_org_id INTEGER,
+    project_id INTEGER,
+    reversal_of_invoice_id INTEGER,
+    reversal_reason VARCHAR(200),
+    remark VARCHAR(200),
+    created_at DATETIME,
+    updated_at DATETIME,
+    FOREIGN KEY (document_type_id) REFERENCES type_definitions(id),
+    FOREIGN KEY (customer_account_id) REFERENCES parties(id),
+    FOREIGN KEY (currency_id) REFERENCES currencies(id),
+    FOREIGN KEY (org_id) REFERENCES orgs(id),
+    FOREIGN KEY (reversal_of_invoice_id) REFERENCES customer_invoices(id)
+)
+
+-- 销售发票行: 销售发票行（来源：发货行 / 订单行 / 手工）
+CREATE TABLE IF NOT EXISTS customer_invoice_lines (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    invoice_id INTEGER NOT NULL,
+    line_no INTEGER NOT NULL,
+    line_type_id INTEGER NOT NULL,
+    source_doc_type VARCHAR(200) NOT NULL,
+    source_doc_id INTEGER,
+    source_line_id INTEGER,
+    shipment_line_id INTEGER,
+    schedule_id INTEGER,
+    order_line_id INTEGER,
+    item_id INTEGER,
+    description VARCHAR(200) NOT NULL,
+    uom_id INTEGER NOT NULL,
+    qty REAL NOT NULL,
+    billing_basis VARCHAR(200) NOT NULL DEFAULT 'quantity',
+    unit_price REAL NOT NULL,
+    net_amount REAL NOT NULL DEFAULT 0,
+    tax_code_id INTEGER NOT NULL,
+    tax_rate_percent REAL NOT NULL,
+    tax_amount REAL NOT NULL DEFAULT 0,
+    gross_amount REAL NOT NULL DEFAULT 0,
+    project_id INTEGER,
+    project_task_id INTEGER,
+    billing_percent REAL,
+    billing_base_amount REAL,
+    price_source VARCHAR(200) NOT NULL DEFAULT 'order',
+    order_unit_price REAL,
+    price_change_reason VARCHAR(200),
+    price_change_approved_by VARCHAR(200),
+    price_diff_amount REAL DEFAULT 0,
+    header_discount_amount REAL NOT NULL DEFAULT 0,
+    header_surcharge_amount REAL NOT NULL DEFAULT 0,
+    calc_result_id INTEGER,
+    source_rate_record_id INTEGER,
+    price_trace TEXT,
+    price_override_reason_code VARCHAR(200),
+    original_invoice_line_id INTEGER,
+    created_at DATETIME,
+    updated_at DATETIME,
+    FOREIGN KEY (invoice_id) REFERENCES customer_invoices(id),
+    FOREIGN KEY (shipment_line_id) REFERENCES shipment_lines(id),
+    FOREIGN KEY (schedule_id) REFERENCES sales_order_schedules(id),
+    FOREIGN KEY (order_line_id) REFERENCES sales_order_lines(id)
+)
+
+-- 应收期次: 销售发票应收期次（过账时按付款条件生成，只读）
+CREATE TABLE IF NOT EXISTS customer_invoice_schedules (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    invoice_id INTEGER NOT NULL,
+    schedule_no INTEGER NOT NULL,
+    payment_term_line_id INTEGER,
+    ratio_percent REAL NOT NULL,
+    due_date DATETIME NOT NULL,
+    amount REAL NOT NULL,
+    amount_applied REAL NOT NULL DEFAULT 0,
+    status VARCHAR(200) NOT NULL DEFAULT 'open',
+    created_at DATETIME,
+    updated_at DATETIME,
+    FOREIGN KEY (invoice_id) REFERENCES customer_invoices(id),
+    FOREIGN KEY (payment_term_line_id) REFERENCES payment_term_lines(id)
 )
 
 -- 客户销售员分配: 客户与销售员的分配关系（可按销售组织区分，可设主销售员）
@@ -2475,6 +2585,7 @@ CREATE TABLE IF NOT EXISTS rate_records (
     exclude_bo VARCHAR(200),
     hit_policy VARCHAR(200) NOT NULL DEFAULT 'exclusive',
     allocation_weight REAL,
+    distribution_basis VARCHAR(200) NOT NULL DEFAULT 'none',
     priority INTEGER NOT NULL DEFAULT 100,
     status VARCHAR(200) NOT NULL DEFAULT 'active',
     description TEXT,
@@ -2962,6 +3073,8 @@ CREATE TABLE IF NOT EXISTS sales_orders (
     updated_at DATETIME,
     fulfillment_status VARCHAR(200) NOT NULL DEFAULT 'not_started',
     fulfillment_derived_at DATETIME,
+    billing_status VARCHAR(200) NOT NULL DEFAULT 'none',
+    billing_derived_at DATETIME,
     revision_no INTEGER NOT NULL DEFAULT 1,
     FOREIGN KEY (document_type_id) REFERENCES type_definitions(id),
     FOREIGN KEY (customer_account_id) REFERENCES customer_accounts(id),
@@ -3026,6 +3139,14 @@ CREATE TABLE IF NOT EXISTS sales_order_lines (
     updated_at DATETIME,
     fulfillment_status VARCHAR(200) NOT NULL DEFAULT 'not_started',
     fulfillment_derived_at DATETIME,
+    billing_relevance VARCHAR(200) NOT NULL DEFAULT 'delivery',
+    billing_period_count INTEGER,
+    billing_interval_months INTEGER DEFAULT 1,
+    billing_anchor_date DATETIME,
+    billing_lead_days INTEGER DEFAULT 0,
+    billing_proration VARCHAR(200) DEFAULT 'none',
+    billed_qty REAL NOT NULL DEFAULT 0,
+    billed_amount REAL NOT NULL DEFAULT 0,
     FOREIGN KEY (order_id) REFERENCES sales_orders(id),
     FOREIGN KEY (line_type_id) REFERENCES type_definitions(id),
     FOREIGN KEY (item_id) REFERENCES items(id),
@@ -3051,6 +3172,9 @@ CREATE TABLE IF NOT EXISTS sales_order_schedules (
     promised_date DATETIME NOT NULL,
     promised_qty REAL,
     billing_percent REAL,
+    billing_fixed_amount REAL,
+    billed_amount REAL NOT NULL DEFAULT 0,
+    billing_status VARCHAR(200) NOT NULL DEFAULT 'none',
     milestone_code VARCHAR(200),
     service_visit_no INTEGER,
     status VARCHAR(200) NOT NULL DEFAULT 'planned',
@@ -3496,6 +3620,31 @@ CREATE TABLE IF NOT EXISTS task_events (
     created_at DATETIME
 )
 
+-- 后台任务执行记录: 后台作业每次执行尝试的账本（claim/lease/结果/重试，只读）
+CREATE TABLE IF NOT EXISTS task_runs (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    run_key VARCHAR(200) UNIQUE NOT NULL,
+    job_id INTEGER NOT NULL,
+    trigger_id INTEGER,
+    task_id INTEGER,
+    status VARCHAR(200) NOT NULL,
+    params TEXT,
+    attempt INTEGER,
+    max_attempts INTEGER,
+    scheduled_for REAL,
+    claimed_at REAL,
+    started_at REAL,
+    finished_at REAL,
+    lease_until REAL,
+    worker_id VARCHAR(200),
+    duration_ms INTEGER,
+    result TEXT,
+    error VARCHAR(200),
+    next_retry_at REAL,
+    created_at DATETIME,
+    updated_at DATETIME
+)
+
 -- 任务模板节点: Workflow 静态节点定义（定义层无状态；Run 启动时按版本克隆为 Task）
 CREATE TABLE IF NOT EXISTS task_templates (
     id VARCHAR(200) PRIMARY KEY,
@@ -3777,6 +3926,10 @@ CREATE TABLE IF NOT EXISTS type_definitions (
     scope_bo VARCHAR(200) NOT NULL,
     level VARCHAR(200) NOT NULL,
     document_category VARCHAR(200) DEFAULT 'standard',
+    document_role VARCHAR(200),
+    direction INTEGER NOT NULL DEFAULT 1,
+    reversal_type_id INTEGER,
+    is_default INTEGER NOT NULL DEFAULT 0,
     default_type_id INTEGER,
     number_sequence_id INTEGER,
     line_category VARCHAR(200) DEFAULT 'material',
@@ -4392,6 +4545,28 @@ CREATE INDEX IF NOT EXISTS idx_currency_rate_to ON currency_rates(to_currency_id
 CREATE INDEX IF NOT EXISTS idx_customer_accounts_tax_classification_id ON customer_accounts(tax_classification_id)
 CREATE UNIQUE INDEX IF NOT EXISTS idx_customer_account_relation_unique ON customer_accounts(relation_id)
 CREATE INDEX IF NOT EXISTS idx_customer_accounts_name ON customer_accounts(name)
+
+-- Indexes for 销售发票
+CREATE INDEX IF NOT EXISTS idx_customer_invoices_currency_id ON customer_invoices(currency_id)
+CREATE INDEX IF NOT EXISTS idx_customer_invoices_org_id ON customer_invoices(org_id)
+CREATE UNIQUE INDEX IF NOT EXISTS uq_customer_invoice_no ON customer_invoices(invoice_no)
+CREATE INDEX IF NOT EXISTS idx_customer_invoice_status_date ON customer_invoices(status, invoice_date)
+CREATE INDEX IF NOT EXISTS idx_customer_invoice_customer_status ON customer_invoices(customer_account_id, status)
+CREATE INDEX IF NOT EXISTS idx_customer_invoice_document_type ON customer_invoices(document_type_id)
+CREATE INDEX IF NOT EXISTS idx_customer_invoice_reversal_of ON customer_invoices(reversal_of_invoice_id)
+CREATE INDEX IF NOT EXISTS idx_customer_invoice_project ON customer_invoices(project_id)
+
+-- Indexes for 销售发票行
+CREATE UNIQUE INDEX IF NOT EXISTS uq_customer_invoice_line_no ON customer_invoice_lines(invoice_id, line_no)
+CREATE INDEX IF NOT EXISTS idx_customer_invoice_line_shipment ON customer_invoice_lines(shipment_line_id)
+CREATE INDEX IF NOT EXISTS idx_customer_invoice_line_schedule ON customer_invoice_lines(schedule_id)
+CREATE INDEX IF NOT EXISTS idx_customer_invoice_line_order ON customer_invoice_lines(order_line_id)
+
+-- Indexes for 应收期次
+CREATE INDEX IF NOT EXISTS idx_customer_invoice_schedules_payment_term_line_id ON customer_invoice_schedules(payment_term_line_id)
+CREATE UNIQUE INDEX IF NOT EXISTS uq_customer_invoice_schedule_no ON customer_invoice_schedules(invoice_id, schedule_no)
+CREATE INDEX IF NOT EXISTS idx_customer_invoice_schedule_invoice ON customer_invoice_schedules(invoice_id)
+CREATE INDEX IF NOT EXISTS idx_customer_invoice_schedule_status_due ON customer_invoice_schedules(status, due_date)
 
 -- Indexes for 客户销售员分配
 CREATE UNIQUE INDEX IF NOT EXISTS uidx_customer_salesperson_assign ON customer_salesperson_assignments(customer_account_id, sales_org_id, salesperson_id)
@@ -5142,6 +5317,9 @@ CREATE INDEX IF NOT EXISTS idx_task_events_run ON task_events(workflow_run_id)
 CREATE INDEX IF NOT EXISTS idx_task_events_type ON task_events(event_type, occurred_at)
 CREATE INDEX IF NOT EXISTS idx_task_events_doc ON task_events(doc_ref)
 CREATE INDEX IF NOT EXISTS idx_task_events_trace ON task_events(trace_id)
+
+-- Indexes for 后台任务执行记录
+CREATE INDEX IF NOT EXISTS idx_task_runs_created_at ON task_runs(created_at)
 
 -- Indexes for 任务模板节点
 CREATE UNIQUE INDEX IF NOT EXISTS uq_task_template_node ON task_templates(workflow_id, workflow_version, node_id)

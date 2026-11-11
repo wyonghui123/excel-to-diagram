@@ -356,7 +356,7 @@ ui_view_config:
         label: 新建例外
         icon: plus
         type: primary
-        permission: resource_availability:resource_availability_create
+        permission: resource_availability:create
     defaultSort:
       field: start_at
       order: asc
@@ -385,7 +385,7 @@ ui_view_config:
                  source, org_id]
 
 category_config:
-  create_permission: resource_availability:resource_availability_create
-  update_permission: resource_availability:resource_availability_update
-  delete_permission: resource_availability:resource_availability_delete
+  create_permission: resource_availability:create
+  update_permission: resource_availability:update
+  delete_permission: resource_availability:delete
   owner_auto_permission: false

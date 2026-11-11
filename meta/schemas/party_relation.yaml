@@ -557,14 +557,14 @@ ui_view_config:
     #     keep them as short as possible"，本表对应 tab 标签已是「业务伙伴关系」，
     #     按钮不重复对象全称属合理省略；实测 390px 窄屏容器 310px，6 字（96px）时
     #     按钮组 96+8+48+8+48+8+69=285px 可单行放下，若写全 8 字则溢出。
-    #   permission 用双段式（permissions 表实有 party_relation:party_relation_create）；
+    #   permission 用双段式（permissions 表实有 party_relation:create）；
     #     单段式在该表命中数为 0，写单段式会导致非 admin 看不到按钮。详见 party_archive.yaml 同段注释。
     actions:
       - id: create
         label: 新建伙伴关系
         icon: plus
         type: primary
-        permission: party_relation:party_relation_create
+        permission: party_relation:create
       - id: export
         label: 导出
         icon: download
@@ -660,7 +660,7 @@ ui_view_config:
           - key: create
             label: 新建客户档案
             variant: primary
-            permission: customer_account:customer_account_create
+            permission: customer_account:create
       - title: 供应商档案
         id: vendor_account_section
         type: association
@@ -675,4 +675,4 @@ ui_view_config:
           - key: create
             label: 新建供应商档案
             variant: primary
-            permission: vendor_account:vendor_account_create
+            permission: vendor_account:create
