@@ -119,7 +119,7 @@ class BusinessActionMeta:
     # [B1 2026-10-02] 前置条件（声明式、机器可查；调用 handler 前统一拦截，见 bo_action_contract）
     preconditions: Optional[List[Dict[str, Any]]] = None
     # [E3 2026-11-11] 治理级别：none=只读 / audit=写审计 / audit_scope=写审计+组织范围校验
-    governance: str = 'none'
+    governance: Optional[str] = None
     # 仅 governance='audit_scope' 使用：{'param_field': 'org_id'}
     org_scope: Optional[Dict[str, Any]] = None
 
@@ -163,7 +163,7 @@ class BoActionRegistry:
         # [B1 2026-10-02] 前置条件（声明式；形状与求值见 meta.core.bo_action_contract）
         preconditions: Optional[List[Dict[str, Any]]] = None,
         # [E3 2026-11-11] 治理级别与组织范围声明（形状校验见 bo_action_contract）
-        governance: str = 'none',
+        governance: Optional[str] = None,
         org_scope: Optional[Dict[str, Any]] = None,
     ) -> 'BoActionRegistry':
         """注册一个业务 Action
@@ -242,7 +242,7 @@ class BoActionRegistry:
                 # [B1 2026-10-02] 前置条件属固化契约的一部分，随 schema 一并输出
                 'preconditions': meta.preconditions or [],
                 # [E3 2026-11-11] 治理声明随 schema 输出（OpenAPI 消费方可感知）
-                'governance': meta.governance,
+                'governance': meta.governance or 'none',
                 'org_scope': meta.org_scope or {},
             }
             for meta in self.list_all()

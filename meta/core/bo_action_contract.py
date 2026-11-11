@@ -123,9 +123,15 @@ def validate_preconditions(preconditions: Any) -> List[str]:
 
 
 def _check_governance(meta: Any) -> List[str]:
-    """治理声明形状校验（级别合法 / audit_scope 的 param_field 必须在入参 schema 内）。"""
+    """治理声明校验（级别合法 / audit_scope 的 param_field 必须在入参 schema 内）。
+
+    灰度口径（spec §16.4）：仅「未声明」在 warn 下放行；非法枚举与 audit_scope
+    形状问题两种模式都上报（启动期只打日志，strict 由 assert 阻断）。
+    """
     errors: List[str] = []
-    governance = getattr(meta, "governance", "none")
+    governance = getattr(meta, "governance", None)
+    if governance is None:
+        return ["governance 未声明（允许 none / audit / audit_scope）"] if _GOVERNANCE_MODE == "strict" else []
     if governance not in GOVERNANCE_LEVELS:
         return [f"governance 非法：{governance!r}（允许 {GOVERNANCE_LEVELS}）"]
 
@@ -149,9 +155,8 @@ def _check_governance(meta: Any) -> List[str]:
 
 
 def _validate_governance(meta: Any) -> List[str]:
-    """灰度口径：warn 不报违规（放行），strict 才计入。"""
-    errors = _check_governance(meta)
-    return errors if _GOVERNANCE_MODE == "strict" else []
+    """治理声明校验（灰度口径见 `_check_governance`）。"""
+    return _check_governance(meta)
 
 
 def validate_action_meta(meta: Any) -> List[str]:

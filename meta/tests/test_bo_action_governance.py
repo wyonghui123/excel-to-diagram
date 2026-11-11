@@ -20,7 +20,7 @@ import pytest
 pytestmark = pytest.mark.unit
 
 from meta.core import bo_action_contract
-from meta.core.bo_action_contract import report_registry_contracts
+from meta.core.bo_action_contract import report_registry_contracts, validate_registry
 from meta.core.bo_action_registry import BoActionRegistry
 from meta.services.org_scope_service import OrgScopeService
 from meta.tests.shared.db_schema import create_audit_logs
@@ -29,6 +29,16 @@ from meta.tests.shared.db_schema import create_audit_logs
 # ─────────────────────────────────────────────────────────────────────────────
 # 夹具
 # ─────────────────────────────────────────────────────────────────────────────
+
+@pytest.fixture(autouse=True)
+def _isolate_registry():
+    """BoActionRegistry 是进程单例：每个用例前清空，结束后还原，避免 action 泄漏。"""
+    from meta.core.bo_action_registry import bo_action_registry
+    snapshot = dict(bo_action_registry._actions)
+    bo_action_registry._actions.clear()
+    yield
+    bo_action_registry._actions.clear()
+    bo_action_registry._actions.update(snapshot)
 
 @pytest.fixture
 def audit_ds():
@@ -216,3 +226,26 @@ class TestRegistryContract:
 
         monkeypatch.setattr(bo_action_contract, '_GOVERNANCE_MODE', 'strict')
         assert report_registry_contracts(registry, level='error') == 0
+
+
+class TestGovernanceContract:
+    def test_invalid_governance_reported(self):
+        """非法枚举在 warn 下也上报（只 log 不阻断）。"""
+        registry = BoActionRegistry()
+        _register_write_action(registry, action_id='demo.bad', governance='auditx')
+
+        violations = validate_registry(registry)
+        assert 'demo.bad' in violations
+        assert any('governance 非法' in err for err in violations['demo.bad'])
+
+    def test_undeclared_governance_only_strict(self, monkeypatch):
+        """未声明 governance：warn 放行，strict 上报。"""
+        registry = BoActionRegistry()
+        _register_write_action(registry, action_id='demo.legacy', governance=None)
+
+        assert validate_registry(registry) == {}
+
+        monkeypatch.setattr(bo_action_contract, '_GOVERNANCE_MODE', 'strict')
+        violations = validate_registry(registry)
+        assert 'demo.legacy' in violations
+        assert any('未声明' in err for err in violations['demo.legacy'])
