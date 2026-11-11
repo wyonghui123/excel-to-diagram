@@ -1,5 +1,5 @@
 -- 自动生成的 Schema
--- 生成时间: 2026-11-11 19:26:00.075282
+-- 生成时间: 2026-11-11 19:40:50.061184
 
 -- 地址: 结构化地址库（支持对象）：国家 / 省 / 市 / 区 / 街道 / 门牌 / 邮编分列 + 格式化全文；只被引用，不承载用途 / 角色
 CREATE TABLE IF NOT EXISTS addresses (
@@ -165,7 +165,7 @@ CREATE TABLE IF NOT EXISTS audit_logs (
     transaction_id VARCHAR(200),
     change_set_id VARCHAR(200),
     reason_code VARCHAR(200),
-    status VARCHAR(200) DEFAULT 'written' CHECK (status IN ('pending', 'written', 'failed')),
+    status VARCHAR(200) DEFAULT 'written',
     status_entered_at DATETIME,
     retry_count INTEGER DEFAULT 0,
     error_message TEXT,
@@ -4007,7 +4007,7 @@ CREATE TABLE IF NOT EXISTS users (
     primary_org_id INTEGER,
     password_hash VARCHAR(200),
     display_name VARCHAR(200) NOT NULL,
-    status VARCHAR(200) DEFAULT 'active' CHECK (status IN ('active', 'inactive', 'locked', 'frozen')),
+    status VARCHAR(200) DEFAULT 'active',
     sso_provider VARCHAR(200),
     sso_user_id VARCHAR(200),
     must_change_password INTEGER DEFAULT 0,

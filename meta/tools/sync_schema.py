@@ -22,7 +22,7 @@ from meta import registry, get_meta_object
 from meta.core.datasource import DataSource, DataSourceType, get_data_source, DataSourceFactory
 from meta.core.schema_generator import (
     SchemaGenerator, SchemaMigrator, sync_schema_from_meta,
-    enum_check_values, normalize_sql_type, parse_schema_text,
+    allowed_check_values, normalize_sql_type, parse_schema_text,
     rebuild_table_with_checks,
 )
 from meta.core.models import MetaObject, MetaField, FieldType, ObjectType
@@ -330,7 +330,7 @@ def build_expected_schema(meta_objects: List[MetaObject]) -> Dict[str, Dict[str,
                 continue
             columns[field.db_column] = {
                 "type": normalize_sql_type(generator._sql_type(field)),
-                "check": enum_check_values(field) or None,
+                "check": allowed_check_values(obj.table_name, field) or None,
             }
         expected[obj.table_name] = {"object": obj.id, "columns": columns}
     return expected

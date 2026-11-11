@@ -120,6 +120,21 @@ def test_column_definition_contains_check():
     assert 'CHECK (status IN (' in definition
 
 
+def test_runtime_status_columns_exempt_from_check():
+    """users/audit_logs.status 由运行时写入 archived/retried/success 等，不得生成 CHECK。"""
+    generator = SchemaGenerator('sqlite')
+    objects = [get_meta_object(oid) for oid in registry.list_objects()]
+    objects = {obj.table_name: obj for obj in objects if obj}
+    for table in ('users', 'audit_logs'):
+        sql = generator.generate_create_table(objects[table])
+        status_lines = [line for line in sql.splitlines() if 'status' in line]
+        assert not any('CHECK' in line for line in status_lines), table
+
+    expected = build_expected_schema(list(objects.values()))
+    assert expected['users']['columns']['status']['check'] is None
+    assert expected['audit_logs']['columns']['status']['check'] is None
+
+
 # ─────────────────────────────────────────────────────────────────────────────
 # 漂移比对
 # ─────────────────────────────────────────────────────────────────────────────
@@ -228,6 +243,32 @@ def test_v256_is_idempotent(tmp_path):
     before = _receipts_sql(db_path)
     assert migrate(str(db_path)) is True
     assert _receipts_sql(db_path) == before
+
+
+def test_v256_keeps_dependent_views_and_indexes(tmp_path):
+    """真实库有引用单据表的视图：重建表必须先降后升视图，且不丢索引/数据。"""
+    db_path = tmp_path / 'migration_view.db'
+    _create_legacy_receipts(db_path)
+    conn = sqlite3.connect(str(db_path))
+    conn.execute("CREATE INDEX idx_receipts_status ON receipts(status)")
+    conn.execute(
+        "CREATE VIEW receipt_brief_view AS SELECT code, status FROM receipts")
+    conn.commit()
+    conn.close()
+
+    assert migrate(str(db_path)) is True
+
+    conn = sqlite3.connect(str(db_path))
+    try:
+        assert conn.execute(
+            "SELECT code, status FROM receipt_brief_view").fetchall() == [('R-1', 'draft')]
+        indexes = {row[0] for row in conn.execute(
+            "SELECT name FROM sqlite_master WHERE type='index' AND tbl_name='receipts'")}
+        assert 'idx_receipts_status' in indexes
+        with pytest.raises(sqlite3.IntegrityError):
+            conn.execute("INSERT INTO receipts (code, status) VALUES ('R-2', 'bogus')")
+    finally:
+        conn.close()
 
 
 # ─────────────────────────────────────────────────────────────────────────────

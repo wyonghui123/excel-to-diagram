@@ -53,6 +53,18 @@ def enum_check_values(field: MetaField) -> List[str]:
     return values
 
 
+# 运行时内部状态（审计成败 / 账号冻结）由业务代码写入，不受 YAML 枚举约束；
+# 若自动生成 CHECK，会拦截 success/failure/denied 等合法写入，故豁免。
+CHECK_EXEMPT_COLUMNS = {("users", "status"), ("audit_logs", "status")}
+
+
+def allowed_check_values(table_name: Optional[str], field: MetaField) -> List[str]:
+    """该列允许生成的 CHECK 候选值（豁免列返回空 → 不生成 CHECK）。"""
+    if table_name and (table_name, field.db_column) in CHECK_EXEMPT_COLUMNS:
+        return []
+    return enum_check_values(field)
+
+
 # ==================== DDL 比对 / CHECK 补齐 ====================
 
 _CREATE_TABLE_RE = re.compile(
@@ -201,14 +213,25 @@ def rebuild_table_with_checks(db_path: str, table: str, checks: Dict[str, List[s
         index_sqls = [item[0] for item in conn.execute(
             "SELECT sql FROM sqlite_master WHERE type IN ('index','trigger') "
             "AND tbl_name=? AND sql IS NOT NULL", (table,))]
+        # 引用本表的视图：DROP TABLE 后视图失效（SQLite 会报
+        # "error in view ...: no such table"），必须先降后升。
+        view_sqls = [
+            (item[0], item[1]) for item in conn.execute(
+                "SELECT name, sql FROM sqlite_master WHERE type='view' AND sql IS NOT NULL")
+            if re.search(r"\b{0}\b".format(re.escape(table)), item[1], re.IGNORECASE)
+        ]
         conn.execute("PRAGMA foreign_keys=OFF")
         try:
             conn.execute("BEGIN")
+            for name, _sql in view_sqls:
+                conn.execute("DROP VIEW IF EXISTS {0}".format(name))
             conn.execute("CREATE TABLE {0}__new ({1})".format(table, ",".join(updated)))
             conn.execute("INSERT INTO {0}__new SELECT * FROM {0}".format(table))
             conn.execute("DROP TABLE {0}".format(table))
             conn.execute("ALTER TABLE {0}__new RENAME TO {0}".format(table))
             for sql in index_sqls:
+                conn.execute(sql)
+            for _name, sql in view_sqls:
                 conn.execute(sql)
             conn.execute("COMMIT")
         except Exception:
@@ -244,14 +267,15 @@ class SchemaGenerator:
             return "VARCHAR({0})".format(_field_max_length(field))
         return self.TYPE_MAPPING.get(field.field_type, "TEXT")
 
-    def _sql_check(self, field: MetaField) -> Optional[str]:
+    def _sql_check(self, field: MetaField,
+                   table_name: Optional[str] = None) -> Optional[str]:
         """列级 CHECK：enum_values 非空且 <=50 时渲染 `CHECK (col IN (...))`。
 
         本轮只对 SQLite 生效（MySQL/PG 的 CHECK 语法差异留待后续）。
         """
         if self.dialect != "sqlite":
             return None
-        values = enum_check_values(field)
+        values = allowed_check_values(table_name, field)
         if not values or len(values) > MAX_ENUM_CHECK_VALUES:
             return None
         quoted = ", ".join("'{0}'".format(v.replace("'", "''")) for v in values)
@@ -276,7 +300,7 @@ class SchemaGenerator:
             if field.db_column in seen_db_columns:
                 continue
             seen_db_columns.add(field.db_column)
-            col_def = self._generate_column_definition(field)
+            col_def = self._generate_column_definition(field, meta_object.table_name)
             columns.append(col_def)
         
         for relation in meta_object.relations:
@@ -378,7 +402,8 @@ class SchemaGenerator:
         
         return sql
     
-    def _generate_column_definition(self, field: MetaField) -> str:
+    def _generate_column_definition(self, field: MetaField,
+                                    table_name: Optional[str] = None) -> str:
         """生成列定义"""
         parts = [field.db_column]
         
@@ -404,7 +429,7 @@ class SchemaGenerator:
             else:
                 parts.append("DEFAULT {0}".format(field.default))
 
-        check = self._sql_check(field)
+        check = self._sql_check(field, table_name)
         if check:
             parts.append(check)
 
@@ -641,7 +666,7 @@ class SchemaMigrator:
                     for col_name in report["missing_columns"]:
                         field = next((f for f in obj.get_persistent_fields() if f.db_column == col_name), None)
                         if field:
-                            col_def = self.generator._generate_column_definition(field)
+                            col_def = self.generator._generate_column_definition(field, obj.table_name)
                             sql = "ALTER TABLE {0} ADD COLUMN {1}".format(obj.table_name, col_def)
                             executed_sql.append(sql)
                             if not dry_run:
