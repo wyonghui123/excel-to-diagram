@@ -1,0 +1,1120 @@
+# 采购发票 (Vendor Invoice) — W1
+# 依据: docs/specs/spec-vendor-invoice-object-model-2026-11-11.md
+#       §3 头字段 / §6 状态机 / §7 过账副作用 / §8 doc_flow 边 / §12 页面与动作
+#
+# 定位: 供应商来票的业务事实载体（发票 / 贷项凭证 / 借项通知单 / 取消单）。
+#       匹配结果与过账副作用由服务层写，前端只读；不承载付款域事实。
+#
+# 服务层不变量:
+#   R-VI-1   invoice_no 取号后不可变
+#   R-VI-7   头金额 = Σ 行金额（round_amount 口径）
+#   R-VI-9   红冲单必须回指原发票；反转类型 direction 与原类型相反
+#   R-VI-14  重复发票硬拦：supplier_account_id + normalized(supplier_invoice_no)
+#   R-VI-18  过账事务以 BEGIN IMMEDIATE 开启
+
+id: vendor_invoice
+name: 采购发票
+table_name: vendor_invoices
+description: 采购发票头（供应商来票 / 贷项 / 借项 / 取消单）
+display_name_field: invoice_no
+
+aspects:
+  - audit_aspect
+  - document_type_aspect
+
+semantics:
+  meaning: 采购发票
+  category: business_document
+  business_key: [invoice_no]
+  aliases:
+    - 应付发票
+    - 供应商发票
+    - Vendor Invoice
+
+deletion_policy:
+  mode: restrict
+  restrict_on: []
+  cascade_delete:
+    - vendor_invoice_line
+
+audit:
+  enabled: true
+  create:
+    enabled: true
+    fields: all
+  update:
+    enabled: true
+    fields: changed_only
+    exclude:
+      - id
+      - created_at
+      - updated_at
+  delete:
+    enabled: true
+    fields: business_only
+    exclude:
+      - id
+      - created_at
+      - updated_at
+  associate:
+    enabled: true
+  dissociate:
+    enabled: true
+
+org_scope:
+  mode: direct
+  field: org_id
+  function: accounting
+  write_check: true
+
+numbering:
+  no_field: invoice_no
+  date_field: invoice_date
+  type_table: type_definitions
+
+fields:
+  - id: id
+    name: ID
+    type: integer
+    db_column: id
+    required: true
+    unique: true
+    description: 技术主键
+    semantics:
+      meaning: 自增主键
+      primary_key: true
+
+  - id: invoice_no
+    name: 发票号
+    type: string
+    db_column: invoice_no
+    required: true
+    max_length: 30
+    description: 内部发票号（编号序列取号，创建后不可变）
+    semantics:
+      meaning: 发票号
+      data_category: code
+      immutable: true
+      filterable: true
+      filter_type: text
+      filter_label: 发票号
+      filter_scope: local
+    ui:
+      widget: text
+      editable: false
+
+  - id: document_type_id
+    name: 单据类型
+    type: integer
+    db_column: document_type_id
+    required: true
+    description: 单据类型（type_definitions，scope_bo=vendor_invoice）
+    semantics:
+      meaning: 采购发票单据类型
+      display:
+        type: association
+        target_type: type_definition
+        display_field: name
+    value_help:
+      source:
+        type: bo
+        target_bo: type_definition
+        value_field: id
+        display_field: name
+        code_field: code
+        apply_target_permissions: true
+        value_filter:
+          scope_bo: vendor_invoice
+          level: header
+          status: active
+      behavior:
+        multiple: false
+        validation: true
+        binding_strength: strict
+        min_search_length: 0
+      presentation:
+        result_type: dropdown
+        display_format: "{code} {name}"
+    ui:
+      widget: select
+      relation: type_definition
+      multiple: false
+
+  - id: document_category
+    name: 单据类别
+    type: string
+    db_column: document_category
+    required: true
+    max_length: 20
+    default: invoice
+    description: 由单据类型派生（invoice / credit_memo / debit_memo / cancellation）
+    enum_values:
+      - value: invoice
+        label: 发票
+        color: primary
+        category: active
+        is_initial: true
+      - value: credit_memo
+        label: 贷项凭证
+        color: warning
+        category: active
+      - value: debit_memo
+        label: 借项通知单
+        color: info
+        category: active
+      - value: cancellation
+        label: 取消单
+        color: danger
+        category: active
+    semantics:
+      meaning: 单据类别
+      immutable: true
+      filterable: true
+      filter_type: enum
+      filter_label: 单据类别
+      filter_scope: local
+    ui:
+      widget: select
+      editable: false
+
+  - id: direction
+    name: 方向
+    type: integer
+    db_column: direction
+    required: true
+    default: 1
+    description: 金额方向（1 正向 / -1 负向），由单据类型派生
+    semantics:
+      meaning: 金额方向
+      immutable: true
+    ui:
+      widget: number
+      editable: false
+
+  - id: invoice_date
+    name: 发票日期
+    type: date
+    db_column: invoice_date
+    required: true
+    description: 供应商发票日期（编号日期段基准）
+    semantics:
+      meaning: 发票日期
+      data_category: date
+      filterable: true
+      filter_type: date_range
+      filter_label: 发票日期
+      filter_scope: local
+    ui:
+      widget: date
+
+  - id: received_date
+    name: 收票日期
+    type: date
+    db_column: received_date
+    nullable: true
+    description: 我方收到发票的日期（匹配基准日）
+    semantics:
+      meaning: 收票日期
+      data_category: date
+    ui:
+      widget: date
+
+  - id: posting_date
+    name: 过账日期
+    type: date
+    db_column: posting_date
+    nullable: true
+    description: 过账日期，空则取发票日期
+    semantics:
+      meaning: 过账日期
+      data_category: date
+    ui:
+      widget: date
+
+  - id: status
+    name: 状态
+    type: string
+    db_column: status
+    required: true
+    max_length: 20
+    default: draft
+    description: 单据状态
+    enum_values:
+      - value: draft
+        label: 草稿
+        color: info
+        category: active
+        is_initial: true
+      - value: submitted
+        label: 已提交
+        color: warning
+        category: active
+      - value: posted
+        label: 已过账
+        color: success
+        category: active
+      - value: cancelled
+        label: 已取消
+        color: danger
+        category: terminal
+      - value: reversed
+        label: 已红冲
+        color: danger
+        category: terminal
+    semantics:
+      meaning: 单据状态
+      derived_from: match_status
+      filterable: true
+      filter_type: enum
+      filter_label: 状态
+      filter_scope: local
+    ui:
+      widget: select
+      editable: false
+
+  - id: match_status
+    name: 匹配状态
+    type: string
+    db_column: match_status
+    required: true
+    max_length: 20
+    default: unmatched
+    description: 头级匹配聚合结果
+    enum_values:
+      - value: unmatched
+        label: 未匹配
+        color: info
+        category: active
+        is_initial: true
+      - value: matched
+        label: 已匹配
+        color: success
+        category: active
+      - value: exception
+        label: 匹配异常
+        color: danger
+        category: active
+      - value: overridden
+        label: 例外放行
+        color: warning
+        category: active
+    semantics:
+      meaning: 匹配状态
+      filterable: true
+      filter_type: enum
+      filter_label: 匹配状态
+      filter_scope: local
+    ui:
+      widget: select
+      editable: false
+
+  - id: match_mode
+    name: 匹配模式
+    type: string
+    db_column: match_mode
+    required: true
+    max_length: 20
+    default: gr_based
+    description: 创建时从 vi_match_mode 参数解析的快照（po_based / gr_based）
+    enum_values:
+      - value: po_based
+        label: 按订单匹配
+        color: info
+        category: active
+      - value: gr_based
+        label: 按收货匹配
+        color: primary
+        category: active
+        is_initial: true
+    semantics:
+      meaning: 匹配模式快照
+      filterable: true
+      filter_type: enum
+      filter_label: 匹配模式
+      filter_scope: local
+    ui:
+      widget: select
+      editable: false
+
+  - id: supplier_account_id
+    name: 供应商
+    type: integer
+    db_column: supplier_account_id
+    required: true
+    description: 供应商往来单位（vendor_account.id，创建时快照）
+    semantics:
+      meaning: 供应商
+      display:
+        type: association
+        target_type: vendor_account
+        display_field: name
+      filterable: true
+      filter_type: relation
+      filter_label: 供应商
+      filter_scope: local
+    ui:
+      widget: select
+      relation: vendor_account
+      multiple: false
+
+  - id: supplier_party_id
+    name: 供应商主体
+    type: integer
+    db_column: supplier_party_id
+    required: true
+    description: 供应商主体（party.id，用于跨法人查询）
+    semantics:
+      meaning: 供应商主体
+      display:
+        type: association
+        target_type: party
+        display_field: name
+    ui:
+      widget: select
+      relation: party
+      multiple: false
+
+  - id: supplier_site_text
+    name: 供应商开票地址
+    type: string
+    db_column: supplier_site_text
+    nullable: true
+    max_length: 512
+    description: 供应商开票地址快照
+    semantics:
+      meaning: 供应商开票地址快照
+      data_category: text
+    ui:
+      widget: textarea
+      rows: 2
+
+  - id: supplier_tax_no
+    name: 供应商税号
+    type: string
+    db_column: supplier_tax_no
+    nullable: true
+    max_length: 64
+    description: 供应商税号快照
+    semantics:
+      meaning: 供应商税号
+      data_category: code
+    ui:
+      widget: text
+
+  - id: currency_id
+    name: 币种
+    type: integer
+    db_column: currency_id
+    required: true
+    description: 单据币种，必须等于来源采购订单币种
+    semantics:
+      meaning: 币种
+      display:
+        type: association
+        target_type: currency
+        display_field: name
+    ui:
+      widget: select
+      relation: currency
+      multiple: false
+
+  - id: exchange_rate
+    name: 汇率
+    type: number
+    db_column: exchange_rate
+    nullable: true
+    constraints:
+      - type: numeric_range
+        decimal_places: 8
+    description: 汇率快照
+    semantics:
+      meaning: 汇率
+    ui:
+      widget: number
+
+  - id: exchange_rate_type
+    name: 汇率类型
+    type: string
+    db_column: exchange_rate_type
+    nullable: true
+    max_length: 20
+    description: 汇率类型快照
+    semantics:
+      meaning: 汇率类型
+      data_category: code
+    ui:
+      widget: text
+
+  - id: exchange_rate_date
+    name: 汇率日期
+    type: date
+    db_column: exchange_rate_date
+    nullable: true
+    description: 汇率日期快照
+    semantics:
+      meaning: 汇率日期
+      data_category: date
+    ui:
+      widget: date
+
+  - id: purchase_org_id
+    name: 采购组织
+    type: integer
+    db_column: purchase_org_id
+    nullable: true
+    description: 采购组织（来源采购订单快照）
+    semantics:
+      meaning: 采购组织
+      display:
+        type: association
+        target_type: org
+        display_field: name
+      filterable: true
+      filter_type: relation
+      filter_label: 采购组织
+      filter_scope: local
+    ui:
+      widget: select
+      relation: org
+      multiple: false
+      clearable: true
+
+  - id: org_id
+    name: 财务组织
+    type: integer
+    db_column: org_id
+    required: true
+    description: 财务归属组织（org_scope 字段）
+    semantics:
+      meaning: 财务归属组织
+      display:
+        type: association
+        target_type: org
+        display_field: name
+    ui:
+      widget: select
+      relation: org
+      multiple: false
+
+  - id: supplier_invoice_no
+    name: 供应商发票号
+    type: string
+    db_column: supplier_invoice_no
+    nullable: true
+    max_length: 60
+    description: 供应商方发票号（外部业务键，用于重复发票检查）
+    semantics:
+      meaning: 供应商发票号
+      data_category: code
+      filterable: true
+      filter_type: text
+      filter_label: 供应商发票号
+      filter_scope: local
+    ui:
+      widget: text
+
+  - id: net_amount
+    name: 净额
+    type: number
+    db_column: net_amount
+    required: true
+    default: 0
+    constraints:
+      - type: numeric_range
+        decimal_places: 4
+    description: 不含税金额合计（Σ 行净额，系统算）
+    semantics:
+      meaning: 头净额
+    ui:
+      widget: number
+      editable: false
+
+  - id: tax_amount
+    name: 税额
+    type: number
+    db_column: tax_amount
+    required: true
+    default: 0
+    constraints:
+      - type: numeric_range
+        decimal_places: 4
+    description: 税额合计（Σ 行税额）
+    semantics:
+      meaning: 头税额
+    ui:
+      widget: number
+      editable: false
+
+  - id: gross_amount
+    name: 价税合计
+    type: number
+    db_column: gross_amount
+    required: true
+    default: 0
+    constraints:
+      - type: numeric_range
+        decimal_places: 4
+    description: 价税合计（net + tax）
+    semantics:
+      meaning: 头价税合计
+    ui:
+      widget: number
+      editable: false
+
+  - id: rounding_diff
+    name: 舍入差
+    type: number
+    db_column: rounding_diff
+    nullable: true
+    default: 0
+    constraints:
+      - type: numeric_range
+        decimal_places: 4
+    description: 舍入差（round_amount 口径）
+    semantics:
+      meaning: 舍入差
+    ui:
+      widget: number
+
+  - id: match_pricing_mode
+    name: 匹配计价模式
+    type: string
+    db_column: match_pricing_mode
+    required: true
+    max_length: 20
+    default: po_price
+    description: 价格校验基准（po_price / receipt_price / manual）
+    enum_values:
+      - value: po_price
+        label: PO 价
+        color: primary
+        category: active
+        is_initial: true
+      - value: receipt_price
+        label: 收货价
+        color: warning
+        category: active
+      - value: manual
+        label: 手工
+        color: info
+        category: active
+    semantics:
+      meaning: 匹配计价模式
+      filterable: true
+      filter_type: enum
+      filter_label: 匹配计价模式
+      filter_scope: local
+    ui:
+      widget: select
+
+  - id: match_exception_reason
+    name: 匹配异常原因
+    type: string
+    db_column: match_exception_reason
+    nullable: true
+    max_length: 200
+    description: 头级匹配异常原因码
+    enum_values:
+      - value: price_over_tolerance
+        label: 价格超容差
+        color: danger
+        category: active
+      - value: qty_over_receipt
+        label: 超收量
+        color: danger
+        category: active
+      - value: qty_over_order
+        label: 超订单量
+        color: danger
+        category: active
+      - value: no_receipt
+        label: 无收货
+        color: danger
+        category: active
+      - value: currency_mismatch
+        label: 币种不一致
+        color: danger
+        category: active
+      - value: supplier_mismatch
+        label: 供应商不一致
+        color: danger
+        category: active
+    semantics:
+      meaning: 匹配异常原因
+      data_category: code
+    ui:
+      widget: select
+      editable: false
+
+  - id: match_matched_at
+    name: 匹配时间
+    type: datetime
+    db_column: match_matched_at
+    nullable: true
+    description: 匹配通过时间（审计用）
+    semantics:
+      meaning: 匹配通过时间
+      data_category: datetime
+    ui:
+      widget: datetime
+
+  - id: match_matched_by
+    name: 匹配人
+    type: string
+    db_column: match_matched_by
+    nullable: true
+    max_length: 200
+    description: 匹配通过人
+    semantics:
+      meaning: 匹配通过人
+      data_category: code
+    ui:
+      widget: text
+      editable: false
+
+  - id: settlement_mode
+    name: 结算模式
+    type: string
+    db_column: settlement_mode
+    required: true
+    max_length: 20
+    default: supplier_invoice
+    description: 结算模式（本波仅 supplier_invoice；ers 预留）
+    enum_values:
+      - value: supplier_invoice
+        label: 供应商发票
+        color: primary
+        category: active
+        is_initial: true
+      - value: ers
+        label: 自动结算
+        color: info
+        category: active
+    semantics:
+      meaning: 结算模式
+      filterable: true
+      filter_type: enum
+      filter_label: 结算模式
+      filter_scope: local
+    ui:
+      widget: select
+
+  - id: reversal_of_invoice_id
+    name: 红冲原发票
+    type: integer
+    db_column: reversal_of_invoice_id
+    nullable: true
+    description: 红冲 / 取消单指向的原发票
+    semantics:
+      meaning: 红冲原发票
+      display:
+        type: association
+        target_type: vendor_invoice
+        display_field: invoice_no
+    ui:
+      widget: select
+      relation: vendor_invoice
+      multiple: false
+      hidden_in_form: true
+
+  - id: remark
+    name: 备注
+    type: text
+    db_column: remark
+    nullable: true
+    description: 备注
+    semantics:
+      meaning: 备注
+      data_category: text
+    ui:
+      widget: textarea
+      rows: 3
+
+  - id: created_at
+    name: 创建时间
+    type: datetime
+    db_column: created_at
+    description: 创建时间
+    semantics:
+      meaning: 记录创建时间
+      audit_field: true
+    ui:
+      widget: datetime
+      hidden_in_form: true
+      editable: false
+
+  - id: created_by
+    name: 创建人
+    type: string
+    db_column: created_by
+    max_length: 200
+    description: 创建人
+    semantics:
+      meaning: 记录创建人
+      audit_field: true
+    ui:
+      widget: text
+      hidden_in_form: true
+      editable: false
+
+  - id: updated_at
+    name: 更新时间
+    type: datetime
+    db_column: updated_at
+    description: 更新时间
+    semantics:
+      meaning: 记录更新时间
+      audit_field: true
+    ui:
+      widget: datetime
+      hidden_in_form: true
+      editable: false
+
+  - id: updated_by
+    name: 更新人
+    type: string
+    db_column: updated_by
+    max_length: 200
+    description: 更新人
+    semantics:
+      meaning: 记录更新人
+      audit_field: true
+    ui:
+      widget: text
+      hidden_in_form: true
+      editable: false
+
+# 状态机：提交 / 过账 / 取消 / 红冲由 vendor_invoice_guard_interceptor 委托
+# vendor_invoice_service 执行（跨表副作用唯一写入口）。
+# 过账前置：match_status ∈ {matched, overridden} 且重复票硬拦通过（§6.1）。
+rules:
+  - id: submit_vendor_invoice
+    name: 提交发票
+    type: state_transition
+    state_field: status
+    from_states: [draft]
+    to_state: submitted
+    triggers: [before_update]
+    ui_hints:
+      label: 提交
+      icon: send
+      confirm_message: "提交后将执行三单匹配并锁定发票内容，确定提交吗？"
+
+  - id: post_vendor_invoice
+    name: 过账
+    type: state_transition
+    state_field: status
+    from_states: [submitted]
+    to_state: posted
+    triggers: [before_update]
+    ui_hints:
+      label: 过账
+      icon: check_circle
+      highlight: true
+      confirm_message: "过账将写入采购订单 / 收货的已开票量并固化匹配结果，且不可撤销（只能红冲），确定过账吗？"
+
+  - id: cancel_vendor_invoice
+    name: 取消发票
+    type: state_transition
+    state_field: status
+    from_states: [draft, submitted]
+    to_state: cancelled
+    triggers: [before_update]
+    ui_hints:
+      label: 取消
+      icon: close
+      confirm_message: "取消后发票作废，确定取消吗？"
+
+  - id: reverse_vendor_invoice
+    name: 红冲发票
+    type: state_transition
+    state_field: status
+    from_states: [posted]
+    to_state: reversed
+    triggers: [before_update]
+    ui_hints:
+      label: 红冲
+      icon: undo
+      confirm_message: "红冲将生成一张贷项凭证并回退已开票量，原发票不可再修改、不可再次红冲；确定红冲吗？"
+      input_fields:
+        - field: remark
+          label: 红冲原因
+          type: textarea
+          required: true
+          placeholder: 请填写红冲原因
+
+# 逆向声明（平台统一逆向引擎）：红冲 = 建贷项凭证 + 回滚已开票量 +
+# 写反向事实边，由 reversal_orchestrator 按固定步骤执行。
+doc_effect:
+  posting:
+    event_key: "vendor_invoice:{id}:post"
+    direction_field: direction
+
+# 行来源策略：document_role → 允许的行来源种类（§4.3）
+# 内核在插入行时按头表角色校验；声明了策略但角色缺失 → 默认拒绝（fail-closed）
+line_source_policy:
+  invoice: [purchase_order_schedule, receipt_line, manual]
+  credit_memo: [invoice_line, return_line, manual]
+  debit_memo: [invoice_line, manual]
+  cancellation: [invoice_line]
+
+indexes:
+  - fields: [invoice_no]
+    unique: true
+    name: uq_vendor_invoice_no
+  - fields: [reversal_of_invoice_id]
+    type: partial
+    unique: true
+    condition: "reversal_of_invoice_id IS NOT NULL"
+    name: uq_vendor_invoice_reversal
+  - fields: [status, invoice_date]
+    name: idx_vendor_invoice_status_date
+  - fields: [supplier_account_id, status]
+    name: idx_vendor_invoice_supplier_status
+  - fields: [supplier_account_id, supplier_invoice_no]
+    name: idx_vendor_invoice_supplier_no
+  - fields: [document_type_id]
+    name: idx_vendor_invoice_document_type
+  - fields: [purchase_org_id]
+    name: idx_vendor_invoice_purchase_org
+  - fields: [org_id, status]
+    name: idx_vendor_invoice_org_status
+
+relations:
+  - id: vendor_invoice_to_document_type
+    name: 单据类型
+    type: reference
+    target: type_definition
+    source_field: document_type_id
+    target_field: id
+    cardinality: N:1
+    description: 单据类型引用
+  - id: vendor_invoice_to_supplier
+    name: 供应商
+    type: reference
+    target: vendor_account
+    source_field: supplier_account_id
+    target_field: id
+    cardinality: N:1
+    description: 供应商往来单位引用
+  - id: vendor_invoice_to_party
+    name: 供应商主体
+    type: reference
+    target: party
+    source_field: supplier_party_id
+    target_field: id
+    cardinality: N:1
+    description: 供应商主体引用
+  - id: vendor_invoice_to_currency
+    name: 币种
+    type: reference
+    target: currency
+    source_field: currency_id
+    target_field: id
+    cardinality: N:1
+    description: 币种引用
+  - id: vendor_invoice_to_org
+    name: 财务组织
+    type: reference
+    target: org
+    source_field: org_id
+    target_field: id
+    cardinality: N:1
+    description: 财务归属组织引用
+  - id: vendor_invoice_to_purchase_org
+    name: 采购组织
+    type: reference
+    target: org
+    source_field: purchase_org_id
+    target_field: id
+    cardinality: N:1
+    description: 采购组织引用（可空）
+  - id: vendor_invoice_to_reversal
+    name: 红冲原单
+    type: reference
+    target: vendor_invoice
+    source_field: reversal_of_invoice_id
+    target_field: id
+    cardinality: N:1
+    description: 红字 / 取消单指向原发票（可空）
+
+ui_view_config:
+  list:
+    detail_mode: drawer
+    title: 采购发票
+    columns:
+      - field: invoice_no
+        width: 170
+        sortable: true
+      - field: invoice_date
+        width: 130
+        sortable: true
+      - field: supplier_account_id
+        width: 180
+        filterable: true
+        filter_type: select
+      - field: supplier_invoice_no
+        width: 160
+      - field: currency_id
+        width: 100
+      - field: gross_amount
+        width: 130
+      - field: match_status
+        width: 110
+        filterable: true
+        filter_type: select
+      - field: status
+        width: 110
+        filterable: true
+        filter_type: select
+      - field: purchase_org_id
+        width: 140
+      - field: org_id
+        width: 140
+    filters:
+      - field: document_category
+      - field: status
+      - field: match_status
+      - field: supplier_account_id
+      - field: invoice_date
+    selection:
+      enabled: true
+      mode: multiple
+    defaultSort:
+      field: invoice_no
+      order: desc
+    actions:
+      - id: create
+        label: 新建采购发票
+        icon: plus
+        type: primary
+        permission: vendor_invoice:create
+      - id: export
+        label: 导出
+        icon: download
+        type: default
+  form:
+    title: 采购发票信息
+    layout: vertical
+    sections:
+      - title: 基本信息
+        columns:
+          - fields: [invoice_no, document_type_id]
+          - fields: [invoice_date, received_date]
+          - fields: [status, supplier_invoice_no]
+      - title: 供应商
+        columns:
+          - fields: [supplier_account_id, supplier_party_id]
+          - fields: [supplier_tax_no]
+          - fields: [supplier_site_text]
+      - title: 金额
+        columns:
+          - fields: [currency_id, exchange_rate]
+          - fields: [exchange_rate_type, exchange_rate_date]
+          - fields: [net_amount, tax_amount]
+          - fields: [gross_amount, rounding_diff]
+      - title: 组织与匹配
+        columns:
+          - fields: [org_id, purchase_org_id]
+          - fields: [match_mode, match_pricing_mode]
+          - fields: [settlement_mode]
+      - title: 备注
+        columns:
+          - fields: [remark]
+  detail:
+    showChangeHistory: true
+    showRelations: true
+    actions:
+      - id: match
+        label: 执行匹配
+        icon: swap
+        variant: secondary
+        permission: vendor_invoice:match
+        action: vendor_invoice.match
+      - id: override_match
+        label: 例外放行
+        icon: unlock
+        variant: secondary
+        permission: vendor_invoice:override_match
+        action: vendor_invoice.override_match
+      - id: override_duplicate
+        label: 重复票放行
+        icon: unlock
+        variant: secondary
+        permission: vendor_invoice:override_duplicate
+        action: vendor_invoice.override_duplicate
+      - id: create_credit
+        label: 创建贷项
+        icon: plus
+        variant: secondary
+        permission: vendor_invoice:create_credit_memo
+        action: vendor_invoice.create_credit_from_invoice
+      - id: create_debit
+        label: 创建借项
+        icon: plus
+        variant: secondary
+        permission: vendor_invoice:create_debit_memo
+        action: vendor_invoice.create_debit_from_invoice
+    facets:
+      - title: 基本信息
+        id: vendor_invoice_basic
+        type: fieldGroup
+        fields:
+          - invoice_no
+          - document_type_id
+          - document_category
+          - direction
+          - invoice_date
+          - received_date
+          - posting_date
+          - status
+          - supplier_invoice_no
+      - title: 供应商
+        id: vendor_invoice_supplier
+        type: fieldGroup
+        fields:
+          - supplier_account_id
+          - supplier_party_id
+          - supplier_tax_no
+          - supplier_site_text
+      - title: 金额
+        id: vendor_invoice_amount
+        type: fieldGroup
+        fields:
+          - currency_id
+          - exchange_rate
+          - exchange_rate_type
+          - exchange_rate_date
+          - net_amount
+          - tax_amount
+          - gross_amount
+          - rounding_diff
+      - title: 匹配与结算
+        id: vendor_invoice_match
+        type: fieldGroup
+        fields:
+          - match_mode
+          - match_pricing_mode
+          - match_status
+          - match_exception_reason
+          - match_matched_at
+          - match_matched_by
+          - settlement_mode
+      - title: 系统信息
+        id: vendor_invoice_system
+        type: fieldGroup
+        fields:
+          - org_id
+          - purchase_org_id
+          - reversal_of_invoice_id
+          - remark
+          - created_at
+          - updated_at
+  child_sections:
+    - child_object: vendor_invoice_line
+      title: 发票行
+      display: tab
+      pageSize: 10
+      useMetaList: true
+      enableDetail: true
+      enableAutoCrud: true

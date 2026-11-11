@@ -1,0 +1,745 @@
+# 采购发票行 (Vendor Invoice Line) — W1
+# 依据: docs/specs/spec-vendor-invoice-object-model-2026-11-11.md
+#       §4 行字段 / §4.3 line_source_policy / §5 匹配
+#
+# 定位: 发票行，来源由头表 document_role 经 line_source_policy 约束：
+#       invoice  → purchase_order_schedule / receipt_line / manual
+#       credit_memo → invoice_line / return_line / manual
+#       debit_memo  → invoice_line / manual
+#       cancellation→ invoice_line
+#
+# 服务层不变量:
+#   R-VI-2  匹配锚点互斥（schedule_id / receipt_line_id / invoice_line_id / return_line_id）
+#   R-VI-7  行金额由服务层按数量与快照单价重算，前端只读
+#   R-VI-8  头币种 = 来源 PO 币种；行 currency_id 必须为空或等于头币种
+#   R-VI-10 超收量 qty_over_receipt = max(qty - qty_invoiceable, 0)
+
+id: vendor_invoice_line
+name: 采购发票行
+table_name: vendor_invoice_lines
+description: 采购发票行（来源：采购订单计划行 / 收货行 / 原发票行 / 退货行 / 手工）
+display_name_field: id
+parent_object: vendor_invoice
+
+hierarchy:
+  parent_field: invoice_id
+
+semantics:
+  meaning: 采购发票行
+  category: business_document_line
+  business_key: []
+  aliases:
+    - 发票行
+    - Vendor Invoice Line
+
+deletion_policy:
+  mode: cascade
+
+audit:
+  enabled: true
+  create:
+    enabled: true
+    fields: all
+  update:
+    enabled: true
+    fields: changed_only
+    exclude:
+      - id
+      - created_at
+      - updated_at
+  delete:
+    enabled: true
+    fields: business_only
+    exclude:
+      - id
+      - created_at
+      - updated_at
+
+org_scope:
+  mode: chain
+  via: invoice_id
+  host: vendor_invoice
+  function: accounting
+  write_check: true
+
+fields:
+  - id: id
+    name: ID
+    type: integer
+    db_column: id
+    required: true
+    unique: true
+    description: 技术主键
+    semantics:
+      meaning: 自增主键
+      primary_key: true
+
+  - id: invoice_id
+    name: 采购发票
+    type: integer
+    db_column: invoice_id
+    required: true
+    description: 所属采购发票（父字段）
+    semantics:
+      meaning: 所属采购发票
+      display:
+        type: association
+        target_type: vendor_invoice
+        display_field: invoice_no
+    ui:
+      widget: select
+      relation: vendor_invoice
+      hidden_in_form: true
+
+  - id: line_no
+    name: 行号
+    type: integer
+    db_column: line_no
+    required: true
+    description: 发票内行号（从 1 递增）
+    semantics:
+      meaning: 行号
+      data_category: code
+      filterable: true
+      filter_type: number
+      filter_label: 行号
+      filter_scope: local
+    ui:
+      widget: number
+
+  - id: schedule_id
+    name: 匹配锚点（订单计划行）
+    type: integer
+    db_column: schedule_id
+    nullable: true
+    description: purchase_order_schedule.id，匹配锚点
+    semantics:
+      meaning: 来源采购订单计划行
+      display:
+        type: association
+        target_type: purchase_order_schedule
+        display_field: id
+      filterable: true
+      filter_type: relation
+      filter_label: 订单计划行
+      filter_scope: local
+    ui:
+      widget: select
+      relation: purchase_order_schedule
+      multiple: false
+
+  - id: order_line_id
+    name: 订单行
+    type: integer
+    db_column: order_line_id
+    nullable: true
+    description: PO 行（随 schedule_id 快照，只读）
+    semantics:
+      meaning: 来源采购订单行
+      display:
+        type: association
+        target_type: purchase_order_line
+        display_field: line_no
+    ui:
+      widget: select
+      relation: purchase_order_line
+      multiple: false
+      editable: false
+
+  - id: receipt_line_id
+    name: 收货行
+    type: integer
+    db_column: receipt_line_id
+    nullable: true
+    description: 收货行 trace（gr_based 下必填，po_based 可空）
+    semantics:
+      meaning: 来源收货行
+      display:
+        type: association
+        target_type: receipt_line
+        display_field: id
+      filterable: true
+      filter_type: relation
+      filter_label: 收货行
+      filter_scope: local
+    ui:
+      widget: select
+      relation: receipt_line
+      multiple: false
+
+  - id: invoice_line_id
+    name: 原发票行
+    type: integer
+    db_column: invoice_line_id
+    nullable: true
+    description: 被核销的原发票行（贷项 / 借项 / 取消单）
+    semantics:
+      meaning: 被核销的原发票行
+      display:
+        type: association
+        target_type: vendor_invoice_line
+        display_field: line_no
+    ui:
+      widget: select
+      relation: vendor_invoice_line
+      multiple: false
+
+  - id: return_line_id
+    name: 退货行
+    type: integer
+    db_column: return_line_id
+    nullable: true
+    description: 退货收货行（VENDOR_RETURN 的收货行）
+    semantics:
+      meaning: 来源退货行
+      display:
+        type: association
+        target_type: receipt_line
+        display_field: id
+    ui:
+      widget: select
+      relation: receipt_line
+      multiple: false
+
+  - id: item_id
+    name: 物料
+    type: integer
+    db_column: item_id
+    nullable: true
+    description: 物料（随锚点快照；服务采购可空）
+    semantics:
+      meaning: 物料
+      display:
+        type: association
+        target_type: item
+        display_field: name
+    ui:
+      widget: select
+      relation: item
+      multiple: false
+      clearable: true
+
+  - id: item_group_id
+    name: 物料组
+    type: integer
+    db_column: item_group_id
+    nullable: true
+    description: 物料组快照（容差解析维度之一）
+    semantics:
+      meaning: 物料组
+      display:
+        type: association
+        target_type: item_group
+        display_field: name
+    ui:
+      widget: select
+      relation: item_group
+      multiple: false
+      clearable: true
+
+  - id: line_type_id
+    name: 行类型
+    type: integer
+    db_column: line_type_id
+    nullable: true
+    description: 行类型（type_definitions，scope_bo=vendor_invoice + level=line）
+    semantics:
+      meaning: 发票行类型
+      display:
+        type: association
+        target_type: type_definition
+        display_field: name
+    value_help:
+      source:
+        type: bo
+        target_bo: type_definition
+        value_field: id
+        display_field: name
+        code_field: code
+        apply_target_permissions: true
+        value_filter:
+          scope_bo: vendor_invoice
+          level: line
+          status: active
+      behavior:
+        multiple: false
+        validation: true
+        binding_strength: strict
+        min_search_length: 0
+      presentation:
+        result_type: dropdown
+        display_format: "{code} {name}"
+    ui:
+      widget: select
+      relation: type_definition
+      multiple: false
+
+  - id: description
+    name: 描述
+    type: string
+    db_column: description
+    nullable: true
+    max_length: 500
+    description: 行描述
+    semantics:
+      meaning: 行描述
+      data_category: text
+    ui:
+      widget: textarea
+      rows: 2
+
+  - id: qty
+    name: 开票数量
+    type: number
+    db_column: qty
+    required: true
+    default: 0
+    constraints:
+      - type: numeric_range
+        decimal_places: 4
+    description: 开票数量（按 uom_id）
+    semantics:
+      meaning: 开票数量
+    ui:
+      widget: number
+
+  - id: uom_id
+    name: 计量单位
+    type: integer
+    db_column: uom_id
+    nullable: true
+    description: 计量单位
+    semantics:
+      meaning: 计量单位
+      display:
+        type: association
+        target_type: uom
+        display_field: name
+    ui:
+      widget: select
+      relation: uom
+      multiple: false
+
+  - id: unit_price
+    name: 单价
+    type: number
+    db_column: unit_price
+    required: true
+    default: 0
+    constraints:
+      - type: numeric_range
+        decimal_places: 6
+    description: 单价（含税口径见 price_includes_tax）
+    semantics:
+      meaning: 开票单价
+    ui:
+      widget: number
+
+  - id: price_includes_tax
+    name: 单价含税
+    type: integer
+    db_column: price_includes_tax
+    required: true
+    default: 0
+    description: 单价是否含税（1 含税 / 0 不含税）
+    semantics:
+      meaning: 单价含税标志
+      data_category: flag
+    ui:
+      widget: switch
+
+  - id: net_amount
+    name: 净额
+    type: number
+    db_column: net_amount
+    required: true
+    default: 0
+    constraints:
+      - type: numeric_range
+        decimal_places: 4
+    description: 行不含税金额（服务层按数量与单价重算）
+    semantics:
+      meaning: 行净额
+    ui:
+      widget: number
+      editable: false
+
+  - id: tax_amount
+    name: 税额
+    type: number
+    db_column: tax_amount
+    required: true
+    default: 0
+    constraints:
+      - type: numeric_range
+        decimal_places: 4
+    description: 行税额（本波直录）
+    semantics:
+      meaning: 行税额
+    ui:
+      widget: number
+
+  - id: gross_amount
+    name: 价税合计
+    type: number
+    db_column: gross_amount
+    required: true
+    default: 0
+    constraints:
+      - type: numeric_range
+        decimal_places: 4
+    description: 行价税合计（= net + tax）
+    semantics:
+      meaning: 行价税合计
+    ui:
+      widget: number
+      editable: false
+
+  - id: po_unit_price
+    name: PO 单价
+    type: number
+    db_column: po_unit_price
+    nullable: true
+    constraints:
+      - type: numeric_range
+        decimal_places: 6
+    description: 采购订单单价快照（匹配基准，不可变）
+    semantics:
+      meaning: PO 单价快照
+      immutable: true
+    ui:
+      widget: number
+      editable: false
+
+  - id: price_diff_amount
+    name: 价格差异额
+    type: number
+    db_column: price_diff_amount
+    nullable: true
+    constraints:
+      - type: numeric_range
+        decimal_places: 4
+    description: (unit_price - po_unit_price) × qty（系统算）
+    semantics:
+      meaning: 价格差异额
+    ui:
+      widget: number
+      editable: false
+
+  - id: price_diff_percent
+    name: 价格差异(%)
+    type: number
+    db_column: price_diff_percent
+    nullable: true
+    constraints:
+      - type: numeric_range
+        decimal_places: 4
+    description: 价格差异百分比（容差判定用，系统算）
+    semantics:
+      meaning: 价格差异百分比
+    ui:
+      widget: number
+      editable: false
+
+  - id: qty_over_receipt
+    name: 超收量
+    type: number
+    db_column: qty_over_receipt
+    nullable: true
+    constraints:
+      - type: numeric_range
+        decimal_places: 4
+    description: 超收量（qty - qty_invoiceable，≤0 置 0，系统算）
+    semantics:
+      meaning: 超收量
+    ui:
+      widget: number
+      editable: false
+
+  - id: match_status
+    name: 匹配状态
+    type: string
+    db_column: match_status
+    required: true
+    max_length: 20
+    default: unmatched
+    description: 行级匹配结果（聚合到头的判定依据）
+    enum_values:
+      - value: unmatched
+        label: 未匹配
+        color: info
+        category: active
+        is_initial: true
+      - value: matched
+        label: 已匹配
+        color: success
+        category: active
+      - value: exception
+        label: 匹配异常
+        color: danger
+        category: active
+      - value: overridden
+        label: 例外放行
+        color: warning
+        category: active
+    semantics:
+      meaning: 行匹配状态
+      filterable: true
+      filter_type: enum
+      filter_label: 匹配状态
+      filter_scope: local
+    ui:
+      widget: select
+      editable: false
+
+  - id: match_exception_reason
+    name: 匹配异常原因
+    type: string
+    db_column: match_exception_reason
+    nullable: true
+    max_length: 200
+    description: 行级例外原因码
+    semantics:
+      meaning: 行匹配异常原因
+      data_category: code
+    ui:
+      widget: text
+      editable: false
+
+  - id: override_reason
+    name: 放行原因
+    type: string
+    db_column: override_reason
+    nullable: true
+    max_length: 200
+    description: 例外放行原因（match_status=overridden 时必填）
+    semantics:
+      meaning: 例外放行原因
+      data_category: text
+    ui:
+      widget: textarea
+      rows: 2
+
+  - id: overridden_by
+    name: 放行人
+    type: string
+    db_column: overridden_by
+    nullable: true
+    max_length: 200
+    description: 放行人
+    semantics:
+      meaning: 放行人
+      data_category: code
+    ui:
+      widget: text
+      editable: false
+
+  - id: overridden_at
+    name: 放行时间
+    type: datetime
+    db_column: overridden_at
+    nullable: true
+    description: 放行时间
+    semantics:
+      meaning: 放行时间
+      data_category: datetime
+    ui:
+      widget: datetime
+      editable: false
+
+  - id: tax_code_id
+    name: 税码
+    type: integer
+    db_column: tax_code_id
+    nullable: true
+    description: 税码（TBD-4，本波可空）
+    semantics:
+      meaning: 税码
+      display:
+        type: association
+        target_type: tax_code
+        display_field: name
+    ui:
+      widget: select
+      relation: tax_code
+      multiple: false
+      clearable: true
+
+  - id: currency_id
+    name: 行币种
+    type: integer
+    db_column: currency_id
+    nullable: true
+    description: 行币种：必须为空或等于头币种（多币种行不采纳）
+    semantics:
+      meaning: 行币种
+      display:
+        type: association
+        target_type: currency
+        display_field: name
+    ui:
+      widget: select
+      relation: currency
+      multiple: false
+      clearable: true
+
+  - id: created_at
+    name: 创建时间
+    type: datetime
+    db_column: created_at
+    description: 创建时间
+    semantics:
+      meaning: 记录创建时间
+      audit_field: true
+    ui:
+      widget: datetime
+      hidden_in_form: true
+      editable: false
+
+  - id: created_by
+    name: 创建人
+    type: string
+    db_column: created_by
+    max_length: 200
+    description: 创建人
+    semantics:
+      meaning: 记录创建人
+      audit_field: true
+    ui:
+      widget: text
+      hidden_in_form: true
+      editable: false
+
+  - id: updated_at
+    name: 更新时间
+    type: datetime
+    db_column: updated_at
+    description: 更新时间
+    semantics:
+      meaning: 记录更新时间
+      audit_field: true
+    ui:
+      widget: datetime
+      hidden_in_form: true
+      editable: false
+
+  - id: updated_by
+    name: 更新人
+    type: string
+    db_column: updated_by
+    max_length: 200
+    description: 更新人
+    semantics:
+      meaning: 记录更新人
+      audit_field: true
+    ui:
+      widget: text
+      hidden_in_form: true
+      editable: false
+
+indexes:
+  - fields: [invoice_id, line_no]
+    unique: true
+    name: uq_line_no
+  - fields: [schedule_id]
+    name: idx_vendor_invoice_line_schedule
+  - fields: [order_line_id]
+    name: idx_vendor_invoice_line_order
+  - fields: [receipt_line_id]
+    name: idx_vendor_invoice_line_receipt
+  - fields: [invoice_line_id]
+    name: idx_vendor_invoice_line_invoice_line
+  - fields: [return_line_id]
+    name: idx_vendor_invoice_line_return
+  - fields: [item_id]
+    name: idx_vendor_invoice_line_item
+
+relations:
+  - id: vendor_invoice_line_to_header
+    name: 采购发票
+    type: reference
+    target: vendor_invoice
+    source_field: invoice_id
+    target_field: id
+    cardinality: N:1
+    description: 所属采购发票
+  - id: vendor_invoice_line_to_schedule
+    name: 订单计划行
+    type: reference
+    target: purchase_order_schedule
+    source_field: schedule_id
+    target_field: id
+    cardinality: N:1
+    description: 匹配锚点（可空）
+  - id: vendor_invoice_line_to_receipt
+    name: 收货行
+    type: reference
+    target: receipt_line
+    source_field: receipt_line_id
+    target_field: id
+    cardinality: N:1
+    description: 收货行 trace（可空）
+  - id: vendor_invoice_line_to_invoice_line
+    name: 原发票行
+    type: reference
+    target: vendor_invoice_line
+    source_field: invoice_line_id
+    target_field: id
+    cardinality: N:1
+    description: 被核销的原发票行（可空）
+
+ui_view_config:
+  skip_auto_menu: true
+  list:
+    title: 发票行
+    columns:
+      - field: line_no
+        width: 80
+      - field: schedule_id
+        width: 150
+      - field: receipt_line_id
+        width: 150
+      - field: item_id
+        width: 160
+      - field: qty
+        width: 110
+      - field: uom_id
+        width: 90
+      - field: unit_price
+        width: 110
+      - field: po_unit_price
+        width: 110
+      - field: price_diff_amount
+        width: 120
+      - field: net_amount
+        width: 120
+      - field: tax_amount
+        width: 110
+      - field: match_status
+        width: 110
+    selection:
+      enabled: true
+      mode: multiple
+  form:
+    title: 发票行信息
+    layout: vertical
+    sections:
+      - title: 锚点
+        columns:
+          - fields: [schedule_id, order_line_id]
+          - fields: [receipt_line_id, return_line_id]
+          - fields: [invoice_line_id]
+      - title: 数量与金额
+        columns:
+          - fields: [item_id, item_group_id]
+          - fields: [qty, uom_id]
+          - fields: [unit_price, price_includes_tax]
+          - fields: [net_amount, tax_amount]
+          - fields: [gross_amount, tax_code_id]
+          - fields: [currency_id]
+      - title: 匹配
+        columns:
+          - fields: [po_unit_price, price_diff_amount]
+          - fields: [price_diff_percent, qty_over_receipt]
+          - fields: [match_status, match_exception_reason]
+          - fields: [override_reason]

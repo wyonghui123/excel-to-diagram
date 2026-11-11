@@ -141,6 +141,16 @@ def register_all_bo_actions(registry=None):
         reverse_handler as customer_invoice_reverse_handler,
     )
 
+    # W5 采购发票三单匹配（spec-vendor-invoice-object-model §12 / §13）
+    from meta.services.vendor_invoice_actions import (
+        match_handler as vendor_invoice_match_handler,
+        override_match_handler as vendor_invoice_override_match_handler,
+        override_duplicate_handler as vendor_invoice_override_duplicate_handler,
+        submit_handler as vendor_invoice_submit_handler,
+        post_handler as vendor_invoice_post_handler,
+        cancel_handler as vendor_invoice_cancel_handler,
+    )
+
     # M4 调拨单: 下达 / 发货 / 收货 / 取消 / 关闭（spec-transfer-order-object-model §6/§7）
     # + 审批提交 / 撤回 / 通过 / 驳回（TBD-9，approval_status 正交于 status）
     from meta.services.transfer_order_actions import (
@@ -1782,6 +1792,147 @@ def register_all_bo_actions(registry=None):
             },
         },
         output_schema=_customer_invoice_output_schema,
+        requires_auth=True,
+        idempotent=True,
+    )
+
+    # ==================== 40: 采购发票三单匹配（W5） ====================
+    _vendor_invoice_output_schema = {
+        'type': 'object',
+        'properties': {
+            'id': {'type': 'integer'},
+            'invoice_no': {'type': 'string'},
+            'status': {'type': 'string'},
+            'match_status': {'type': 'string'},
+            'match_mode': {'type': 'string'},
+            'duplicate_of_id': {'type': 'integer'},
+            'lines': {'type': 'array', 'items': {'type': 'object'}},
+            'amounts': {'type': 'object'},
+        },
+    }
+    registry.register(
+        'vendor_invoice.match',
+        vendor_invoice_match_handler,
+        governance='audit',
+        description='执行采购发票三单匹配（PO 计划行 / 收货行 → 发票行，只算不落库）',
+        object_type='vendor_invoice',
+        category='business',
+        permission_required='vendor_invoice:match',
+        input_schema={
+            'type': 'object',
+            'properties': {
+                'invoice_id': {'type': 'integer'},
+                'id': {'type': 'integer'},
+                'persist': {'type': 'boolean'},
+            },
+        },
+        output_schema=_vendor_invoice_output_schema,
+        requires_auth=True,
+        idempotent=True,
+    )
+    registry.register(
+        'vendor_invoice.override_match',
+        vendor_invoice_override_match_handler,
+        governance='audit',
+        description='匹配差异例外放行（须填写原因，留痕后再提交/过账）',
+        object_type='vendor_invoice',
+        category='business',
+        permission_required='vendor_invoice:override_match',
+        input_schema={
+            'type': 'object',
+            'required': ['reason'],
+            'properties': {
+                'invoice_id': {'type': 'integer'},
+                'id': {'type': 'integer'},
+                'reason': {'type': 'string'},
+                'override_reason': {'type': 'string'},
+                'line_ids': {'type': 'array', 'items': {'type': 'integer'}},
+            },
+        },
+        output_schema=_vendor_invoice_output_schema,
+        requires_auth=True,
+        idempotent=True,
+    )
+    registry.register(
+        'vendor_invoice.override_duplicate',
+        vendor_invoice_override_duplicate_handler,
+        governance='audit',
+        description='重复发票例外放行（同一供应商发票号重复，须填写原因并留痕）',
+        object_type='vendor_invoice',
+        category='business',
+        permission_required='vendor_invoice:override_duplicate',
+        input_schema={
+            'type': 'object',
+            'required': ['reason'],
+            'properties': {
+                'invoice_id': {'type': 'integer'},
+                'id': {'type': 'integer'},
+                'reason': {'type': 'string'},
+                'override_reason': {'type': 'string'},
+                'duplicate_override_reason': {'type': 'string'},
+            },
+        },
+        output_schema=_vendor_invoice_output_schema,
+        requires_auth=True,
+        idempotent=False,
+    )
+    registry.register(
+        'vendor_invoice.submit',
+        vendor_invoice_submit_handler,
+        governance='audit',
+        description='提交采购发票（草稿 → 已提交；匹配必须无 exception）',
+        object_type='vendor_invoice',
+        category='business',
+        permission_required='vendor_invoice:submit',
+        input_schema={
+            'type': 'object',
+            'properties': {
+                'invoice_id': {'type': 'integer'},
+                'id': {'type': 'integer'},
+            },
+        },
+        output_schema=_vendor_invoice_output_schema,
+        requires_auth=True,
+        idempotent=True,
+    )
+    registry.register(
+        'vendor_invoice.post',
+        vendor_invoice_post_handler,
+        governance='audit',
+        description='过账采购发票（已提交 → 已过账；写 billing / ap_match 单据流边）',
+        object_type='vendor_invoice',
+        category='business',
+        permission_required='vendor_invoice:post',
+        input_schema={
+            'type': 'object',
+            'properties': {
+                'invoice_id': {'type': 'integer'},
+                'id': {'type': 'integer'},
+                'posting_date': {'type': 'string'},
+            },
+        },
+        output_schema=_vendor_invoice_output_schema,
+        requires_auth=True,
+        idempotent=True,
+    )
+    registry.register(
+        'vendor_invoice.cancel',
+        vendor_invoice_cancel_handler,
+        governance='audit',
+        description='取消采购发票（草稿/已提交 → 已取消；已过账须走冲销）',
+        object_type='vendor_invoice',
+        category='business',
+        permission_required='vendor_invoice:cancel',
+        input_schema={
+            'type': 'object',
+            'required': ['reason'],
+            'properties': {
+                'invoice_id': {'type': 'integer'},
+                'id': {'type': 'integer'},
+                'reason': {'type': 'string'},
+            },
+        },
+        output_schema=_vendor_invoice_output_schema,
         requires_auth=True,
         idempotent=True,
     )
