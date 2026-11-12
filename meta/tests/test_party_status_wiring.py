@@ -98,7 +98,8 @@ def pst_ds(tmp_path):
     # [FIX] orgs.parent_id 为真自引用外键（9018570a 落库）⇒ 探针父行该列须显式 NULL，
     #   'PROBE' 会触发 FOREIGN KEY constraint failed 使整类 setup 报错
     sample = {'code': 'ORG-PROBE', 'name': '探针组织', 'org_type': 'company',
-              'org_scope': 'internal', 'parent_id': None}
+              'org_scope': 'internal', 'parent_id': None,
+              'status': 'active'}   # orgs.status 有 CHECK('active','inactive')，'PROBE' 会触发约束失败
     ds.insert('orgs', {c: (1 if c == 'id' else sample.get(c, 'PROBE'))
                        for c in org_cols})
     # [2026-10-20] party_internal 谓词补齐「org 具备 legal_entity 职能」⇒ 视图依赖

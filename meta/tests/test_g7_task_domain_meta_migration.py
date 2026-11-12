@@ -98,6 +98,7 @@ EXPECTED_COLUMNS = {
         "workflow_version INTEGER NOT NULL",
         "name VARCHAR(200)",
         "trigger_kind VARCHAR(200)",
+        "idempotency_key VARCHAR(200)",
         "definition_snapshot TEXT",
         "variables TEXT",
         "inputs TEXT",
@@ -199,6 +200,7 @@ EXPECTED_INDEXES = {
         "CREATE INDEX IF NOT EXISTS idx_task_template_wf ON task_templates(workflow_id, workflow_version)",
     ],
     "workflow_run": [
+        "CREATE UNIQUE INDEX IF NOT EXISTS uq_run_idempotency ON workflow_runs(idempotency_key)",
         "CREATE INDEX IF NOT EXISTS idx_run_workflow ON workflow_runs(workflow_id)",
         "CREATE INDEX IF NOT EXISTS idx_run_key ON workflow_runs(workflow_key)",
     ],
@@ -378,7 +380,7 @@ class TestV154Provisioning:
         expected_index_names = {
             "uq_workflow_key_version", "idx_workflow_key",
             "uq_task_template_node", "idx_task_template_wf",
-            "idx_run_workflow", "idx_run_key",
+            "idx_run_workflow", "idx_run_key", "uq_run_idempotency",
             "uq_tasks_code", "idx_tasks_status", "idx_tasks_inbox",
             "idx_tasks_assignee", "idx_tasks_run", "idx_tasks_parent",
             "idx_tasks_doc",

@@ -2240,22 +2240,67 @@ def pytest_runtest_makereport(item, call):
 # (_pool=None)。同进程后续用例再用共享 app 请求时抛
 # 'NoneType' object has no attribute 'reader' / cursor, 造成大批伪失败
 # (实测 test_datasource_cache 跑完后同 worker 全部 500)。
-# 处理: 每个用例前扫描 meta.* 模块级引用, 把持有已关闭实例的引用重置为 None,
-# 让各模块惰性重建连接。
+# 处理: 每个用例前扫描 meta.* 模块级引用 / create_app 期一次性装配的服务,
+# 把持有已关闭实例的引用重绑到可用实例。
+# [FIX 2026-11-12] 原实现把引用重置为 None, 但 bo_framework._data_source 只在
+# create_app 时赋值, 不会惰性重建; manage_api 的 *_service 更完全没被处理。
+# 结果: 缓存清理用例之后同 worker 的共享 app 请求继续抛
+# 'NoneType' object has no attribute 'execute'/'transaction' 与 'reader'
+# (实测 93+11 条伪失败)。改为直接重绑到 fresh 平台库实例。
 
 
 def _is_closed_data_source(obj):
     return getattr(obj, '_pool', None) is None and hasattr(obj, '_pool')
 
 
+_DATA_SOURCE_ATTRS = ('ds', '_ds', 'data_source', '_data_source')
+_REBIND_SKIP_TYPES = (str, bytes, int, float, bool, dict, list, tuple, set,
+                      frozenset, type)
+
+
+def _rebind_closed_data_source_holders(fresh):
+    """把模块级服务单例里已关闭的数据源引用重绑到 fresh。"""
+    for name, mod in list(sys.modules.items()):
+        if mod is None or not name.startswith('meta.'):
+            continue
+        for attr_name, holder in list(vars(mod).items()):
+            if holder is None or isinstance(holder, _REBIND_SKIP_TYPES) or callable(holder):
+                continue
+            for ds_attr in _DATA_SOURCE_ATTRS:
+                try:
+                    inner = getattr(holder, ds_attr)
+                except Exception:
+                    continue
+                if inner is not None and _is_closed_data_source(inner):
+                    try:
+                        setattr(holder, ds_attr, fresh)
+                    except Exception:
+                        pass
+
+
 def _heal_stale_data_sources():
+    fresh_ds = None
+
+    def _fresh():
+        nonlocal fresh_ds
+        if fresh_ds is None:
+            # 注意: 不能用 get_platform_data_source(), 它会返回
+            # bo_framework 里那个已关闭的实例。
+            from meta.core.datasource import get_data_source
+            from meta.core.db_path import get_meta_db_path
+            fresh_ds = get_data_source('sqlite', database=get_meta_db_path())
+        return fresh_ds
+
+    rebind_needed = False
+
     # 1) 扫描所有 meta.* 模块的模块级数据源缓存
     for name, mod in list(sys.modules.items()):
         if mod is None or not name.startswith('meta.'):
             continue
         ds = getattr(mod, '_data_source', None)
         if ds is not None and _is_closed_data_source(ds):
-            setattr(mod, '_data_source', None)
+            setattr(mod, '_data_source', _fresh())
+            rebind_needed = True
         provider = getattr(mod, '_auth_provider', None)
         if provider is not None and _is_closed_data_source(getattr(provider, '_data_source', None)):
             setattr(mod, '_auth_provider', None)
@@ -2264,7 +2309,8 @@ def _heal_stale_data_sources():
     try:
         from meta.core.bo_framework import bo_framework as _bf
         if _is_closed_data_source(getattr(_bf, '_data_source', None)):
-            _bf._data_source = None
+            _bf._data_source = _fresh()
+            rebind_needed = True
     except Exception:
         pass
 
@@ -2276,6 +2322,18 @@ def _heal_stale_data_sources():
         writer_ds = getattr(writer, '_ds', None)
         if writer_ds is not None and _is_closed_data_source(writer_ds):
             writer.set_data_source(get_platform_data_source())
+    except Exception:
+        pass
+
+    # 4) create_app 期一次性装配的服务(manage_api 的 *_service 等)仍持有已关闭实例
+    if rebind_needed:
+        _rebind_closed_data_source_holders(_fresh())
+
+    # 5) 表名白名单缓存可能被「清空 registry 的用例」构建成空集且不再失效,
+    #    导致后续用例 validate_table_name('business_objects') 抛 ValueError。
+    try:
+        from meta.core.table_name_validator import invalidate_cache
+        invalidate_cache()
     except Exception:
         pass
 

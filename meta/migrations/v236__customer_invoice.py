@@ -456,7 +456,7 @@ def _do_backfill(conn):
            SET billing_relevance = CASE
                  WHEN billing_method = 'milestone'
                   AND EXISTS (SELECT 1 FROM {1} s
-                               WHERE s.order_line_id = {0}.id
+                               WHERE s.line_id = {0}.id
                                  AND s.schedule_kind = 'billing')
                  THEN 'plan'
                  ELSE 'delivery'
@@ -758,7 +758,7 @@ def verify(db_path: Path) -> bool:
                     SELECT COUNT(*) FROM {0} ol
                      WHERE ol.billing_relevance='plan'
                        AND NOT EXISTS (SELECT 1 FROM {1} s
-                                        WHERE s.order_line_id=ol.id
+                                        WHERE s.line_id=ol.id
                                           AND s.schedule_kind='billing')
                     """.format(ORDER_LINE_TABLE, ORDER_SCHEDULE_TABLE)
                 ).fetchone()[0]

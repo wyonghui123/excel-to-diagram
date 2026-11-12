@@ -486,11 +486,11 @@ def _build_project_db(path):
 
         # G6：交货单按 project_id 进入 360（空值不归集），planned_ship_date 倒序
         seed_row(conn, 'shipments', id=51, delivery_no='DN-001', order_id=11,
-                 project_id=1, status='planned', planned_ship_date='2026-02-10')
+                 project_id=1, status='draft', planned_ship_date='2026-02-10')
         seed_row(conn, 'shipments', id=52, delivery_no='DN-002', order_id=11,
                  project_id=1, status='shipped', planned_ship_date='2026-01-15')
         seed_row(conn, 'shipments', id=53, delivery_no='DN-003', order_id=13,
-                 project_id=None, status='planned', planned_ship_date='2026-03-05')
+                 project_id=None, status='draft', planned_ship_date='2026-03-05')
         conn.commit()
     finally:
         conn.close()

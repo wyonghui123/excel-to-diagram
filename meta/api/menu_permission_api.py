@@ -284,7 +284,9 @@ def get_visible_menu_tree():
             ).fetchall()
             user_perms = {r[0] for r in perm_rows}
 
-        has_super = '*' in user_perms
+        # 超级管理员口径与 @admin_required / is_admin 保持一致：DB 权限集含 '*'，
+        # 或登录令牌本身持有 '*'（令牌签发时即由 DB 权限集派生）。
+        has_super = '*' in user_perms or is_admin(user)
 
         # [Spec16 Plan D 2026-09-02] 直接授予的菜单: role_menu_permissions → permission_set_menu_permissions
         granted_menu_codes = set()
