@@ -26,6 +26,7 @@ from meta.services.chain_owner_resolver import (
     resolve_root_owner,
     resolve_subordinate_owner as _chain_resolve_subordinate_owner,
 )
+from meta.services.condition_evaluator import ALLOWED_FIELDS, ConditionEvaluator
 
 logger = logging.getLogger(__name__)
 
@@ -39,6 +40,11 @@ RESOURCE_INDEPENDENT = 'independent'   # 独立资源 (product, user, role) — 
 RESOURCE_ASSOCIATION = 'association'   # 关联资源 (relationship) — 不继承, 取两端并集
 RESOURCE_SUBORDINATE = 'subordinate'   # 附属资源 (annotation, audit_log) — 继承 parent.owner
 RESOURCE_HIERARCHY = 'hierarchy'       # 层级资源 (version, domain, sub_domain) — 向下展开
+
+# [R-MM-04 §6.2] 关系感知授权求值模式 (三枚举)
+INHERIT_MODES = ('none', 'endpoint_union', 'explicit')
+DEFAULT_INHERIT_MODE = 'endpoint_union'
+MAX_ASSOCIATION_INHERIT_DEPTH = 2
 
 # Resource 元数据: BO → {type, parent_field?, parent_bo?, table_name}
 RESOURCE_METADATA_MAP: Dict[str, Dict[str, Any]] = {
@@ -66,6 +72,8 @@ RESOURCE_METADATA_MAP: Dict[str, Dict[str, Any]] = {
         'type': RESOURCE_ASSOCIATION, 'table': 'relationships',
         'source_field': 'source_bo_id',
         'target_field': 'target_bo_id',
+        # [R-MM-04] explicit 模式按 relation_code 引用 permission_rules
+        'relation_field': 'relation_code',
     },
 
     # Subordinate (附属资源)
@@ -106,6 +114,8 @@ class ResourceInheritanceEngine:
                          (仅用于方法签名校验, 实际查询时再检查)
         """
         self._ds = data_source
+        # [R-MM-04 R18] 最近一次关联可见性判定轨迹 (decided_by 唯一)
+        self._last_decision: Dict[str, Any] = {}
 
     # ========================================================================
     # 规则 1: 向下继承 (inherit_children=1)
@@ -317,60 +327,248 @@ class ResourceInheritanceEngine:
         resource_id: int,
         resource_type: str,
         user_scope: Dict[str, Set[int]],
+        inherit_mode: Optional[str] = None,
+        max_depth: int = 2,
+        auth_config: Optional[Dict[str, Any]] = None,
+        user_id: Optional[int] = None,
     ) -> bool:
-        """[规则 3] Association 资源: 任一端在 user_scope 内 → 可见
+        """[规则 3 + R-MM-04] Association 资源可见性判定
 
-        Spec §3.6.1: Association (relationship) 表达对象关系, 取两端并集 (任一端可见即可见)
+        Spec §3.6.1 + §6.2: Association (relationship) 默认取两端并集 (任一端可见即可见)
+        Spec §6.4 R16-R19: 支持 inherit_mode 三枚举 + 求值顺序 + max_depth ≤ 2
 
         Args:
             resource_id: relationship.id
             resource_type: 'relationship' (or 其他 Association)
             user_scope: {'product': {1}, 'version': {1, 2}, ...}
+            inherit_mode: 'none' / 'endpoint_union' / 'explicit' (缺省 endpoint_union)
+            max_depth: 关系继承最大深度, 仅允许 1/2, 超出明确报错
+            auth_config: relationship.authorization 段 (含 inherit_mode)
+            user_id: 保留参数 (供 explicit 条件模板使用)
 
         Returns:
-            True 表示可见, False 表示两端都不在 scope
+            True 表示可见, False 表示不可见 (Secure-by-Default)
+
+        Raises:
+            ValueError: max_depth 超过 MAX_ASSOCIATION_INHERIT_DEPTH
         """
+        if max_depth not in (1, MAX_ASSOCIATION_INHERIT_DEPTH):
+            raise ValueError(
+                f'[R-MM-04] max_depth={max_depth} exceeds limit '
+                f'{MAX_ASSOCIATION_INHERIT_DEPTH}'
+            )
+
+        mode = self._resolve_inherit_mode(inherit_mode, auth_config)
+        self._last_decision = {
+            'resource_id': resource_id,
+            'resource_type': resource_type,
+            'inherit_mode': mode,
+            'max_depth': max_depth,
+            'user_id': user_id,
+            'decided_by': 'default_deny',
+            'allowed': False,
+        }
+
         if self._ds is None:
+            self._last_decision['reason'] = 'no_data_source'
             return False
+
         meta = RESOURCE_METADATA_MAP.get(resource_type)
         if not meta or meta.get('type') != RESOURCE_ASSOCIATION:
             # 非 association 资源, 退化为: resource_id 在 user_scope 中?
-            return any(resource_id in vals for vals in user_scope.values())
+            allowed = any(resource_id in vals for vals in user_scope.values())
+            self._last_decision.update(
+                decided_by='association.non_association', allowed=allowed
+            )
+            return allowed
 
         table = meta['table']
         source_field = meta.get('source_field', 'source_bo_id')
         target_field = meta.get('target_field', 'target_bo_id')
+        relation_field = meta.get('relation_field')
 
         try:
-            row = self._ds.execute(
-                f'SELECT {source_field}, {target_field} FROM {table} WHERE id = ? LIMIT 1',
-                [resource_id],
-            ).fetchone()
-            if not row:
+            row, relation_code = self._fetch_association_row(
+                table, source_field, target_field, relation_field, resource_id
+            )
+            if row is None:
+                self._last_decision['reason'] = 'relationship_not_found'
                 return False
             source_id, target_id = row[0], row[1]
+            self._last_decision.update(
+                source_bo_id=source_id,
+                target_bo_id=target_id,
+                relation_code=relation_code,
+            )
 
-            # 默认两端都是 business_object 类型, 需反查 BO 所属的 product/version/...
-            # 简化: 任一端 ID 在 user_scope 中 → 可见
-            # 实际生产应反查 BO → sub_domain → domain → version → product 链
-            for endpoint_id in (source_id, target_id):
-                if endpoint_id is None:
-                    continue
-                # 反查 endpoint 所属的 product_id (沿 chain)
-                product_id = self._resolve_endpoint_product_id(endpoint_id)
-                if product_id is not None:
-                    if 'product' in user_scope and product_id in user_scope['product']:
-                        return True
-                # 兼容: 直接 ID 匹配 (测试 fixture 简化场景)
-                for dim_vals in user_scope.values():
-                    if endpoint_id in dim_vals:
-                        return True
+            # R17 求值顺序: is_denied → 直接规则 → 关系继承 → 默认拒绝
+            if mode == 'explicit':
+                decided = self._evaluate_relation_rules(
+                    relation_code, resource_id, source_id, target_id, user_id
+                )
+                if decided is not None:
+                    self._last_decision.update(
+                        decided_by=decided['decided_by'],
+                        allowed=decided['allowed'],
+                        rule_id=decided.get('rule_id'),
+                    )
+                    return bool(decided['allowed'])
+
+            # none: 仅 source 端; endpoint_union(缺省): 两端并集
+            endpoints = (source_id,) if mode == 'none' else (source_id, target_id)
+            if self._any_endpoint_visible(endpoints, user_scope, max_depth):
+                self._last_decision.update(
+                    decided_by='association.inherit', allowed=True
+                )
+                return True
+
+            self._last_decision['decided_by'] = 'default_deny'
             return False
         except Exception as e:
             logger.debug(
                 f'[P5-T2 check_association_visibility] {resource_type}({resource_id}) failed: {e}'
             )
+            self._last_decision['reason'] = f'error: {e}'
             return False
+
+    def get_last_decision(self) -> Dict[str, Any]:
+        """返回最近一次关联可见性判定的 trace 副本 (R18 decided_by)"""
+        return dict(self._last_decision)
+
+    def _resolve_inherit_mode(
+        self,
+        inherit_mode: Optional[str],
+        auth_config: Optional[Dict[str, Any]],
+    ) -> str:
+        """解析 inherit_mode: 显式形参 > auth_config > 缺省; 未知值告警后回落"""
+        raw = inherit_mode
+        if raw is None and auth_config:
+            raw = auth_config.get('inherit_mode')
+        if raw is None:
+            return DEFAULT_INHERIT_MODE
+        normalized = str(raw).strip().lower()
+        if normalized not in INHERIT_MODES:
+            logger.warning(
+                "[R-MM-04] unknown inherit_mode '%s', fallback to %s",
+                raw,
+                DEFAULT_INHERIT_MODE,
+            )
+            return DEFAULT_INHERIT_MODE
+        return normalized
+
+    def _fetch_association_row(
+        self,
+        table: str,
+        source_field: str,
+        target_field: str,
+        relation_field: Optional[str],
+        resource_id: int,
+    ) -> Any:
+        """读取 relationship 行; 兼容 relation_field 不存在的老库"""
+        if relation_field:
+            try:
+                row = self._ds.execute(
+                    f'SELECT {source_field}, {target_field}, {relation_field} '
+                    f'FROM {table} WHERE id = ? LIMIT 1',
+                    [resource_id],
+                ).fetchone()
+                relation_code = ''
+                if row is not None and len(row) > 2:
+                    relation_code = row[2] or ''
+                return row, relation_code
+            except Exception as e:
+                logger.debug(
+                    f'[R-MM-04] relation_field {relation_field} unavailable: {e}'
+                )
+        row = self._ds.execute(
+            f'SELECT {source_field}, {target_field} FROM {table} WHERE id = ? LIMIT 1',
+            [resource_id],
+        ).fetchone()
+        return row, ''
+
+    def _any_endpoint_visible(
+        self,
+        endpoint_ids: Any,
+        user_scope: Dict[str, Set[int]],
+        max_depth: int,
+    ) -> bool:
+        """任一端点在 user_scope 内 → 可见; max_depth=1 仅 product 级, 2 含直接 ID 匹配"""
+        for endpoint_id in endpoint_ids:
+            if endpoint_id is None:
+                continue
+            product_id = self._resolve_endpoint_product_id(endpoint_id)
+            if (
+                product_id is not None
+                and 'product' in user_scope
+                and product_id in user_scope['product']
+            ):
+                return True
+            if max_depth >= 2:
+                for dim_vals in user_scope.values():
+                    if endpoint_id in dim_vals:
+                        return True
+        return False
+
+    def _evaluate_relation_rules(
+        self,
+        relation_code: str,
+        resource_id: int,
+        source_id: Optional[int],
+        target_id: Optional[int],
+        user_id: Optional[int] = None,
+    ) -> Optional[Dict[str, Any]]:
+        """[R16/R17] explicit 模式: 求值 permission_rules 中引用同一 relation_code 的规则
+
+        口径: resource_type = 'relationship:<relation_code>' (不新增列/不新增声明位)
+        返回 None 表示无命中, 由调用方回落到关系继承 / 默认拒绝。
+        """
+        if not relation_code:
+            self._last_decision['reason'] = 'explicit_without_relation_code'
+            return None
+        try:
+            rows = self._ds.execute(
+                'SELECT id, condition, is_denied FROM permission_rules '
+                'WHERE resource_type = ? ORDER BY is_denied DESC, id ASC',
+                [f'relationship:{relation_code}'],
+            ).fetchall()
+        except Exception as e:
+            logger.debug(f'[R-MM-04] load permission_rules failed: {e}')
+            self._last_decision['reason'] = f'permission_rules_unavailable: {e}'
+            return None
+
+        resource = {
+            'id': resource_id,
+            'relation_code': relation_code,
+            'source_bo_id': source_id,
+            'target_bo_id': target_id,
+            'resource_type': 'relationship',
+            'created_by': user_id,
+        }
+        evaluator = ConditionEvaluator(
+            allowed_fields=ALLOWED_FIELDS
+            | {'relation_code', 'source_bo_id', 'target_bo_id'}
+        )
+        for rule in rows:
+            rule_id, condition, is_denied = rule[0], rule[1], rule[2]
+            try:
+                matched = evaluator.evaluate(condition or '', resource)
+            except Exception as e:
+                logger.debug(f'[R-MM-04] evaluate rule {rule_id} failed: {e}')
+                matched = False
+            if not matched:
+                continue
+            if is_denied:
+                return {
+                    'allowed': False,
+                    'decided_by': 'permission_rule.is_denied',
+                    'rule_id': rule_id,
+                }
+            return {
+                'allowed': True,
+                'decided_by': 'permission_rule.direct',
+                'rule_id': rule_id,
+            }
+        return None
 
     def _resolve_endpoint_product_id(self, bo_id: int) -> Optional[int]:
         """反查 business_object 所属的 product_id (沿 chain)"""

@@ -12,8 +12,19 @@ class ConcurrentModificationError(Exception):
 
 
 class FieldPolicyViolationError(Exception):
-    """字段策略违反异常 — FieldPolicy 校验失败"""
-    pass
+    """字段策略违反异常 — FieldPolicy 校验失败
+
+    [R-MM-03 R12] 状态矩阵导致的写入拒绝使用 `field_not_writable_in_state`，
+    与普通 `FIELD_NOT_EDITABLE` 区分，便于前端定位「已过账不可改」而非权限不足。
+    """
+
+    code = 'FIELD_NOT_EDITABLE'
+    status_code = 400
+
+    def __init__(self, message: str = "", code: str = None):
+        super().__init__(message)
+        if code:
+            self.code = code
 
 
 class ValidationFailedError(Exception):

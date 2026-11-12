@@ -100,6 +100,9 @@ class SemanticAnnotation:
     examples: List[str] = field(default_factory=list)
     aliases: List[str] = field(default_factory=list)
     category: str = ""
+    # R-MM-01（Spec §3.2）：关联语义类型，仅 relationship / associations 使用；
+    # 空串 = 未声明（关系资源按 association 兜底，其它语义不受影响）
+    kind: str = ""
     hierarchy_level: int = 0
     custom: Dict[str, Any] = field(default_factory=dict)
 

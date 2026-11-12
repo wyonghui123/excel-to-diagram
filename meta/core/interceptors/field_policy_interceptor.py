@@ -46,7 +46,10 @@ class FieldPolicyInterceptor(Interceptor):
 
         if not validation_result.valid:
             from meta.core.exceptions import FieldPolicyViolationError
-            raise FieldPolicyViolationError(validation_result.get_error_message())
+            # [R-MM-03 R12] 透传首个错误的 error_code（如 field_not_writable_in_state）。
+            first_code = validation_result.errors[0].error_code if validation_result.errors else None
+            raise FieldPolicyViolationError(
+                validation_result.get_error_message(), code=first_code)
 
     def after_action(self, context: ActionContext) -> None:
         pass

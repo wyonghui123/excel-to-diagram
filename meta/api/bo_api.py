@@ -1436,6 +1436,7 @@ def query_associations_bo(object_type, obj_id, association_name):
         search=search,
         filters=filters,
         ordering=ordering,
+        kind=request.args.get('kind'),  # [R-MM-01 §3.3] 关联语义过滤，缺省不过滤
     )
 
     if result.success:
@@ -1465,6 +1466,7 @@ def query_associations_v2(object_type, obj_id, association_name):
         search=search,
         filters=filters,
         ordering=ordering,
+        kind=request.args.get('kind'),  # [R-MM-01 §3.3] 关联语义过滤，缺省不过滤
     )
 
     if result.success:
@@ -1484,6 +1486,7 @@ def count_associations_v2(object_type, obj_id, association_name):
         params={
             'src_id': obj_id,
             'association_name': association_name,
+            'kind': request.args.get('kind'),  # [R-MM-01 §3.3]
         },
     )
 

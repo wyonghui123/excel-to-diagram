@@ -22,6 +22,16 @@ except ImportError:
     )
 
 
+#: 预置角色（permission_sets.code 的唯一真源）。
+#: [R-MM-02 R8] lint_metamodel --actions 复用此常量校验动作声明中的 role_any，
+#: 避免 lint 直读 DB，也避免角色码在脚本与 lint 之间双写。
+SEED_ROLES = (
+    ('admin', '系统管理员', '拥有所有权限', True),
+    ('editor', '编辑者', '可创建和编辑数据', True),
+    ('viewer', '查看者', '只读权限', True),
+)
+
+
 def get_db():
     conn = sqlite3.connect(DB_PATH)
     conn.row_factory = sqlite3.Row
@@ -152,13 +162,7 @@ def seed_roles(conn):
     # V1 简化: 删 is_super_admin 字段
     # "拥有 * 权限的角色" 即视为 admin, 不再单独存 is_super_admin 标志
     # (spec-auth-object-category-v2-2026-06-10.md FR-V1-002)
-    roles = [
-        ('admin', '系统管理员', '拥有所有权限', True),
-        ('editor', '编辑者', '可创建和编辑数据', True),
-        ('viewer', '查看者', '只读权限', True),
-    ]
-
-    for code, name, desc, is_system in roles:
+    for code, name, desc, is_system in SEED_ROLES:
         cursor.execute(
             "INSERT OR IGNORE INTO permission_sets (code, name, description, is_system) VALUES (?, ?, ?, ?)",
             (code, name, desc, is_system)
@@ -169,7 +173,7 @@ def seed_roles(conn):
         )
 
     conn.commit()
-    print(f"Seeded {len(roles)} roles")
+    print(f"Seeded {len(SEED_ROLES)} roles")
 
 
 def seed_permissions(conn):

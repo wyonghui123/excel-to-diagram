@@ -1011,7 +1011,6 @@ class ImportExportService:
                     # 配合 "update - 更新" 文字已足够表达"待更新"语义
                     if protect_sheet:
                         op_cell.protection = Protection(locked=False)
-                    op_mode_validation.add(op_cell)
 
                 for col_idx, header in enumerate(headers[col_offset:], 1 + col_offset):
                     field_id = header_to_field.get(header, header)
@@ -1064,6 +1063,12 @@ class ImportExportService:
                     elif actual_col_idx in editable_columns:
                         if protect_sheet:
                             cell.protection = Protection(locked=False)
+
+            # [perf-2026-11-12] 批量范围添加: 原在行循环内逐行 op_mode_validation.add(op_cell)，
+            # openpyxl MultiCellRange.add 每次 __contains__ 线性扫描已登记范围 → O(N²)，
+            # annotation 等大表导出实测 95s+（4 文件联合运行触发 600s STALL）。
+            if include_operation_mode and sheet_row_count > 0:
+                op_mode_validation.add(f"A2:A{sheet_row_count + 1}")
 
             print(f"[Export] {obj.name} 数据写入完成，共 {sheet_row_count} 行")
             

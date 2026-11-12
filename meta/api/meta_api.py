@@ -169,6 +169,14 @@ def get_object(object_type: str):
             'path': action.path,
             'description': action.description,
             'parameters': _dataclass_to_dict(action.parameters),
+            # [R-MM-02 A-02-3] 完整动作声明可直接读取，前端「动作详情」不再硬编码
+            'instance_scope': action.instance_scope.value,
+            'object_types': list(action.object_types),
+            'params': list(action.params),
+            'preconditions': dict(action.preconditions),
+            'effects': list(action.effects),
+            'emits': list(action.emits),
+            'audit': action.audit,
         })
 
     version = _ensure_fresh_meta()

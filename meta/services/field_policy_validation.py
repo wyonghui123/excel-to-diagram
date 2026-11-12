@@ -302,7 +302,18 @@ class FieldPolicyValidationInterceptor:
         
         field = self._get_field(field_id)
         field_name = getattr(field, 'name', field_id) if field else field_id
-        
+
+        # [R-MM-03 R12] 状态矩阵导致的不可写单独成码，不静默忽略，也不与权限问题混淆。
+        state_policy = self.engine._state_policy(field_id, context)
+        if state_policy in ('hidden', 'readonly'):
+            return ValidationError(
+                field_id=field_id,
+                field_name=field_name,
+                message=(f"字段 '{field_name}' 在状态 '{context.state}' 下不可写入"
+                         f"（state_field_policies.{context.state}.{state_policy}）"),
+                error_code="field_not_writable_in_state"
+            )
+
         # 生成错误消息
         if context.object_context and context.object_context.mutability == 'locked':
             message = f"字段 '{field_name}' 不可修改（对象已锁定）"

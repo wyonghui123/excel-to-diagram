@@ -115,6 +115,8 @@ class AssociationDefinition:
     max_cardinality: Optional[int] = None
     allow_reassign: bool = False
     readonly: bool = False  # [FIX 2026-06-09] 详情页/列表页用：true 时隐藏移除/解绑按钮
+    # [R-MM-01] 逐条关联语义类型（Spec §3.2）；空串 = association（零行为变化）
+    kind: str = ""
 
 from meta.core.models import (
     MetaObject,
@@ -203,6 +205,7 @@ from meta.core.models_enums import (
     SEMANTICS_CATEGORY_ALIASES,
     ARCHETYPE_TO_BO_CATEGORY,
     BO_CATEGORY_VALUE_MAP,
+    normalize_association_kind,
 )
 
 
@@ -430,6 +433,20 @@ def parse_semantics(data: Dict[str, Any]) -> SemanticAnnotation:
     """解析语义标注"""
     if not data:
         return SemanticAnnotation()
+
+    # [R-MM-01 R1] kind 五枚举受控校验：空 = 未声明；未知取值告警后置空（按未声明处理）
+    kind = str(data.get("kind") or "").strip()
+    if kind:
+        normalized_kind = normalize_association_kind(kind)
+        if normalized_kind is None:
+            logger.warning(
+                "[R24] semantics.kind=%r 不在受控枚举内"
+                "（association/hierarchy/reference/master_detail/derived），按未声明处理",
+                kind,
+            )
+            kind = ""
+        else:
+            kind = normalized_kind.value
     
     return SemanticAnnotation(
         meaning=data.get("meaning", ""),
@@ -439,6 +456,7 @@ def parse_semantics(data: Dict[str, Any]) -> SemanticAnnotation:
         examples=data.get("examples", []),
         aliases=data.get("aliases", []),
         category=data.get("category", ""),
+        kind=kind,
         hierarchy_level=data.get("hierarchy_level", 0),
         custom=data.get("custom", {}),
         # [P3 2026-10-29] 敏感度分级 + 字段级权限位（缺省空串 = 未标注 / 不受限）
@@ -1595,9 +1613,24 @@ def parse_association(data: Dict[str, Any]) -> AssociationDefinition:
                 params=action_data.get("params", []),
             )
     
+    # [R-MM-01 R1] 逐条 kind 受控校验：空 = association；未知取值告警后按 association 处理
+    kind = ""
+    raw_kind = data.get("kind")
+    if raw_kind:
+        normalized_kind = normalize_association_kind(raw_kind)
+        if normalized_kind is None:
+            logger.warning(
+                "[R24] association %r kind=%r 不在受控枚举内"
+                "（association/hierarchy/reference/master_detail/derived），按 association 处理",
+                data.get("name", ""), raw_kind,
+            )
+        else:
+            kind = normalized_kind.value
+
     return AssociationDefinition(
         name=data.get("name", ""),
         type=data.get("type", "association"),
+        kind=kind,
         through=data.get("through"),
         source_key=data.get("source_key", ""),
         target_entity=data.get("target_entity") or data.get("target_type", ""),
@@ -2702,13 +2735,55 @@ def load_type_specs(dir_path: str) -> Dict[str, Dict[str, Any]]:
     return _TYPE_SPECS
 
 
+#: 切面字段索引缓存：{schema_dir: (aspects/shared mtime 戳, {aspect: {field_id, ...}})}
+_ASPECT_FIELD_INDEX_CACHE: Dict[str, Any] = {}
+
+
+def _resolve_schema_dir(source_file: str = "") -> str:
+    """定位 schema 目录：优先 source_file 所在目录（含 aspects.yaml 时），否则回退标准目录。
+
+    `parse_meta_object` 在测试中常以相对文件名（如 "purchase_order.yaml"）调用，
+    此时 dirname 不可靠，统一回退 `meta/schemas`。
+    """
+    if source_file:
+        candidate = os.path.dirname(os.path.abspath(source_file))
+        if (os.path.exists(os.path.join(candidate, "aspects.yaml"))
+                or os.path.exists(os.path.join(candidate, "shared_properties.yaml"))):
+            return candidate
+    return str(Path(__file__).parent.parent / "schemas")
+
+
+def _aspect_field_ids_by_name(schema_dir: str) -> Dict[str, set]:
+    """返回 {切面名: 注入字段 id 集合}，按 aspects.yaml/shared_properties.yaml mtime 缓存。"""
+    stamp = tuple(
+        os.path.getmtime(os.path.join(schema_dir, name))
+        if os.path.exists(os.path.join(schema_dir, name)) else 0.0
+        for name in ("aspects.yaml", "shared_properties.yaml")
+    )
+    cached = _ASPECT_FIELD_INDEX_CACHE.get(schema_dir)
+    if cached is not None and cached[0] == stamp:
+        return cached[1]
+
+    index: Dict[str, set] = {}
+    for aspect_name, aspect_def in parse_aspects_yaml(schema_dir).items():
+        ids = set()
+        for item in aspect_def.get("fields") or []:
+            if isinstance(item, dict):
+                for key in ("id", "db_column"):
+                    if item.get(key):
+                        ids.add(str(item[key]))
+        index[str(aspect_name)] = ids
+    _ASPECT_FIELD_INDEX_CACHE[schema_dir] = (stamp, index)
+    return index
+
+
 def _validate_state_declarations(obj: MetaObject, source_file: str = "") -> None:
     """[S1] 状态目录/矩阵的 fail-fast 校验。
 
     规则：① 状态 code 非空且不重复；② category 必须在四类内；
           ③ 声明了 states 时，transitions 的 from/to 必须落在目录内；
           ④ 矩阵 key 必须出现在 obj.states 或任一 state_transition 的 from/to；
-          ⑤ 矩阵中的字段 id 必须存在于 obj.fields。
+          ⑤ 矩阵中的字段 id 必须存在于 obj.fields（含本对象 `aspects:` 注入字段）。
     违规直接抛错（启动失败），不静默忽略。
     """
     where = " ({0})".format(source_file) if source_file else ""
@@ -2752,6 +2827,13 @@ def _validate_state_declarations(obj: MetaObject, source_file: str = "") -> None
         return
     allowed = declared | transition_states
     field_ids = {f.id for f in obj.fields}
+    # ⑤ 的合法字段集合 = 自有 fields ∪ 本对象 `aspects:` 注入字段。
+    # 与 parse_document_profile 的既有口径一致（切面字段在原始 YAML 解析阶段尚未合并）；
+    # 经 load_yaml_directory 装载时切面已 merge，此处并集是幂等的。
+    if obj.aspects:
+        aspect_index = _aspect_field_ids_by_name(_resolve_schema_dir(source_file))
+        for aspect_name in obj.aspects:
+            field_ids |= aspect_index.get(str(aspect_name), set())
     for state, policy in obj.state_field_policies.items():
         if state not in allowed:
             raise ValueError(

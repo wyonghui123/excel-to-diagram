@@ -106,6 +106,7 @@ associations:
   # [P2-11 2026-08-29] Spec 16: role → permission_set
   - name: permission_set
     type: reference
+    kind: reference   # [R-MM-01] 引用/查阅，目标只读
     target_entity: permission_set
     source_key: permission_set_id
     description: 关联的权限集

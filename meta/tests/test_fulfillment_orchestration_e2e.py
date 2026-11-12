@@ -94,7 +94,8 @@ CREATE TABLE shipments (
 );
 CREATE TABLE shipment_lines (
     id INTEGER PRIMARY KEY, delivery_id INTEGER, schedule_id INTEGER,
-    order_line_id INTEGER, item_id INTEGER, uom_id INTEGER, qty REAL,
+    order_line_id INTEGER, item_id INTEGER, project_task_id INTEGER,
+    uom_id INTEGER, qty REAL,
     lot_no TEXT, serial_no TEXT, status TEXT, created_at TEXT, updated_at TEXT
 );
 CREATE TABLE calendars (
@@ -116,6 +117,7 @@ CREATE TABLE sla_coverage_rules (
 CREATE TABLE work_orders (
     id INTEGER PRIMARY KEY AUTOINCREMENT, work_order_no TEXT, order_type TEXT,
     schedule_id INTEGER, order_id INTEGER, order_line_id INTEGER,
+    project_id INTEGER, project_task_id INTEGER,
     customer_account_id INTEGER, severity TEXT, channel TEXT, status TEXT,
     coverage_id INTEGER, asset_ref TEXT, source_demand_type TEXT,
     source_demand_id INTEGER, opened_at TEXT, first_response_at TEXT,

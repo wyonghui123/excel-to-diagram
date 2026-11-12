@@ -63,6 +63,7 @@ fields:
 associations:
   - name: user
     type: reference
+    kind: reference   # [R-MM-01] 引用/查阅，目标只读
     target_entity: user
     source_key: user_id
     description: 关联的用户

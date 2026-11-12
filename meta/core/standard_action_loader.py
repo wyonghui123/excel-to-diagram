@@ -47,6 +47,13 @@ class StandardActionLoader:
                 path='',
                 description=item.get('description', ''),
                 instance_scope=InstanceScope(instance_scope_value),
+                # [R-MM-02 Spec §4.2] 6 组可选声明；缺省为空 => 旧行为不变
+                object_types=list(item.get('object_types') or []),
+                params=list(item.get('params') or []),
+                preconditions=dict(item.get('preconditions') or {}),
+                effects=list(item.get('effects') or []),
+                emits=list(item.get('emits') or []),
+                audit=item.get('audit'),
             ))
 
         cls._suffix_map = {}

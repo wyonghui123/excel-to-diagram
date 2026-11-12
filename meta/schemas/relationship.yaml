@@ -61,6 +61,12 @@ authorization:
   auto_owner: false
   auto_permission: admin
   inherit_to_children: false
+  # [R-MM-04 §6.2] 关系感知授权求值模式（三枚举）
+  #   endpoint_union: 两端 product 并集，任一端可见即可见（缺省，保持既有行为，存量 0 迁移）
+  #   none:           仅 source 端 product（按 source_bo_id 所属 product 判定）
+  #   explicit:       复用 permission_rule.condition（必须存在引用同一 relation_code 的规则行）
+  # 判定链: is_denied → 直接规则 → 关系继承 → 默认拒绝; max_depth ≤ 2
+  inherit_mode: endpoint_union
   allow_transfer: false
   transfer_keep_permissions: false
 context:
@@ -104,6 +110,9 @@ semantics:
   business_key: false
   display_name: true
   category: relationship
+  # [R-MM-01 §3.2] 关联语义类型（五枚举：association/hierarchy/reference/master_detail/derived）
+  # 聚合根级声明；逐条语义见各对象 associations[].kind（$associations?kind= 过滤依据）
+  kind: association
   hierarchy_level: 7
   aliases:
   - 关系

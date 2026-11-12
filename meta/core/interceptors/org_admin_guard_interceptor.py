@@ -89,9 +89,27 @@ class RowScopeDenied(PermissionDenied):
     pass
 
 
+def _has_http_request() -> bool:
+    """是否处于真实 HTTP 请求上下文 (app + request 都在)。"""
+    try:
+        from flask import has_app_context, has_request_context
+        return has_app_context() and has_request_context()
+    except ImportError:
+        return False
+
+
 def _get_user_info():
-    from flask import g
-    return g.get('current_user') if hasattr(g, 'current_user') else None
+    # [FIX 2026-11-12] hasattr(g, ...) 在无 app context 时不会返回 False,
+    #   而是由 LocalProxy 抛 RuntimeError("Working outside of application context")。
+    #   直调 BO / 单测/内部调用常无请求上下文, 必须先判上下文再访问 g;
+    #   且只认 request context 内的 g, 避免读到前序用例泄漏的陈旧用户。
+    try:
+        from flask import g
+        if not _has_http_request():
+            return None
+        return g.get('current_user') if hasattr(g, 'current_user') else None
+    except (ImportError, RuntimeError):
+        return None
 
 
 def _is_admin(user_info) -> bool:
@@ -313,6 +331,13 @@ class OrgAdminGuardInterceptor(Interceptor):
     def before_action(self, context: 'ActionContext') -> None:
         user_info = _get_user_info()
         if not user_info:
+            # [FIX 2026-11-12] 内部直调/内部写路径没有 HTTP 主体（无 request context），
+            #   但其调用方在 BOFramework 上传入了显式 user 上下文 (context.user_id)。
+            #   登录态归 login_required / PermissionInterceptor 管；此处若仍判"未登录"
+            #   会把 BOFramework 内部写入误拒（如创建用户时级联写 org 相关对象）。
+            #   与 write_scope_interceptor._extract_user_info_from_g 的"无上下文即放行"一致。
+            if not _has_http_request() and getattr(context, 'user_id', None):
+                return
             from meta.core.interceptors.permission_interceptor import PermissionDenied
             raise PermissionDenied('未登录')
 

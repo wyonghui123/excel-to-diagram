@@ -15,6 +15,17 @@
 # （实际上 read/update/delete 都是对实例生效）。
 # 改动后 read/update/delete/approve/assign/... 列头改为 [CRUD] 实例级
 
+# [R-MM-02 Spec §4.2 2026-11-12] 动作元模型 6 组可选声明（全部缺省 => 旧行为不变）
+#   object_types:  [str]                 适用对象类型；空 = 全部（受控枚举见 lint --actions）
+#   params:        [{name, type, required, default, source}]  source ∈ request/instance/user
+#   preconditions: {status_in: [str], role_any: [str], relation_exists: {name, target?}, expr: str}
+#                  role_any 必须 ⊆ permission_sets.code（seed: admin/editor/viewer）
+#   effects:       [{type, field?, to?, ...}]  type ∈ transition/set/create/link/notify
+#                  其中 transition 必须同时声明 field + to（R5）
+#   emits:         [str]                 必须在 apps/*/app.yaml 的 events.publish 注册（R6）
+#   audit:         {record: bool, reason_required: bool}
+# 校验入口：python meta/tools/lint_metamodel.py --actions
+
 standard_actions:
   - id: crud_create
     name: 创建

@@ -1132,10 +1132,15 @@ class ActionExecutor:
             return None
 
         # 获取当前用户: 优先 flask.g.current_user, fallback thread-local (import 子线程)
+        # [FIX 2026-11-12] 仅在 request context 内读 flask.g：串行/并行测试里前序用例
+        #   可能泄漏一个 app context 并把 g.current_user 留在栈上，此时读到的是**别人的**
+        #   用户；非 admin 会触发 P35 深度校验，进而访问 current_app 抛
+        #   "Working outside of application context"。request 之外 g 语义无效，直接跳过。
         user_info = None
         try:
-            from flask import g
-            user_info = getattr(g, 'current_user', None)
+            from flask import g, has_request_context
+            if has_request_context():
+                user_info = getattr(g, 'current_user', None)
         except (ImportError, RuntimeError):
             pass
 

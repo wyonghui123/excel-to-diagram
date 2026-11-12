@@ -1,0 +1,270 @@
+# 由 meta/tools/gen_state_field_matrix.py 生成，请勿手工编辑（Spec §5 R10）。
+# 只读派生：判定源是 state_field_policies / field_policies；本文件仅用于覆盖度 diff
+# 与前端版本失效。重新生成：python -m meta.tools.gen_state_field_matrix
+version: 312644d98ae7
+generated_by: meta/tools/gen_state_field_matrix.py
+note: 派生只读产物：不是判定源，判定走 state_field_policies + FieldPolicyEngine
+coverage:
+  total: 15
+  covered: 2
+  uncovered:
+  - change_request
+  - engineering_change
+  - fulfillment_order
+  - inventory_adjustment
+  - inventory_count
+  - receipt
+  - requisition
+  - sales_order
+  - service_request
+  - shipment
+  - transfer_order
+  - transfer_shipment
+  - work_order
+objects:
+  change_request:
+    schema: change_request.yaml
+    state_field: status
+    posting_state: ''
+    source: none
+    states: {}
+  customer_invoice:
+    schema: customer_invoice.yaml
+    state_field: ''
+    posting_state: ''
+    source: declared
+    states:
+      cancelled:
+        readonly:
+        - bill_to_account_id
+        - bill_to_address_text
+        - currency_id
+        - customer_account_id
+        - direction
+        - document_category
+        - document_type_id
+        - exchange_rate
+        - exchange_rate_date
+        - exchange_rate_type
+        - gross_amount
+        - incoterm_code
+        - invoice_date
+        - invoice_no
+        - net_amount
+        - org_id
+        - payer_account_id
+        - payment_term_id
+        - posting_date
+        - project_id
+        - sales_org_id
+        - tax_amount
+        - tax_registration_no
+        hidden: []
+        required: []
+        writable_fields: []
+      draft:
+        readonly:
+        - direction
+        hidden: []
+        required: []
+        writable_fields: []
+      posted:
+        readonly:
+        - bill_to_account_id
+        - bill_to_address_text
+        - currency_id
+        - customer_account_id
+        - direction
+        - document_category
+        - document_type_id
+        - exchange_rate
+        - exchange_rate_date
+        - exchange_rate_type
+        - gross_amount
+        - incoterm_code
+        - invoice_date
+        - invoice_no
+        - net_amount
+        - org_id
+        - payer_account_id
+        - payment_term_id
+        - posting_date
+        - project_id
+        - sales_org_id
+        - tax_amount
+        - tax_registration_no
+        hidden: []
+        required: []
+        writable_fields: []
+      reversed:
+        readonly:
+        - bill_to_account_id
+        - bill_to_address_text
+        - currency_id
+        - customer_account_id
+        - direction
+        - document_category
+        - document_type_id
+        - exchange_rate
+        - exchange_rate_date
+        - exchange_rate_type
+        - gross_amount
+        - incoterm_code
+        - invoice_date
+        - invoice_no
+        - net_amount
+        - org_id
+        - payer_account_id
+        - payment_term_id
+        - posting_date
+        - project_id
+        - reversal_of_invoice_id
+        - reversal_reason
+        - sales_org_id
+        - tax_amount
+        - tax_registration_no
+        hidden: []
+        required: []
+        writable_fields: []
+      submitted:
+        readonly:
+        - bill_to_account_id
+        - currency_id
+        - customer_account_id
+        - direction
+        - document_category
+        - document_type_id
+        - exchange_rate
+        - exchange_rate_date
+        - exchange_rate_type
+        - invoice_no
+        - org_id
+        - payer_account_id
+        - sales_org_id
+        hidden: []
+        required: []
+        writable_fields: []
+  engineering_change:
+    schema: engineering_change.yaml
+    state_field: status
+    posting_state: ''
+    source: none
+    states: {}
+  fulfillment_order:
+    schema: fulfillment_order.yaml
+    state_field: status
+    posting_state: ''
+    source: none
+    states: {}
+  inventory_adjustment:
+    schema: inventory_adjustment.yaml
+    state_field: status
+    posting_state: ''
+    source: none
+    states: {}
+  inventory_count:
+    schema: inventory_count.yaml
+    state_field: status
+    posting_state: ''
+    source: none
+    states: {}
+  purchase_order:
+    schema: purchase_order.yaml
+    state_field: status
+    posting_state: confirmed
+    source: declared
+    states:
+      cancelled:
+        readonly:
+        - order_date
+        - purchase_legal_entity_id
+        - purchase_org_id
+        - supplier_party_id
+        hidden: []
+        required: []
+        writable_fields: []
+      closed:
+        readonly:
+        - currency_id
+        - deliver_to_location_id
+        - exchange_rate
+        - exchange_rate_date
+        - exchange_rate_type
+        - header_discount_percent
+        - incoterm_code
+        - order_date
+        - payment_term_id
+        - purchase_legal_entity_id
+        - purchase_org_id
+        - supplier_account_id
+        - supplier_party_id
+        hidden: []
+        required: []
+        writable_fields: []
+      confirmed:
+        readonly:
+        - currency_id
+        - deliver_to_location_id
+        - document_type_id
+        - exchange_rate
+        - exchange_rate_date
+        - exchange_rate_type
+        - header_discount_percent
+        - order_date
+        - order_no
+        - purchase_legal_entity_id
+        - purchase_org_id
+        - supplier_account_id
+        - supplier_party_id
+        hidden: []
+        required: []
+        writable_fields: []
+  receipt:
+    schema: receipt.yaml
+    state_field: status
+    posting_state: ''
+    source: none
+    states: {}
+  requisition:
+    schema: requisition.yaml
+    state_field: status
+    posting_state: ''
+    source: none
+    states: {}
+  sales_order:
+    schema: sales_order.yaml
+    state_field: status
+    posting_state: ''
+    source: none
+    states: {}
+  service_request:
+    schema: service_request.yaml
+    state_field: status
+    posting_state: ''
+    source: none
+    states: {}
+  shipment:
+    schema: shipment.yaml
+    state_field: status
+    posting_state: ''
+    source: none
+    states: {}
+  transfer_order:
+    schema: transfer_order.yaml
+    state_field: status
+    posting_state: ''
+    source: none
+    states: {}
+  transfer_shipment:
+    schema: transfer_shipment.yaml
+    state_field: status
+    posting_state: ''
+    source: none
+    states: {}
+  work_order:
+    schema: work_order.yaml
+    state_field: status
+    posting_state: ''
+    source: none
+    states: {}
+errors: []

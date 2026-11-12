@@ -510,6 +510,7 @@ associations:
   - name: version
     target_type: version
     type: composition
+    kind: master_detail   # [R-MM-01] composition = 主从强依赖
     source_key: product_id
     # [FIX 2026-06-25] 显式标注: product -> version 应 CASCADE
     # 原因: 产品是顶层分类, version 是其内部数据, 删产品应级联清理 version

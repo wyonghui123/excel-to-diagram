@@ -1,4 +1,5 @@
 from enum import Enum
+from typing import Optional
 
 
 class FieldType(Enum):
@@ -295,6 +296,36 @@ class EnumBindingStrength(Enum):
     LOOSE = "loose"
     FILTER_ONLY = "filter_only"
     DISPLAY_ONLY = "display_only"
+
+
+class AssociationKind(Enum):
+    """关联语义类型（Spec R-MM-01 §3.2，五枚举，缺省 association）。
+
+    声明位有两层，共同构成单一事实：
+    - 聚合根级：`relationship.yaml` 的 `semantics.kind`（关系资源的自身类型）
+    - 逐条级：对象 `associations[].kind`（该条关联的语义，`$associations?kind=` 过滤依据）
+
+    只影响渲染与继承强度；不进 DDL、不新增表、不新增端点、不改
+    `relationships` 表结构（R-MM-01 R4）。
+    """
+    ASSOCIATION = "association"      # 一般关联（默认）
+    HIERARCHY = "hierarchy"          # 树形上下级
+    REFERENCE = "reference"          # 引用/查阅（目标只读）
+    MASTER_DETAIL = "master_detail"  # 主从强依赖
+    DERIVED = "derived"              # 派生（视图/计算，只读）
+
+
+def normalize_association_kind(raw) -> Optional[AssociationKind]:
+    """把声明值归一为 AssociationKind；空串或未知取值返回 None（由调用方决定默认/告警）。"""
+    if raw is None:
+        return None
+    text = str(raw).strip().lower()
+    if not text:
+        return None
+    try:
+        return AssociationKind(text)
+    except ValueError:
+        return None
 
 
 class DimensionReferenceType(Enum):

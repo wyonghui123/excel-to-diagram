@@ -727,6 +727,14 @@ class MetaAction:
     semantics: SemanticAnnotation = field(default_factory=SemanticAnnotation)
     parameters: List[ActionParameter] = field(default_factory=list)
     behavior: Optional[ActionBehavior] = None
+    # [R-MM-02 Spec §4.2 2026-11-12] 动作元模型 6 组可选声明。
+    # 全部缺省为空 => 旧 yaml 行为不变（A-02-1 零回归）；YAML 只是声明，执行体仍在 Python。
+    object_types: List[str] = field(default_factory=list)
+    params: List[Dict[str, Any]] = field(default_factory=list)
+    preconditions: Dict[str, Any] = field(default_factory=dict)
+    effects: List[Dict[str, Any]] = field(default_factory=list)
+    emits: List[str] = field(default_factory=list)
+    audit: Optional[Dict[str, Any]] = None
     
     def get_permission_suffix(self) -> str:
         from meta.core.standard_action_loader import StandardActionLoader

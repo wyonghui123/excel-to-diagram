@@ -258,7 +258,9 @@ class BOFramework:
                                     code=StateMachineViolationError.code)
             if isinstance(e, FieldPolicyViolationError):
                 logger.info(f"[BOFramework] FieldPolicy validation FAILED: {e}")
-                return ActionResult(success=False, message=str(e))
+                return ActionResult(success=False, message=str(e),
+                                    status_code=getattr(e, 'status_code', 400),
+                                    code=getattr(e, 'code', 'FIELD_NOT_EDITABLE'))
             if isinstance(e, ValidationFailedError):
                 logger.info(f"[BOFramework] Validation FAILED: {e}")
                 return ActionResult(success=False, message=str(e), errors=e.details)
@@ -405,7 +407,7 @@ class BOFramework:
     def query_associations(self, src_type: str, src_id: int, association_name: str,
                            page: int = 1, page_size: int = 50, search: str = None,
                            filters: Optional[Dict[str, Any]] = None,
-                           ordering: str = None) -> ActionResult:
+                           ordering: str = None, kind: str = None) -> ActionResult:
         params = {
             'src_id': src_id,
             'association_name': association_name,
@@ -417,6 +419,9 @@ class BOFramework:
             params['filters'] = dict(filters)
         if ordering:
             params['ordering'] = ordering
+        if kind:
+            # [R-MM-01 §3.3] 关联语义过滤，缺省不过滤
+            params['kind'] = kind
         return self.execute(src_type, 'query_associations', params)
 
     def batch_query_associations(self, src_type: str, source_ids: List[int],

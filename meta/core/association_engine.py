@@ -25,6 +25,7 @@ from meta.core.enrich_utils import (
     build_computed_count_order_clause,
 )
 from meta.core.enrichment_engine import EnrichmentEngine
+from meta.core.models_enums import AssociationKind, normalize_association_kind
 
 logger = logging.getLogger(__name__)
 
@@ -686,6 +687,25 @@ class AssociationEngine:
         params = context.params
         association_name = params.get('association_name', '')
         assoc_meta = resolve_assoc_meta(context.object_type, association_name)
+
+        # [R-MM-01 §3.3] ?kind= 只做过滤，不改响应结构：缺省 = 不过滤；
+        # 请求 kind 与声明 kind（缺省 association）不一致 => 空结果（R1/R4：0 迁移、0 新端点）
+        kind_filter = params.get('kind')
+        if kind_filter and operation in ('query', 'count'):
+            requested_kind = normalize_association_kind(kind_filter)
+            if requested_kind is None:
+                return ActionResult(
+                    success=False,
+                    message="Unknown association kind: %s" % kind_filter,
+                )
+            declared_kind = (
+                normalize_association_kind((assoc_meta or {}).get('kind'))
+                or AssociationKind.ASSOCIATION
+            )
+            if requested_kind is not declared_kind:
+                if operation == 'count':
+                    return ActionResult(success=True, data={'count': 0})
+                return ActionResult(success=True, data={'items': [], 'total': 0, 'counts': {}})
 
         if assoc_meta is None:
             fallback_map = {

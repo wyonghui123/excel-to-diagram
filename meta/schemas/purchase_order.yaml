@@ -72,6 +72,8 @@ state_field_policies:
   # 已确认：源头字段锁定（供应商/组织/地点/日期/币种/汇率/折扣）
   confirmed:
     readonly:
+      - order_no
+      - document_type_id
       - supplier_party_id
       - supplier_account_id
       - purchase_org_id

@@ -152,6 +152,8 @@ class TestActionExecutorUserCreate:
         except Exception:
             detect_runtime_config(get_meta_db_path())
         # 设置测试用户上下文
+        # 注: 此处故意不压 flask 应用上下文 —— 权限拦截器在无 app context 时
+        #   走 thread-local user 兜底；压栈反而会走 flask.g 分支被判"未登录"。
         global_bo.set_user_context(
             user_id=1, user_name='admin', ip_address='127.0.0.1'
         )
