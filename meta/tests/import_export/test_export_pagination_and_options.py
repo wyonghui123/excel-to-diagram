@@ -63,6 +63,7 @@ class TestExportPagination:
             headers=headers
         )
 
+        assert response.status_code == 200, f"导出请求失败: {response.status_code}"
         if response.status_code == 200:
             import json
             data = json.loads(response.data)
@@ -112,6 +113,7 @@ class TestSensitiveFieldsExport:
             headers=headers
         )
 
+        assert response.status_code == 200, f"导出请求失败: {response.status_code}"
         if response.status_code == 200:
             import json
             data = json.loads(response.data)
@@ -170,6 +172,7 @@ class TestComputedFieldsReadonly:
         # 验证导出成功
         assert response.status_code in [200, 400, 401, 500], f"导出请求失败: {response.status_code}"
 
+        assert response.status_code == 200, f"导出请求失败: {response.status_code}"
         if response.status_code == 200:
             import json
             data = json.loads(response.data)
@@ -204,6 +207,7 @@ class TestHierarchyPathControl:
             headers=headers
         )
 
+        assert response.status_code == 200, f"导出请求失败: {response.status_code}"
         if response.status_code == 200:
             import json
             data = json.loads(response.data)
@@ -242,6 +246,7 @@ class TestHierarchyPathControl:
             headers=headers
         )
 
+        assert response.status_code == 200, f"导出请求失败: {response.status_code}"
         if response.status_code == 200:
             import json
             data = json.loads(response.data)
@@ -301,6 +306,7 @@ class TestEnumDropdownFix:
             headers=headers
         )
 
+        assert response.status_code == 200, f"导出请求失败: {response.status_code}"
         if response.status_code == 200:
             import json
             data = json.loads(response.data)
@@ -346,6 +352,7 @@ class TestEnumDropdownFix:
             headers=headers
         )
 
+        assert response.status_code == 200, f"导出请求失败: {response.status_code}"
         if response.status_code == 200:
             import io
             wb = load_workbook(io.BytesIO(response.data))
@@ -391,6 +398,7 @@ class TestEnumDropdownFix:
             headers=headers
         )
 
+        assert response.status_code == 200, f"导出请求失败: {response.status_code}"
         if response.status_code == 200:
             import json
             data = json.loads(response.data)
@@ -406,15 +414,24 @@ class TestEnumDropdownFix:
                             # 数据行数=29, 表头=1, 操作模式=1列
                             # 第2行开始是数据，最后一行是第30行
                             # 如果有5个新增行，最后一行是第35行
-                            data_rows = ws.max_row - 1  # 减去表头
-                            print(f"关系数据行数: {data_rows}")
-                            # 有数据时不应该添加额外的空白行
-                            # 实际行数应该约等于数据行数
+                            # 有数据时不应该添加额外的空白行：
+                            # 校验最后一行确实承载数据（存在非空单元格），而不是被空白行填充
+                            last_row_values = [
+                                c.value for c in ws[ws.max_row]
+                                if c.value not in (None, '')
+                            ]
+                            assert last_row_values, \
+                                f"有数据时最后一行为空（追加了空白行），总行数: {ws.max_row}"
                             break
 
                     wb.close()
                     os.remove(file_path)
 
+    @pytest.mark.xfail(
+        reason="[BUG 2026-11-12] relationship 用 filters 过滤到空结果时 /api/v1/export "
+               "返回 500（原本断言全在 if status==200 内，故长期假绿）",
+        strict=False,
+    )
     def test_export_has_empty_rows_when_no_data(self):
         """测试无数据时批量导出会添加5个新增行"""
         app, client = get_shared_app()
@@ -432,6 +449,7 @@ class TestEnumDropdownFix:
             headers=headers
         )
 
+        assert response.status_code == 200, f"导出请求失败: {response.status_code}"
         if response.status_code == 200:
             import json
             data = json.loads(response.data)
@@ -445,8 +463,8 @@ class TestEnumDropdownFix:
                             ws = wb[sheet_name]
                             # 无数据时：表头(1) + 5个新增行 = 6行
                             # 如果有操作模式列，应该在第2-6行
-                            print(f"无数据时总行数: {ws.max_row}")
-                            # 验证有新增行（至少有5行空白）
+                            assert ws.max_row >= 6, \
+                                f"无数据时应有表头+5个新增行，实际总行数: {ws.max_row}"
                             break
 
                     wb.close()
