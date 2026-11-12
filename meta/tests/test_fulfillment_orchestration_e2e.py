@@ -13,6 +13,7 @@
   6. 驳回返工: confirm 上调用 work_order.rework → 新 Run（variables.reason='rework'）
   7. 负向回归: 无兜底规则 → DEFAULT_ROUTING_MISS
   8. line_refs 全链路 = schedule_id（Run meta + 每个任务）
+  9. 跨批次（4a×4b）: 生产工单 + BOM 组件展开 → 完工闸口 → 发运
 
 说明:
   - 用真实 sqlite 数据源（temp 文件），合并 Shipment/WorkOrder 两套业务表 schema；
@@ -135,6 +136,24 @@ CREATE TABLE change_events (
     event_type TEXT, changed_fields TEXT, old_values TEXT, new_values TEXT,
     payload TEXT, status TEXT, created_at TEXT
 );
+CREATE TABLE item_structures (
+    id INTEGER PRIMARY KEY, item_id INTEGER, usage TEXT,
+    alternative_no INTEGER DEFAULT 1, revision TEXT, base_qty REAL DEFAULT 1,
+    status TEXT DEFAULT 'active', valid_from TEXT, valid_to TEXT
+);
+CREATE TABLE item_structure_lines (
+    id INTEGER PRIMARY KEY, structure_id INTEGER, line_no INTEGER,
+    component_item_id INTEGER, qty_per REAL, fixed_qty REAL,
+    scrap_rate REAL DEFAULT 0, optional_flag INTEGER DEFAULT 0,
+    default_qty REAL, min_qty REAL, max_qty REAL, valid_from TEXT, valid_to TEXT
+);
+CREATE TABLE work_order_components (
+    id INTEGER PRIMARY KEY AUTOINCREMENT, work_order_id INTEGER,
+    structure_id INTEGER, structure_line_id INTEGER, component_item_id INTEGER,
+    line_no INTEGER, qty_per REAL, fixed_qty REAL, scrap_rate REAL,
+    qty_required REAL, optional_flag INTEGER DEFAULT 0,
+    created_at TEXT, updated_at TEXT
+);
 """
 
 _ROUTING_SCHEMA = """
@@ -239,6 +258,24 @@ def _seed_base(ds, *, promised_qty: float = 5.0, with_service: bool = False) -> 
             "INSERT INTO sales_order_schedules (id, order_id, line_id, schedule_kind, "
             "plant_location_id, promised_date, promised_qty, delivered_qty, status) "
             "VALUES (11, 10, 100, 'service', NULL, '2026-10-12', 1, 0, 'planned')")
+
+
+def _seed_item_structure(ds) -> None:
+    """物料 1000 的生产 BOM：组件 2001×2、组件 2002×1（含 20% 损耗）。"""
+    ds.execute(
+        "INSERT INTO item_structures (id, item_id, usage, alternative_no, revision, "
+        "base_qty, status, valid_from, valid_to) "
+        "VALUES (1, 1000, 'production', 1, 'A', 1, 'active', '2026-01-01', NULL)")
+    ds.execute(
+        "INSERT INTO item_structure_lines (id, structure_id, line_no, "
+        "component_item_id, qty_per, fixed_qty, scrap_rate, optional_flag, "
+        "default_qty, min_qty, max_qty, valid_from, valid_to) "
+        "VALUES (1, 1, 10, 2001, 2, 0, 0, 0, NULL, NULL, NULL, NULL, NULL)")
+    ds.execute(
+        "INSERT INTO item_structure_lines (id, structure_id, line_no, "
+        "component_item_id, qty_per, fixed_qty, scrap_rate, optional_flag, "
+        "default_qty, min_qty, max_qty, valid_from, valid_to) "
+        "VALUES (2, 1, 20, 2002, 1, 0, 0.2, 0, NULL, NULL, NULL, NULL, NULL)")
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -367,6 +404,69 @@ def test_mto_flow_with_produce_gate(ds, registry):
     _record("mto", run_id=run_id, shipment_id=shipment_id,
             produce_task_status="done", shipment_status="delivered",
             pick_outputs=pick["outputs"], ship_outputs=ship["outputs"])
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# 2b. 跨批次：生产工单 + 组件展开接入按单生产 Run
+# ─────────────────────────────────────────────────────────────────────────────
+
+def test_mto_production_work_order_and_component_chain(ds, registry):
+    """批次 4a（生产工单/组件展开）× 批次 4b（编排）：需求追溯 → BOM → 完工 → 发运。"""
+    from meta.services.work_order_service import WorkOrderService
+
+    _seed_base(ds, promised_qty=5.0)
+    _seed_item_structure(ds)
+
+    payload = {"procurement_type": "mto", "order_id": 10, "schedule_id": 10,
+               "lines": [{"schedule_id": 10, "qty": 5, "item_id": 1000}]}
+    started = _start(ds, payload, schedule_id=10)
+    run_id = started["run"]["run_id"]
+    assert started["workflow_key"] == "wf-fulfill-mto"
+
+    production = WorkOrderService(ds).create_work_order({
+        "order_type": "production",
+        "source_demand_type": "sales_order_line",
+        "source_demand_id": 100,
+        "actor": "e2e",
+    })
+    work_order_id = production["id"]
+    assert production["order_type"] == "production"
+    assert production["item_id"] == 1000 and production["qty"] == 10
+    assert production["component_expansion"]["code"] == "expanded"
+
+    rows = ds.query(
+        "SELECT component_item_id, qty_required FROM work_order_components "
+        "WHERE work_order_id = ? ORDER BY component_item_id", [work_order_id])
+    assert [(r["component_item_id"], r["qty_required"]) for r in rows] == [
+        (2001, 20), (2002, 12)]
+
+    assert _scalar(ds, "SELECT COUNT(*) FROM sla_milestones", ()) == 0
+    assert _scalar(ds, "SELECT COUNT(*) FROM service_events", ()) == 0
+    assert _scalar(ds, "SELECT COUNT(*) FROM change_events WHERE object_type = 'work_order'", ()) == 1
+
+    resolved = WorkOrderService(ds).resolve_event(work_order_id, actor="e2e")
+    assert str(resolved["status"]).lower() == "resolved"
+    assert resolved["schedule_status"] is None
+    assert _scalar(ds, "SELECT status FROM sales_order_schedules WHERE id = 10", ()) == "planned"
+
+    produce = _complete_human(ds, run_id, "produce")
+    assert _scalar(ds, "SELECT status FROM tasks WHERE id = ?", (produce["id"],)) == "done"
+
+    pick = _run_system(ds, registry, run_id, "pick")
+    ship = _run_system(ds, registry, run_id, "ship")
+    deliver = _run_system(ds, registry, run_id, "deliver")
+
+    shipment_id = deliver["outputs"]["shipment_id"]
+    assert _scalar(ds, "SELECT status FROM shipments WHERE id = ?", (shipment_id,)) == "delivered"
+    assert _scalar(ds, "SELECT delivered_qty FROM sales_order_schedules WHERE id = 10", ()) == 5
+    assert _scalar(ds, "SELECT status FROM sales_order_schedules WHERE id = 10", ()) == "completed"
+
+    _assert_line_refs(ds, run_id, 10)
+    _record("mto_production", run_id=run_id, production_work_order_id=work_order_id,
+            production_status="resolved", component_qty={2001: 20, 2002: 12},
+            shipment_id=shipment_id, shipment_status="delivered",
+            schedule_status="completed", pick_outputs=pick["outputs"],
+            ship_outputs=ship["outputs"])
 
 
 # ─────────────────────────────────────────────────────────────────────────────

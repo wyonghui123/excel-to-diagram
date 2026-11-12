@@ -1,4 +1,4 @@
-﻿# -*- coding: utf-8 -*-
+﻿﻿# -*- coding: utf-8 -*-
 """定价 P2 六对象 —— schema 落地 / 真外键约束 / 枚举逐值 回归 (2026-10-06)
 
 依据: docs/superpowers/specs/2026-10-05-pricing-engine-spec.md
