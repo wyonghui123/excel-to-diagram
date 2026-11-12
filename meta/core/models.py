@@ -1459,8 +1459,14 @@ class MetaObject:
         return getattr(obj.semantics, 'category', '') in (
             'business_document', 'business_document_line')
 
+    # 系统/主数据/架构/关系类子对象即使 parent_object 指向单据头，也不属于单据聚合
+    _NON_BUSINESS_CATEGORIES = (
+        'system_entity', 'core_entity', 'architecture', 'system', 'relationship')
+
     def get_aggregate_root(self) -> Optional['MetaObject']:
         """返回聚合根（最顶层单据头）；不属于单据聚合时返回 None。"""
+        if getattr(self.semantics, 'category', '') in self._NON_BUSINESS_CATEGORIES:
+            return None  # 系统事件 / 主数据从属 / 架构层级：不参与单据聚合
         cursor = self
         visited = {cursor.id}
         while True:
@@ -1488,7 +1494,9 @@ class MetaObject:
         if getattr(self.semantics, 'category', '') != 'business_document':
             return []
         children = [obj for obj in registry.all()
-                    if (obj.parent_object or '').strip() == self.id]
+                    if (obj.parent_object or '').strip() == self.id
+                    and getattr(obj.semantics, 'category', '')
+                    not in self._NON_BUSINESS_CATEGORIES]
         return sorted(children, key=lambda obj: obj.id)
 
     def get_aggregate_parent_field(self) -> str:

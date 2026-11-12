@@ -494,16 +494,22 @@ class DocFlowService:
         for child in children:
             fk = child.get_aggregate_parent_field()
             id_field = child.get_field("id")
-            if not fk or id_field is None:
-                logger.warning("聚合子对象缺少父字段: %s", child.id)
+            if not fk or id_field is None or not child.table_name:
+                logger.warning("聚合子对象缺少父字段/表名: %s", child.id)
                 continue
-            rows = self.app_ds.execute(
-                "SELECT CAST({id_col} AS TEXT) FROM {table}"
-                " WHERE CAST({fk} AS TEXT) = ?".format(
-                    id_col=id_field.db_column,
-                    table=child.table_name, fk=fk),
-                (rid,),
-            ).fetchall()
+            try:
+                rows = self.app_ds.execute(
+                    "SELECT CAST({id_col} AS TEXT) FROM {table}"
+                    " WHERE CAST({fk} AS TEXT) = ?".format(
+                        id_col=id_field.db_column,
+                        table=child.table_name, fk=fk),
+                    (rid,),
+                ).fetchall()
+            except Exception:
+                # 跨应用子表可能不在当前库（如未安装的服务应用），追溯降级跳过
+                logger.warning("聚合子对象查询失败，已跳过: %s", child.id,
+                               exc_info=True)
+                continue
             child_ids = sorted({
                 str(row[0]) for row in rows if row and row[0] not in (None, "")
             })
@@ -550,14 +556,18 @@ class DocFlowService:
         """行 id → 所属单据头 id；解析不到返回空串。"""
         fk = obj.get_aggregate_parent_field()
         id_field = obj.get_field("id")
-        if not fk or id_field is None:
+        if not fk or id_field is None or not obj.table_name:
             return ""
-        rows = self.app_ds.execute(
-            "SELECT CAST({fk} AS TEXT) FROM {table}"
-            " WHERE CAST({id_col} AS TEXT) = ?".format(
-                fk=fk, table=obj.table_name, id_col=id_field.db_column),
-            (rid,),
-        ).fetchall()
+        try:
+            rows = self.app_ds.execute(
+                "SELECT CAST({fk} AS TEXT) FROM {table}"
+                " WHERE CAST({id_col} AS TEXT) = ?".format(
+                    fk=fk, table=obj.table_name, id_col=id_field.db_column),
+                (rid,),
+            ).fetchall()
+        except Exception:
+            logger.warning("行对象反查单据头失败: %s", obj.id, exc_info=True)
+            return ""
         if not rows or rows[0][0] in (None, ""):
             return ""
         return str(rows[0][0])

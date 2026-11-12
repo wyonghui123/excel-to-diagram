@@ -24,10 +24,12 @@ CUSTOMER_BO = "tft_customer"
 ARCH_BO = "tft_arch_node"
 CYCLE_A_BO = "tft_cycle_a"
 CYCLE_B_BO = "tft_cycle_b"
+SYS_EVENT_BO = "tft_sys_event"
+SLA_BO = "tft_sla_milestone"
 
 _REGISTERED_BOS = (
     HEAD_BO, LINE_BO, ORPHAN_LINE_BO, CORE_BO, CUSTOMER_BO,
-    ARCH_BO, CYCLE_A_BO, CYCLE_B_BO,
+    ARCH_BO, CYCLE_A_BO, CYCLE_B_BO, SYS_EVENT_BO, SLA_BO,
 )
 
 
@@ -90,7 +92,29 @@ def _demo_metas():
         semantics=SemanticAnnotation(category="business_document"),
         fields=[_field("id", FieldType.STRING, required=True, unique=True)],
     )
-    return [head, line, orphan_line, core, customer, arch, cycle_a, cycle_b]
+    # 系统事件 / 主数据从属即使 parent_object 指向单据头，也不属于聚合
+    sys_event = MetaObject(
+        id=SYS_EVENT_BO, name="系统事件", table_name="tft_sys_events",
+        parent_object=HEAD_BO,
+        hierarchy={"parent_field": "invoice_id"},
+        semantics=SemanticAnnotation(category="system_entity"),
+        fields=[
+            _field("id", FieldType.STRING, required=True, unique=True),
+            _field("invoice_id", FieldType.STRING),
+        ],
+    )
+    sla = MetaObject(
+        id=SLA_BO, name="主数据从属", table_name="tft_sla_milestones",
+        parent_object=HEAD_BO,
+        hierarchy={"parent_field": "invoice_id"},
+        semantics=SemanticAnnotation(category="core_entity"),
+        fields=[
+            _field("id", FieldType.STRING, required=True, unique=True),
+            _field("invoice_id", FieldType.STRING),
+        ],
+    )
+    return [head, line, orphan_line, core, customer, arch, cycle_a, cycle_b,
+            sys_event, sla]
 
 
 @pytest.fixture()
@@ -117,7 +141,8 @@ def service(metas, tmp_path):
     app_ds = get_data_source("sqlite", database=str(tmp_path / "biz.db"))
     platform_ds = get_data_source("sqlite", database=str(tmp_path / "platform.db"))
     invalidate_cache()
-    sync_schema_from_meta(app_ds, [metas[0], metas[1], metas[2]])
+    sync_schema_from_meta(
+        app_ds, [metas[0], metas[1], metas[2], metas[8], metas[9]])
     ensure_doc_flow_edge_tables(app_ds)
     return DocFlowService(app_ds, platform_ds)
 
@@ -152,12 +177,44 @@ def test_cycle_returns_none(metas):
     assert metas[6].get_aggregate_root() is None
 
 
+def test_non_business_children_excluded_from_aggregate(metas):
+    """work_order 等头挂载的 system_entity/core_entity 子对象不参与追溯展开。"""
+    head = metas[0]
+    assert [child.id for child in head.get_aggregate_children()] == [LINE_BO]
+    assert metas[8].get_aggregate_root() is None   # system_entity 子对象
+    assert metas[9].get_aggregate_root() is None   # core_entity 子对象
+
+
 def test_parent_field_falls_back_to_parent_id():
     obj = MetaObject(
         id="tft_fallback", name="回落", table_name="tft_fallback",
         parent_object="tft_some_head",
     )
     assert obj.get_aggregate_parent_field() == "tft_some_head_id"
+
+
+def test_system_and_relationship_categories_excluded(metas):
+    """system / relationship 类对象即使误挂单据头，也不进入聚合（防御性）。"""
+    from meta.core.models import registry
+
+    guards = []
+    try:
+        for category in ("system", "relationship"):
+            guard = MetaObject(
+                id="tft_guard_" + category, name="类别守卫",
+                table_name="tft_guards_" + category, parent_object=HEAD_BO,
+                semantics=SemanticAnnotation(category=category),
+                fields=[_field("id", FieldType.STRING, required=True, unique=True)],
+            )
+            registry.register(guard)
+            guards.append(guard)
+
+        assert [child.id for child in metas[0].get_aggregate_children()] == [LINE_BO]
+        for guard in guards:
+            assert guard.get_aggregate_root() is None
+    finally:
+        for guard in guards:
+            registry._objects.pop(guard.id, None)
 
 
 # ---------------------------------------------------------------- 头→行追溯
@@ -168,6 +225,10 @@ def _seed_invoice(app_ds):
         app_ds.insert("tft_invoice_lines", {
             "id": line_id, "invoice_id": "VI-1", "quantity": 10,
         })
+    # 非业务子对象：挂同一单据头，但不计入行展开
+    for event_id in ("EV-1", "EV-2"):
+        app_ds.insert("tft_sys_events", {"id": event_id, "invoice_id": "VI-1"})
+    app_ds.insert("tft_sla_milestones", {"id": "SLA-1", "invoice_id": "VI-1"})
 
 
 def _edge(edge_id, source_bo, source_id, target_bo, target_id,
@@ -199,6 +260,8 @@ def test_trace_expands_head_to_lines(service):
 
     assert data["expanded"] is True
     assert data["line_scope"]["count"] == 3
+    assert data["line_scope"]["object"] == LINE_BO
+    assert data["line_scope"]["ids"] == ["L1", "L2", "L3"]
     assert data["root_object"] == HEAD_BO
     assert data["root_id"] == "VI-1"
 
