@@ -32,6 +32,15 @@ class FakeDocFlowService:
     def list_edges(self, **kwargs):
         return {'edges': [{'id': 'e1', 'quantity': 10.0}], 'total': 1}
 
+    def trace_records(self, bo, record_id):
+        self.calls.append(('trace_records', bo, record_id))
+        return {'object': bo, 'root_object': bo, 'root_id': record_id,
+                'upstream': {'items': [], 'total': 0},
+                'downstream': {'items': [], 'total': 0},
+                'expanded': False,
+                'line_scope': {'object': '', 'count': 0, 'ids': []},
+                'truncated': False}
+
 
 @pytest.fixture()
 def api_app():
@@ -48,6 +57,7 @@ def test_routes_registered(api_app):
     assert '/api/v2/doc-flow/sources' in rules
     assert '/api/v2/doc-flow/derive' in rules
     assert '/api/v2/doc-flow/edges' in rules
+    assert '/api/v2/doc-flow/trace' in rules
 
 
 def test_rules_requires_login(api_app):
@@ -99,3 +109,22 @@ def test_edges_view_requires_a_filter(api_app):
         body, status = _edges_view()
     assert status == 400
     assert body['code'] == 'DOC_FLOW_EDGE_FILTER_REQUIRED'
+
+
+def test_trace_view_requires_bo_and_id(api_app):
+    from meta.api.doc_flow_api import _trace_view
+    with api_app.test_request_context('/api/v2/doc-flow/trace?bo=vendor_invoice'):
+        body, status = _trace_view()
+    assert status == 400
+    assert body['code'] == 'DOC_FLOW_TRACE_ARGS_REQUIRED'
+
+
+def test_trace_view_passes_args(api_app):
+    from meta.api.doc_flow_api import _trace_view
+    with api_app.test_request_context(
+            '/api/v2/doc-flow/trace?bo=vendor_invoice&id=VI-1'):
+        body, status = _trace_view()
+    assert status == 200
+    assert body['success'] is True
+    assert body['data']['root_id'] == 'VI-1'
+    assert body['data']['expanded'] is False
