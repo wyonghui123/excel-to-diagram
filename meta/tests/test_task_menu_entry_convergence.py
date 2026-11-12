@@ -20,6 +20,7 @@ import sqlite3
 import pytest
 
 from meta.scripts.init_task_menus import init_task_menus
+from meta.tests.factories._raw_sql_bridge import insert
 
 #遗留实体 BO：入口收敛后不应再出现在 task-management 的任何绑定里
 LEGACY_BOS = ('scheduled_task', 'task_queue', 'task_execution', 'ai_async_task')
@@ -110,17 +111,15 @@ class Test入口收敛:
         """[收敛-4] 幂等重跑时须主动 DELETE 遗留菜单行（含历史库已有数据）"""
         #先手工塞入遗留行，模拟"旧版本已写过"的历史库
         for code in LEGACY_LEAF_CODES:
-            ds.execute(
-                "INSERT INTO menus (menu_code, menu_name, menu_path, page_type,"
-                " parent_menu, is_active, show_in_sidebar)"
-                " VALUES (?, ?, ?, 'object_list', 'task-management', 1, 0)",
-                (code, code, f'/system/{code}'))
-        ds.execute(
-            "INSERT INTO menu_permissions (menu_code, menu_name, menu_path,"
-            " required_permissions, required_any_permission, parent_menu,"
-            " icon, sort_order, is_active)"
-            " VALUES ('task-definitions', '任务定义', '/system/task-definitions',"
-            " '[]', 0, 'task-management', 'List', 1, 1)")
+            insert(ds, 'menus', menu_code=code, menu_name=code,
+                   menu_path=f'/system/{code}', page_type='object_list',
+                   parent_menu='task-management', is_active=1,
+                   show_in_sidebar=0)
+        insert(ds, 'menu_permissions', menu_code='task-definitions',
+               menu_name='任务定义', menu_path='/system/task-definitions',
+               required_permissions='[]', required_any_permission=0,
+               parent_menu='task-management', icon='List', sort_order=1,
+               is_active=1)
 
         init_task_menus(ds)
 
@@ -138,3 +137,23 @@ class Test入口收敛:
         assert row[2] == 1, 'task-management 应 show_in_sidebar=1'
         assert row[3] == 0, 'task-management 应 auto_generated=0（人工维护）'
         assert row[1] == 'custom_page', 'task-management 应挂自定义页面（非遗留 hub）'
+
+
+@pytest.mark.unit
+class Test执行记录入口:
+    """[P3 2026-11-10] 执行记录 = 元数据驱动只读列表"""
+
+    def test_task_runs_menu_is_readonly_object_list(self, ds):
+        init_task_menus(ds)
+        row = _menu(ds, 'task-runs')
+        assert row[0] == '执行记录'
+        assert row[1] == 'object_list'
+        assert json.loads(row[4] or '[]') == ['task_run']
+        assert row[2] == 1, '执行记录应显示在侧栏'
+        assert row[3] == 0, '人工维护菜单，不标记 auto_generated'
+        assert json.loads(row[6] or '[]') == ['*'], '仅管理员可见'
+
+        perms = ds.query(
+            "SELECT menu_code FROM menu_permissions WHERE menu_code = ?",
+            ('task-runs',))
+        assert perms == [('task-runs',)]

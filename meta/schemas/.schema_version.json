@@ -191,6 +191,68 @@
       ],
       "table": "audit_logs"
     },
+    "batch": {
+      "hash": "42f4577b515d6153171495ce6aae1476",
+      "fields": [
+        "created_by",
+        "updated_by",
+        "id",
+        "batch_no",
+        "item_id",
+        "org_id",
+        "qty",
+        "qty_uom_id",
+        "parent_batch_id",
+        "status",
+        "quality_status",
+        "source",
+        "produced_at",
+        "expiry_date",
+        "potency_pct",
+        "grade_code",
+        "description",
+        "created_at",
+        "updated_at"
+      ],
+      "table": "batches"
+    },
+    "batch_attribute_value": {
+      "hash": "8783a04888ea86e52cac9d6e6fb76a91",
+      "fields": [
+        "id",
+        "tenant_id",
+        "batch_id",
+        "attribute_id",
+        "seq",
+        "value_text",
+        "value_number",
+        "value_boolean",
+        "value_date",
+        "value_datetime",
+        "description",
+        "created_at"
+      ],
+      "table": "batch_attribute_values"
+    },
+    "batch_selection_policy": {
+      "hash": "915ded558450c8ed5da1bf13ac9b6e3f",
+      "fields": [
+        "created_by",
+        "updated_by",
+        "id",
+        "code",
+        "name",
+        "scope_type",
+        "scope_ref",
+        "rule_json",
+        "priority",
+        "status",
+        "description",
+        "created_at",
+        "updated_at"
+      ],
+      "table": "batch_selection_policies"
+    },
     "business_object": {
       "hash": "12ecddaecfd9bab6fee95febdf7724dd",
       "fields": [
@@ -371,6 +433,30 @@
       ],
       "table": "calendar_days"
     },
+    "calendar_shift": {
+      "hash": "59002e05f1a5773837d6dd4c3831cc10",
+      "fields": [
+        "created_by",
+        "updated_by",
+        "id",
+        "calendar_id",
+        "shift_id",
+        "day_mask_mon",
+        "day_mask_tue",
+        "day_mask_wed",
+        "day_mask_thu",
+        "day_mask_fri",
+        "day_mask_sat",
+        "day_mask_sun",
+        "seq",
+        "capacity_factor",
+        "valid_from",
+        "valid_to",
+        "created_at",
+        "updated_at"
+      ],
+      "table": "calendar_shifts"
+    },
     "change_event": {
       "hash": "2af1f33412c2a283dceac0b6a0de3422",
       "fields": [
@@ -447,7 +533,7 @@
       "table": "change_subscriptions"
     },
     "configuration": {
-      "hash": "56e04f327eb6fd4ede8db73ea0071374",
+      "hash": "8c08dca1777c907a19c69d6f03c01fc6",
       "fields": [
         "created_at",
         "updated_at",
@@ -456,6 +542,7 @@
         "id",
         "model_item_id",
         "structure_id",
+        "project_id",
         "status",
         "config_hash",
         "revision",
@@ -707,6 +794,85 @@
       ],
       "table": "data_permissions"
     },
+    "demand_allocation": {
+      "hash": "86cd7cda5eadc43c964903590db2eee7",
+      "fields": [
+        "created_by",
+        "updated_by",
+        "id",
+        "demand_bo",
+        "demand_id",
+        "demand_line_id",
+        "demand_line_no",
+        "demand_need_date",
+        "project_id",
+        "project_task_id",
+        "target_bo",
+        "target_id",
+        "target_line_id",
+        "target_schedule_id",
+        "qty",
+        "uom_id",
+        "allocated_amount",
+        "cost_center_id",
+        "expense_account_code",
+        "asset_category_code",
+        "charge_basis",
+        "status",
+        "reversed_at",
+        "created_at",
+        "updated_at"
+      ],
+      "table": "demand_allocations"
+    },
+    "demand_trace_graph": {
+      "hash": "7ace5c8b25a559542c17017e0468f6a8",
+      "fields": [
+        "id",
+        "layer",
+        "relation",
+        "source_object_type",
+        "source_object_id",
+        "source_line_id",
+        "target_object_type",
+        "target_object_id",
+        "target_line_id",
+        "qty",
+        "signed_qty",
+        "status",
+        "peg_type",
+        "plan_version",
+        "valid_from",
+        "valid_to",
+        "occurred_at"
+      ],
+      "table": "v_demand_trace_graph"
+    },
+    "demand_trace_link": {
+      "hash": "d0a716e27f55cf7bbec9cde78487d014",
+      "fields": [
+        "id",
+        "supply_object_type",
+        "supply_object_id",
+        "supply_line_id",
+        "demand_object_type",
+        "demand_object_id",
+        "demand_line_id",
+        "trace_type",
+        "peg_type",
+        "allocated_qty",
+        "plan_version",
+        "valid_from",
+        "valid_to",
+        "source_doc_type",
+        "source_doc_id",
+        "source_line_id",
+        "remark",
+        "computed_at",
+        "created_at"
+      ],
+      "table": "demand_trace_links"
+    },
     "dimension_object_mapping": {
       "hash": "1d516a0f1d9c45f8625df48553c09ddd",
       "fields": [],
@@ -727,8 +893,64 @@
       ],
       "table": "divisions"
     },
+    "document_hu_link": {
+      "hash": "31c3bf123ce21a7a1d147ebc5ff51823",
+      "fields": [
+        "id",
+        "doc_type",
+        "doc_id",
+        "line_id",
+        "hu_id",
+        "direction",
+        "link_type",
+        "tentative",
+        "qty",
+        "org_id",
+        "remark",
+        "created_at",
+        "updated_at"
+      ],
+      "table": "document_hu_links"
+    },
+    "document_hu_link_view": {
+      "hash": "938032f890cf2e2696018753d688e89e",
+      "fields": [
+        "id",
+        "hu_id",
+        "hu_no",
+        "hu_status",
+        "hu_type",
+        "doc_type",
+        "doc_id",
+        "doc_no",
+        "doc_status",
+        "doc_date",
+        "line_id",
+        "line_no",
+        "direction",
+        "link_type",
+        "tentative",
+        "qty",
+        "org_id",
+        "created_at"
+      ],
+      "table": "document_hu_link_view"
+    },
+    "document_serial_link": {
+      "hash": "66009a05569498bfb0f6557d1d57d7ac",
+      "fields": [
+        "id",
+        "doc_type",
+        "doc_id",
+        "line_id",
+        "serial_id",
+        "direction",
+        "created_at"
+      ],
+      "table": "document_serial_links"
+    },
     "document_type": {
-      "hash": "c8f128aa6fe12bf888140aa80ce27c6f",
+      "hash": "4ff12857f15863896783d095c091527f",
       "fields": [
         "id",
         "code",
@@ -738,7 +960,8 @@
         "number_sequence_id",
         "status",
         "description",
-        "created_at"
+        "created_at",
+        "scope_bo"
       ],
       "table": "document_types"
     },
@@ -763,6 +986,31 @@
       ],
       "table": "domains"
     },
+    "employee": {
+      "hash": "4bb55801dc14e3e68bacb855873ddc68",
+      "fields": [
+        "created_by",
+        "updated_by",
+        "id",
+        "employee_no",
+        "name",
+        "person_profile_id",
+        "user_id",
+        "org_id",
+        "location_id",
+        "position",
+        "job_grade",
+        "employment_type",
+        "supplier_party_id",
+        "status",
+        "hire_date",
+        "termination_date",
+        "manager_employee_id",
+        "created_at",
+        "updated_at"
+      ],
+      "table": "employees"
+    },
     "employee_data_scope": {
       "hash": "a354bf8cec231115c9ecb3e5300e37d2",
       "fields": [
@@ -773,6 +1021,78 @@
         "description"
       ],
       "table": "employee_data_scopes"
+    },
+    "employee_shift_assignment": {
+      "hash": "3635ea6ec67f28156fffe1be0ae8ce64",
+      "fields": [
+        "created_by",
+        "updated_by",
+        "id",
+        "employee_id",
+        "shift_id",
+        "day_mask_mon",
+        "day_mask_tue",
+        "day_mask_wed",
+        "day_mask_thu",
+        "day_mask_fri",
+        "day_mask_sat",
+        "day_mask_sun",
+        "seq",
+        "effective_from",
+        "effective_to",
+        "work_center_id",
+        "note",
+        "created_at",
+        "updated_at"
+      ],
+      "table": "employee_shift_assignments"
+    },
+    "engineering_change": {
+      "hash": "dc7e9281e09db27754cb572cd6a45bec",
+      "fields": [
+        "created_at",
+        "updated_at",
+        "created_by",
+        "updated_by",
+        "id",
+        "change_no",
+        "title",
+        "change_type",
+        "project_id",
+        "reason",
+        "effective_date",
+        "status",
+        "applied_at",
+        "applied_by"
+      ],
+      "table": "engineering_changes"
+    },
+    "engineering_change_line": {
+      "hash": "449810f9255ae934bf3b640d89116b42",
+      "fields": [
+        "created_at",
+        "updated_at",
+        "created_by",
+        "updated_by",
+        "id",
+        "change_id",
+        "line_no",
+        "line_type",
+        "target_structure_id",
+        "source_structure_id",
+        "source_structure_line_id",
+        "structure_line_id",
+        "component_item_id",
+        "match_key",
+        "target_revision",
+        "source_revision",
+        "old_qty_per",
+        "new_qty_per",
+        "old_valid_to",
+        "new_valid_to",
+        "note"
+      ],
+      "table": "engineering_change_lines"
     },
     "enum_type": {
       "hash": "4baa9478a68e1e204882fe99b3d5618a",
@@ -884,15 +1204,17 @@
       "table": "filter_variants"
     },
     "fulfillment_order": {
-      "hash": "3ca9ec00c98d9a4346586d371ef3b19b",
+      "hash": "5013ad6a73bb31f29411250c7e1645fc",
       "fields": [
         "created_by",
         "updated_by",
+        "document_type_id",
         "id",
         "fulfillment_no",
         "order_id",
         "customer_account_id",
         "site_id",
+        "project_id",
         "fulfillment_type",
         "status",
         "workflow_run_id",
@@ -934,10 +1256,79 @@
       ],
       "table": "group_data_permissions"
     },
+    "handling_unit": {
+      "hash": "179804314c1a9888b7c489dc1bf6b52b",
+      "fields": [
+        "created_by",
+        "updated_by",
+        "id",
+        "hu_no",
+        "hu_type",
+        "packaging_item_id",
+        "org_id",
+        "location_id",
+        "parent_hu_id",
+        "root_hu_id",
+        "status",
+        "is_reusable",
+        "cycle_no",
+        "sealed_at",
+        "shipped_at",
+        "voided_at",
+        "gross_weight",
+        "tare_weight",
+        "net_weight",
+        "volume",
+        "uom_id",
+        "source_doc_type",
+        "source_doc_id",
+        "remark",
+        "created_at",
+        "updated_at"
+      ],
+      "table": "handling_units"
+    },
+    "handling_unit_item": {
+      "hash": "1b28e9debb7b4304b487476e7d527a37",
+      "fields": [
+        "id",
+        "hu_id",
+        "content_type",
+        "item_id",
+        "batch_id",
+        "serial_id",
+        "child_hu_id",
+        "qty",
+        "uom_id",
+        "created_at"
+      ],
+      "table": "handling_unit_items"
+    },
     "hierarchies": {
       "hash": "1d516a0f1d9c45f8625df48553c09ddd",
       "fields": [],
       "table": ""
+    },
+    "hu_transaction": {
+      "hash": "702db8baddc3bd4d96df3f343bbdf9a5",
+      "fields": [
+        "id",
+        "hu_id",
+        "txn_type",
+        "serial_id",
+        "child_hu_id",
+        "from_hu_id",
+        "to_hu_id",
+        "from_location_id",
+        "to_location_id",
+        "doc_type",
+        "doc_id",
+        "line_id",
+        "txn_at",
+        "remark",
+        "created_at"
+      ],
+      "table": "hu_transactions"
     },
     "incoterm": {
       "hash": "6850233618e46aa5857b113bbda3785c",
@@ -963,8 +1354,190 @@
       ],
       "table": "incoterms"
     },
+    "inventory_adjustment": {
+      "hash": "2133c05cc6f5e794d90652a60e83a5d8",
+      "fields": [
+        "updated_by",
+        "id",
+        "adjustment_no",
+        "adjustment_type",
+        "status",
+        "org_id",
+        "location_id",
+        "reason_code",
+        "reason_text",
+        "posting_date",
+        "source_count_id",
+        "reversal_of_adjustment_id",
+        "created_by",
+        "created_at",
+        "posted_by",
+        "posted_at",
+        "updated_at"
+      ],
+      "table": "inventory_adjustments"
+    },
+    "inventory_adjustment_line": {
+      "hash": "a9ec3b237c5fddfd39aa68c7af192115",
+      "fields": [
+        "id",
+        "adjustment_id",
+        "line_no",
+        "item_id",
+        "location_id",
+        "batch_id",
+        "uom_id",
+        "qty",
+        "serial_no",
+        "from_stock_status",
+        "to_stock_status",
+        "source_count_line_id",
+        "remark",
+        "created_at",
+        "updated_at"
+      ],
+      "table": "inventory_adjustment_lines"
+    },
+    "inventory_balance": {
+      "hash": "d644e3724acded64785742ec10adedc7",
+      "fields": [
+        "id",
+        "org_id",
+        "location_id",
+        "item_id",
+        "batch_id",
+        "stock_status",
+        "qty_on_hand",
+        "qty_reserved",
+        "stock_segment_type",
+        "project_id",
+        "project_task_id",
+        "sales_order_line_id",
+        "owner_party_id",
+        "first_received_date",
+        "updated_at"
+      ],
+      "table": "inventory_balances"
+    },
+    "inventory_count": {
+      "hash": "5e0df5cfe60ae30df2b615144f3db692",
+      "fields": [
+        "updated_by",
+        "id",
+        "count_no",
+        "count_type",
+        "status",
+        "org_id",
+        "location_id",
+        "snapshot_at",
+        "posting_block",
+        "tolerance_qty_pct",
+        "tolerance_qty_abs",
+        "generated_adjustment_id",
+        "approved_by",
+        "approved_at",
+        "posted_at",
+        "remark",
+        "created_by",
+        "created_at",
+        "updated_at"
+      ],
+      "table": "inventory_counts"
+    },
+    "inventory_count_line": {
+      "hash": "478bc2aa2ab659d3d103cf8fe447035e",
+      "fields": [
+        "id",
+        "count_id",
+        "line_no",
+        "item_id",
+        "location_id",
+        "batch_id",
+        "uom_id",
+        "stock_status",
+        "snapshot_qty",
+        "counted_qty",
+        "variance_qty",
+        "serial_no",
+        "variance_reason",
+        "source_balance_id",
+        "remark",
+        "created_at",
+        "updated_at"
+      ],
+      "table": "inventory_count_lines"
+    },
+    "inventory_reservation": {
+      "hash": "384624e3a764831f8b0ac379e071c943",
+      "fields": [
+        "id",
+        "reservation_no",
+        "org_id",
+        "item_id",
+        "uom_id",
+        "demand_object_type",
+        "demand_object_id",
+        "demand_line_id",
+        "location_id",
+        "batch_id",
+        "stock_segment_type",
+        "project_id",
+        "project_task_id",
+        "sales_order_line_id",
+        "owner_party_id",
+        "qty_reserved",
+        "qty_fulfilled",
+        "peg_type",
+        "status",
+        "valid_from",
+        "valid_to",
+        "source_doc_type",
+        "source_doc_id",
+        "source_line_id",
+        "reservation_key",
+        "remark",
+        "created_by",
+        "created_at",
+        "updated_by",
+        "updated_at"
+      ],
+      "table": "inventory_reservations"
+    },
+    "inventory_transaction": {
+      "hash": "210304d06da4e5e019be903cf7d7c0d4",
+      "fields": [
+        "id",
+        "transaction_no",
+        "transaction_type_id",
+        "transaction_date",
+        "org_id",
+        "location_id",
+        "item_id",
+        "uom_id",
+        "qty",
+        "base_qty",
+        "direction",
+        "batch_id",
+        "stock_status",
+        "stock_segment_type",
+        "project_id",
+        "project_task_id",
+        "sales_order_line_id",
+        "owner_party_id",
+        "source_doc_type",
+        "source_doc_id",
+        "source_line_id",
+        "source_event_key",
+        "transfer_group_id",
+        "reversal_of_transaction_id",
+        "remark",
+        "created_by",
+        "created_at"
+      ],
+      "table": "inventory_transactions"
+    },
     "item": {
-      "hash": "b44f6e6084027dc1d056c96db1f2ea48",
+      "hash": "1d44d2057c10774345b4ae35f1fc730e",
       "fields": [
         "updated_at",
         "created_by",
@@ -983,6 +1556,8 @@
         "structure_role",
         "config_match_policy",
         "config_materialize_policy",
+        "variant_of_item_id",
+        "variant_config_hash",
         "item_group_id",
         "tax_classification_id",
         "base_uom",
@@ -991,6 +1566,13 @@
         "order_multiple",
         "net_weight",
         "gross_weight",
+        "serial_tracked",
+        "require_on_receipt",
+        "require_on_issue",
+        "so_segment_enabled",
+        "consignment_enabled",
+        "hard_peg_default",
+        "valuation_relevant",
         "barcode",
         "status",
         "created_at"
@@ -1139,7 +1721,7 @@
       "table": "key_schemas"
     },
     "line_type": {
-      "hash": "ee525c9e5b700f4459ab85192bcce0b1",
+      "hash": "85af46b56c9fedd2f46dd13a2c3333a2",
       "fields": [
         "id",
         "code",
@@ -1148,7 +1730,8 @@
         "delivery_relevant",
         "status",
         "description",
-        "created_at"
+        "created_at",
+        "scope_bo"
       ],
       "table": "line_types"
     },
@@ -1167,7 +1750,7 @@
       "table": "line_type_assignments"
     },
     "location": {
-      "hash": "85ee0c0e889d5fc0c46404358d532bc5",
+      "hash": "9683f73eb94c3003058e6eac32493eb0",
       "fields": [
         "updated_at",
         "created_by",
@@ -1176,6 +1759,7 @@
         "code",
         "name",
         "location_type",
+        "org_id",
         "parent_id",
         "address_id",
         "calendar_id",
@@ -1265,8 +1849,31 @@
       ],
       "table": "number_sequences"
     },
+    "operation_resource_requirement": {
+      "hash": "0b0b0cdc80fc041a8c7836448cd503e3",
+      "fields": [
+        "created_by",
+        "updated_by",
+        "id",
+        "operation_id",
+        "resource_group_id",
+        "resource_id",
+        "role",
+        "qty",
+        "required_skill_id",
+        "min_level",
+        "is_primary",
+        "priority",
+        "lead_time_days",
+        "substitute_group",
+        "replacement_group",
+        "created_at",
+        "updated_at"
+      ],
+      "table": "operation_resource_requirements"
+    },
     "org": {
-      "hash": "5f8ee6d4cf40575e61f5c39e17bea2cd",
+      "hash": "8f9bdb7613db7bb8ca4d2c7ff21e0aac",
       "fields": [
         "updated_at",
         "created_by",
@@ -1280,6 +1887,7 @@
         "parent_id",
         "manager_id",
         "description",
+        "default_inventory_location_id",
         "created_at",
         null
       ],
@@ -1696,6 +2304,33 @@
       ],
       "table": "pricing_periods"
     },
+    "process_instruction": {
+      "hash": "25491837122559d603c489fef2c87073",
+      "fields": [
+        "created_by",
+        "updated_by",
+        "id",
+        "operation_id",
+        "seq",
+        "instruction_kind",
+        "title",
+        "content",
+        "parameter_code",
+        "parameter_name",
+        "data_type",
+        "uom_id",
+        "target_value",
+        "min_value",
+        "max_value",
+        "direction",
+        "resource_id",
+        "is_required",
+        "description",
+        "created_at",
+        "updated_at"
+      ],
+      "table": "process_instructions"
+    },
     "product": {
       "hash": "cf4f4a266ab5699aa45b410cf7e0cb7d",
       "fields": [
@@ -1713,6 +2348,233 @@
         "child_count"
       ],
       "table": "products"
+    },
+    "production_version": {
+      "hash": "7d3475ee8c76caafa186ad800da627e5",
+      "fields": [
+        "created_by",
+        "updated_by",
+        "id",
+        "code",
+        "item_id",
+        "org_id",
+        "bom_id",
+        "work_definition_id",
+        "valid_from",
+        "valid_to",
+        "lot_min",
+        "lot_max",
+        "priority",
+        "locked",
+        "status",
+        "description",
+        "created_at",
+        "updated_at"
+      ],
+      "table": "production_versions"
+    },
+    "project": {
+      "hash": "4faff1e9ba20011c3e8bc6a7cddc4f74",
+      "fields": [
+        "created_by",
+        "updated_by",
+        "id",
+        "project_no",
+        "name",
+        "project_type_id",
+        "status",
+        "org_id",
+        "customer_account_id",
+        "manager_user_id",
+        "start_date",
+        "end_date",
+        "budget_amount",
+        "design_mode",
+        "currency_id",
+        "description",
+        "created_at",
+        "updated_at"
+      ],
+      "table": "projects"
+    },
+    "project_structure_baseline": {
+      "hash": "40d2833d12dcee71101c0efb3e434ba4",
+      "fields": [
+        "id",
+        "project_id",
+        "item_id",
+        "usage",
+        "alternative_no",
+        "structure_id",
+        "baseline_hash",
+        "captured_at",
+        "note"
+      ],
+      "table": "project_structure_baselines"
+    },
+    "project_task": {
+      "hash": "15eaa96db1fde311975bea7ac7310a66",
+      "fields": [
+        "created_by",
+        "updated_by",
+        "id",
+        "project_id",
+        "parent_task_id",
+        "task_no",
+        "name",
+        "task_type",
+        "status",
+        "planned_start",
+        "planned_end",
+        "percent_complete",
+        "owner_user_id",
+        "description",
+        "created_at",
+        "updated_at"
+      ],
+      "table": "project_tasks"
+    },
+    "project_task_dependency": {
+      "hash": "2a160990690308fa817c19c7f33497c9",
+      "fields": [
+        "created_by",
+        "updated_by",
+        "id",
+        "predecessor_task_id",
+        "successor_task_id",
+        "dependency_type",
+        "lag_minutes",
+        "created_at",
+        "updated_at"
+      ],
+      "table": "project_task_dependencies"
+    },
+    "purchase_order": {
+      "hash": "6007d09d8e98fd0e3ab1ff63ef801180",
+      "fields": [
+        "created_by",
+        "updated_by",
+        "document_type_id",
+        "id",
+        "order_no",
+        "order_date",
+        "project_id",
+        "status",
+        "supplier_party_id",
+        "supplier_account_id",
+        "supplier_reference_no",
+        "contact_party_id",
+        "contact_name_text",
+        "contact_phone_text",
+        "org_id",
+        "purchase_org_id",
+        "purchase_legal_entity_id",
+        "division_code",
+        "deliver_to_location_id",
+        "currency_id",
+        "exchange_rate",
+        "exchange_rate_type",
+        "exchange_rate_date",
+        "payment_term_id",
+        "incoterm_code",
+        "requested_date",
+        "confirmed_date",
+        "price_date",
+        "header_discount_percent",
+        "header_surcharge_percent",
+        "header_discount_amount",
+        "header_surcharge_amount",
+        "price_list_id",
+        "pricing_procedure_id",
+        "net_amount",
+        "tax_amount",
+        "gross_amount",
+        "approval_status",
+        "fulfillment_status",
+        "fulfillment_derived_at",
+        "description",
+        "revision_no",
+        "created_at",
+        "updated_at"
+      ],
+      "table": "purchase_orders"
+    },
+    "purchase_order_line": {
+      "hash": "1dc6e774bc853996551b188169561242",
+      "fields": [
+        "created_by",
+        "updated_by",
+        "id",
+        "order_id",
+        "line_no",
+        "line_type_id",
+        "item_id",
+        "supplier_item_code",
+        "description",
+        "qty",
+        "uom_id",
+        "unit_price",
+        "net_amount",
+        "header_discount_amount",
+        "header_surcharge_amount",
+        "tax_code_id",
+        "tax_base_amount",
+        "tax_rate_percent",
+        "tax_amount",
+        "tax_recoverable",
+        "non_recoverable_tax_amount",
+        "gross_amount",
+        "requested_date",
+        "deliver_to_location_id",
+        "service_start_date",
+        "service_end_date",
+        "subcontract_fee_basis",
+        "component_issue_required",
+        "asset_category_code",
+        "capitalization_flag",
+        "capitalization_date",
+        "service_acceptance_required",
+        "expense_account_code",
+        "cost_center_id",
+        "price_source",
+        "price_trace",
+        "sourcing_rule_line_id",
+        "pricing_mode",
+        "parent_line_id",
+        "component_no",
+        "configuration_id",
+        "source_structure_id",
+        "source_structure_line_id",
+        "status",
+        "fulfillment_status",
+        "fulfillment_derived_at",
+        "created_at",
+        "updated_at"
+      ],
+      "table": "purchase_order_lines"
+    },
+    "purchase_order_schedule": {
+      "hash": "b1f15a0e85b4b433ab6ad85da0cf26a8",
+      "fields": [
+        "created_by",
+        "updated_by",
+        "id",
+        "order_id",
+        "line_id",
+        "schedule_no",
+        "schedule_kind",
+        "deliver_to_location_id",
+        "promised_date",
+        "promised_qty",
+        "status",
+        "received_qty",
+        "rejected_qty",
+        "completion_source",
+        "completion_prev_status",
+        "created_at",
+        "updated_at"
+      ],
+      "table": "purchase_order_schedules"
     },
     "rate_record": {
       "hash": "85d9105af20db9ad1969c02af3003459",
@@ -1790,6 +2652,65 @@
       ],
       "table": "rate_types"
     },
+    "receipt": {
+      "hash": "b071a29b5f389a4a210049ae76710a42",
+      "fields": [
+        "created_by",
+        "updated_by",
+        "document_type_id",
+        "id",
+        "receipt_no",
+        "receipt_date",
+        "actual_arrival_date",
+        "source_doc_type",
+        "source_doc_id",
+        "source_doc_no",
+        "supplier_party_id",
+        "supplier_delivery_no",
+        "org_id",
+        "purchase_org_id",
+        "inventory_org_id",
+        "deliver_to_location_id",
+        "project_id",
+        "received_by",
+        "status",
+        "reversal_of_receipt_id",
+        "reversed_at",
+        "remark",
+        "created_at",
+        "updated_at"
+      ],
+      "table": "receipts"
+    },
+    "receipt_line": {
+      "hash": "652c6e688b82441983bb0e8588532bd3",
+      "fields": [
+        "id",
+        "receipt_id",
+        "line_no",
+        "schedule_id",
+        "source_line_id",
+        "order_id",
+        "order_line_id",
+        "item_id",
+        "project_task_id",
+        "uom_id",
+        "qty_received",
+        "qty_rejected",
+        "rejection_reason_code",
+        "rejection_disposition",
+        "lot_no",
+        "serial_no",
+        "hu_no",
+        "hu_type",
+        "putaway_location_id",
+        "status",
+        "reversal_of_line_id",
+        "created_at",
+        "updated_at"
+      ],
+      "table": "receipt_lines"
+    },
     "region": {
       "hash": "7618f0f6033c522a2ca2b618d8dcbff8",
       "fields": [
@@ -1856,6 +2777,244 @@
       ],
       "table": "relationships"
     },
+    "requisition": {
+      "hash": "f08859d5efa2532bce77f410faebbe97",
+      "fields": [
+        "created_by",
+        "updated_by",
+        "document_type_id",
+        "id",
+        "requisition_no",
+        "status",
+        "priority",
+        "requester_org_id",
+        "deliver_to_org_id",
+        "deliver_to_location_id",
+        "need_date",
+        "requested_by_party_id",
+        "description",
+        "closed_at",
+        "created_at",
+        "updated_at"
+      ],
+      "table": "requisitions"
+    },
+    "requisition_line": {
+      "hash": "5733a3808f7829fbe916a27edd91ff4b",
+      "fields": [
+        "created_by",
+        "updated_by",
+        "id",
+        "requisition_id",
+        "line_no",
+        "line_type",
+        "item_id",
+        "description",
+        "qty",
+        "uom_id",
+        "need_date",
+        "deliver_to_location_id",
+        "cost_center_id",
+        "requested_source_org_id",
+        "resolved_source_org_id",
+        "status",
+        "created_at",
+        "updated_at"
+      ],
+      "table": "requisition_lines"
+    },
+    "resource": {
+      "hash": "702ac11b53b9162168bb9c89241110ac",
+      "fields": [
+        "created_by",
+        "updated_by",
+        "id",
+        "code",
+        "name",
+        "resource_kind",
+        "resource_role",
+        "org_id",
+        "location_id",
+        "cost_center_id",
+        "party_id",
+        "person_ref",
+        "capacity_uom_id",
+        "capacity_per_day",
+        "capacity_units",
+        "utilization_pct",
+        "calendar_id",
+        "timezone",
+        "is_active",
+        "valid_from",
+        "valid_to",
+        "description",
+        "created_at",
+        "updated_at"
+      ],
+      "table": "resources"
+    },
+    "resource_assignment": {
+      "hash": "d51c7fabdda7bb5d9d5c6c95f65e18f5",
+      "fields": [
+        "created_by",
+        "updated_by",
+        "id",
+        "work_order_operation_id",
+        "resource_id",
+        "planned_start",
+        "planned_end",
+        "planned_qty",
+        "status",
+        "source",
+        "created_at",
+        "updated_at"
+      ],
+      "table": "resource_assignments"
+    },
+    "resource_availability": {
+      "hash": "6bded8269809407ddc57ae81212722f8",
+      "fields": [
+        "created_by",
+        "updated_by",
+        "id",
+        "resource_id",
+        "availability_type",
+        "start_at",
+        "end_at",
+        "reason",
+        "source",
+        "org_id",
+        "created_at",
+        "updated_at"
+      ],
+      "table": "resource_availabilities"
+    },
+    "resource_capability": {
+      "hash": "552c3e11d068a944337daaf3a330f32e",
+      "fields": [
+        "created_by",
+        "updated_by",
+        "id",
+        "resource_id",
+        "skill_id",
+        "level",
+        "valid_from",
+        "valid_to",
+        "certification_ref",
+        "verified_by",
+        "verified_at",
+        "created_at",
+        "updated_at"
+      ],
+      "table": "resource_capabilities"
+    },
+    "resource_capacity": {
+      "hash": "5223e330afb0cc12973afc6e95b7c281",
+      "fields": [
+        "created_by",
+        "updated_by",
+        "id",
+        "resource_id",
+        "resource_group_id",
+        "capacity_category",
+        "capacity_uom_id",
+        "capacity_per_day",
+        "capacity_units",
+        "utilization_pct",
+        "valid_from",
+        "valid_to",
+        "created_at",
+        "updated_at"
+      ],
+      "table": "resource_capacities"
+    },
+    "resource_group": {
+      "hash": "4cb66b2ed8f131296cfde078999e32fa",
+      "fields": [
+        "created_by",
+        "updated_by",
+        "id",
+        "code",
+        "name",
+        "group_kind",
+        "org_id",
+        "org_unit_id",
+        "location_id",
+        "calendar_id",
+        "cost_center_id",
+        "capacity_aggregation",
+        "membership_mode",
+        "parent_group_id",
+        "is_bottleneck",
+        "is_active",
+        "valid_from",
+        "valid_to",
+        "description",
+        "created_at",
+        "updated_at"
+      ],
+      "table": "resource_groups"
+    },
+    "resource_group_member": {
+      "hash": "7b15487818c95d78498a7de13610500f",
+      "fields": [
+        "created_by",
+        "updated_by",
+        "id",
+        "group_id",
+        "resource_id",
+        "role",
+        "priority",
+        "allocation_pct",
+        "quantity",
+        "valid_from",
+        "valid_to",
+        "created_at",
+        "updated_at"
+      ],
+      "table": "resource_group_members"
+    },
+    "resource_rate": {
+      "hash": "9ba5566ebca9a5703ade24318daa3c59",
+      "fields": [
+        "created_by",
+        "updated_by",
+        "id",
+        "resource_id",
+        "resource_group_id",
+        "rate_purpose",
+        "rate_basis",
+        "org_id",
+        "location_id",
+        "currency_id",
+        "rate",
+        "rate_uom_id",
+        "valid_from",
+        "valid_to",
+        "priority",
+        "rate_source",
+        "created_at",
+        "updated_at"
+      ],
+      "table": "resource_rates"
+    },
+    "resource_territory_assignment": {
+      "hash": "da7768b268e4c15d1e4a42e7f8e06c65",
+      "fields": [
+        "created_by",
+        "updated_by",
+        "id",
+        "resource_id",
+        "resource_group_id",
+        "territory_id",
+        "coverage_level",
+        "effective_from",
+        "effective_to",
+        "created_at",
+        "updated_at"
+      ],
+      "table": "resource_territory_assignments"
+    },
     "salesperson": {
       "hash": "db0a1f5adf4c0420e5ccec93bc1b0b7b",
       "fields": [
@@ -1890,14 +3049,15 @@
       "table": "salesperson_territory_assignments"
     },
     "sales_order": {
-      "hash": "948bb57e50ea1dedefc99fdf7c286835",
+      "hash": "6b8d671ea3c18f7e1d2184ae7619a43e",
       "fields": [
         "created_by",
         "updated_by",
         "id",
         "order_no",
-        "order_type_id",
+        "document_type_id",
         "order_date",
+        "project_id",
         "status",
         "customer_account_id",
         "bill_to_account_id",
@@ -1945,12 +3105,14 @@
       "table": "sales_orders"
     },
     "sales_order_line": {
-      "hash": "124e7c1c8da65a8c9fc8c134ea069395",
+      "hash": "00dcf4a3edf0a5dd7c9c9f7da2d8981c",
       "fields": [
         "created_by",
         "updated_by",
         "id",
         "order_id",
+        "project_id",
+        "project_task_id",
         "line_no",
         "line_type_id",
         "item_id",
@@ -1993,12 +3155,13 @@
       "table": "sales_order_lines"
     },
     "sales_order_schedule": {
-      "hash": "5a38f10e5a231b2dbb64702d887b21ac",
+      "hash": "e41d5a72f9a5af743abac5845a7b6d7d",
       "fields": [
         "created_by",
         "updated_by",
         "id",
         "order_id",
+        "project_id",
         "line_id",
         "plant_location_id",
         "schedule_no",
@@ -2014,6 +3177,83 @@
         "updated_at"
       ],
       "table": "sales_order_schedules"
+    },
+    "serial_number": {
+      "hash": "88a7100a2b33aedce6656f6e6381706d",
+      "fields": [
+        "created_by",
+        "updated_by",
+        "id",
+        "serial_no",
+        "uii",
+        "revision",
+        "item_id",
+        "org_id",
+        "batch_id",
+        "current_location_id",
+        "usage_status",
+        "quality_status",
+        "shipped_at",
+        "scrapped_at",
+        "parent_serial_id",
+        "relation_type",
+        "parent_item_id",
+        "source_type",
+        "source_doc_type",
+        "source_doc_id",
+        "received_at",
+        "produced_at",
+        "remark",
+        "created_at",
+        "updated_at"
+      ],
+      "table": "serial_numbers"
+    },
+    "serial_transaction": {
+      "hash": "8b196a0013244340028f82277aa09428",
+      "fields": [
+        "id",
+        "serial_id",
+        "inventory_transaction_id",
+        "txn_type",
+        "txn_date",
+        "org_from_id",
+        "org_to_id",
+        "location_from_id",
+        "location_to_id",
+        "batch_from_id",
+        "batch_to_id",
+        "usage_from",
+        "usage_to",
+        "quality_from",
+        "quality_to",
+        "doc_type",
+        "doc_id",
+        "line_id",
+        "remark",
+        "created_by",
+        "created_at"
+      ],
+      "table": "serial_transactions"
+    },
+    "service_catalog_item": {
+      "hash": "0a3431ad5bde104ebfb40aacab34a6a3",
+      "fields": [
+        "created_by",
+        "updated_by",
+        "id",
+        "code",
+        "name",
+        "status",
+        "default_priority",
+        "default_provider_org_id",
+        "requires_approval",
+        "approval_policy",
+        "description",
+        "created_at",
+        "updated_at"
+      ],
+      "table": "service_catalog_items"
     },
     "service_event": {
       "hash": "d58119aa25b2d64cf5b412471e2ff37b",
@@ -2055,14 +3295,82 @@
       ],
       "table": "service_modules"
     },
-    "shipment": {
-      "hash": "d5714bc63f021503ee43a76d06ff51ef",
+    "service_request": {
+      "hash": "1fb9b926d02bda61ff44a8cc60b87d69",
+      "fields": [
+        "created_by",
+        "updated_by",
+        "document_type_id",
+        "id",
+        "request_no",
+        "title",
+        "status",
+        "priority",
+        "requester_org_id",
+        "provider_org_id",
+        "requester_party_id",
+        "need_date",
+        "description",
+        "closed_at",
+        "created_at",
+        "updated_at"
+      ],
+      "table": "service_requests"
+    },
+    "service_request_line": {
+      "hash": "089343a7ddc0301d42cf09b1a239ec90",
       "fields": [
         "created_by",
         "updated_by",
         "id",
+        "request_id",
+        "line_no",
+        "line_type",
+        "catalog_item_id",
+        "item_id",
+        "description",
+        "qty",
+        "uom_id",
+        "need_date",
+        "deliver_to_location_id",
+        "status",
+        "created_at",
+        "updated_at"
+      ],
+      "table": "service_request_lines"
+    },
+    "shift": {
+      "hash": "e064ce9db7337bf6080e343ec703dccf",
+      "fields": [
+        "created_by",
+        "updated_by",
+        "id",
+        "code",
+        "name",
+        "start_time",
+        "end_time",
+        "crosses_midnight",
+        "break_minutes",
+        "shift_type",
+        "org_id",
+        "is_active",
+        "valid_from",
+        "valid_to",
+        "created_at",
+        "updated_at"
+      ],
+      "table": "shifts"
+    },
+    "shipment": {
+      "hash": "81a3d231f4466af311768c31389d7106",
+      "fields": [
+        "created_by",
+        "updated_by",
+        "document_type_id",
+        "id",
         "delivery_no",
         "order_id",
+        "project_id",
         "ship_from_location_id",
         "ship_to_party_id",
         "ship_to_address_text",
@@ -2073,6 +3381,8 @@
         "actual_ship_date",
         "actual_arrival_date",
         "signature_ref",
+        "reversed_at",
+        "reversal_reason",
         "status",
         "source",
         "remark",
@@ -2082,22 +3392,43 @@
       "table": "shipments"
     },
     "shipment_line": {
-      "hash": "cd63577eae4f0ca7f629ae89a5deccaa",
+      "hash": "cdd4ac7f773b6b81cd44bb50ab1a65cd",
       "fields": [
         "id",
         "delivery_id",
         "schedule_id",
         "order_line_id",
         "item_id",
+        "project_task_id",
         "uom_id",
         "qty",
         "lot_no",
         "serial_no",
+        "hu_no",
         "status",
         "created_at",
         "updated_at"
       ],
       "table": "shipment_lines"
+    },
+    "skill": {
+      "hash": "4d8083b9cb22c9065ff1dc5a18e7f608",
+      "fields": [
+        "created_by",
+        "updated_by",
+        "id",
+        "code",
+        "name",
+        "category",
+        "parent_id",
+        "requires_certification",
+        "default_validity_months",
+        "status",
+        "description",
+        "created_at",
+        "updated_at"
+      ],
+      "table": "skills"
     },
     "sla_coverage": {
       "hash": "6150faf056b72e5afc41429c93b11676",
@@ -2132,10 +3463,11 @@
       "table": "sla_coverage_rules"
     },
     "sla_milestone": {
-      "hash": "1a3b26e62638d12b6cee28835a95ad97",
+      "hash": "8d7d88082628190271b8b845253b9d1a",
       "fields": [
         "id",
         "work_order_id",
+        "project_id",
         "milestone_type",
         "state",
         "due_at",
@@ -2253,6 +3585,129 @@
       ],
       "table": "sub_domains"
     },
+    "task": {
+      "hash": "5418c34f7832047979e30c4800b87601",
+      "fields": [
+        "id",
+        "code",
+        "title",
+        "description",
+        "type",
+        "status",
+        "priority",
+        "app_id",
+        "executor_type",
+        "executor_assignee",
+        "executor_candidates",
+        "assign_policy",
+        "executor_config",
+        "executor_fallback",
+        "claim_timeout_seconds",
+        "timeout_seconds",
+        "retry_policy",
+        "due_at",
+        "sla",
+        "parent_task_id",
+        "workflow_run_id",
+        "workflow_node_id",
+        "deps",
+        "inputs",
+        "inputs_schema",
+        "outputs",
+        "outputs_schema",
+        "acceptance",
+        "attempt",
+        "trace_id",
+        "agent_session_id",
+        "doc_ref",
+        "line_refs",
+        "created_by",
+        "created_at",
+        "started_at",
+        "finished_at",
+        "fail_reason",
+        "meta",
+        "updated_at"
+      ],
+      "table": "tasks"
+    },
+    "task_event": {
+      "hash": "e0c2dc0d902d26b94dfff581e7250b91",
+      "fields": [
+        "id",
+        "task_id",
+        "workflow_run_id",
+        "event_type",
+        "from_status",
+        "to_status",
+        "actor",
+        "actor_kind",
+        "reason",
+        "payload",
+        "doc_ref",
+        "line_refs",
+        "agent_session_id",
+        "trace_id",
+        "occurred_at",
+        "created_at"
+      ],
+      "table": "task_events"
+    },
+    "task_template": {
+      "hash": "127cfc76f43937ebfc1fd15d52a89fa8",
+      "fields": [
+        "id",
+        "workflow_id",
+        "workflow_version",
+        "node_id",
+        "step_number",
+        "parent_step_number",
+        "group_name",
+        "title",
+        "description",
+        "type",
+        "priority",
+        "executor_type",
+        "executor_assignee",
+        "executor_candidates",
+        "assign_policy",
+        "executor_config",
+        "executor_fallback",
+        "claim_timeout_seconds",
+        "timeout_seconds",
+        "retry_policy",
+        "inputs_schema",
+        "outputs_schema",
+        "acceptance",
+        "sla",
+        "meta",
+        "created_at",
+        "updated_at"
+      ],
+      "table": "task_templates"
+    },
+    "task_worklog": {
+      "hash": "61654c2286f03f5ad0c17f201c2dbbe7",
+      "fields": [
+        "id",
+        "task_id",
+        "workflow_run_id",
+        "event_id",
+        "entry_type",
+        "actor",
+        "actor_kind",
+        "summary",
+        "detail",
+        "inputs_hash",
+        "outputs_hash",
+        "progress_pct",
+        "doc_ref",
+        "trace_id",
+        "occurred_at",
+        "created_at"
+      ],
+      "table": "task_worklogs"
+    },
     "tax_classification": {
       "hash": "b52c92d1f009cdc6c6402a03022726d5",
       "fields": [
@@ -2365,6 +3820,112 @@
         "status"
       ],
       "table": "test_table"
+    },
+    "time_entry": {
+      "hash": "1ee0beae7227901b5426cd23f74f1c8d",
+      "fields": [
+        "created_by",
+        "updated_by",
+        "id",
+        "work_date",
+        "resource_id",
+        "minutes",
+        "project_task_id",
+        "work_order_id",
+        "work_order_operation_id",
+        "resource_assignment_id",
+        "entry_type",
+        "billable",
+        "note",
+        "created_at",
+        "updated_at"
+      ],
+      "table": "time_entries"
+    },
+    "transfer_order": {
+      "hash": "eb58e9cf90ef30ce32477cfc7bb03900",
+      "fields": [
+        "created_by",
+        "updated_by",
+        "document_type_id",
+        "id",
+        "transfer_order_no",
+        "transfer_date",
+        "status",
+        "approval_status",
+        "fulfillment_status",
+        "from_org_id",
+        "to_org_id",
+        "legal_entity_id",
+        "from_location_id",
+        "to_location_id",
+        "project_id",
+        "actual_ship_date",
+        "carrier_name",
+        "waybill_no",
+        "remark",
+        "reversal_of_transfer_id",
+        "created_at",
+        "updated_at"
+      ],
+      "table": "transfer_orders"
+    },
+    "transfer_order_line": {
+      "hash": "bf4b7452a38309c1ceed5d3c93635340",
+      "fields": [
+        "created_by",
+        "updated_by",
+        "id",
+        "transfer_order_id",
+        "line_no",
+        "line_type_id",
+        "item_id",
+        "uom_id",
+        "qty",
+        "serial_no",
+        "hu_no",
+        "hu_type",
+        "qty_shipped",
+        "qty_received",
+        "status",
+        "fulfillment_status",
+        "remark",
+        "created_at",
+        "updated_at"
+      ],
+      "table": "transfer_order_lines"
+    },
+    "transfer_shipment": {
+      "hash": "b1dfdf1ac30242404fb0220cf76cabe9",
+      "fields": [
+        "created_by",
+        "updated_by",
+        "id",
+        "shipment_no",
+        "transfer_order_id",
+        "ship_date",
+        "carrier_name",
+        "waybill_no",
+        "status",
+        "remark",
+        "created_at",
+        "updated_at"
+      ],
+      "table": "transfer_shipments"
+    },
+    "transfer_shipment_line": {
+      "hash": "146b1204b9e7636dcd97145f376cf6de",
+      "fields": [
+        "id",
+        "transfer_shipment_id",
+        "line_no",
+        "transfer_order_line_id",
+        "qty",
+        "remark",
+        "created_at",
+        "updated_at"
+      ],
+      "table": "transfer_shipment_lines"
     },
     "type_definition": {
       "hash": "32062459c67f498940faa1f8d8f4ccf7",
@@ -2515,11 +4076,141 @@
       ],
       "table": "versions"
     },
-    "work_order": {
-      "hash": "ba981fcaa66d7898e0e1b0ecda845478",
+    "workflow": {
+      "hash": "d14954c85c1704dc724fc64b311ca40f",
+      "fields": [
+        "id",
+        "workflow_key",
+        "version",
+        "name",
+        "description",
+        "owner",
+        "trigger_kind",
+        "trigger_expr",
+        "edges",
+        "sla",
+        "meta",
+        "created_by",
+        "created_at",
+        "updated_at"
+      ],
+      "table": "workflows"
+    },
+    "workflow_run": {
+      "hash": "9eb7b38b134af22a9a6a3c8f684c551a",
+      "fields": [
+        "id",
+        "workflow_id",
+        "workflow_key",
+        "workflow_version",
+        "name",
+        "trigger_kind",
+        "definition_snapshot",
+        "variables",
+        "inputs",
+        "outputs",
+        "created_by",
+        "created_at",
+        "started_at",
+        "finished_at",
+        "meta",
+        "updated_at"
+      ],
+      "table": "workflow_runs"
+    },
+    "work_definition": {
+      "hash": "34f26a3ecb90f7b028e1b8707839708a",
       "fields": [
         "created_by",
         "updated_by",
+        "id",
+        "code",
+        "name",
+        "definition_kind",
+        "item_id",
+        "revision",
+        "status",
+        "org_id",
+        "description",
+        "base_qty",
+        "base_uom_id",
+        "batch_qty",
+        "valid_from",
+        "valid_to",
+        "created_at",
+        "updated_at"
+      ],
+      "table": "work_definitions"
+    },
+    "work_definition_operation": {
+      "hash": "05c10897084302ec03b970906f56e658",
+      "fields": [
+        "created_by",
+        "updated_by",
+        "id",
+        "definition_id",
+        "seq",
+        "sequence_id",
+        "operation_name",
+        "resource_group_id",
+        "setup_minutes",
+        "teardown_minutes",
+        "run_minutes",
+        "queue_minutes",
+        "move_minutes",
+        "travel_minutes",
+        "qty_per",
+        "status",
+        "created_at",
+        "updated_at"
+      ],
+      "table": "work_definition_operations"
+    },
+    "work_definition_operation_output": {
+      "hash": "d13456d549468c3bb4616bae567bc58a",
+      "fields": [
+        "created_by",
+        "updated_by",
+        "id",
+        "operation_id",
+        "output_type",
+        "item_id",
+        "qty",
+        "qty_uom_id",
+        "is_primary",
+        "cost_allocation_pct",
+        "description",
+        "created_at",
+        "updated_at"
+      ],
+      "table": "work_definition_operation_outputs"
+    },
+    "work_definition_sequence": {
+      "hash": "d4fec309d494b997a091434a4b43805e",
+      "fields": [
+        "created_by",
+        "updated_by",
+        "id",
+        "definition_id",
+        "seq_no",
+        "seq_type",
+        "description",
+        "branch_operation_seq",
+        "return_operation_seq",
+        "lot_min",
+        "lot_max",
+        "priority",
+        "created_at",
+        "updated_at"
+      ],
+      "table": "work_definition_sequences"
+    },
+    "work_order": {
+      "hash": "3a8498a81cd794518b2d67ebed46af03",
+      "fields": [
+        "created_by",
+        "updated_by",
+        "document_type_id",
         "id",
         "work_order_no",
         "order_type",
@@ -2528,6 +4219,8 @@
         "source_demand_id",
         "order_id",
         "order_line_id",
+        "project_id",
+        "project_task_id",
         "customer_account_id",
         "severity",
         "channel",
@@ -2544,7 +4237,7 @@
       "table": "work_orders"
     },
     "work_order_component": {
-      "hash": "07287e9095179edf11569ca0b5db700f",
+      "hash": "f20a3190fd370f4c733ee480b62313ff",
       "fields": [
         "id",
         "work_order_id",
@@ -2557,22 +4250,27 @@
         "scrap_rate",
         "qty_required",
         "optional_flag",
+        "project_task_id",
         "created_at",
         "updated_at"
       ],
       "table": "work_order_components"
     },
     "work_order_operation": {
-      "hash": "0d4890b9c37198f780aa645c16c7c01f",
+      "hash": "5eeaf5e99459fae0758ce8f87754bed8",
       "fields": [
         "id",
         "work_order_id",
         "seq",
-        "work_center_id",
+        "resource_group_id",
         "operation_name",
         "setup_minutes",
         "run_minutes",
+        "teardown_minutes",
+        "required_skill_id",
         "required_skill",
+        "work_definition_id",
+        "work_definition_operation_id",
         "status",
         "created_at",
         "updated_at"
@@ -2580,5 +4278,5 @@
       "table": "work_order_operations"
     }
   },
-  "last_sync": "2026-10-31T03:41:17.469740"
+  "last_sync": "2026-11-06T13:19:54.975717"
 }

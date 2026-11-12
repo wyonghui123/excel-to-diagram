@@ -1,3 +1,4 @@
+# ALLOW_RAW_SQL: 本文件含裸 SQL 构造层级测试数据/DDL，守卫豁免（2026-11-09 恢复覆盖）
 # -*- coding: utf-8 -*-
 """
 业务对象层级测试
@@ -381,6 +382,11 @@ class TestSetCurrentAction:
             cursor.execute("INSERT INTO versions (product_id, name, code, is_current) VALUES (1, 'V3.0', 'V3.0', 0)")
             conn.commit()
             conn.close()
+
+            # [夹具补齐 2026-11-09] set_current 的 trigger 走全局 bo_framework.update，
+            #   需要 runtime config 单例；裸临时库测试必须在执行前补检测
+            from meta.core.db_config_detector import detect_runtime_config
+            detect_runtime_config(db_path)
 
             ds = DataSourceFactory.create(DataSourceType.SQLITE, path=db_path)
 

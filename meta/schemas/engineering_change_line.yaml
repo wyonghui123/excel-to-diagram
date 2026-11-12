@@ -1,0 +1,247 @@
+# 工程变更明细 — G4 / ECM
+# 依据: docs/specs/spec-project-g4-engineering-bom-2026-11-03.md §5.3 / §6.2 / §9
+#
+# 一条 = 一个差异动作：
+#   add    新增：source_structure_line_id 必填，structure_line_id 必须为空
+#   modify 修改：source_structure_line_id + structure_line_id 均必填（关旧开新）
+#   remove 移除：structure_line_id 必填；source_structure_line_id 可空
+#
+# 结构 id 为软引用（不建 FK 到 item_structures，避免跨 usage 删除限制）；
+# component_item_id 为真外键 → items(id)。草稿阶段可物理删除明细，apply 后只能失效。
+
+id: engineering_change_line
+name: 工程变更明细
+table_name: engineering_change_lines
+parent_object: engineering_change
+description: 工程变更单明细行（add / modify / remove）
+display_name_field: line_no
+aspects: [audit_aspect]
+skip_auto_menu: true
+skip_generic_api: true
+requires_state_machine: true
+
+hierarchy:
+  enabled: true
+  parent_field: change_id
+
+deletion_policy:
+  mode: restrict
+  restrict_on: []
+  cascade_delete: []
+
+fields:
+  - id: id
+    name: ID
+    type: integer
+    db_column: id
+    required: true
+    unique: true
+    semantics:
+      meaning: 自增主键
+      primary_key: true
+
+  - id: change_id
+    name: 所属变更单
+    type: integer
+    db_column: change_id
+    required: true
+    description: 父变更单（真外键，ON DELETE CASCADE）
+    semantics:
+      meaning: 归属的工程变更单
+    value_help:
+      source:
+        type: bo
+        target_bo: engineering_change
+        value_field: id
+        label_field: change_no
+    ui:
+      widget: select
+      editable: false
+
+  - id: line_no
+    name: 行号
+    type: integer
+    db_column: line_no
+    required: true
+    description: 单内行号（1..N，创建后不可修改）
+    semantics:
+      meaning: 变更单内明细序号
+      business_key: true
+    ui:
+      widget: number
+      editable: false
+
+  - id: line_type
+    name: 变更动作
+    type: string
+    db_column: line_type
+    required: true
+    max_length: 20
+    description: add 新增 / modify 修改 / remove 移除
+    enum_values:
+      - value: add
+        label: 新增
+        color: success
+        category: active
+      - value: modify
+        label: 修改
+        color: primary
+        category: active
+      - value: remove
+        label: 移除
+        color: danger
+        category: active
+    semantics:
+      meaning: 明细差异动作
+      filterable: true
+      filter_type: enum
+      filter_label: 变更动作
+      filter_scope: local
+    ui:
+      widget: select
+
+  - id: target_structure_id
+    name: 目标生产结构
+    type: integer
+    db_column: target_structure_id
+    required: true
+    description: 目标生产 BOM（usage=production）；同一变更单所有明细必须相同（P1）
+    semantics:
+      meaning: 变更应用的目标结构 id（软引用）
+      filterable: true
+      filter_type: relation
+      filter_label: 目标结构
+      filter_scope: local
+
+  - id: source_structure_id
+    name: 来源工程结构
+    type: integer
+    db_column: source_structure_id
+    nullable: true
+    description: 来源工程 BOM（usage=engineering）；add / modify 必填
+    semantics:
+      meaning: 差异来源的工程结构 id（软引用）
+
+  - id: source_structure_line_id
+    name: 来源工程行
+    type: integer
+    db_column: source_structure_line_id
+    nullable: true
+    description: 来源工程 BOM 的结构行；add / modify 必填，apply 时从此行复制字段
+    semantics:
+      meaning: 来源工程结构行 id（软引用）
+
+  - id: structure_line_id
+    name: 目标结构行
+    type: integer
+    db_column: structure_line_id
+    nullable: true
+    description: 目标生产 BOM 的现存结构行；modify / remove 必填
+    semantics:
+      meaning: 目标结构行 id（软引用，modify 时关旧、remove 时失效）
+
+  - id: component_item_id
+    name: 组件物料
+    type: integer
+    db_column: component_item_id
+    required: true
+    description: 组件物料（真外键 → items，restrict）
+    semantics:
+      meaning: 差异对象组件物料
+      filterable: true
+      filter_type: relation
+      filter_label: 组件物料
+      filter_scope: local
+    value_help:
+      source:
+        type: bo
+        target_bo: item
+        value_field: id
+        label_field: item_no
+
+  - id: match_key
+    name: 匹配键
+    type: string
+    db_column: match_key
+    nullable: true
+    max_length: 120
+    description: 匹配键 = component_item_id + substitute_group_code + operation_seq（评审展示用）
+    semantics:
+      meaning: BOM 行匹配键
+      searchable: true
+
+  - id: target_revision
+    name: 目标结构版本快照
+    type: string
+    db_column: target_revision
+    nullable: true
+    max_length: 200
+    description: 创建时目标结构 revision 快照；apply / approve 防并发改版（spec §6.4）
+    semantics:
+      meaning: 创建时目标结构 revision
+
+  - id: source_revision
+    name: 来源结构版本快照
+    type: string
+    db_column: source_revision
+    nullable: true
+    max_length: 200
+    description: 创建时来源结构 revision 快照；apply / approve 防并发改版（spec §6.4）
+    semantics:
+      meaning: 创建时来源结构 revision
+
+  - id: old_qty_per
+    name: 旧用量
+    type: number
+    db_column: old_qty_per
+    nullable: true
+    description: modify 前目标行用量（评审展示）
+    semantics:
+      meaning: 变更前单位用量
+
+  - id: new_qty_per
+    name: 新用量
+    type: number
+    db_column: new_qty_per
+    nullable: true
+    description: modify 后来源工程行用量（评审展示）
+    semantics:
+      meaning: 变更后单位用量
+
+  - id: old_valid_to
+    name: 旧失效日
+    type: date
+    db_column: old_valid_to
+    nullable: true
+    description: 目标行原失效日（评审展示）
+    semantics:
+      meaning: 变更前失效日
+
+  - id: new_valid_to
+    name: 新失效日
+    type: date
+    db_column: new_valid_to
+    nullable: true
+    description: 来源工程行失效日（评审展示）
+    semantics:
+      meaning: 变更后失效日
+
+  - id: note
+    name: 备注
+    type: text
+    db_column: note
+    nullable: true
+    description: 明细备注
+    semantics:
+      meaning: 明细备注
+
+indexes:
+  - fields: [change_id, line_no]
+    unique: true
+    name: uq_ecl_change_line
+  - fields: [change_id]
+    name: idx_ecl_change
+  - fields: [component_item_id]
+    name: idx_ecl_component
+  - fields: [target_structure_id]
+    name: idx_ecl_target

@@ -143,19 +143,6 @@
                 </template>
               </el-table-column>
               <el-table-column
-                prop="is_enabled"
-                label="状态"
-                width="80"
-                align="center"
-              >
-                <template #default="{ row }">
-                  <el-switch
-                    v-model="row.is_enabled"
-                    @change="handleRuleStatusChange(row)"
-                  />
-                </template>
-              </el-table-column>
-              <el-table-column
                 label="操作"
                 width="150"
                 fixed="right"
@@ -188,7 +175,7 @@ const _dbgTrace = (...args) => { const d = (typeof window !== 'undefined' && win
 
 import { useRoute, useRouter } from 'vue-router'
 import { useMessage } from '@/composables/useMessage'
-import { Close } from '@element-plus/icons-vue'
+import { Check, Close } from '@element-plus/icons-vue'
 import { AppButton, AppInput, AppIcon } from '@/components/common'
 import PermissionDimensionSelector from '@/components/common/PermissionDimensionSelector/PermissionDimensionSelector.vue'
 import ConditionRuleEditor from '@/components/common/ConditionRuleEditor/ConditionRuleEditor.vue'
@@ -430,17 +417,6 @@ async function handleDeleteRule(row) {
   } catch (e) {
     console.error('Failed to delete rule:', e)
     error('删除规则失败')
-  }
-}
-
-async function handleRuleStatusChange(row) {
-  try {
-    await permService.patchPermissionRule(roleId.value, row.id, { is_enabled: row.is_enabled })
-    success(row.is_enabled ? '规则已启用' : '规则已禁用')
-  } catch (e) {
-    console.error('Failed to update rule status:', e)
-    error('更新规则状态失败')
-    row.is_enabled = !row.is_enabled
   }
 }
 

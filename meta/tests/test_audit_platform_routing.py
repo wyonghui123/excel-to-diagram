@@ -24,35 +24,24 @@ import sqlite3
 
 import pytest
 
+from meta.tests.shared.db_schema import create_audit_logs
+
 pytestmark = pytest.mark.unit
 
-# 平台库最小审计 schema（audit_logs + users 都是平台资源）
+# 平台库附属表（audit_logs 由 shared.db_schema 统一创建）
 _PLATFORM_DDL = """
-CREATE TABLE IF NOT EXISTS audit_logs (
-    id INTEGER PRIMARY KEY AUTOINCREMENT,
-    object_type VARCHAR(200), object_id VARCHAR(200), action VARCHAR(200),
-    field_name VARCHAR(200), old_value TEXT, new_value TEXT,
-    user_id VARCHAR(200), user_name VARCHAR(200),
-    ip_address VARCHAR(200), user_agent VARCHAR(500),
-    created_at VARCHAR(200), trace_id VARCHAR(200), transaction_id VARCHAR(200),
-    agent_id VARCHAR(200), agent_session_id VARCHAR(200),
-    tool_call_id VARCHAR(200), agent_reasoning TEXT,
-    status VARCHAR(100) DEFAULT 'written', extra_data TEXT,
-    parent_object_type VARCHAR(200), parent_object_id VARCHAR(200),
-    log_category VARCHAR(100), log_level VARCHAR(50), outcome VARCHAR(50),
-    retention_until VARCHAR(200), cascade_root_id VARCHAR(200),
-    cascade_root_action VARCHAR(200), error_message TEXT
-);
 CREATE TABLE IF NOT EXISTS users (
     id INTEGER PRIMARY KEY, username VARCHAR(200), display_name VARCHAR(200)
 );
 """
 
 
-def _make_ds(path, ddl=""):
+def _make_ds(path, ddl="", with_audit=False):
     conn = sqlite3.connect(str(path))
     if ddl:
         conn.executescript(ddl)
+    if with_audit:
+        create_audit_logs(conn)
     conn.commit()
     conn.close()
     from meta.core.datasource import get_data_source
@@ -75,7 +64,7 @@ def isolated_binding(monkeypatch):
 @pytest.fixture
 def platform_ds(tmp_path):
     """平台库：含 audit_logs + users。"""
-    return _make_ds(tmp_path / "platform.db", _PLATFORM_DDL)
+    return _make_ds(tmp_path / "platform.db", _PLATFORM_DDL, with_audit=True)
 
 
 @pytest.fixture

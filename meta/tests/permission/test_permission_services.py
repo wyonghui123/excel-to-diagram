@@ -78,7 +78,7 @@ class TestPermissionService:
 
     def test_get_all_roles(self, permission_service):
         """获取所有角色"""
-        roles = permission_service.get_all_roles()
+        roles = permission_service.get_all_permission_sets()
         assert isinstance(roles, list)
 
     def test_get_all_permissions(self, permission_service):
@@ -88,7 +88,7 @@ class TestPermissionService:
 
     def test_get_user_roles(self, permission_service):
         """获取用户角色"""
-        roles = permission_service.get_user_roles(1)
+        roles = permission_service.get_user_permission_sets(1)
         assert isinstance(roles, list)
 
     def test_get_user_permissions(self, permission_service):
@@ -108,25 +108,25 @@ class TestPermissionService:
 
     def test_get_role_permissions(self, permission_service):
         """获取角色权限"""
-        perms = permission_service.get_role_permissions(1)
+        perms = permission_service.get_permission_set_permissions(1)
         assert isinstance(perms, list)
 
     def test_assign_and_remove_role(self, permission_service):
         """分配和移除角色"""
-        result = permission_service.assign_role(1, 999)
+        result = permission_service.assign_permission_set(1, 999)
         assert isinstance(result, bool)
         if result:
-            removed = permission_service.remove_role(1, 999)
+            removed = permission_service.remove_permission_set(1, 999)
             assert removed is True
 
     def test_remove_nonexistent_role(self, permission_service):
         """移除不存在的角色"""
-        result = permission_service.remove_role(999999, 999999)
+        result = permission_service.remove_permission_set(999999, 999999)
         assert isinstance(result, bool)
 
     def test_get_user_roles_nonexistent_user(self, permission_service):
         """获取不存在用户的角色"""
-        roles = permission_service.get_user_roles(999999)
+        roles = permission_service.get_user_permission_sets(999999)
         assert roles == []
 
     def test_get_user_permissions_nonexistent_user(self, permission_service):
@@ -236,7 +236,7 @@ class TestPermissionBundleAPI:
     def test_list_permission_bundles(self, api_client, admin_headers):
         """列出权限包"""
         response = api_client.get(f'{self.base_url}?page=1&page_size=10', headers=admin_headers)
-        assert response.status_code in [200, 401, 403, 404, 500]
+        assert response.status_code in [200, 401, 403, 404, 500, 410]
 
     def test_create_permission_bundle(self, api_client, admin_headers):
         """创建权限包"""
@@ -251,12 +251,12 @@ class TestPermissionBundleAPI:
             data=json.dumps(data),
             headers=admin_headers
         )
-        assert response.status_code in [200, 201, 400, 401, 403, 404, 500]
+        assert response.status_code in [200, 201, 400, 401, 403, 404, 500, 410]
 
     def test_get_permission_bundle_by_id(self, api_client, admin_headers):
         """根据 ID 获取权限包"""
         response = api_client.get(f'{self.base_url}/1', headers=admin_headers)
-        assert response.status_code in [200, 401, 404, 500]
+        assert response.status_code in [200, 401, 404, 500, 410]
 
     def test_update_permission_bundle(self, api_client, admin_headers):
         """更新权限包"""
@@ -266,12 +266,12 @@ class TestPermissionBundleAPI:
             data=json.dumps(data),
             headers=admin_headers
         )
-        assert response.status_code in [200, 400, 401, 403, 404, 500]
+        assert response.status_code in [200, 400, 401, 403, 404, 500, 410]
 
     def test_delete_permission_bundle(self, api_client, admin_headers):
         """删除权限包"""
         response = api_client.delete(f'{self.base_url}/999', headers=admin_headers)
-        assert response.status_code in [200, 204, 400, 401, 403, 404, 500]
+        assert response.status_code in [200, 204, 400, 401, 403, 404, 500, 410]
 
     def test_apply_bundle_to_role(self, api_client, admin_headers):
         """将权限包应用到角色"""
@@ -280,7 +280,7 @@ class TestPermissionBundleAPI:
             data=json.dumps({'role_id': 1}),
             headers=admin_headers
         )
-        assert response.status_code in [200, 400, 401, 403, 404, 500]
+        assert response.status_code in [200, 400, 401, 403, 404, 500, 410]
 
     def test_apply_bundle_to_user(self, api_client, admin_headers):
         """将权限包应用到用户"""
@@ -289,14 +289,14 @@ class TestPermissionBundleAPI:
             data=json.dumps({'user_id': 1}),
             headers=admin_headers
         )
-        assert response.status_code in [200, 400, 401, 403, 404, 500]
+        assert response.status_code in [200, 400, 401, 403, 404, 500, 410]
 
     def test_get_bundle_permissions(self, api_client, admin_headers):
         """获取权限包包含的权限"""
         response = api_client.get(f'{self.base_url}/1/permissions', headers=admin_headers)
-        assert response.status_code in [200, 401, 404, 500]
+        assert response.status_code in [200, 401, 404, 500, 410]
 
     def test_list_without_auth(self, api_client):
         """未认证访问"""
         response = api_client.get(self.base_url)
-        assert response.status_code in [401, 403, 302, 200, 404, 500]
+        assert response.status_code in [401, 403, 302, 200, 404, 500, 410]

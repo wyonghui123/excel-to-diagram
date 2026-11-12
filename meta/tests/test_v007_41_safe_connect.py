@@ -1,4 +1,5 @@
 # -*- coding: utf-8 -*-
+# ALLOW_RAW_SQL: 本文件含裸 SQL 构造迁移测试数据/DDL，守卫豁免（2026-11-09 恢复覆盖）
 """V007.41 safe_connect 单元测试
 
 覆盖范围:
@@ -63,9 +64,9 @@ class TestSafeConnectForRead:
                 # 在 with 块内可访问
                 assert ref is not None
             # 退出后, ref 对象本身仍存在但已 close
-            # 直接 in_transaction 会抛错 (OperationalError), 验证连接已关闭
+            # [2026-11-09] read proxy 的 execute 返回惰性 cursor, 必须 fetch 才真正执行
             with pytest.raises(sqlite3.ProgrammingError):
-                ref.execute("SELECT 1")
+                ref.execute("SELECT 1").fetchone()
         finally:
             os.unlink(db_path)
 
@@ -84,8 +85,9 @@ class TestSafeConnectForRead:
 
             # 验证连接被关闭
             assert captured_conn is not None
+            # [2026-11-09] read proxy 的 execute 返回惰性 cursor, 必须 fetch 才真正执行
             with pytest.raises(sqlite3.ProgrammingError):
-                captured_conn.execute("SELECT 1")
+                captured_conn.execute("SELECT 1").fetchone()
         finally:
             os.unlink(db_path)
 
@@ -319,19 +321,15 @@ class TestSafeConnectIntegration:
         with tempfile.NamedTemporaryFile(suffix='.db', delete=False) as tf:
             db_path = tf.name
         try:
-            # 初始化表
-            with safe_connect_for_read(db_path) as conn:
+            # 初始化表 + 写入 (写连接; read proxy 的 execute 是惰性执行, 不能用于建表)
+            from meta.core.safe_connect import safe_connect_for_write
+            with safe_connect_for_write(db_path, force_no_tx=True) as conn:
                 conn.execute("""
                     CREATE TABLE IF NOT EXISTS t (
                         id INTEGER PRIMARY KEY,
                         name TEXT
                     )
                 """)
-                conn.commit()
-
-            # 写入 (用 force_no_tx 绕过守卫, 因为本测试不模拟外层事务)
-            from meta.core.safe_connect import safe_connect_for_write
-            with safe_connect_for_write(db_path, force_no_tx=True) as conn:
                 conn.execute("INSERT INTO t (name) VALUES (?)", ("alice",))
                 conn.execute("INSERT INTO t (name) VALUES (?)", ("bob",))
                 conn.commit()

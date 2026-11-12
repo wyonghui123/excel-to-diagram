@@ -1,6 +1,7 @@
 ---
 alwaysApply: false
 description: "组件生命周期 - 分类 + FilterBar 详细规范 + 弃用流程"
+globs: "src/**"
 ---
 
 # 组件生命周期（v4.0 拆分）

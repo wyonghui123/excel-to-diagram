@@ -26,6 +26,7 @@ orphan annotation 处理 (FR-002):
 ================================================================================
 """
 from flask import Blueprint, request, jsonify
+from meta.api._response_contract import error_response, ok
 from meta.services.cascade_service import get_type_order
 from meta.core.models import registry
 from meta.core.datasource import get_data_source
@@ -110,17 +111,11 @@ def list_annotations_by_target():
     target_id = request.args.get('target_id', type=int)
 
     if not target_type or not target_id:
-        return jsonify({
-            'success': False,
-            'message': '目标类型和目标 ID 不能为空',
-        }), 400
+        return error_response('目标类型和目标 ID 不能为空')
 
     valid_target_types = get_type_order() + ['relationship']
     if target_type not in valid_target_types:
-        return jsonify({
-            'success': False,
-            'message': f'Invalid target_type. Must be one of: {", ".join(valid_target_types)}',
-        }), 400
+        return error_response(f'Invalid target_type. Must be one of: {", ".join(valid_target_types)}')
 
     sql = """
         SELECT * FROM annotations
@@ -155,10 +150,7 @@ def get_annotation(annotation_id):
     row = cursor.fetchone()
 
     if not row:
-        return jsonify({
-            'success': False,
-            'message': '标注不存在',
-        }), 404
+        return error_response('标注不存在', status=404)
 
     columns = [desc[0] for desc in cursor.description]
     data = dict(zip(columns, row))
@@ -166,10 +158,7 @@ def get_annotation(annotation_id):
     category_labels = _get_annotation_category_labels()
     data['category_label'] = category_labels.get(data.get('category'), data.get('category', ''))
 
-    return jsonify({
-        'success': True,
-        'data': data,
-    })
+    return ok(data)
 
 
 def _set_audit_user_for_annotation():
@@ -222,39 +211,24 @@ def create_annotation():
     data = request.get_json(silent=True) or {}
 
     if not data.get('target_type') or not data.get('target_id'):
-        return jsonify({
-            'success': False,
-            'message': '目标类型和目标 ID 不能为空',
-        }), 400
+        return error_response('目标类型和目标 ID 不能为空')
 
     if isinstance(data.get('target_id'), str) and not str(data.get('target_id')).isdigit():
-        return jsonify({
-            'success': False,
-            'message': '目标 ID 必须为有效数字',
-        }), 400
+        return error_response('目标 ID 必须为有效数字')
 
     if not data.get('category'):
         data['category'] = 'info'
 
     if not data.get('content'):
-        return jsonify({
-            'success': False,
-            'message': '内容不能为空',
-        }), 400
+        return error_response('内容不能为空')
 
     valid_target_types = get_type_order() + ['relationship']
     if data.get('target_type') not in valid_target_types:
-        return jsonify({
-            'success': False,
-            'message': f'Invalid target_type. Must be one of: {", ".join(valid_target_types)}',
-        }), 400
+        return error_response(f'Invalid target_type. Must be one of: {", ".join(valid_target_types)}')
 
     valid_categories = _get_valid_annotation_categories()
     if data.get('category') not in valid_categories:
-        return jsonify({
-            'success': False,
-            'message': f'Invalid category. Must be one of: {", ".join(valid_categories)}',
-        }), 400
+        return error_response(f'Invalid category. Must be one of: {", ".join(valid_categories)}')
 
     data['created_at'] = datetime.now().isoformat()
 
@@ -284,10 +258,7 @@ def update_annotation(annotation_id):
     if data.get('category'):
         valid_categories = _get_valid_annotation_categories()
         if data['category'] not in valid_categories:
-            return jsonify({
-                'success': False,
-                'message': f'Invalid category. Must be one of: {", ".join(valid_categories)}',
-            }), 400
+            return error_response(f'Invalid category. Must be one of: {", ".join(valid_categories)}')
 
     req = UpdateRequest(
         object_type='annotation',
@@ -360,13 +331,7 @@ def get_annotation_category_stats():
                 continue
             stats[category] = row[1]
 
-        return jsonify({
-            'success': True,
-            'data': stats,
-        })
+        return ok(stats)
     except Exception as e:
         logger.error(f"获取备注分类统计失败: {e}")
-        return jsonify({
-            'success': True,
-            'data': {},
-        })
+        return ok({})

@@ -67,6 +67,8 @@ test.describe('S-PAG: 分页 (Pagination)', () => {
   test('C02 [next_prev]: 上/下页导航', async ({
     page, navigateTo, dataFinder, waitForApiFn, isolation
   }, testInfo) => {
+    // [2026-10-31] 本用例含 21 条 BO 创建 + 两次翻页, 全局 60s 不够 → 单独放宽
+    test.setTimeout(150000)
     const pv = await dataFinder.productWithVersion()
     await navigateTo(page, `/system/archdata?productId=${pv.product.id}&versionId=${pv.version.id}&tab=business_object`)
 
@@ -194,6 +196,12 @@ test.describe('S-PAG: 分页 (Pagination)', () => {
     })
 
     await withStep(page, testInfo, '获取总条数文本 (POM getTotalText)', async () => {
+      // [2026-10-31] 移动端为卡片列表, 部分页面不渲染分页器 → 与 C04 一致走 skip
+      const pager = archData.paginationRoot()
+      if (!(await pager.isVisible({ timeout: 2000 }).catch(() => false))) {
+        test.skip(true, '当前页面无分页器 (移动端卡片列表)')
+        return
+      }
       const totalText = await archData.getTotalText()
       console.log(`[C05] 总条数文本: '${totalText}'`)
       // Element UI 格式: "共 N 条"

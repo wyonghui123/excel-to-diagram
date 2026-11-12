@@ -181,7 +181,7 @@ def seed_territory_scenario_data(ds) -> Dict[str, Any]:
         _upsert(
             ds, 'sales_orders', 'SELECT id FROM sales_orders WHERE order_no = ?',
             [order_no],
-            {'order_no': order_no, 'order_type_id': ORDER_TYPE_STD,
+            {'order_no': order_no, 'document_type_id': ORDER_TYPE_STD,
              'order_date': ORDER_DATE, 'status': status,
              'customer_account_id': cids[customer_name],
              'org_id': SALES_ORG_ID, 'sales_org_id': SALES_ORG_ID,

@@ -74,7 +74,11 @@ export class ArchDataPage extends GenericListPage {
    */
   async openTab(name) {
     const tabName = this.tabs[name] || name
-    const tab = this.page.locator(`.el-tabs__item:has-text("${tabName}")`).first()
+    // [2026-08-21 起] MultiObjectManagementPage 已弃用 el-tabs, 改为 .momp-tab-btn 按钮式 nav;
+    // 保留 .el-tabs__item 兜底以兼容旧结构。
+    const tab = this.page.locator(
+      `.momp-tabs .momp-tab-btn:has-text("${tabName}"), .el-tabs__item:has-text("${tabName}")`
+    ).first()
     await tab.waitFor({ state: 'visible', timeout: 10000 })
     await tab.click()
     // 等表格刷新

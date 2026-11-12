@@ -15,6 +15,7 @@ from meta.api.user_api import login_required
 from meta.services.auth_middleware import is_admin, get_current_user
 from meta.services.dimension_scope_engine import get_dimension_scope_engine
 from meta.api._audit_helper import write_permission_config_audit
+from meta.api._response_contract import error_response, ok
 from functools import wraps
 import json
 from meta.core.db_path import get_meta_db_path
@@ -407,7 +408,7 @@ def admin_required(f):
     def decorated(*args, **kwargs):
         user = get_current_user()
         if not user or not is_admin(user):
-            return jsonify({"success": False, "message": "\u9700\u8981\u7ba1\u7406\u5458\u6743\u9650"}), 403
+            return error_response("\u9700\u8981\u7ba1\u7406\u5458\u6743\u9650", status=403)
         return f(*args, **kwargs)
     return decorated
 
@@ -481,9 +482,9 @@ def get_dimension_scopes(permission_set_id):
                 item['dimension_values'] = []
 
             rows.append(item)
-        return jsonify({'success': True, 'data': rows})
+        return ok(rows)
     except Exception as e:
-        return jsonify({'success': False, 'message': str(e)}), 500
+        return error_response(str(e), status=500)
 
 
 @role_dim_bp.route('/<int:permission_set_id>/dimension-scopes', methods=['POST'])
@@ -494,9 +495,9 @@ def save_dimension_scopes(permission_set_id):
         # [FIX 2026-06-15] 空 list 是合法操作 (用户清空维度范围), 不应 400
         # 之前用 `if not data` 把空 list 当 400, 导致"移除 dim value 后保存"必失败
         if data is None:
-            return jsonify({'success': False, 'message': '请求体为空'}), 400
+            return error_response('请求体为空')
         if not isinstance(data, list):
-            return jsonify({'success': False, 'message': '请求体必须为 list'}), 400
+            return error_response('请求体必须为 list')
 
         ds = _ds()
         current_user = get_current_user()
@@ -535,7 +536,7 @@ def save_dimension_scopes(permission_set_id):
                 # [Spec 20] 锚点白名单校验 (非法字符直接 400, 引擎侧转义是双保险)
                 ok, err = _validate_anchor_codes(normalized_values)
                 if not ok:
-                    return jsonify({'success': False, 'message': err}), 400
+                    return error_response(err)
                 anchor_strs = [v for v in normalized_values if _is_anchor_code(v)]
                 if anchor_strs:
                     preflight_warnings.extend(_preflight_anchor_warnings(
@@ -600,7 +601,7 @@ def save_dimension_scopes(permission_set_id):
         return jsonify({'success': True, 'message': '\u7ef4\u5ea6\u8303\u56f4\u5df2\u4fdd\u5b58',
                         'warnings': preflight_warnings})
     except Exception as e:
-        return jsonify({'success': False, 'message': str(e)}), 500
+        return error_response(str(e), status=500)
 
 
 @role_dim_bp.route('/<int:permission_set_id>/dimension-scopes/resolve-preview',
@@ -648,9 +649,9 @@ def resolve_dim_scope_preview(permission_set_id):
                     entry['warning'] = '未解析到实例'
                 dim_results[c] = entry
             results[dim] = dim_results
-        return jsonify({'success': True, 'data': results})
+        return ok(results)
     except Exception as e:
-        return jsonify({'success': False, 'message': str(e)}), 500
+        return error_response(str(e), status=500)
 
 
 @role_dim_bp.route('/<int:permission_set_id>/derived-permissions', methods=['GET'])
@@ -670,6 +671,6 @@ def get_derived_permissions(permission_set_id):
             parent_object_type='role',
             parent_object_id=permission_set_id,
         )
-        return jsonify({'success': True, 'data': result})
+        return ok(result)
     except Exception as e:
-        return jsonify({'success': False, 'message': str(e)}), 500
+        return error_response(str(e), status=500)

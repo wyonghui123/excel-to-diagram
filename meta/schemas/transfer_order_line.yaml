@@ -1,0 +1,549 @@
+# 调拨单行 (Transfer Order Line) — M4 内部供应
+# 依据: docs/specs/spec-transfer-order-object-model-2026-11-02.md §3.2 / §3.3 / §4 / §6
+#
+# 定位: transfer_order 的附属明细（child_sections），不单独成菜单。
+#
+# 行级口径:
+#   ① 行类型 line_type_id 必填：type_definitions 中 scope_bo='transfer_order'
+#      + level='line'，本波仅 TRF_GOODS（material）；由头类型 default_type_id
+#      自动带出，UI 只读，守卫强制校验 scope / level / status。
+#   ② item_id 必填（守卫校验存在、启用、item_type='goods'）；uom_id 必填。
+#   ③ qty 恒为正，草稿可改，release 后冻结；qty_shipped / qty_received 为
+#      单据缓存（只读），由 ship / 收货过账动作累加，不是库存台账。
+#   ④ 行不存单价、金额、税率、成本价；成本事实留给库存 / 成本域。
+#   ⑤ 行不建 schedule 子表；发货 / 收货事实直接累计在行上。
+#
+# 行状态极简：open / closed / cancelled（不复制抬头状态机）。
+
+id: transfer_order_line
+name: 调拨单行
+table_name: transfer_order_lines
+description: 调拨单行（本波仅标准物料行 TRF_GOODS）
+parent_object: transfer_order
+display_name_field: line_no
+aspects: [audit_aspect]
+hierarchy:
+  enabled: true
+  parent_field: transfer_order_id
+
+deletion_policy:
+  # 父单删除时级联清行（仅 draft 可删，由守卫强制度）
+  mode: cascade
+  restrict_on: []
+  cascade_delete: []
+
+audit:
+  enabled: true
+  create:
+    enabled: true
+    fields: all
+  update:
+    enabled: true
+    fields: changed_only
+    exclude:
+      - id
+      - created_at
+      - updated_at
+      - qty_shipped
+      - qty_received
+      - fulfillment_status
+  delete:
+    enabled: true
+    fields: business_only
+    exclude:
+      - id
+      - created_at
+      - updated_at
+  associate:
+    enabled: true
+  dissociate:
+    enabled: true
+
+org_scope:
+  mode: chain
+  via: transfer_order_id
+  host: transfer_order
+  function: inventory
+  write_check: true
+
+fields:
+  - id: id
+    name: ID
+    type: integer
+    db_column: id
+    required: true
+    unique: true
+    description: 技术主键
+    semantics:
+      meaning: 自增主键
+      primary_key: true
+
+  # 父键推断依据（metaService.getParentIdField 取首个 ui.relation = transfer_order 的字段）
+  - id: transfer_order_id
+    name: 所属调拨单
+    type: integer
+    db_column: transfer_order_id
+    required: true
+    description: 所属调拨单
+    semantics:
+      meaning: 所属调拨单
+      display:
+        type: association
+        target_type: transfer_order
+        display_field: transfer_order_no
+    value_help:
+      source:
+        type: bo
+        target_bo: transfer_order
+        value_field: id
+        display_field: transfer_order_no
+        code_field: transfer_order_no
+        apply_target_permissions: true
+      behavior:
+        multiple: false
+        validation: true
+        binding_strength: strict
+        min_search_length: 0
+      presentation:
+        result_type: dropdown
+        display_format: "{transfer_order_no}"
+    ui:
+      widget: select
+      relation: transfer_order
+      multiple: false
+
+  - id: line_no
+    name: 行号
+    type: integer
+    db_column: line_no
+    required: true
+    description: 行号（同一调拨单内唯一，服务层按 10 / 20 / 30 递增）
+    semantics:
+      meaning: 调拨单行号
+      data_category: code
+      filterable: true
+      filter_type: number
+      filter_label: 行号
+      filter_scope: local
+    ui:
+      widget: input
+
+  - id: line_type_id
+    name: 行类型
+    type: integer
+    db_column: line_type_id
+    required: true
+    description: 行类型（type_definitions，scope_bo='transfer_order' + level='line' + active）
+    semantics:
+      meaning: 调拨行业务类型（本波仅标准物料行）
+      display:
+        type: association
+        target_type: type_definition
+        display_field: name
+    value_help:
+      source:
+        type: bo
+        target_bo: type_definition
+        value_field: id
+        display_field: name
+        code_field: code
+        apply_target_permissions: true
+        value_filter:
+          scope_bo: transfer_order
+          level: line
+          status: active
+      behavior:
+        multiple: false
+        validation: true
+        binding_strength: strict
+        min_search_length: 0
+      presentation:
+        result_type: dropdown
+        display_format: "{code} - {name}"
+        columns:
+          - field: code
+            label: 类型编码
+            width: 140
+          - field: name
+            label: 类型名称
+            width: 200
+    ui:
+      widget: select
+      relation: type_definition
+      multiple: false
+      readonly: true
+
+  - id: item_id
+    name: 物料
+    type: integer
+    db_column: item_id
+    required: true
+    description: 物料（须存在、启用、item_type='goods'）
+    semantics:
+      meaning: 调拨行物料
+      display:
+        type: association
+        target_type: item
+        display_field: name
+    value_help:
+      source:
+        type: bo
+        target_bo: item
+        value_field: id
+        display_field: name
+        code_field: code
+        apply_target_permissions: true
+        value_filter:
+          status: active
+      behavior:
+        multiple: false
+        validation: true
+        binding_strength: strict
+        min_search_length: 0
+      presentation:
+        result_type: dropdown
+        display_format: "{code} {name}"
+        columns:
+          - field: code
+            label: 物料编码
+            width: 140
+          - field: name
+            label: 物料名称
+            width: 200
+    ui:
+      widget: select
+      relation: item
+      multiple: false
+
+  - id: uom_id
+    name: 单位
+    type: integer
+    db_column: uom_id
+    required: true
+    description: 计量单位（必填）
+    semantics:
+      meaning: 调拨行计量单位
+      display:
+        type: association
+        target_type: uom
+        display_field: name
+    value_help:
+      source:
+        type: bo
+        target_bo: uom
+        value_field: id
+        display_field: name
+        code_field: code
+        apply_target_permissions: true
+        value_filter:
+          status: active
+      behavior:
+        multiple: false
+        validation: true
+        binding_strength: strict
+        min_search_length: 0
+      presentation:
+        result_type: dropdown
+        display_format: "{code} {name}"
+    ui:
+      widget: select
+      relation: uom
+      multiple: false
+
+  - id: qty
+    name: 计划调拨量
+    type: number
+    db_column: qty
+    required: true
+    description: 计划调拨量（恒为正；草稿可改，release 后冻结）
+    constraints:
+      - type: numeric_range
+        gt: 0
+        decimal_places: 6
+    semantics:
+      meaning: 调拨行计划数量
+    ui:
+      widget: input
+
+  - id: serial_no
+    name: 序列号
+    type: string
+    db_column: serial_no
+    nullable: true
+    max_length: 200
+    description: 序列号（qty=1 快捷录入；qty>1 必须走 document_serial_links 序列号子表）
+    semantics:
+      meaning: 调拨行序列号（仅数量为 1 时快捷录入）
+      searchable: true
+    ui:
+      widget: input
+
+  - id: hu_no
+    name: 容器号
+    type: string
+    db_column: hu_no
+    nullable: true
+    max_length: 40
+    description: 可选容器号；发运按该容器整体移库 / 整箱发运
+    semantics:
+      meaning: 包装容器业务标识
+      data_category: code
+    ui:
+      widget: input
+
+  - id: hu_type
+    name: 容器类型
+    type: string
+    db_column: hu_type
+    nullable: true
+    max_length: 20
+    description: 容器类型（仅建新容器时使用；空 = carton）
+    enum_values:
+      - value: pallet
+        label: 托盘
+        color: primary
+      - value: carton
+        label: 纸箱
+        color: info
+      - value: bin
+        label: 料箱
+        color: success
+      - value: container
+        label: 集装箱
+        color: warning
+      - value: other
+        label: 其他
+        color: default
+    semantics:
+      meaning: 包装容器类型
+    ui:
+      widget: select
+
+  - id: qty_shipped
+    name: 已发货量
+    type: number
+    db_column: qty_shipped
+    required: true
+    default: 0
+    description: 已发货累计（只读缓存，仅 ship 动作累加；单行不得超发）
+    constraints:
+      - type: numeric_range
+        gte: 0
+        decimal_places: 6
+    semantics:
+      meaning: 已发货累计数量
+    ui:
+      readonly: true
+
+  - id: qty_received
+    name: 已收货量
+    type: number
+    db_column: qty_received
+    required: true
+    default: 0
+    description: 已收货累计（净收；只读缓存，仅收货过账 / 红冲回写）
+    constraints:
+      - type: numeric_range
+        gte: 0
+        decimal_places: 6
+    semantics:
+      meaning: 已收货累计数量
+    ui:
+      readonly: true
+
+  - id: status
+    name: 行状态
+    type: string
+    db_column: status
+    required: true
+    default: open
+    max_length: 20
+    description: 行状态（开放 / 已关闭 / 已取消）
+    enum_values:
+      - value: open
+        label: 开放
+        color: primary
+        category: active
+        is_initial: true
+      - value: closed
+        label: 已关闭
+        color: info
+        category: inactive
+      - value: cancelled
+        label: 已取消
+        color: danger
+        category: inactive
+    semantics:
+      meaning: 调拨行状态
+      filterable: true
+      filter_type: enum
+      filter_label: 行状态
+      filter_scope: local
+    ui:
+      widget: select
+
+  - id: fulfillment_status
+    name: 行履约状态
+    type: string
+    db_column: fulfillment_status
+    nullable: true
+    max_length: 30
+    description: 行履约状态只读缓存（取值同头，由发货 / 收货累计派生）
+    enum_values:
+      - value: open
+        label: 未发货
+        color: info
+        category: active
+      - value: partially_shipped
+        label: 部分发货
+        color: warning
+        category: active
+      - value: shipped
+        label: 已发货
+        color: primary
+        category: active
+      - value: partially_received
+        label: 部分收货
+        color: warning
+        category: active
+      - value: received
+        label: 已收货
+        color: success
+        category: inactive
+    semantics:
+      meaning: 调拨行履约进度
+      filterable: true
+      filter_type: enum
+      filter_label: 行履约状态
+      filter_scope: local
+    ui:
+      readonly: true
+
+  - id: remark
+    name: 备注
+    type: text
+    db_column: remark
+    nullable: true
+    description: 备注
+    semantics:
+      meaning: 调拨行备注
+      searchable: true
+    ui:
+      widget: textarea
+
+  - id: created_at
+    name: 创建时间
+    type: datetime
+    db_column: created_at
+    description: 创建时间
+    semantics:
+      meaning: 记录创建时间
+      audit_field: true
+
+  - id: updated_at
+    name: 更新时间
+    type: datetime
+    db_column: updated_at
+    description: 更新时间
+    semantics:
+      meaning: 记录更新时间
+      audit_field: true
+
+indexes:
+  - fields: [transfer_order_id, line_no]
+    unique: true
+    name: uidx_transfer_order_line_no
+  - fields: [transfer_order_id]
+    name: idx_transfer_order_line_order
+  - fields: [item_id]
+    name: idx_transfer_order_line_item
+  - fields: [line_type_id]
+    name: idx_transfer_order_line_type
+
+relations:
+  - id: transfer_order_line_to_order
+    name: 所属调拨单
+    type: reference
+    target: transfer_order
+    source_field: transfer_order_id
+    target_field: id
+    cardinality: N:1
+    description: 所属调拨单引用（真外键）
+  - id: transfer_order_line_to_type_definition
+    name: 行类型
+    type: reference
+    target: type_definition
+    source_field: line_type_id
+    target_field: id
+    cardinality: N:1
+    description: 行类型引用（真外键，限定 line 层）
+  - id: transfer_order_line_to_item
+    name: 物料
+    type: reference
+    target: item
+    source_field: item_id
+    target_field: id
+    cardinality: N:1
+    description: 物料引用（必填）
+  - id: transfer_order_line_to_uom
+    name: 单位
+    type: reference
+    target: uom
+    source_field: uom_id
+    target_field: id
+    cardinality: N:1
+    description: 计量单位引用（必填）
+
+ui_view_config:
+  # 作为调拨单头详情页的子表，不单独成菜单
+  skip_auto_menu: true
+  list:
+    detail_mode: drawer
+    title: 调拨行
+    columns:
+      - field: line_no
+        width: 80
+        sortable: true
+      - field: line_type_id
+        width: 130
+      - field: item_id
+        width: 200
+      - field: qty
+        width: 110
+      - field: uom_id
+        width: 90
+      - field: qty_shipped
+        width: 110
+      - field: qty_received
+        width: 110
+      - field: status
+        width: 90
+        filterable: true
+        filter_type: select
+      - field: fulfillment_status
+        width: 110
+        filterable: true
+        filter_type: select
+    selection:
+      enabled: true
+      mode: multiple
+    defaultSort:
+      field: line_no
+      order: asc
+  form:
+    title: 调拨行信息
+    layout: vertical
+    sections:
+      - title: 基本信息
+        columns:
+          - fields: [line_no, line_type_id]
+          - fields: [item_id, uom_id]
+      - title: 数量与进度
+        columns:
+          - fields: [qty]
+          - fields: [serial_no]
+          - fields: [qty_shipped, qty_received]
+          - fields: [status, fulfillment_status]
+      - title: 其他
+        columns:
+          - fields: [remark]

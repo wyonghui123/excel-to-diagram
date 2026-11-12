@@ -1,4 +1,5 @@
 # -*- coding: utf-8 -*-
+# ALLOW_RAW_SQL: 本文件含裸 SQL 构造权限测试数据/DDL，守卫豁免（2026-11-09 恢复覆盖）
 """
 P10 单元测试：permission_service 边界场景
 v1.4 P10 补齐：通配符/个人组重用/assign 失效/业务一致性
@@ -48,10 +49,10 @@ def ds():
         CREATE TABLE org_members (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
             user_id INTEGER NOT NULL,
-            group_id INTEGER NOT NULL,
+            org_id INTEGER NOT NULL,
             is_manager INTEGER DEFAULT 0,
             joined_at DATETIME DEFAULT CURRENT_TIMESTAMP,
-            UNIQUE(user_id, group_id)
+            UNIQUE(user_id, org_id)
         );
         CREATE TABLE permission_sets (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -64,10 +65,10 @@ def ds():
         );
         CREATE TABLE org_permission_sets (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
-            group_id INTEGER NOT NULL,
-            role_id INTEGER NOT NULL,
+            org_id INTEGER NOT NULL,
+            permission_set_id INTEGER NOT NULL,
             created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
-            UNIQUE(group_id, role_id)
+            UNIQUE(org_id, permission_set_id)
         );
         CREATE TABLE permissions (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -81,9 +82,9 @@ def ds():
         );
         CREATE TABLE permission_set_permissions (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
-            role_id INTEGER NOT NULL,
+            permission_set_id INTEGER NOT NULL,
             permission_id INTEGER NOT NULL,
-            UNIQUE(role_id, permission_id)
+            UNIQUE(permission_set_id, permission_id)
         );
     """)
     conn.commit()
@@ -126,7 +127,7 @@ def _insert_user(ds, username='u'):
 
 
 def _insert_personal_group(ds, user_id):
-    code = f'personal_group_user_{user_id}'
+    code = f'personal_org_user_{user_id}'
     ds.execute(
         "INSERT INTO orgs (code, name, description, updated_at) VALUES (?, ?, ?, datetime('now'))",
         [code, f'Personal group for user {user_id}', 'auto-generated']
@@ -173,8 +174,8 @@ def test_wildcard_permission_grants_all(svc, ds):
     svc._ensure_user_in_group(u, g)
     r = _insert_role(ds, code='admin', name='Admin')
     p = _insert_permission(ds, code='*')
-    ds.execute("INSERT INTO org_permission_sets (group_id, role_id) VALUES (?, ?)", [g, r])
-    ds.execute("INSERT INTO permission_set_permissions (role_id, permission_id) VALUES (?, ?)", [r, p])
+    ds.execute("INSERT INTO org_permission_sets (org_id, permission_set_id) VALUES (?, ?)", [g, r])
+    ds.execute("INSERT INTO permission_set_permissions (permission_set_id, permission_id) VALUES (?, ?)", [r, p])
     # 任意 permission_code 都应返回 True
     assert svc.has_permission(u, 'product.read') is True
     assert svc.has_permission(u, 'any.random.code') is True
@@ -187,8 +188,8 @@ def test_wildcard_via_get_user_permissions(svc, ds):
     svc._ensure_user_in_group(u, g)
     r = _insert_role(ds, code='super', name='Super')
     p = _insert_permission(ds, code='*')
-    ds.execute("INSERT INTO org_permission_sets (group_id, role_id) VALUES (?, ?)", [g, r])
-    ds.execute("INSERT INTO permission_set_permissions (role_id, permission_id) VALUES (?, ?)", [r, p])
+    ds.execute("INSERT INTO org_permission_sets (org_id, permission_set_id) VALUES (?, ?)", [g, r])
+    ds.execute("INSERT INTO permission_set_permissions (permission_set_id, permission_id) VALUES (?, ?)", [r, p])
     perms = svc.get_user_permissions(u)
     assert '*' in perms
 
@@ -210,9 +211,9 @@ def test_get_user_roles_dedup(svc, ds):
     svc._ensure_user_in_group(u, g1)
     svc._ensure_user_in_group(u, g2)
     r = _insert_role(ds, code='multi_g_role', name='Multi')
-    ds.execute("INSERT INTO org_permission_sets (group_id, role_id) VALUES (?, ?)", [g1, r])
-    ds.execute("INSERT INTO org_permission_sets (group_id, role_id) VALUES (?, ?)", [g2, r])
-    roles = svc.get_user_roles(u)
+    ds.execute("INSERT INTO org_permission_sets (org_id, permission_set_id) VALUES (?, ?)", [g1, r])
+    ds.execute("INSERT INTO org_permission_sets (org_id, permission_set_id) VALUES (?, ?)", [g2, r])
+    roles = svc.get_user_permission_sets(u)
     # 同一角色不重复
     role_ids = [r['id'] for r in roles]
     assert len(role_ids) == len(set(role_ids))
@@ -233,10 +234,10 @@ def test_get_user_permissions_dedup(svc, ds):
     r1 = _insert_role(ds, code='r_dedup1', name='R1')
     r2 = _insert_role(ds, code='r_dedup2', name='R2')
     p = _insert_permission(ds, code='shared.perm')
-    ds.execute("INSERT INTO org_permission_sets (group_id, role_id) VALUES (?, ?)", [g1, r1])
-    ds.execute("INSERT INTO org_permission_sets (group_id, role_id) VALUES (?, ?)", [g2, r2])
-    ds.execute("INSERT INTO permission_set_permissions (role_id, permission_id) VALUES (?, ?)", [r1, p])
-    ds.execute("INSERT INTO permission_set_permissions (role_id, permission_id) VALUES (?, ?)", [r2, p])
+    ds.execute("INSERT INTO org_permission_sets (org_id, permission_set_id) VALUES (?, ?)", [g1, r1])
+    ds.execute("INSERT INTO org_permission_sets (org_id, permission_set_id) VALUES (?, ?)", [g2, r2])
+    ds.execute("INSERT INTO permission_set_permissions (permission_set_id, permission_id) VALUES (?, ?)", [r1, p])
+    ds.execute("INSERT INTO permission_set_permissions (permission_set_id, permission_id) VALUES (?, ?)", [r2, p])
     perms = svc.get_user_permissions(u)
     # 同一 permission 不重复
     assert perms.count('shared.perm') == 1
@@ -250,10 +251,10 @@ def test_assign_role_repeat_is_idempotent(svc, ds):
     """assign_role 同一角色多次：结果幂等（去重）"""
     u = _insert_user(ds, 'repeat_assign')
     r = _insert_role(ds, code='repeat_r', name='Repeat')
-    svc.assign_role(u, r)
-    svc.assign_role(u, r)
-    svc.assign_role(u, r)
-    roles = svc.get_user_roles(u)
+    svc.assign_permission_set(u, r)
+    svc.assign_permission_set(u, r)
+    svc.assign_permission_set(u, r)
+    roles = svc.get_user_permission_sets(u)
     role_ids = [x['id'] for x in roles]
     # 只有 1 个关联（INSERT OR IGNORE）
     assert role_ids.count(r) == 1
@@ -265,10 +266,10 @@ def test_assign_role_multiple_to_one_user(svc, ds):
     r1 = _insert_role(ds, code='ma_r1', name='R1')
     r2 = _insert_role(ds, code='ma_r2', name='R2')
     r3 = _insert_role(ds, code='ma_r3', name='R3')
-    assert svc.assign_role(u, r1) is True
-    assert svc.assign_role(u, r2) is True
-    assert svc.assign_role(u, r3) is True
-    roles = svc.get_user_roles(u)
+    assert svc.assign_permission_set(u, r1) is True
+    assert svc.assign_permission_set(u, r2) is True
+    assert svc.assign_permission_set(u, r3) is True
+    roles = svc.get_user_permission_sets(u)
     role_ids = {x['id'] for x in roles}
     assert role_ids == {r1, r2, r3}
 
@@ -277,12 +278,12 @@ def test_remove_role_repeat_is_idempotent(svc, ds):
     """remove_role 多次移除：应幂等"""
     u = _insert_user(ds, 'repeat_remove')
     r = _insert_role(ds, code='removable', name='Removable')
-    svc.assign_role(u, r)
-    svc.remove_role(u, r)
+    svc.assign_permission_set(u, r)
+    svc.remove_permission_set(u, r)
     # 第二次 remove（应该不报错）
-    result = svc.remove_role(u, r)
+    result = svc.remove_permission_set(u, r)
     assert result in (True, False)
-    roles = svc.get_user_roles(u)
+    roles = svc.get_user_permission_sets(u)
     assert r not in [x['id'] for x in roles]
 
 
@@ -291,7 +292,7 @@ def test_remove_role_not_in_personal_group(svc, ds):
     u = _insert_user(ds, 'no_personal_remove')
     r = _insert_role(ds, code='not_in_personal', name='X')
     # 用户没有 personal group（只有用户记录）
-    result = svc.remove_role(u, r)
+    result = svc.remove_permission_set(u, r)
     # 实现可能返回 True（无操作）或 False
     assert result in (True, False)
 
@@ -324,14 +325,14 @@ def test_ensure_user_in_group_after_personal_group_creation(svc, ds):
     g = svc._get_or_create_personal_group(u)
     # 此时 u 不在 personal group 里
     cursor = ds.execute(
-        "SELECT 1 FROM org_members WHERE group_id = ? AND user_id = ?",
+        "SELECT 1 FROM org_members WHERE org_id = ? AND user_id = ?",
         [g, u]
     )
     assert cursor.fetchone() is None
     # 调用 _ensure_user_in_group 后
     svc._ensure_user_in_group(u, g)
     cursor = ds.execute(
-        "SELECT 1 FROM org_members WHERE group_id = ? AND user_id = ?",
+        "SELECT 1 FROM org_members WHERE org_id = ? AND user_id = ?",
         [g, u]
     )
     assert cursor.fetchone() is not None
@@ -347,9 +348,9 @@ def test_set_role_permissions_duplicate_in_list(svc, ds):
     p1 = _insert_permission(ds, code='a.perm1')
     p2 = _insert_permission(ds, code='b.perm2')
     # 传 [p1, p1, p2] 应当不重复插入
-    svc.set_role_permissions(r, [p1, p1, p2])
+    svc.set_permission_set_permissions(r, [p1, p1, p2])
     cursor = ds.execute(
-        "SELECT COUNT(*) FROM permission_set_permissions WHERE role_id = ?", [r]
+        "SELECT COUNT(*) FROM permission_set_permissions WHERE permission_set_id = ?", [r]
     )
     # 期望：2 条（p1, p2）
     assert cursor.fetchone()[0] == 2
@@ -360,13 +361,13 @@ def test_set_role_permissions_with_nonexistent_perm(svc, ds):
     r = _insert_role(ds, code='fk_test_role', name='FKTest')
     # perm_id=9999 不存在
     try:
-        result = svc.set_role_permissions(r, [9999])
+        result = svc.set_permission_set_permissions(r, [9999])
         # 如果没启用 FK 约束：result 可能是 True（错误地插入 0 条）
         # 如果启用 FK 约束：result 是 False
         assert result in (True, False)
         # 验证：无 role_permissions 记录（FK 失败应回滚）
         cursor = ds.execute(
-            "SELECT COUNT(*) FROM permission_set_permissions WHERE role_id = ?", [r]
+            "SELECT COUNT(*) FROM permission_set_permissions WHERE permission_set_id = ?", [r]
         )
         assert cursor.fetchone()[0] == 0
     except Exception:
@@ -385,8 +386,8 @@ def test_has_permission_inherited_from_group(svc, ds):
     svc._ensure_user_in_group(u, g)
     r = _insert_role(ds, code='inherited_role', name='Inherited')
     p = _insert_permission(ds, code='inherited.read')
-    ds.execute("INSERT INTO org_permission_sets (group_id, role_id) VALUES (?, ?)", [g, r])
-    ds.execute("INSERT INTO permission_set_permissions (role_id, permission_id) VALUES (?, ?)", [r, p])
+    ds.execute("INSERT INTO org_permission_sets (org_id, permission_set_id) VALUES (?, ?)", [g, r])
+    ds.execute("INSERT INTO permission_set_permissions (permission_set_id, permission_id) VALUES (?, ?)", [r, p])
     # 即使 p.code 不是 resource_type:action_code 格式，has_permission 应当也能匹配
     assert svc.has_permission(u, 'inherited.read') is True
 
@@ -399,9 +400,9 @@ def test_get_user_permissions_excludes_unlinked(svc, ds):
     r = _insert_role(ds, code='excl_role', name='Excl')
     p1 = _insert_permission(ds, code='granted.perm')
     p2 = _insert_permission(ds, code='not.granted')
-    ds.execute("INSERT INTO org_permission_sets (group_id, role_id) VALUES (?, ?)", [g, r])
+    ds.execute("INSERT INTO org_permission_sets (org_id, permission_set_id) VALUES (?, ?)", [g, r])
     # 只关联 p1，不关联 p2
-    ds.execute("INSERT INTO permission_set_permissions (role_id, permission_id) VALUES (?, ?)", [r, p1])
+    ds.execute("INSERT INTO permission_set_permissions (permission_set_id, permission_id) VALUES (?, ?)", [r, p1])
     perms = svc.get_user_permissions(u)
     assert 'granted.perm' in perms
     assert 'not.granted' not in perms
@@ -418,8 +419,8 @@ def test_check_permission_unified_wildcard(svc, ds):
     svc._ensure_user_in_group(u, g)
     r = _insert_role(ds, code='super_check', name='Super')
     p = _insert_permission(ds, code='*')
-    ds.execute("INSERT INTO org_permission_sets (group_id, role_id) VALUES (?, ?)", [g, r])
-    ds.execute("INSERT INTO permission_set_permissions (role_id, permission_id) VALUES (?, ?)", [r, p])
+    ds.execute("INSERT INTO org_permission_sets (org_id, permission_set_id) VALUES (?, ?)", [g, r])
+    ds.execute("INSERT INTO permission_set_permissions (permission_set_id, permission_id) VALUES (?, ?)", [r, p])
     # 任意 resource_type:action_code 都通过
     assert svc.check_permission_unified(u, 'product', 'read') is True
     assert svc.check_permission_unified(u, 'user', 'delete') is True
@@ -432,8 +433,8 @@ def test_check_permission_unified_with_instance(svc, ds):
     svc._ensure_user_in_group(u, g)
     r = _insert_role(ds, code='inst_role', name='Inst')
     p = _insert_permission(ds, code='user:read', resource_type='user', action='read')
-    ds.execute("INSERT INTO org_permission_sets (group_id, role_id) VALUES (?, ?)", [g, r])
-    ds.execute("INSERT INTO permission_set_permissions (role_id, permission_id) VALUES (?, ?)", [r, p])
+    ds.execute("INSERT INTO org_permission_sets (org_id, permission_set_id) VALUES (?, ?)", [g, r])
+    ds.execute("INSERT INTO permission_set_permissions (permission_set_id, permission_id) VALUES (?, ?)", [r, p])
     # 带 resource_id 走 _check_instance_permission（默认 True）
     result = svc.check_permission_unified(u, 'user', 'read', resource_id=123)
     assert result is True
@@ -499,15 +500,15 @@ def test_remove_role_only_affects_target_user(svc, ds):
     u1 = _insert_user(ds, 'user1')
     u2 = _insert_user(ds, 'user2')
     r = _insert_role(ds, code='shared_removable', name='Shared')
-    svc.assign_role(u1, r)
-    svc.assign_role(u2, r)
+    svc.assign_permission_set(u1, r)
+    svc.assign_permission_set(u2, r)
     # u1 移除
-    svc.remove_role(u1, r)
+    svc.remove_permission_set(u1, r)
     # u2 仍有该角色
-    u2_roles = svc.get_user_roles(u2)
+    u2_roles = svc.get_user_permission_sets(u2)
     assert r in [x['id'] for x in u2_roles]
     # u1 没有
-    u1_roles = svc.get_user_roles(u1)
+    u1_roles = svc.get_user_permission_sets(u1)
     assert r not in [x['id'] for x in u1_roles]
 
 
@@ -522,16 +523,16 @@ def test_full_permission_lifecycle(svc, ds):
     p = _insert_permission(ds, code='lifecycle.perm')
 
     # 1) 分配角色
-    assert svc.assign_role(u, r) is True
+    assert svc.assign_permission_set(u, r) is True
     g = svc._get_or_create_personal_group(u)
     svc._ensure_user_in_group(u, g)
-    ds.execute("INSERT INTO permission_set_permissions (role_id, permission_id) VALUES (?, ?)", [r, p])
+    ds.execute("INSERT INTO permission_set_permissions (permission_set_id, permission_id) VALUES (?, ?)", [r, p])
 
     # 2) 验证权限存在
     assert svc.has_permission(u, 'lifecycle.perm') is True
 
     # 3) 移除角色
-    svc.remove_role(u, r)
+    svc.remove_permission_set(u, r)
     # 4) 权限应不再存在
     assert svc.has_permission(u, 'lifecycle.perm') is False
 
@@ -544,10 +545,10 @@ def test_role_priority_ordering(svc, ds):
     r1 = _insert_role(ds, code='low', name='Low', priority=1)
     r2 = _insert_role(ds, code='high', name='High', priority=10)
     r3 = _insert_role(ds, code='mid', name='Mid', priority=5)
-    svc.assign_role(u, r1)
-    svc.assign_role(u, r2)
-    svc.assign_role(u, r3)
-    roles = svc.get_user_roles(u)
+    svc.assign_permission_set(u, r1)
+    svc.assign_permission_set(u, r2)
+    svc.assign_permission_set(u, r3)
+    roles = svc.get_user_permission_sets(u)
     role_codes = [r['code'] for r in roles]
     assert set(role_codes) == {'low', 'high', 'mid'}
 
@@ -556,8 +557,8 @@ def test_system_role_cannot_be_removed_via_service(svc, ds):
     """is_system=1 的角色：业务方法不应特殊处理（验证无副作用）"""
     u = _insert_user(ds, 'sys_user')
     r = _insert_role(ds, code='system_role', name='System', is_system=1)
-    svc.assign_role(u, r)
+    svc.assign_permission_set(u, r)
     # 即使是 system role，仍可移除（业务方法不做特殊处理）
-    svc.remove_role(u, r)
-    roles = svc.get_user_roles(u)
+    svc.remove_permission_set(u, r)
+    roles = svc.get_user_permission_sets(u)
     assert r not in [x['id'] for x in roles]

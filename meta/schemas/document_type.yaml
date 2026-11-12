@@ -24,7 +24,7 @@ view_definition: |
          document_category AS category,
          default_type_id AS default_line_type_id,
          number_sequence_id,
-         status, description, created_at
+         status, description, created_at, scope_bo
   FROM type_definitions
   WHERE level = 'header'
 
@@ -260,6 +260,23 @@ fields:
     semantics:
       meaning: 记录创建时间
       audit_field: true
+
+  # 类型归属域（视图暴露，供 /api/v2/meta 按 scope_bo 过滤）
+  - id: scope_bo
+    name: 归属域
+    type: string
+    db_column: scope_bo
+    nullable: true
+    description: 类型归属的业务对象域（如 sales_order / transfer_order）
+    semantics:
+      meaning: 类型归属的业务对象域
+      filterable: true
+      filter_type: string
+      filter_label: 归属域
+      filter_scope: local
+    ui:
+      widget: input
+      readonly: true
 
 relations:
   - id: document_type_to_default_line_type

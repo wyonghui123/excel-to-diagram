@@ -66,6 +66,11 @@ def _counter_prefix(orig_edge_id: str) -> str:
     return "count:{0}:".format(orig_edge_id)
 
 
+def _rev_prefix(orig_edge_id: str) -> str:
+    """补偿边锚前缀（derive_key = 前缀 + 冲销单 ID）。"""
+    return "rev:{0}:".format(orig_edge_id)
+
+
 def _read_edge(app_ds, edge_id: str) -> Dict[str, Any]:
     """读边行；不存在 → EDGE_NOT_FOUND（fail-closed）。"""
     cols = ("id", "source_bo", "source_id", "source_item",
@@ -124,6 +129,17 @@ def reverse_edge(app_ds, edge_id: str, *,
                     edge_id, edge["status"]),
             )
 
+        compensated = app_ds.execute(
+            "SELECT 1 FROM doc_flow_edges WHERE reverses_edge_id=?"
+            " AND edge_kind='reversal' AND status='active' LIMIT 1",
+            (edge_id,),
+        ).fetchall()
+        if compensated:
+            raise DocFlowDeriveError(
+                "EDGE_HAS_COMPENSATION",
+                "边已被补偿事实冲销，禁止原地翻转: {0}".format(edge_id),
+            )
+
         cascaded: List[str] = []
         prefix = _red_prefix(edge_id)
         children = app_ds.execute(
@@ -160,6 +176,51 @@ def reverse_edge(app_ds, edge_id: str, *,
                         edge_id, reversed_by, len(cascaded))
         return ReversalResult(edge_id=edge_id, kind="reversed",
                               replay=False, cascaded_edges=cascaded)
+
+
+def release_target_edges(app_ds, target_bo: str, target_ids,
+                         *, reversed_by: str = "") -> Dict[str, List[str]]:
+    """下游单据取消 → 释放其名下正向边对上游的占用（边保留，视图不计）。
+
+    边方向为「上游计划行 → 下游明细行」，故按 target 侧定位：
+    target_bo / target_id ∈ target_ids 且 status='active' 且
+    quantity_sign='normal' 的边逐条 reverse_edge。
+
+    幂等：已 reversed 的边不再命中查询，重复取消不会二次翻转。
+
+    Returns:
+        {'released': [边 ID...], 'replay': [幂等重放的边 ID...]}
+    """
+    ids = [str(value) for value in (target_ids or []) if value not in (None, "")]
+    if not target_bo or not ids:
+        return {"released": [], "replay": []}
+    placeholders = ", ".join(["?"] * len(ids))
+    try:
+        rows = app_ds.execute(
+            "SELECT id FROM doc_flow_edges WHERE target_bo=?"
+            " AND target_id IN ({0}) AND status='active'"
+            " AND quantity_sign='normal' ORDER BY id".format(placeholders),
+            tuple([target_bo] + ids),
+        ).fetchall()
+    except Exception as error:  # noqa: BLE001 - 单据流未启用的库无此表
+        if "no such table" not in str(error):
+            raise
+        logger.warning("[DocFlow] 边表不可读，跳过取消释放 %s: %s",
+                       target_bo, error)
+        return {"released": [], "replay": []}
+    released: List[str] = []
+    replay: List[str] = []
+    with app_ds.transaction():
+        for row in rows:
+            edge_id = row["id"] if isinstance(row, dict) else row[0]
+            result = reverse_edge(app_ds, edge_id, reversed_by=reversed_by)
+            if result.replay:
+                replay.append(edge_id)
+            else:
+                released.append(edge_id)
+    logger.info("[DocFlow] 取消释放 %s 目标边：翻转 %d 条，重放 %d 条（%s）",
+                target_bo, len(released), len(replay), reversed_by)
+    return {"released": released, "replay": replay}
 
 
 def red_ink_edge(app_ds, orig_edge_id: str, *, quantity: float, ref_id: str,
@@ -280,7 +341,7 @@ def counter_edge(app_ds, platform_ds, orig_edge_id: str, *,
             "退货数量必须 > 0（正向新增请走 derive），实际: {0}".format(quantity),
         )
 
-    from meta.core.doc_flow_rule_store import get_rule
+    from meta.core.rule_provider import get_doc_flow_rule as get_rule
     rule = get_rule(platform_ds, return_rule_id)
     if rule is None:
         raise DocFlowDeriveError(
@@ -325,3 +386,89 @@ def counter_edge(app_ds, platform_ds, orig_edge_id: str, *,
     )
     return ReversalResult(edge_id=result.edge_id, kind="counter",
                           replay=result.replay)
+
+
+def compensate_edge(app_ds, orig_edge_id: str, *,
+                    ref_id: str, derived_by: str = "") -> ReversalResult:
+    """追加补偿事实：不改原边，新边 ``edge_kind='reversal'`` 指向原边。
+
+    数量语义: 补偿边取原边反号（normal → red，red → normal），因此现有聚合
+    口径 ``Σ(active normal) − Σ(active red)`` 无需改动即可归零；原边与既有
+    红字子边全部保留，历史可重建（D3 / R-SF-03 / R-SF-04）。
+
+    幂等: ``derive_key='rev:<原边id>:<ref_id>'`` 命中即重放；
+    同一原边的 active 补偿合计不得超过原边数量（COMPENSATE_OVER_ORIGINAL）。
+    """
+    ref = str(ref_id or "")
+    if not ref:
+        raise DocFlowDeriveError(
+            "REF_ID_REQUIRED", "补偿边必须携带冲销单 ID（ref_id，业务权威锚）"
+        )
+
+    with app_ds.transaction():
+        orig = _read_edge(app_ds, orig_edge_id)
+        if orig["status"] != "active":
+            raise DocFlowDeriveError(
+                "COMPENSATE_ORIG_REVERSED",
+                "仅 active 边可被补偿: {0} status={1}".format(
+                    orig_edge_id, orig["status"]),
+            )
+
+        derive_key = _rev_prefix(orig_edge_id) + ref
+        existing = _find_edge_by_derive_key(app_ds, derive_key)
+        if existing:
+            return ReversalResult(edge_id=existing, kind="compensation",
+                                  replay=True)
+
+        orig_qty = _num(orig["quantity"])
+        rows = app_ds.execute(
+            "SELECT COALESCE(SUM(quantity), 0) FROM doc_flow_edges"
+            " WHERE reverses_edge_id=? AND edge_kind='reversal'"
+            " AND status='active'",
+            (orig_edge_id,),
+        ).fetchall()
+        compensated = _num(rows[0][0]) if rows else 0.0
+        if compensated + orig_qty > orig_qty + _QTY_EPSILON:
+            raise DocFlowDeriveError(
+                "COMPENSATE_OVER_ORIGINAL",
+                "补偿合计不得超过原边数量: 原边={0}, 已补偿={1}".format(
+                    orig_qty, compensated),
+            )
+
+        rev_sign = "red" if orig["quantity_sign"] == "normal" else "normal"
+        edge_id = uuid.uuid4().hex
+        row = {
+            "id": edge_id,
+            "source_bo": orig["source_bo"],
+            "source_id": str(orig["source_id"]),
+            "source_item": orig["source_item"],
+            "target_bo": orig["target_bo"],
+            "target_id": str(orig["target_id"]),
+            "target_item": orig["target_item"],
+            "quantity": orig_qty,
+            "amount": 0,
+            "currency": str(orig["currency"] or ""),
+            "unit": str(orig["unit"] or ""),
+            "quantity_sign": rev_sign,
+            "rule_id": "{0}#rev:{1}".format(orig["rule_id"], ref),
+            "derived_at": datetime.now().isoformat(timespec="seconds"),
+            "derived_by": derived_by,
+            "status": "active",
+            "pool": orig["pool"],
+            "source_instance_id": "",
+            "target_instance_id": "",
+            "derive_key": derive_key,
+            "edge_kind": "reversal",
+            "reverses_edge_id": orig_edge_id,
+        }
+        try:
+            app_ds.insert(DOC_FLOW_EDGES_TABLE, row)
+        except Exception as e:  # noqa: BLE001 - 唯一索引冲突 → 幂等重放兜底
+            existing = _find_edge_by_derive_key(app_ds, derive_key)
+            if existing:
+                logger.warning("[DocFlow] 补偿边冲突但命中既有边（并发重放）: %s", e)
+                return ReversalResult(edge_id=existing, kind="compensation",
+                                      replay=True)
+            raise
+        return ReversalResult(edge_id=edge_id, kind="compensation",
+                              replay=False)

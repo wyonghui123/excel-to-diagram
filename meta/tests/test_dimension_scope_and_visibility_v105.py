@@ -1,3 +1,4 @@
+# ALLOW_RAW_SQL: 本文件含裸 SQL 构造维度范围/可见性测试数据，守卫豁免（2026-11-09 恢复覆盖）
 # -*- coding: utf-8 -*-
 """
 测试 v1.0.5 修复: dimension scope 与 visibility/owner scope 改为 AND 关系
@@ -157,6 +158,14 @@ class TestDimensionScopeEngineYamlPath:
                                   visibility TEXT, owner_id INTEGER);
             CREATE TABLE sub_domains (id INTEGER PRIMARY KEY, domain_id INTEGER,
                                      visibility TEXT, owner_id INTEGER);
+            CREATE TABLE permission_set_dimension_scopes (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                permission_set_id INTEGER NOT NULL,
+                dimension_code TEXT NOT NULL,
+                dimension_values TEXT,
+                inherit_children INTEGER DEFAULT 1,
+                scope_mode TEXT DEFAULT 'include'
+            );
 
             INSERT INTO products VALUES (1, '供应链管理系统');
             INSERT INTO versions VALUES (1, 1, 'public', NULL);
@@ -179,9 +188,16 @@ class TestDimensionScopeEngineYamlPath:
         engine = DimensionScopeEngine(mock_ds)
 
         # 模拟 expand: 用户配 product=[1]
+        # [FIX 2026-11-09] 现代实现走 expand_dimension_values_detail (5 元组), 旧 expand_dimension_values 已不再被调用
         import unittest.mock as mock
-        with mock.patch.object(engine, 'expand_dimension_values') as mock_expand:
-            mock_expand.return_value = {'product': {'include': {1}, 'exclude': set(), 'wildcard': False}}
+        with mock.patch.object(engine, 'expand_dimension_values_detail') as mock_expand:
+            mock_expand.return_value = (
+                {'product': {1}},   # expanded
+                {'product': {1}},   # native
+                {},                 # anchors
+                {},                 # inherited
+                {},                 # failed
+            )
 
             conditions = engine.derive_data_conditions(role_id=1)
 
@@ -262,10 +278,11 @@ class TestDataPermissionInterceptorV105:
         and_inner = or_inner[0]['conditions']
         assert len(and_inner) == 2  # dim + visibility OR group
 
-        # 第 2 项: owner exception
-        assert or_inner[1].get('source') == 'owner_exception'
-        assert or_inner[1]['field'] == 'owner_id'
-        assert or_inner[1]['value'] == 1456
+        # 第 2 项: owner exception (BUG-V013/V050: version 走 chain 子查询)
+        assert or_inner[1].get('source') == 'owner_exception_chain'
+        assert or_inner[1]['field'] == 'id'
+        assert or_inner[1]['operator'] == 'in_subquery'
+        assert '1456' in str(or_inner[1]['value'])
 
         # 验证 visibility scope 是 OR group
         visibility_conds = [c for c in and_inner if c.get('source') == 'visibility_scope']
@@ -297,8 +314,10 @@ class TestDataPermissionInterceptorV105:
         conds = ctx.extra['query_conditions']
         # 应只有 owner 条件（因为 existing 为空）
         assert len(conds) == 1
-        assert conds[0]['field'] == 'owner_id'
-        assert conds[0]['source'] == 'owner_exception'
+        # BUG-V013/V050: version 走 chain 子查询, 不再是裸 owner_id 字段
+        assert conds[0]['field'] == 'id'
+        assert conds[0]['operator'] == 'in_subquery'
+        assert conds[0]['source'] == 'owner_exception_chain'
 
 
 # ────────────────────────────────────────
@@ -465,11 +484,11 @@ class TestTeset68EndToEnd:
         assert vis_cond.get('type') == 'or'
         assert vis_cond['source'] == 'visibility_scope'
 
-        # or_inner[1]: owner exception
+        # or_inner[1]: owner exception (BUG-V013/V050: version 走 chain 子查询)
         owner_cond = or_inner[1]
-        assert owner_cond['source'] == 'owner_exception'
-        assert owner_cond['field'] == 'owner_id'
-        assert owner_cond['value'] == ctx_user_id
+        assert owner_cond['source'] == 'owner_exception_chain'
+        assert owner_cond['field'] == 'id'
+        assert owner_cond['operator'] == 'in_subquery'
 
     def test_teset68_cannot_see_other_users_draft(self):
         """TESET68 不能看到别人 owner 的 draft

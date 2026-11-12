@@ -5,6 +5,7 @@
 """
 
 from flask import Blueprint, request, jsonify
+from meta.api._response_contract import error_response, ok, ok_message
 import os
 import json
 import logging
@@ -62,8 +63,10 @@ def _execute_read_query(sql, params=()):
 def _execute_write_query(sql, params=()):
     """[V007.41] L0 写查询 (force_no_tx)
 
-    Phase 2: 用 force_no_tx=True 保持 V007.40 简单语义.
-    Phase 3: 调用方应改用 bo_framework.transaction() 包裹.
+    [BUG-FIX 2026-11-09] 本函数每次开独立裸连接，外层 bo_framework.transaction()
+    的 commit 作用在 datasource 自己的连接上，无法提交这里的写事务；若不在本函数内
+    commit，连接关闭时 SQLite 会回滚 → 过滤变体写入静默丢失（列表永远为空）。
+    因此必须在此显式 commit，恢复 V007.40 的持久化语义。
     """
     db_path = _get_db_path()
     with safe_connect_for_write(db_path, force_no_tx=True) as conn:
@@ -105,10 +108,11 @@ def _init_table():
         updated_at TEXT
     )
     '''
-    _execute_query(sql, fetch=False)
+    with bo_framework.transaction() as txn:
+        _execute_query(sql, fetch=False)
 
-    _execute_query('CREATE INDEX IF NOT EXISTS idx_fv_user_obj ON filter_variants(user_id, object_type)', fetch=False)
-    _execute_query('CREATE INDEX IF NOT EXISTS idx_fv_shared ON filter_variants(is_shared, object_type)', fetch=False)
+        _execute_query('CREATE INDEX IF NOT EXISTS idx_fv_user_obj ON filter_variants(user_id, object_type)', fetch=False)
+        _execute_query('CREATE INDEX IF NOT EXISTS idx_fv_shared ON filter_variants(is_shared, object_type)', fetch=False)
 
     _table_initialized = True
 
@@ -172,7 +176,7 @@ def get_variant(variant_id):
     variant = _execute_query(sql, (variant_id, user_id))
     
     if not variant:
-        return jsonify({'success': False, 'message': '变体不存在或无权访问'}), 404
+        return error_response('变体不存在或无权访问', status=404)
     
     variant = variant[0]
     variant['is_shared'] = bool(variant.get('is_shared', 0))
@@ -183,10 +187,7 @@ def get_variant(variant_id):
         except:
             variant['filters'] = {}
     
-    return jsonify({
-        'success': True,
-        'data': variant
-    })
+    return ok(variant)
 
 
 @filter_variant_bp.route('', methods=['POST'])
@@ -210,13 +211,13 @@ def create_variant():
     is_default = 1 if data.get('is_default', False) else 0
     
     if not name:
-        return jsonify({'success': False, 'message': '变体名称不能为空'}), 400
+        return error_response('变体名称不能为空')
     
     if not object_type:
-        return jsonify({'success': False, 'message': '对象类型不能为空'}), 400
+        return error_response('对象类型不能为空')
     
     if is_shared and not _is_admin():
-        return jsonify({'success': False, 'message': '只有管理员可以创建共享变体'}), 403
+        return error_response('只有管理员可以创建共享变体', status=403)
     
     # [V007.41 BUG-FIX] 用 bo_framework.transaction() 包裹, 根治 silent partial commit
     with bo_framework.transaction() as txn:
@@ -238,16 +239,13 @@ def create_variant():
             fetch=False
         )
 
-    return jsonify({
-        'success': True,
-        'data': {
-            'id': variant_id,
-            'name': name,
-            'object_type': object_type,
-            'filters': filters,
-            'is_shared': bool(is_shared),
-            'is_default': bool(is_default)
-        }
+    return ok({
+        'id': variant_id,
+        'name': name,
+        'object_type': object_type,
+        'filters': filters,
+        'is_shared': bool(is_shared),
+        'is_default': bool(is_default)
     })
 
 
@@ -263,7 +261,7 @@ def update_variant(variant_id):
     )
     
     if not existing:
-        return jsonify({'success': False, 'message': '变体不存在或无权修改'}), 404
+        return error_response('变体不存在或无权修改', status=404)
     
     existing = existing[0]
     name = data.get('name', existing['name']).strip()
@@ -272,7 +270,7 @@ def update_variant(variant_id):
     is_default = 1 if data.get('is_default', False) else 0
     
     if is_shared and not _is_admin():
-        return jsonify({'success': False, 'message': '只有管理员可以创建共享变体'}), 403
+        return error_response('只有管理员可以创建共享变体', status=403)
 
     # [V007.41 BUG-FIX] 用 bo_framework.transaction() 包裹
     with bo_framework.transaction() as txn:
@@ -290,15 +288,12 @@ def update_variant(variant_id):
             fetch=False
         )
 
-    return jsonify({
-        'success': True,
-        'data': {
-            'id': variant_id,
-            'name': name,
-            'filters': filters,
-            'is_shared': bool(is_shared),
-            'is_default': bool(is_default)
-        }
+    return ok({
+        'id': variant_id,
+        'name': name,
+        'filters': filters,
+        'is_shared': bool(is_shared),
+        'is_default': bool(is_default)
     })
 
 
@@ -313,14 +308,12 @@ def delete_variant(variant_id):
     )
     
     if not existing:
-        return jsonify({'success': False, 'message': '变体不存在或无权删除'}), 404
+        return error_response('变体不存在或无权删除', status=404)
     
-    _execute_query('DELETE FROM filter_variants WHERE id = ?', (variant_id,), fetch=False)
+    with bo_framework.transaction() as txn:
+        _execute_query('DELETE FROM filter_variants WHERE id = ?', (variant_id,), fetch=False)
     
-    return jsonify({
-        'success': True,
-        'message': '变体已删除'
-    })
+    return ok_message('变体已删除')
 
 
 @filter_variant_bp.route('/<int:variant_id>/set-default', methods=['POST'])
@@ -334,7 +327,7 @@ def set_default_variant(variant_id):
     )
     
     if not existing:
-        return jsonify({'success': False, 'message': '变体不存在或无权访问'}), 404
+        return error_response('变体不存在或无权访问', status=404)
     
     existing = existing[0]
 
@@ -352,7 +345,4 @@ def set_default_variant(variant_id):
             fetch=False
         )
 
-    return jsonify({
-        'success': True,
-        'message': '已设置为默认变体'
-    })
+    return ok_message('已设置为默认变体')

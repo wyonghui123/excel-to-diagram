@@ -13,6 +13,8 @@ const PAGE_TYPE_COMPONENTS = {
   object_list: () => import('@/views/GenericObjectList.vue'),
   object_detail: () => import('@/views/ObjectDetailPage.vue'),
   multi_object_hub: () => import('@/views/GenericTabContainer.vue'),
+  report: () => import('@/views/MetaReportPage.vue'),
+  rule_center: () => import('@/views/RuleCenterPage.vue'),
 }
 
 const STATIC_ROUTE_NAMES = new Set([
@@ -27,7 +29,9 @@ const STATIC_ROUTE_NAMES = new Set([
   // ai-async-tasks 已随菜单收敛下线，不再登记为静态路由。
   'task-management',
   // 平台运维作业（custom_page，静态路由在 router/modules/system.js 注册）
-  'platform-ops-jobs'
+  'platform-ops-jobs',
+  // 包装容器查询 / 封箱作业（custom_page，静态路由在 router/modules/business.js 注册）
+  'handling-unit-docs', 'handling-unit-seal'
 ])
 
 const STATIC_ROUTE_PATHS = new Set([
@@ -39,6 +43,8 @@ const STATIC_ROUTE_PATHS = new Set([
   '/sourcing-rules/calc/',
   '/system/task-management',
   '/system/platform-ops-jobs',
+  // 包装容器查询 / 封箱作业（custom_page）
+  '/warehouse/handling-unit-docs', '/warehouse/handling-unit-seal',
 ])
 
 let _routesRegistered = false
@@ -65,7 +71,7 @@ function _resolveComponent(menu) {
 function _buildProps(menu) {
   const props = {}
 
-  if (menu.page_type === 'object_list') {
+  if (menu.page_type === 'object_list' || menu.page_type === 'report') {
     if (menu.primary_object_type) {
       props.objectType = menu.primary_object_type
     }

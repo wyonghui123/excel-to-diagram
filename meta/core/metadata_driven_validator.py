@@ -654,7 +654,9 @@ class MetadataDrivenValidator:
                 index_type_str = index.get('type', '')
                 index_fields = index.get('fields', [])
                 index_name = index.get('name', 'unknown')
-                is_unique = index_type_str == 'unique'
+                # 兼容 partial(unique=true) 的 YAML 写法
+                is_unique = index_type_str == 'unique' or bool(index.get('unique'))
+                index_condition = (index.get('condition') or '').strip()
             else:
                 # MetaIndex 对象: index_type 可能是 enum 或 str
                 idx_type = getattr(index, 'index_type', None)
@@ -665,6 +667,7 @@ class MetadataDrivenValidator:
                     idx_type_value == 'unique'
                     or getattr(index, 'unique', False)
                 )
+                index_condition = (getattr(index, 'condition', '') or '').strip()
 
             if not is_unique:
                 continue
@@ -704,6 +707,11 @@ class MetadataDrivenValidator:
 
             if not all_present:
                 continue
+
+            # [FIX] partial 唯一索引必须带上声明式 WHERE 条件，
+            # 否则「target_schedule_id IS NULL / IS NOT NULL」两条索引互相误判冲突。
+            if index_condition:
+                where_clauses.insert(0, f"({index_condition})")
 
             query = f"SELECT id FROM {meta_object.table_name} WHERE {' AND '.join(where_clauses)}"
             if exclude_id:

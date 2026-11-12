@@ -12,7 +12,7 @@ from flask import Blueprint, jsonify
 from typing import Any, Dict, List
 from dataclasses import asdict
 
-from meta.core.models import registry, MetaAction
+from meta.core.models import registry, MetaAction, generic_api_mode_of
 from meta.services.view_config_service import view_config_service
 
 agent_bp = Blueprint('agent', __name__, url_prefix='/api/v1/agent')
@@ -42,7 +42,9 @@ def get_tools():
     
     for obj_id in registry.list_objects():
         obj = registry.get(obj_id)
-        if not obj or not obj.persistent:
+        # [G7 2026-11-02] 平台机制对象不生成 agent 工具
+        # [P3 2026-11-10] read_only 对象同样不生成写工具
+        if not obj or not obj.persistent or generic_api_mode_of(obj) != 'full':
             continue
         
         for action in obj.actions:
@@ -250,7 +252,7 @@ def get_full_schema():
     for obj_id in registry.list_objects():
         try:
             obj = registry.get(obj_id)
-            if not obj:
+            if not obj or getattr(obj, 'skip_generic_api', False):
                 continue
             
             obj_schema = {

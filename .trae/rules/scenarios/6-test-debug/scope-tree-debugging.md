@@ -1,4 +1,10 @@
-﻿﻿﻿﻿﻿﻿﻿﻿# 领域树过滤调试经验
+---
+alwaysApply: false
+description: "领域树过滤调试：originalId 跨表碰撞、hierarchyMap 覆盖策略、过滤参数排查"
+globs: "src/components/common/RelationScopeTree/**,src/services/hierarchyService.js,src/composables/useMultiObjectPage.js"
+---
+
+# 领域树过滤调试经验
 
 > 最后更新: 2026-06-30 | 来源: 领域过滤 Bug 排查
 

@@ -1,6 +1,7 @@
 ---
 alwaysApply: false
 description: "编码问题防护 v20260612：mojibake 修复和预防措施"
+globs: "scripts/*.ps1,*.py"
 ---
 
 # Encoding Corruption Prevention Guide (v20260612)
@@ -124,7 +125,7 @@ rm /tmp/bad.js
 - [ai-agent-undo-protection.md](./ai-agent-undo-protection.md) - stash residue rules
 - [file-encoding-rules.md](./file-encoding-rules.md) - existing encoding rules (Note: HEAD content has historical mojibake)
 - [SESSION_REMINDER.md](./SESSION_REMINDER.md) - debugging rules 25-30
-- [multi-agent-coordination.md](./multi-agent-coordination.md) - multi-Agent rules
+- [multi-agent-coordination.md](./scenarios/7-ai-collaboration/multi-agent-coordination.md) - multi-Agent rules
 
 ---
 

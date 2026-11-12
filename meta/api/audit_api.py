@@ -3,7 +3,8 @@
 提供审计日志查询、导出等功能
 """
 
-from flask import Blueprint, jsonify, request, g
+from flask import Blueprint, request, g
+from meta.core.query_spec import parse_query_spec
 from datetime import datetime
 from typing import Optional
 import csv
@@ -13,6 +14,9 @@ audit_bp = Blueprint('audit', __name__)
 
 from meta.core.datasource import get_data_source
 from meta.api._messages import MSG_ADMIN_REQUIRED
+from meta.api._response_contract import (
+    error_response, json_response, ok, ok_message,
+)
 from meta.api.auth_api import login_required, is_admin
 from meta.services.auth_middleware import get_current_user
 
@@ -34,11 +38,11 @@ def _require_audit_log_read():
         perms = user.get('permissions', []) or []
         if '*' in perms or 'admin' in perms or 'audit_log:read' in perms:
             return None
-    return jsonify({
+    return json_response({
         'success': False,
         'message': '缺少权限: audit_log:read',
         'error_code': 'permission.audit_log.read.missing',
-    }), 403
+    }, 403)
 
 # 业务对象元数据定义 - 定义各对象类型的business key配置
 BUSINESS_KEY_METADATA = {
@@ -118,8 +122,8 @@ def get_audit_logs():
         return perm_check
     try:
         # 获取查询参数
-        page = request.args.get('page', 1, type=int)
-        page_size = request.args.get('page_size', 20, type=int)
+        spec = parse_query_spec(request.args)
+        page, page_size = spec.page, spec.page_size
         action = request.args.get('action', '')
         object_type = request.args.get('object_type', '')
         object_id = request.args.get('object_id', '')
@@ -304,7 +308,7 @@ def get_audit_logs():
 
             logs.append(log)
 
-        return jsonify({
+        return json_response({
             'success': True,
             'data': logs,
             'total': total,
@@ -315,7 +319,7 @@ def get_audit_logs():
     except Exception as e:
         import traceback
         traceback.print_exc()
-        return jsonify({'success': False, 'message': str(e)}), 500
+        return error_response(str(e), status=500)
 
 
 @audit_bp.route('/logs/<int:log_id>', methods=['GET'])
@@ -339,7 +343,7 @@ def get_audit_log_detail(log_id):
         row = cursor.fetchone()
         
         if not row:
-            return jsonify({'success': False, 'message': '审计日志不存在'}), 404
+            return error_response('审计日志不存在', status=404)
         
         log = dict(zip(columns, row))
 
@@ -363,15 +367,12 @@ def get_audit_log_detail(log_id):
         # [OPT 2026-07-25 P0-3] detail 接口也注入 label 字段, 与 list 接口一致
         _enrich_log_labels(log, _data_source)
 
-        return jsonify({
-            'success': True,
-            'data': log
-        })
+        return ok(log)
     
     except Exception as e:
         import traceback
         traceback.print_exc()
-        return jsonify({'success': False, 'message': str(e)}), 500
+        return error_response(str(e), status=500)
 
 
 @audit_bp.route('/meta/actions', methods=['GET'])
@@ -429,11 +430,11 @@ def get_audit_meta_actions():
                 f"[audit_api] /meta/actions load enum_values failed: {_e}"
             )
 
-        return jsonify({'success': True, 'data': result})
+        return ok(result)
     except Exception as e:
         import traceback
         traceback.print_exc()
-        return jsonify({'success': False, 'message': str(e)}), 500
+        return error_response(str(e), status=500)
 
 
 @audit_bp.route('/logs/export', methods=['GET'])
@@ -516,7 +517,7 @@ def export_audit_logs():
     except Exception as e:
         import traceback
         traceback.print_exc()
-        return jsonify({'success': False, 'message': str(e)}), 500
+        return error_response(str(e), status=500)
 
 
 @audit_bp.route('/failed', methods=['GET'])
@@ -524,7 +525,7 @@ def export_audit_logs():
 def get_failed_audit_logs():
     """查询失败的审计日志记录"""
     if not is_admin():
-        return jsonify({'success': False, 'message': '您没有执行此操作的权限，需要管理员权限'}), 403
+        return error_response('您没有执行此操作的权限，需要管理员权限', status=403)
     
     try:
         cursor = _data_source.execute("""
@@ -539,15 +540,12 @@ def get_failed_audit_logs():
         columns = [desc[0] for desc in cursor.description]
         logs = [dict(zip(columns, row)) for row in cursor.fetchall()]
         
-        return jsonify({
-            'success': True,
-            'data': logs
-        })
+        return ok(logs)
     
     except Exception as e:
         import traceback
         traceback.print_exc()
-        return jsonify({'success': False, 'message': str(e)}), 500
+        return error_response(str(e), status=500)
 
 
 @audit_bp.route('/overview', methods=['GET'])
@@ -629,25 +627,22 @@ def get_audit_overview():
             count = cursor.fetchone()[0]
             trend_stats.append({'date': day, 'count': count})
 
-        return jsonify({
-            'success': True,
-            'data': {
-                'total': total,
-                'failed': failed,
-                'today_count': today_count,
-                'security_count': security_count,
-                'by_action': action_stats,
-                'by_object': object_stats,
-                'by_user': user_stats,
-                'by_category': category_stats,
-                'trend': trend_stats
-            }
+        return ok({
+            'total': total,
+            'failed': failed,
+            'today_count': today_count,
+            'security_count': security_count,
+            'by_action': action_stats,
+            'by_object': object_stats,
+            'by_user': user_stats,
+            'by_category': category_stats,
+            'trend': trend_stats
         })
     
     except Exception as e:
         import traceback
         traceback.print_exc()
-        return jsonify({'success': False, 'message': str(e)}), 500
+        return error_response(str(e), status=500)
 
 
 def _generate_business_key(data_source, object_type: str, object_id: str, field_name: str = '', new_value: str = '') -> str:
@@ -758,35 +753,29 @@ def _generate_business_key(data_source, object_type: str, object_id: str, field_
 def get_retry_worker_status():
     """获取 audit retry worker 状态"""
     if not is_admin():
-        return jsonify({'success': False, 'message': '您没有执行此操作的权限，需要管理员权限'}), 403
+        return error_response('您没有执行此操作的权限，需要管理员权限', status=403)
 
     try:
         from meta.services.audit_retry_worker import get_audit_retry_worker
 
         worker = get_audit_retry_worker()
         if worker is None:
-            return jsonify({
-                'success': True,
-                'data': {
-                    'running': False,
-                    'message': 'Retry worker not initialized'
-                }
+            return ok({
+                'running': False,
+                'message': 'Retry worker not initialized'
             })
 
         stats = worker.get_stats()
-        return jsonify({
-            'success': True,
-            'data': {
-                'running': True,
-                'interval_sec': worker._interval,
-                'batch_size': worker._batch_size,
-                'stats': stats
-            }
+        return ok({
+            'running': True,
+            'interval_sec': worker._interval,
+            'batch_size': worker._batch_size,
+            'stats': stats
         })
     except Exception as e:
         import traceback
         traceback.print_exc()
-        return jsonify({'success': False, 'message': str(e)}), 500
+        return error_response(str(e), status=500)
 
 
 @audit_bp.route('/retry/trigger', methods=['POST'])
@@ -794,28 +783,24 @@ def get_retry_worker_status():
 def trigger_retry_worker():
     """手动触发 audit retry worker 执行一次"""
     if not is_admin():
-        return jsonify({'success': False, 'message': '您没有执行此操作的权限，需要管理员权限'}), 403
+        return error_response('您没有执行此操作的权限，需要管理员权限', status=403)
 
     try:
         from meta.services.audit_retry_worker import get_audit_retry_worker
 
         worker = get_audit_retry_worker()
         if worker is None:
-            return jsonify({'success': False, 'message': 'Retry worker not initialized'}), 500
+            return error_response('Retry worker not initialized', status=500)
 
         # 手动触发一次扫描
         worker._scan_and_retry()
 
         stats = worker.get_stats()
-        return jsonify({
-            'success': True,
-            'message': 'Retry worker triggered',
-            'data': stats
-        })
+        return ok_message('Retry worker triggered', stats)
     except Exception as e:
         import traceback
         traceback.print_exc()
-        return jsonify({'success': False, 'message': str(e)}), 500
+        return error_response(str(e), status=500)
 
 
 def _extract_deleted_data(extra_data_raw) -> dict:
@@ -1671,8 +1656,8 @@ def get_audit_decisions_route():
         'permissions': user.get('permissions', []) if isinstance(user, dict) else getattr(user, 'permissions', []),
     }
 
-    page = int(request.args.get('page', 1))
-    page_size = int(request.args.get('page_size', 20))
+    spec = parse_query_spec(request.args)
+    page, page_size = spec.page, spec.page_size
 
     # 过滤参数
     filters = {}
@@ -1690,8 +1675,8 @@ def get_audit_decisions_route():
     )
 
     if result.get('forbidden'):
-        return jsonify(result), 403
-    return jsonify(result)
+        return json_response(result, 403)
+    return json_response(result)
 
 
 @audit_bp.route('/compliance', methods=['GET'])
@@ -1717,5 +1702,5 @@ def get_compliance_report_route():
     )
 
     if result.get('forbidden'):
-        return jsonify(result), 403
-    return jsonify(result)
+        return json_response(result, 403)
+    return json_response(result)

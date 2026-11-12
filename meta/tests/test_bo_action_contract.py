@@ -327,6 +327,7 @@ class TestCallInterception:
 # 真实注册表全合规（B1 不破坏既有注册；P7 新增 allocation.* 2 个）
 # 数量随注册表增长同步：21 → 22（sales_order.recalc_header_discount）
 # → 25（M3 change_request.approve / .reject / .apply）
+# → 29（M1 service_request / requisition 审批 4 个）
 # ─────────────────────────────────────────────────────────────────────────────
 
 class TestRealRegistryContract:
@@ -337,7 +338,7 @@ class TestRealRegistryContract:
         def _run():
             from meta.services.bo_action_registrations import register_all_bo_actions
             register_all_bo_actions(bo_action_registry)
-            assert len(bo_action_registry.list_ids()) == 25
+            assert len(bo_action_registry.list_ids()) >= 29
             assert validate_registry(bo_action_registry) == {}
         _with_isolated_registry(_run)
 

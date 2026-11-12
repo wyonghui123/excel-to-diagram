@@ -1,6 +1,6 @@
 ---
 description: Trae IDE 沙箱 v2 配置指南 - 涉及 sandbox.json 自定义、网络控制、白名单、高风险命令拦截时加载。封装沙箱 5 大机制 + 与项目白名单机制的关系。
-globs: ["**/.trae-cn/sandbox.json", "**/sandbox.json"]
+globs: "**/.trae-cn/sandbox.json,**/sandbox.json"
 version: "0.1.0"
 author: "AI"
 last_updated: "2026-09-02"
@@ -192,7 +192,7 @@ last_updated: "2026-09-02"
 ### 7.1 现状（v5.2）
 
 项目已有：
-- [delta-deployment-safety.md](../../../filework/.trae/rules/scenarios/2-deploy/delta-deployment-safety.md) —— 部署沙箱白名单
+- [delta-deployment-safety.md](../2-deploy/delta-deployment-safety.md) —— 部署沙箱白名单
 - service_manager.ps1 —— 服务管理脚本（管理沙箱白名单）
 
 ### 7.2 与 sandbox.json 的关系
@@ -264,4 +264,4 @@ python tools/test.py
 - [docs.trae.cn/ide/sandbox](https://docs.trae.cn/ide/sandbox)
 - [docs.trae.cn/ide/auto-run-and-security](https://docs.trae.cn/ide/auto-run-and-security)
 - [docs.trae.cn/ide_permission-and-approval](https://docs.trae.cn/ide_permission-and-approval)
-- v5.4 深度研究：[2026-09-02-trae-ide-v5.4-deep-research.md](../../../excel-to-diagram/docs/governance/2026-09-02-trae-ide-v5.4-deep-research.md)
+- v5.4 深度研究：[2026-09-02-trae-ide-v5.4-deep-research.md](../../../../docs/governance/2026-09-02-trae-ide-v5.4-deep-research.md)

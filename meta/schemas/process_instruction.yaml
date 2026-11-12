@@ -1,0 +1,621 @@
+# 过程指令（Process Instruction）—— 统一资源模型 P4b
+# 依据: docs/specs/spec-routing-process-manufacturing-benchmark-2026-11-01.md §10.5
+#       docs/specs/spec-unified-resource-model-2026-11-01-v1.0.md 附 C.1
+#
+# 定位: 工序执行时的文本作业指令与结构化操作参数，单表双形态。
+#   Oracle 分 Instructions / Operational Parameters 两页签，SAP 建 Process
+#   Instruction Category + Characteristics；平台首期用 instruction_kind 判别，
+#   避免为 text 与 parameter 各建一张薄表。
+#
+# 口径（已定，勿重复讨论）:
+#   ① (operation_id, seq) 唯一；(operation_id, parameter_code) 在 parameter_code
+#      非空时唯一（部分唯一索引）。
+#   ② kind=text ⇒ title / content 必填；parameter 字段全空。
+#   ③ kind=parameter ⇒ parameter_code / parameter_name / data_type / direction
+#      必填；text 字段空。
+#   ④ data_type=numeric ⇒ target/min/max 可按十进制解析；uom_id 可空。
+#   ⑤ direction=set ⇒ target_value 必填；collect ⇒ target 可空。
+#   ⑥ resource_id 若填，资源类型须为 machine / facility / tool（服务层校验）。
+#   ⑦ target/min/max 用 TEXT 存储，numeric 范围查询不优化（P5 再考虑强类型）。
+#   ⑧ 从表对象 ⇒ 不建独立菜单（skip_auto_menu），但保留完整三态 UI 配置。
+
+id: process_instruction
+name: 过程指令
+table_name: process_instructions
+description: 工序的过程指令（文本指令 / 结构化操作参数，单表双形态）
+display_name_field: title
+aspects: [audit_aspect]
+
+semantics:
+  meaning: 过程指令
+  category: business_document_line
+  aliases:
+    - 过程指令
+    - 作业指令
+    - 操作参数
+    - process instruction
+
+deletion_policy:
+  mode: restrict
+  restrict_on: []
+  cascade_delete: []
+
+audit:
+  enabled: true
+  create:
+    enabled: true
+    fields: all
+  update:
+    enabled: true
+    fields: changed_only
+    exclude: [id, created_at, updated_at]
+  delete:
+    enabled: true
+    fields: business_only
+    exclude: [id, created_at, updated_at]
+  associate:
+    enabled: true
+  dissociate:
+    enabled: true
+
+fields:
+  - id: id
+    name: ID
+    type: integer
+    db_column: id
+    required: true
+    unique: true
+    description: 技术主键
+    semantics:
+      meaning: 自增主键
+      primary_key: true
+
+  - id: operation_id
+    name: 工序
+    type: integer
+    db_column: operation_id
+    required: true
+    description: 所属作业定义工序
+    semantics:
+      meaning: 工序引用
+      display:
+        type: association
+        target_type: work_definition_operation
+        display_field: operation_name
+    value_help:
+      source:
+        type: bo
+        target_bo: work_definition_operation
+        value_field: id
+        display_field: operation_name
+        apply_target_permissions: true
+      behavior:
+        multiple: false
+        validation: true
+        binding_strength: strict
+        min_search_length: 0
+      presentation:
+        result_type: dialog
+        display_format: "{id} - {operation_name}"
+        columns:
+          - field: id
+            label: 工序ID
+            width: 120
+          - field: operation_name
+            label: 工序名称
+            width: 200
+    ui:
+      widget: select
+      relation: work_definition_operation
+      multiple: false
+      hidden_in_form: true
+      fieldGroup: 关联
+      fieldGroupPosition: 10
+
+  - id: seq
+    name: 指令序号
+    type: integer
+    db_column: seq
+    required: true
+    description: 指令顺序号（同工序内唯一）
+    constraints:
+      - type: numeric_range
+        gte: 1
+        decimal_places: 0
+    semantics:
+      meaning: 指令顺序
+    ui:
+      widget: number
+      fieldGroup: 关联
+      fieldGroupPosition: 20
+
+  - id: instruction_kind
+    name: 指令形态
+    type: string
+    db_column: instruction_kind
+    required: true
+    default: text
+    max_length: 40
+    description: 指令形态（文本指令 / 结构化参数）
+    enum_values:
+      - value: text
+        label: 文本指令
+        color: primary
+        is_initial: true
+      - value: parameter
+        label: 操作参数
+        color: success
+    value_help:
+      source:
+        type: enum
+        enum_type_id: instruction_kind
+        sort_by: sort_order
+      behavior:
+        validation: true
+        binding_strength: strict
+        multiple: false
+      presentation:
+        result_type: dropdown
+    semantics:
+      meaning: 指令形态
+      filterable: true
+      filter_type: enum
+      filter_label: 指令形态
+      filter_scope: local
+    ui:
+      widget: select
+      fieldGroup: 认定
+      fieldGroupPosition: 30
+
+  - id: title
+    name: 标题
+    type: string
+    db_column: title
+    nullable: true
+    max_length: 128
+    description: 文本指令标题；kind=text 必填
+    semantics:
+      meaning: 文本指令标题
+      display_name: true
+      searchable: true
+    ui:
+      widget: input
+      fieldGroup: 文本指令
+      fieldGroupPosition: 40
+
+  - id: content
+    name: 指令正文
+    type: text
+    db_column: content
+    nullable: true
+    description: 文本指令正文（多行）；kind=text 必填
+    semantics:
+      meaning: 文本指令正文
+      searchable: true
+    ui:
+      widget: textarea
+      fieldGroup: 文本指令
+      fieldGroupPosition: 50
+
+  - id: parameter_code
+    name: 参数编码
+    type: string
+    db_column: parameter_code
+    nullable: true
+    max_length: 40
+    description: 操作参数编码；kind=parameter 必填，同工序唯一
+    semantics:
+      meaning: 参数编码
+      data_category: code
+      searchable: true
+    ui:
+      widget: input
+      fieldGroup: 操作参数
+      fieldGroupPosition: 60
+
+  - id: parameter_name
+    name: 参数名称
+    type: string
+    db_column: parameter_name
+    nullable: true
+    max_length: 128
+    description: 操作参数显示名；kind=parameter 必填
+    semantics:
+      meaning: 参数显示名
+      searchable: true
+    ui:
+      widget: input
+      fieldGroup: 操作参数
+      fieldGroupPosition: 70
+
+  - id: data_type
+    name: 参数数据类型
+    type: string
+    db_column: data_type
+    nullable: true
+    max_length: 40
+    description: 参数数据类型（数值 / 文本 / 布尔 / 日期）；kind=parameter 必填
+    enum_values:
+      - value: numeric
+        label: 数值
+        color: primary
+      - value: text
+        label: 文本
+        color: info
+      - value: boolean
+        label: 布尔
+        color: success
+      - value: date
+        label: 日期
+        color: warning
+    value_help:
+      source:
+        type: enum
+        enum_type_id: parameter_data_type
+        sort_by: sort_order
+      behavior:
+        validation: true
+        binding_strength: strict
+        multiple: false
+      presentation:
+        result_type: dropdown
+    semantics:
+      meaning: 参数数据类型
+      filterable: true
+      filter_type: enum
+      filter_label: 参数数据类型
+      filter_scope: local
+    ui:
+      widget: select
+      fieldGroup: 操作参数
+      fieldGroupPosition: 80
+
+  - id: uom_id
+    name: 参数单位
+    type: integer
+    db_column: uom_id
+    nullable: true
+    description: 参数单位；仅 numeric 参数可填
+    semantics:
+      meaning: 参数单位引用
+      display:
+        type: association
+        target_type: uom
+        display_field: name
+        placeholder: "无量纲可空"
+    value_help:
+      source:
+        type: bo
+        target_bo: uom
+        value_field: id
+        display_field: name
+        code_field: code
+        apply_target_permissions: true
+      behavior:
+        multiple: false
+        validation: true
+        binding_strength: strict
+        min_search_length: 0
+      presentation:
+        result_type: dialog
+        display_format: "{code} - {name}"
+        columns:
+          - field: code
+            label: 单位编码
+            width: 140
+          - field: name
+            label: 单位名称
+            width: 200
+    ui:
+      widget: select
+      relation: uom
+      multiple: false
+      clearable: true
+      fieldGroup: 操作参数
+      fieldGroupPosition: 90
+
+  - id: target_value
+    name: 目标值
+    type: string
+    db_column: target_value
+    nullable: true
+    max_length: 200
+    description: 目标值；numeric 存规范十进制字符串；direction=set 必填
+    semantics:
+      meaning: 参数目标值
+    ui:
+      widget: input
+      fieldGroup: 操作参数
+      fieldGroupPosition: 100
+
+  - id: min_value
+    name: 下限
+    type: string
+    db_column: min_value
+    nullable: true
+    max_length: 200
+    description: 参数下限（TEXT）；须 ≤ 目标值
+    semantics:
+      meaning: 参数下限
+    ui:
+      widget: input
+      fieldGroup: 操作参数
+      fieldGroupPosition: 110
+
+  - id: max_value
+    name: 上限
+    type: string
+    db_column: max_value
+    nullable: true
+    max_length: 200
+    description: 参数上限（TEXT）；须 ≥ 目标值
+    semantics:
+      meaning: 参数上限
+    ui:
+      widget: input
+      fieldGroup: 操作参数
+      fieldGroupPosition: 120
+
+  - id: direction
+    name: 参数方向
+    type: string
+    db_column: direction
+    nullable: true
+    max_length: 40
+    description: 参数方向（下发目标 / 采集记录）；kind=parameter 必填
+    enum_values:
+      - value: set
+        label: 下发
+        color: primary
+      - value: collect
+        label: 采集
+        color: success
+    value_help:
+      source:
+        type: enum
+        enum_type_id: parameter_direction
+        sort_by: sort_order
+      behavior:
+        validation: true
+        binding_strength: strict
+        multiple: false
+      presentation:
+        result_type: dropdown
+    semantics:
+      meaning: 参数方向
+      filterable: true
+      filter_type: enum
+      filter_label: 参数方向
+      filter_scope: local
+    ui:
+      widget: select
+      fieldGroup: 操作参数
+      fieldGroupPosition: 130
+
+  - id: resource_id
+    name: 绑定资源
+    type: integer
+    db_column: resource_id
+    nullable: true
+    description: 绑定的设备 / 设施 / 工装；空表示不绑定
+    semantics:
+      meaning: 绑定资源引用
+      display:
+        type: association
+        target_type: resource
+        display_field: name
+        placeholder: "不绑定"
+    value_help:
+      source:
+        type: bo
+        target_bo: resource
+        value_field: id
+        display_field: name
+        code_field: code
+        apply_target_permissions: true
+      behavior:
+        multiple: false
+        validation: true
+        binding_strength: strict
+        min_search_length: 0
+      presentation:
+        result_type: dialog
+        display_format: "{code} - {name}"
+        columns:
+          - field: code
+            label: 资源编码
+            width: 150
+          - field: name
+            label: 资源名称
+            width: 220
+    ui:
+      widget: select
+      relation: resource
+      multiple: false
+      clearable: true
+      fieldGroup: 操作参数
+      fieldGroupPosition: 140
+
+  - id: is_required
+    name: 必填指令
+    type: boolean
+    db_column: is_required
+    required: true
+    default: false
+    description: 是否必填（执行时必须确认）
+    semantics:
+      meaning: 是否必填
+    ui:
+      widget: switch
+      fieldGroup: 认定
+      fieldGroupPosition: 150
+
+  - id: description
+    name: 说明
+    type: string
+    db_column: description
+    nullable: true
+    max_length: 255
+    description: 指令说明
+    semantics:
+      meaning: 指令说明
+      searchable: true
+    ui:
+      widget: input
+      fieldGroup: 其他
+      fieldGroupPosition: 160
+
+  - id: created_at
+    name: 创建时间
+    type: datetime
+    db_column: created_at
+    description: 创建时间
+    semantics:
+      meaning: 记录创建时间
+      audit_field: true
+
+  - id: updated_at
+    name: 更新时间
+    type: datetime
+    db_column: updated_at
+    description: 更新时间
+    semantics:
+      meaning: 记录更新时间
+      audit_field: true
+
+indexes:
+  - fields: [operation_id, seq]
+    unique: true
+    name: uq_process_instruction_seq
+  # 同工序内参数编码唯一（仅 parameter_code 非空时生效）
+  - fields: [operation_id, parameter_code]
+    unique: true
+    type: partial
+    condition: "parameter_code IS NOT NULL"
+    name: uq_process_instruction_parameter
+  - fields: [operation_id]
+    name: idx_process_instruction_operation
+  - fields: [instruction_kind]
+    name: idx_process_instruction_kind
+
+relations:
+  - id: process_instruction_to_operation
+    name: 工序
+    type: reference
+    target: work_definition_operation
+    source_field: operation_id
+    target_field: id
+    cardinality: N:1
+    description: 工序引用（真外键 restrict）
+  - id: process_instruction_to_uom
+    name: 参数单位
+    type: reference
+    target: uom
+    source_field: uom_id
+    target_field: id
+    cardinality: N:1
+    description: 参数单位引用（可空；真外键）
+  - id: process_instruction_to_resource
+    name: 绑定资源
+    type: reference
+    target: resource
+    source_field: resource_id
+    target_field: id
+    cardinality: N:1
+    description: 绑定资源引用（可空；真外键）
+
+ui_view_config:
+  # 从表对象，菜单由迁移 v192 不建（过程指令随工序维护）
+  skip_auto_menu: true
+  list:
+    detail_mode: drawer
+    title: 过程指令
+    columns:
+      - field: operation_id
+        width: 210
+        filterable: true
+        filter_type: value_help
+        render_as: association
+        target_type: work_definition_operation
+        display_field: operation_name
+      - field: seq
+        width: 90
+        sortable: true
+      - field: instruction_kind
+        width: 110
+        filterable: true
+        filter_type: select
+      - field: title
+        width: 200
+      - field: parameter_code
+        width: 140
+      - field: parameter_name
+        width: 180
+      - field: data_type
+        width: 120
+        filterable: true
+        filter_type: select
+      - field: direction
+        width: 110
+        filterable: true
+        filter_type: select
+      - field: resource_id
+        width: 170
+        filterable: true
+        filter_type: value_help
+        render_as: association
+        target_type: resource
+        display_field: name
+      - field: is_required
+        width: 100
+    selection:
+      enabled: true
+      mode: multiple
+    searchFields: [title, content, parameter_code, parameter_name]
+    actions:
+      - id: create
+        label: 新建过程指令
+        icon: plus
+        type: primary
+        permission: process_instruction:create
+    defaultSort:
+      field: seq
+      order: asc
+  form:
+    title: 过程指令
+    layout: vertical
+    sections:
+      - title: 关联
+        columns:
+          - fields: [operation_id, seq]
+          - fields: [instruction_kind, is_required]
+      - title: 文本指令
+        columns:
+          - fields: [title]
+          - fields: [content]
+      - title: 操作参数
+        columns:
+          - fields: [parameter_code, parameter_name]
+          - fields: [data_type, uom_id]
+          - fields: [direction, resource_id]
+          - fields: [target_value, min_value, max_value]
+      - title: 其他
+        columns:
+          - fields: [description]
+  detail:
+    layout: tabs
+    title: "过程指令 详情"
+    tabs:
+      - id: basic
+        label: 基本信息
+        type: fields
+        fields: [operation_id, seq, instruction_kind, title, content,
+                 parameter_code, parameter_name, data_type, uom_id,
+                 target_value, min_value, max_value, direction, resource_id,
+                 is_required, description]
+
+category_config:
+  create_permission: process_instruction:create
+  update_permission: process_instruction:update
+  delete_permission: process_instruction:delete
+  owner_auto_permission: false

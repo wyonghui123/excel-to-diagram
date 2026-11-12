@@ -363,14 +363,14 @@ ui_view_config:
         label: 新增税务登记
         icon: plus
         type: primary
-        permission: party_tax_registration:party_tax_registration_create
+        permission: party_tax_registration:create
     defaultSort:
       field: is_primary
       order: desc
 
 category_config:
   # 双段式权限码，与 permissions 表实际行一致（v110 落库）
-  create_permission: party_tax_registration:party_tax_registration_create
-  update_permission: party_tax_registration:party_tax_registration_update
-  delete_permission: party_tax_registration:party_tax_registration_delete
+  create_permission: party_tax_registration:create
+  update_permission: party_tax_registration:update
+  delete_permission: party_tax_registration:delete
   owner_auto_permission: false

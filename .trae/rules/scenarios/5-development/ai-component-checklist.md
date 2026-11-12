@@ -1,6 +1,7 @@
 ---
 alwaysApply: false
 description: "AI 组件检查清单 + 反模式 + 排查 + 版本历史"
+globs: "src/**"
 ---
 
 # AI 组件检查清单（v4.0 拆分）

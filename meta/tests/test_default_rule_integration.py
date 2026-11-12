@@ -33,6 +33,7 @@ from meta.core.models import (
     MetaObject, MetaField, MetaAction, MetaDefaultRule,
     FieldType, ActionType,
 )
+from meta.tests.shared.db_schema import create_audit_logs
 
 TABLE = "sales_orders"
 
@@ -50,35 +51,6 @@ CREATE TABLE IF NOT EXISTS sales_orders (
     updated_at TEXT,
     created_by TEXT,
     updated_by TEXT
-)
-"""
-
-# 与 test_action_executor.py::setup_database 保持一致的 audit_logs 结构
-AUDIT_DDL = """
-CREATE TABLE IF NOT EXISTS audit_logs (
-    id INTEGER PRIMARY KEY AUTOINCREMENT,
-    object_type TEXT NOT NULL,
-    object_id INTEGER NOT NULL,
-    action TEXT NOT NULL,
-    field_name TEXT,
-    old_value TEXT,
-    new_value TEXT,
-    user_id INTEGER,
-    user_name TEXT,
-    ip_address TEXT,
-    user_agent TEXT,
-    created_at TEXT,
-    extra_data TEXT,
-    trace_id TEXT,
-    transaction_id TEXT,
-    status TEXT,
-    retry_count INTEGER,
-    agent_id TEXT,
-    agent_session_id TEXT,
-    tool_call_id TEXT,
-    agent_reasoning TEXT,
-    parent_object_type TEXT,
-    parent_object_id TEXT
 )
 """
 
@@ -165,7 +137,7 @@ def _prepare(tmp_path, db_name):
     """构造独立 sqlite 库 + ActionExecutor，返回 (ds, executor, obj)"""
     ds = SQLiteAdapter()
     ds.connect(path=str(tmp_path / db_name))
-    ds.execute(AUDIT_DDL)
+    create_audit_logs(ds)
     obj = _make_object(_rules())
     register_table_name(obj.table_name)
     ds.execute(TABLE_DDL)

@@ -1,0 +1,346 @@
+# 需求线索（Demand Trace Link）—— INV-2 S3
+# 依据: docs/specs/inv2-reservation-atp/spec.md §3.4 / §4.3
+#
+# 口径:
+#   ① 只负责跨单据的供应—需求链与分配量；单据内需求归属仍走 demand_allocation。
+#   ② 同一 (supply 节点, demand 节点, trace_type) 只允许一条有效 trace。
+#   ③ 只读对象：仅服务写入，无人工 create/update/delete 入口。
+
+id: demand_trace_link
+name: 需求线索
+table_name: demand_trace_links
+description: 跨单据的供应—需求链（预留 / 钉住 / 分配）
+display_name_field: id
+
+authorization:
+  check: true
+  permissions:
+    read: demand_trace_link:read
+    list: demand_trace_link:read
+
+import_export:
+  auto_crud: false
+
+actions:
+  - id: demand_trace_link_read
+    name: 查询需求线索
+    type: crud
+    method: GET
+    path: "/api/v1/demand_trace_links/{id}"
+    description: 查询单条需求线索（只读）
+  - id: demand_trace_link_list
+    name: 查询需求线索列表
+    type: crud
+    method: GET
+    path: "/api/v1/demand_trace_links"
+    description: 查询需求线索列表（只读）
+
+semantics:
+  meaning: 需求线索
+  category: business_document_line
+  aliases:
+    - 需求线索
+    - 供应需求链
+    - demand trace
+    - pegging
+
+fields:
+  - id: id
+    name: ID
+    type: integer
+    db_column: id
+    required: true
+    unique: true
+    description: 技术主键
+    semantics:
+      meaning: 自增主键
+      primary_key: true
+
+  - id: supply_object_type
+    name: 供应对象类型
+    type: string
+    db_column: supply_object_type
+    required: true
+    max_length: 30
+    description: 供应节点类型（inventory_balance / purchase_order_line / work_order / transfer_order_line）
+    semantics:
+      meaning: 供应节点类型
+      filterable: true
+      filter_type: input
+      filter_label: 供应类型
+
+  - id: supply_object_id
+    name: 供应对象
+    type: integer
+    db_column: supply_object_id
+    required: true
+    description: 供应节点主键
+    semantics:
+      meaning: 供应对象引用
+
+  - id: supply_line_id
+    name: 供应行
+    type: integer
+    db_column: supply_line_id
+    required: true
+    default: 0
+    description: 供应节点行主键；0 = 头级
+    semantics:
+      meaning: 供应行引用
+
+  - id: demand_object_type
+    name: 需求对象类型
+    type: string
+    db_column: demand_object_type
+    required: true
+    max_length: 30
+    description: 需求节点类型
+    enum_values:
+      - value: sales_order_line
+        label: 销售订单行
+        color: primary
+        is_initial: true
+      - value: project_task
+        label: 项目任务
+        color: info
+      - value: work_order
+        label: 工单
+        color: warning
+      - value: service_order
+        label: 服务单
+        color: success
+      - value: forecast
+        label: 预测
+        color: default
+    semantics:
+      meaning: 需求节点类型
+      filterable: true
+      filter_type: enum
+      filter_label: 需求类型
+
+  - id: demand_object_id
+    name: 需求对象
+    type: integer
+    db_column: demand_object_id
+    required: true
+    description: 需求节点主键
+    semantics:
+      meaning: 需求对象引用
+
+  - id: demand_line_id
+    name: 需求行
+    type: integer
+    db_column: demand_line_id
+    required: true
+    default: 0
+    description: 需求节点行主键；0 = 头级
+    semantics:
+      meaning: 需求行引用
+
+  - id: trace_type
+    name: 线索类型
+    type: string
+    db_column: trace_type
+    required: true
+    default: allocation
+    max_length: 20
+    description: reservation / pegging / allocation
+    enum_values:
+      - value: reservation
+        label: 预留
+        color: primary
+      - value: pegging
+        label: 钉住
+        color: warning
+      - value: allocation
+        label: 分配
+        color: info
+        is_initial: true
+    semantics:
+      meaning: 线索类型
+      filterable: true
+      filter_type: enum
+      filter_label: 线索类型
+
+  - id: peg_type
+    name: 钉类型
+    type: string
+    db_column: peg_type
+    required: true
+    default: soft
+    max_length: 10
+    description: 硬钉 / 软钉（仅 pegging 语义）
+    enum_values:
+      - value: hard
+        label: 硬钉
+        color: danger
+      - value: soft
+        label: 软钉
+        color: info
+        is_initial: true
+    semantics:
+      meaning: 钉类型
+      filterable: true
+      filter_type: enum
+      filter_label: 钉类型
+
+  - id: allocated_qty
+    name: 分配数量
+    type: number
+    db_column: allocated_qty
+    required: true
+    default: 0
+    description: 本段分配量（基本单位）
+    constraints:
+      - type: numeric_range
+        gte: 0
+    semantics:
+      meaning: 分配数量
+
+  - id: plan_version
+    name: 计划版本
+    type: string
+    db_column: plan_version
+    nullable: true
+    max_length: 40
+    description: 计划型 trace 使用；事务型为空
+    semantics:
+      meaning: 计划版本
+
+  - id: valid_from
+    name: 生效时间
+    type: datetime
+    db_column: valid_from
+    nullable: true
+    description: 线索生效时间
+    semantics:
+      meaning: 生效时间
+
+  - id: valid_to
+    name: 失效时间
+    type: datetime
+    db_column: valid_to
+    nullable: true
+    description: 线索失效时间；逻辑关闭写此列
+    semantics:
+      meaning: 失效时间
+
+  - id: source_doc_type
+    name: 来源单据类型
+    type: string
+    db_column: source_doc_type
+    nullable: true
+    max_length: 50
+    description: 来源单据对象类型
+    semantics:
+      meaning: 来源单据类型
+
+  - id: source_doc_id
+    name: 来源单据
+    type: integer
+    db_column: source_doc_id
+    nullable: true
+    description: 来源单据主键
+    semantics:
+      meaning: 来源单据引用
+
+  - id: source_line_id
+    name: 来源行
+    type: integer
+    db_column: source_line_id
+    nullable: true
+    description: 来源单据行主键
+    semantics:
+      meaning: 来源行引用
+
+  - id: remark
+    name: 备注
+    type: string
+    db_column: remark
+    nullable: true
+    max_length: 255
+    description: 备注
+    semantics:
+      meaning: 备注
+
+  - id: computed_at
+    name: 计算时间
+    type: datetime
+    db_column: computed_at
+    nullable: true
+    description: 计划型线索重算时间
+    semantics:
+      meaning: 计算时间
+
+  - id: created_at
+    name: 创建时间
+    type: datetime
+    db_column: created_at
+    description: 创建时间
+    semantics:
+      meaning: 记录创建时间
+      audit_field: true
+
+indexes:
+  - fields: [supply_object_type, supply_object_id, supply_line_id,
+             demand_object_type, demand_object_id, demand_line_id, trace_type]
+    unique: true
+    name: uq_trace_link
+    description: 有效线索唯一键
+  - fields: [supply_object_type, supply_object_id, supply_line_id]
+    name: idx_trace_supply
+    description: 按供应节点查线索
+  - fields: [demand_object_type, demand_object_id, demand_line_id]
+    name: idx_trace_demand
+    description: 按需求节点查线索
+
+ui_view_config:
+  list:
+    detail_mode: drawer
+    title: 需求线索
+    columns:
+      - field: supply_object_type
+        width: 150
+      - field: supply_object_id
+        width: 130
+      - field: supply_line_id
+        width: 110
+      - field: demand_object_type
+        width: 150
+        filterable: true
+        filter_type: select
+      - field: demand_object_id
+        width: 130
+      - field: demand_line_id
+        width: 110
+      - field: trace_type
+        width: 120
+        filterable: true
+        filter_type: select
+      - field: peg_type
+        width: 100
+      - field: allocated_qty
+        width: 120
+        align: right
+      - field: plan_version
+        width: 140
+      - field: valid_to
+        width: 170
+    selection:
+      enabled: false
+    searchFields: []
+    actions: []
+    defaultSort:
+      field: created_at
+      order: desc
+  detail:
+    layout: tabs
+    title: "需求线索 #{record.id}"
+    tabs:
+      - id: basic
+        label: 基本信息
+        type: fields
+        fields: [supply_object_type, supply_object_id, supply_line_id,
+                 demand_object_type, demand_object_id, demand_line_id,
+                 trace_type, peg_type, allocated_qty, plan_version,
+                 valid_from, valid_to, remark, computed_at, created_at]

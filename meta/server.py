@@ -19,6 +19,8 @@ if sys.stdout.encoding != 'utf-8':
     sys.stdout = io.TextIOWrapper(sys.stdout.buffer, encoding='utf-8', errors='replace')
     sys.stderr = io.TextIOWrapper(sys.stderr.buffer, encoding='utf-8', errors='replace')
 
+from meta.core.query_spec import QuerySpecError
+
 
 def is_port_in_use(port):
     """检查端口是否被占用"""
@@ -148,7 +150,7 @@ from meta.api.special_routes_api import special_bp, init_special_services
 from meta.api.annotation_routes_api import annotation_bp, init_annotation_services
 from meta.api.audit_management_api import audit_mgmt_bp, init_audit_mgmt_services
 from meta.api.meta_utility_routes_api import meta_util_bp
-from meta.core.datasource import get_data_source
+from meta.core.datasource import get_data_source, get_platform_data_source
 from meta.core.yaml_loader import register_from_directory, get_yaml_schema_dir
 from meta.core.migration_runner import init_change_notification_tables
 from meta.services.view_config_service import view_config_service
@@ -168,6 +170,7 @@ from meta.api.task_api import task_api_bp, set_scheduler as set_task_scheduler
 from meta.api.scheduler_api import (
     scheduler_bp, set_inprocess_schedulers,
 )
+from meta.api.job_admin_api import job_admin_bp, set_job_store
 from meta.api.workflow_api import workflow_bp, set_workflow_scheduler
 from meta.api.task_inbox_api import task_inbox_bp
 from meta.api.task_decision_api import task_decision_bp   # [B3 2026-10-03] 审批决策提交入口
@@ -198,17 +201,32 @@ setup_trace_log_filter()
 
 
 def _preflight_db_check(db_path):
+    # [TEST-EFF P1-5] 测试态跳过整库 quick_check
+    # 165MB 库 PRAGMA quick_check 实测 1.35-1.56s，且 `create_app()` 每个测试
+    # 进程都要执行一次（--file/--single 的 802 个文件进程累计约 19 分钟）。
+    # 测试库主要由 test.py 的 SQLite backup 快照产生（backup 本身逐页读取，
+    # 损坏会在快照阶段报错），真损坏也会在首次 SQL 操作时以 DatabaseError
+    # 暴露，不需要预检兜底。仅在测试入口显式设 SKIP_DB_PREFLIGHT=1 才生效，
+    # 生产启动路径行为不变。
+    if os.environ.get('SKIP_DB_PREFLIGHT', '') in ('1', 'true', 'True'):
+        return
     file_size = os.path.getsize(db_path) if os.path.exists(db_path) else 0
     if file_size < 1024:
         return
     try:
         conn = sqlite3.connect(db_path, timeout=5)
-        result = conn.execute("PRAGMA integrity_check").fetchone()[0]
+        # [2026-11-09 P0] 用 quick_check 替代 integrity_check：
+        # 实测 157MB 库 quick_check 1.05s vs integrity_check 4.6-14.0s。
+        # quick_check 跳过 UNIQUE 与索引/表内容一致性校验，仍能发现页级损坏；
+        # 仅在 quick_check 报错时才升级到 integrity_check 取详细原因。
+        result = conn.execute("PRAGMA quick_check").fetchone()[0]
+        if result != "ok":
+            result = conn.execute("PRAGMA integrity_check").fetchone()[0]
         conn.close()
         if result == "ok":
             return
         logging.getLogger(__name__).error(
-            "[PREFLIGHT] DB integrity_check FAILED: %s", result
+            "[PREFLIGHT] DB integrity check FAILED: %s", result
         )
     except sqlite3.DatabaseError:
         logging.getLogger(__name__).error("[PREFLIGHT] DB is corrupt")
@@ -220,7 +238,7 @@ def _preflight_db_check(db_path):
         shutil.copy2(bak_path, db_path)
         try:
             conn = sqlite3.connect(db_path, timeout=5)
-            result = conn.execute("PRAGMA integrity_check").fetchone()[0]
+            result = conn.execute("PRAGMA quick_check").fetchone()[0]
             conn.close()
             if result == "ok":
                 logging.getLogger(__name__).warning(
@@ -342,6 +360,16 @@ def _signal_handler(signum, frame, data_source=None):
     logging.getLogger(__name__).info("Received signal %s, shutting down...", signum)
     _cleanup_resources(data_source)
     sys.exit(0)
+
+
+def _is_test_process() -> bool:
+    """[TEST-EFF P0-2] 测试进程判定。
+
+    - test.py 唯一入口会设置 TEST_ENTRY=1；
+    - 直接 pytest 时看 sys.modules（属于违规用法，但不应因此产生副作用）。
+    生产进程（service_manager / waitress）两条都不满足。
+    """
+    return os.environ.get('TEST_ENTRY') == '1' or 'pytest' in sys.modules
 
 
 def create_app(db_path=None):
@@ -490,6 +518,9 @@ def create_app(db_path=None):
     bo_framework.register_interceptor(OrgAdminGuardInterceptor())
     bo_framework.register_interceptor(PermissionInterceptor())
     bo_framework.register_interceptor(DataPermissionInterceptor())
+    # [Spec 24 T3/T4 2026-11-06] 业务对象组织边界（与 app_builder 同位补齐）
+    from meta.core.interceptors.org_scope_interceptor import OrgScopeInterceptor
+    bo_framework.register_interceptor(OrgScopeInterceptor())
     bo_framework.register_interceptor(FieldPolicyInterceptor())
     from meta.core.interceptors.constraint_validation_interceptor import ConstraintValidationInterceptor
     bo_framework.register_interceptor(ConstraintValidationInterceptor())
@@ -551,6 +582,103 @@ def create_app(db_path=None):
     #   与 app_builder.with_interceptors() 同位补齐 —— 缺任一启动路径都会静默失效。
     from meta.core.interceptors.shipment_guard_interceptor import ShipmentGuardInterceptor
     bo_framework.register_interceptor(ShipmentGuardInterceptor())
+    # [BILLING S8-A 2026-11-09] 销售发票守卫（P51）：抬头创建取号、submit/post/
+    #   cancel/reverse 迁移委托 customer_invoice_service（期次 / billed 回写 /
+    #   doc_flow / billing_status 派生）、行来源与金额校验、期次严格只读（R-INV-22）。
+    #   与 app_builder.with_interceptors() 同位补齐 —— 缺任一启动路径都会静默失效。
+    from meta.core.interceptors.customer_invoice_guard_interceptor import CustomerInvoiceGuardInterceptor
+    bo_framework.register_interceptor(CustomerInvoiceGuardInterceptor())
+    # [VENDOR_INVOICE W5 2026-11-11] 采购发票守卫（P51）：抬头创建/删除与状态迁移
+    #   接线（submit/post/cancel 委托 vendor_invoice_match_service，写 doc_flow 边
+    #   与匹配结果）、行写入仅限草稿父单；红冲链未实现时显式拒绝。
+    #   与 app_builder.with_interceptors() 同位补齐 —— 缺任一启动路径都会静默失效。
+    from meta.core.interceptors.vendor_invoice_guard_interceptor import VendorInvoiceGuardInterceptor
+    bo_framework.register_interceptor(VendorInvoiceGuardInterceptor())
+    # [RECEIPT 2026-11-01] 收货单守卫（P52）：抬头创建归一化与取号、状态迁移委托
+    #   receipt_service（计划行 received_qty / rejected_qty 回写、分配拆分、履约派生）、
+    #   行冗余列校验回填、posted 后冻结（R-RC-0~R-RC-18）。
+    #   与 app_builder.with_interceptors() 同位补齐 —— 缺任一启动路径都会静默失效。
+    from meta.core.interceptors.receipt_guard_interceptor import ReceiptGuardInterceptor
+    bo_framework.register_interceptor(ReceiptGuardInterceptor())
+    # [TRANSFER_ORDER 2026-11-02] 调拨单守卫（P53）：抬头组织/法人/类型校验与
+    #   派生字段回填、行类型/物料/单位/数量区间校验、终态保护（R-TO-0~R-TO-13）。
+    #   与 app_builder.with_interceptors() 同位补齐 —— 缺任一启动路径都会静默失效。
+    from meta.core.interceptors.transfer_order_guard_interceptor import TransferOrderGuardInterceptor
+    bo_framework.register_interceptor(TransferOrderGuardInterceptor())
+    # [ROUTING P4b 2026-11-02] 作业定义守卫（P54）：配方基准量 / 工序产出 /
+    #   替代资源组写前校验，生效时逐工序校验替代包数量。
+    #   与 app_builder.with_interceptors() 同位补齐 —— 缺任一启动路径都会静默失效。
+    from meta.core.interceptors.work_definition_guard_interceptor import WorkDefinitionGuardInterceptor
+    bo_framework.register_interceptor(WorkDefinitionGuardInterceptor())
+    # [ROUTING P4b 2026-11-02] 过程指令守卫（P55）：text / parameter 双形态
+    #   字段矩阵、numeric 区间与绑定资源类型。
+    #   与 app_builder.with_interceptors() 同位补齐 —— 缺任一启动路径都会静默失效。
+    from meta.core.interceptors.process_instruction_guard_interceptor import ProcessInstructionGuardInterceptor
+    bo_framework.register_interceptor(ProcessInstructionGuardInterceptor())
+    # [ROUTING P4c 2026-11-03] 批次守卫（P56）：身份 / 数量单位组 / 枚举 /
+    #   冻结不可关闭 / 日期与效价 / 父批次无环 / 必填批次特性。
+    #   与 app_builder.with_interceptors() 同位补齐 —— 缺任一启动路径都会静默失效。
+    from meta.core.interceptors.batch_guard_interceptor import BatchGuardInterceptor
+    bo_framework.register_interceptor(BatchGuardInterceptor())
+    # [ROUTING P5 2026-11-03] 作业定义序列守卫（P57）：branch/return/parallel 图校验
+    #   （G1–G11）与工序边界改号保护。与 app_builder.with_interceptors() 同位补齐。
+    from meta.core.interceptors.work_definition_sequence_guard_interceptor import (
+        WorkDefinitionSequenceGuardInterceptor,
+    )
+    bo_framework.register_interceptor(WorkDefinitionSequenceGuardInterceptor())
+    # [ROUTING P5 2026-11-03] 批次选择策略守卫（P58）：rule_json v1 白名单、
+    #   范围存在性与 active priority 唯一。与 app_builder.with_interceptors() 同位补齐。
+    from meta.core.interceptors.batch_selection_policy_guard_interceptor import (
+        BatchSelectionPolicyGuardInterceptor,
+    )
+    bo_framework.register_interceptor(BatchSelectionPolicyGuardInterceptor())
+    # [SERIAL P6a 2026-11-03] 序列号守卫（P59）：主档唯一键 / 初始与流转状态 /
+    #   scrapped 终态；物料序列号三开关一致性。与 app_builder 同位补齐。
+    from meta.core.interceptors.serial_number_guard_interceptor import (
+        SerialNumberGuardInterceptor,
+    )
+    bo_framework.register_interceptor(SerialNumberGuardInterceptor())
+    # [SERIAL P6a 2026-11-03] 单据序列号守卫（P60）：收货 / 发运过账录号
+    #   前置校验。priority=50，必须早于 shipment_guard(51) / receipt_guard(52)。
+    #   与 app_builder.with_interceptors() 同位补齐。
+    from meta.core.interceptors.serial_tracking_guard_interceptor import (
+        SerialTrackingGuardInterceptor,
+    )
+    bo_framework.register_interceptor(SerialTrackingGuardInterceptor())
+    # [INV-4 2026-11-03] 库存调整单守卫（P58）：创建取号/类型白名单、状态迁移委托服务、终态锁定、行仅草稿可编辑。
+    from meta.core.interceptors.inventory_adjustment_guard_interceptor import InventoryAdjustmentGuardInterceptor
+    bo_framework.register_interceptor(InventoryAdjustmentGuardInterceptor())
+    # [INV-4 2026-11-03] 库存盘点单守卫（P59）：快照生成、实盘录入、容差提交、差异过账、冻结解除。
+    from meta.core.interceptors.inventory_count_guard_interceptor import InventoryCountGuardInterceptor
+    bo_framework.register_interceptor(InventoryCountGuardInterceptor())
+    # [INV-2 2026-11-04] 库存预留守卫（P60）：创建委托服务取号/段解析/投影，
+    #   更新只允许 status=cancelled 触发释放，段与数量列不可变。
+    from meta.core.interceptors.inventory_reservation_guard_interceptor import InventoryReservationGuardInterceptor
+    bo_framework.register_interceptor(InventoryReservationGuardInterceptor())
+    # [DEMAND_ENTRY 2026-10-31] 需求入口守卫（M1）：提交取号、免审批直落、
+    #   服务请求行 / 请购行的行级必填。
+    #   与 app_builder.with_interceptors() 同位补齐 —— 缺任一启动路径都会静默失效。
+    from meta.core.interceptors.demand_entry_guard_interceptor import DemandEntryGuardInterceptor
+    bo_framework.register_interceptor(DemandEntryGuardInterceptor())
+    # [BO-PLATFORM 2026-11-06] 行语义通用守卫（P54）：同一单据行号唯一、
+    #   实物行数量 > 0。白名单试点 service_request_line，其余对象零开销。
+    #   与 app_builder.with_interceptors() 同位补齐 —— 缺任一启动路径都会静默失效。
+    from meta.core.interceptors.line_guard_interceptor import LineGuardInterceptor
+    bo_framework.register_interceptor(LineGuardInterceptor())
+    # [PURCHASE_ORDER 2026-11-01] 采购订单守卫（P50）：抬头 / 行 / 计划行 / 需求分配的
+    #   写前校验（R-PO-0~R-PO-18），以及行写入后的金额重算、采购取价、取消冲销。
+    #   与 app_builder.with_interceptors() 同位补齐 —— 缺任一启动路径都会静默失效。
+    from meta.core.interceptors.purchase_order_guard_interceptor import PurchaseOrderGuardInterceptor
+    bo_framework.register_interceptor(PurchaseOrderGuardInterceptor())
+    # [G15 2026-11-04] 项目任务执行守卫（P51）：工单 G1-G5 项目归属与发布后锁定，
+    #   项目任务删除 / 取消的 G9 引用检查。
+    #   与 app_builder.with_interceptors() 同位补齐 —— 缺任一启动路径都会静默失效。
+    from meta.core.interceptors.project_task_guard_interceptor import ProjectTaskGuardInterceptor
+    bo_framework.register_interceptor(ProjectTaskGuardInterceptor())
+    # [DOCUMENT_TYPE 2026-11-01] 单据类型守卫（T-D20，平台层）：对所有声明
+    #   document_type_id 的业务单据头生效。
+    from meta.core.interceptors.document_type_guard_interceptor import DocumentTypeGuardInterceptor
+    bo_framework.register_interceptor(DocumentTypeGuardInterceptor())
     # [SALES_ORDER 2026-10-25] 客户销售组织守卫（P49）：W1-R11 销售职能校验。
     from meta.core.interceptors.customer_sales_org_guard_interceptor import CustomerSalesOrgGuardInterceptor
     bo_framework.register_interceptor(CustomerSalesOrgGuardInterceptor())
@@ -644,6 +772,13 @@ def create_app(db_path=None):
     init_task_seed_data(data_source)
 
     init_region_seed_data(data_source)
+
+    # [单据流 Phase 3 2026-11-08] 服务层单例注入（复用启动期 data_source，
+    #   不新建第二个 DataSource 实例，避免事务与连接池分裂）。
+    from meta.services.doc_flow_service import (
+        DocFlowService, init_doc_flow_service,
+    )
+    init_doc_flow_service(DocFlowService(data_source, get_platform_data_source()))
 
     from meta.services.audit_service import AuditService
     _audit_svc = AuditService(data_source)
@@ -763,6 +898,28 @@ def create_app(db_path=None):
 
     atexit.register(task_scheduler.stop)
 
+    # [P3 2026-11-10] 后台作业 dispatcher 通电（spec §6.6 / §10.1 第 1-3 项）。
+    #   顺序固定：先 build registry 再打开开关；JOB_DISPATCH_ENABLED 默认 0，
+    #   handler 白名单与参数校验在 dispatcher 内生效（§7.2）。
+    from meta.core.job_run_store import JobRunStore
+    from meta.handlers.job_handlers import build_default_job_registry
+    job_store = JobRunStore(data_source)
+    set_job_store(job_store)
+    if os.environ.get('JOB_DISPATCH_ENABLED', '0').strip().lower() in (
+            '1', 'true', 'yes'):
+        from meta.core.job_dispatcher import JobDispatcher
+        _job_dispatcher = JobDispatcher(
+            job_store,
+            registry=build_default_job_registry(data_source),
+            enabled=True)
+        _job_dispatcher.start()
+        atexit.register(_job_dispatcher.stop)
+        logging.getLogger(__name__).info(
+            '[P3] job dispatcher started (JOB_DISPATCH_ENABLED=1)')
+    else:
+        logging.getLogger(__name__).info(
+            '[P3] job dispatcher disabled (JOB_DISPATCH_ENABLED=0)')
+
     app = Flask(__name__)
     # P2 修复：Flask session 需要 secret_key（dev-login 写 session 用）
     app.secret_key = os.environ.get(
@@ -879,6 +1036,14 @@ def create_app(db_path=None):
         response.headers['Access-Control-Allow-Credentials'] = 'true'
         return response
 
+    @app.errorhandler(QuerySpecError)
+    def handle_query_spec_error(error):
+        return jsonify({
+            'success': False,
+            'error': 'INVALID_QUERY',
+            'message': str(error)
+        }), 400
+
     @app.errorhandler(500)
     def handle_500(error):
         error_msg = str(error)
@@ -904,6 +1069,10 @@ def create_app(db_path=None):
 
     @app.errorhandler(Exception)
     def handle_exception(error):
+        # HTTPException（404/403/405 等）应保留原状态码，不能被当作 500 吞掉
+        from werkzeug.exceptions import HTTPException
+        if isinstance(error, HTTPException):
+            return error
         error_msg = str(error)
         app_debug = os.environ.get('FLASK_DEBUG', 'False').lower() == 'true'
         if app_debug:
@@ -977,6 +1146,10 @@ def create_app(db_path=None):
     app.register_blueprint(value_help_bp)
     app.register_blueprint(audit_mgmt_bp)
     app.register_blueprint(meta_util_bp)
+    # [单据流 Phase 3 2026-11-08] 通用服务 API（规则/上游/派生/追溯）。
+    #   app_builder 已登记，生产入口（waitress → create_app）必须同址补齐。
+    from meta.api.doc_flow_api import doc_flow_bp
+    app.register_blueprint(doc_flow_bp)
     # [roadmap v1.32.0 §6.2.4] 任务体系 = 部署级可关闭的平台模块。
     # 不注册 blueprint ⇒ 路由真 404（不只是前端看不见），须与菜单种子同门。
     _tasks_enabled = is_module_enabled('tasks')
@@ -997,6 +1170,7 @@ def create_app(db_path=None):
     #   运维作业是平台基础设施（DB 维护 / 审计归档 / 导入队列 + platform_tick），
     #   与 tasks 模块开关无关 —— 故不放进上面被门控的 task_api_bp。
     app.register_blueprint(scheduler_bp)
+    app.register_blueprint(job_admin_bp)
     # [定价引擎 T1-4 2026-10-06] 定价编排服务 HTTP 暴露（IF-001/002/003）
     from meta.api.pricing_api import pricing_bp
     app.register_blueprint(pricing_bp)
@@ -1017,6 +1191,32 @@ def create_app(db_path=None):
     # [销售订单 W1-A 2026-10-25] 重新取价端点。
     from meta.api.sales_order_pricing_api import sales_order_pricing_bp
     app.register_blueprint(sales_order_pricing_bp)
+    # [项目 G4 2026-11-03] 工程变更单（diff 预览 / 提交 / 批准 / 应用 / 影响预览）。
+    #   两条启动路径必须同址登记：waitress 走本函数，app_builder 另有一份。
+    from meta.api.engineering_change_api import engineering_change_bp
+    app.register_blueprint(engineering_change_bp)
+    # [项目轨 G6/G13/G14 2026-11-03] 项目 360 / 工单执行 / 人力负荷：app_builder
+    #   已登记，生产入口这里补齐（否则运行态 405/410）。
+    from meta.api.project_overview_api import project_overview_bp
+    from meta.api.labor_api import labor_bp
+    from meta.api.work_order_api import work_order_bp
+    app.register_blueprint(project_overview_bp)
+    app.register_blueprint(labor_bp)
+    app.register_blueprint(work_order_bp)
+    # [P6a-2 v218 2026-11-05] 包装容器作业台（扫码预检 / 封箱 / 解封 / 批量封箱）。
+    #   app_builder 已登记，生产入口（waitress → create_app）必须同址补齐；
+    #   缺登记时 /scan 返回 404、列表被通用 BO 路由兜底。
+    from meta.api.handling_unit_api import handling_unit_bp
+    app.register_blueprint(handling_unit_bp)
+    # [P8 2026-11-06] 库存库龄只读报表/明细（薄路由）。
+    #   app_builder 已登记，生产入口（waitress → create_app）必须同址补齐。
+    from meta.api.inventory_aging_api import inventory_aging_bp
+    app.register_blueprint(inventory_aging_bp)
+    # [规则收敛 v1.6 2026-11-07] 规则中心目录 + 单据规则推导（只读）。
+    #   app_builder 已登记，生产入口（waitress → create_app）必须同址补齐。
+    from meta.api.rule_center_api import rule_center_bp, rule_trace_bp
+    app.register_blueprint(rule_center_bp)
+    app.register_blueprint(rule_trace_bp)
     app.register_blueprint(key_template_bp)
     app.register_blueprint(test_bp)
     app.register_blueprint(debug_bp)
@@ -1141,6 +1341,20 @@ def create_app(db_path=None):
         # [BOM P4 2026-10-25] 配置求解/取价/匹配是独立 Blueprint 的域内命令端点，
         # 非 BO CRUD；不列入会被本中间件按"其他 v1 路径"误判为 410。
         'config',       # /api/v1/config/solve、/price、/match
+        # [ECM G4 2026-11-03] 工程变更单是独立 Blueprint 的域内命令端点，
+        # 非 BO CRUD；不列入会被本中间件按"其他 v1 路径"误判为 410。
+        'engineering-changes',  # /api/v1/engineering-changes/*（列表/diff/动作/where-used）
+        # [项目轨 G6/G13/G14 2026-11-03] 项目 360 / 工单执行 / 人力负荷 同为独立
+        # Blueprint 的域内命令端点；缺白名单会被本中间件误判为 410。
+        'projects',     # /api/v1/projects/<id>/overview — 项目 360
+        'work-orders',  # /api/v1/work-orders/<id>/start — 工单执行动作
+        'labor',        # /api/v1/labor/* — 项目任务 / 人力负荷
+        # [P6a-2 v218 2026-11-05] 包装容器作业是独立 Blueprint 的域内命令端点
+        # （扫码预检/封箱/解封/批量封箱），非 BO CRUD；缺白名单会被误判为 410。
+        'handling-units',  # /api/v1/handling-units/*
+        # [P8 2026-11-06] 库存库龄报表/明细是独立 Blueprint 的只读聚合端点，
+        # 非 BO CRUD；缺白名单会被本中间件误判为 410。
+        'inventory-aging',  # /api/v1/inventory-aging/report、/detail
     }
 
     # v1.4 P8 Sunset (2026-06-05): 应当 sunset 到 v2 的主表 CRUD 资源
@@ -1247,9 +1461,16 @@ def create_app(db_path=None):
     app.register_blueprint(graphql_bp)
     logging.getLogger(__name__).info("[M9] GraphQL endpoint registered at /graphql (POC: 1 entity, 2 queries)")
 
-    atexit.register(lambda: _cleanup_resources(data_source))
-    signal.signal(signal.SIGTERM, lambda s, f, ds=data_source: _signal_handler(s, f, ds))
-    signal.signal(signal.SIGINT, lambda s, f, ds=data_source: _signal_handler(s, f, ds))
+    # [TEST-EFF P0-2] 测试进程内不注册生产退出钩子：
+    #   1) atexit 会随 create_app() 累积，退出时串行执行
+    #      shutdown_all_data_sources(timeout=30.0)，导致「跑完不出结果」；
+    #   2) 重装 SIGINT/SIGTERM 会覆盖 pytest 的中断语义，中断后
+    #      以 sys.exit(0) 退出，形成「假成功」。
+    # 测试资源的收尾由 conftest.pytest_unconfigure 显式执行（P0-3）。
+    if not _is_test_process():
+        atexit.register(lambda: _cleanup_resources(data_source))
+        signal.signal(signal.SIGTERM, lambda s, f, ds=data_source: _signal_handler(s, f, ds))
+        signal.signal(signal.SIGINT, lambda s, f, ds=data_source: _signal_handler(s, f, ds))
 
     return app
 

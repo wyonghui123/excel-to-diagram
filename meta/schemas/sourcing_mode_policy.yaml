@@ -263,9 +263,9 @@ ui_view_config:
           - fields: [status]
 
 category_config:
-  create_permission: sourcing_mode_policy:sourcing_mode_policy_create
-  update_permission: sourcing_mode_policy:sourcing_mode_policy_update
-  delete_permission: sourcing_mode_policy:sourcing_mode_policy_delete
+  create_permission: sourcing_mode_policy:create
+  update_permission: sourcing_mode_policy:update
+  delete_permission: sourcing_mode_policy:delete
   owner_auto_permission: false
 
 import_export:

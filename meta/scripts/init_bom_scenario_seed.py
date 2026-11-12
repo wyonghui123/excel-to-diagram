@@ -257,7 +257,7 @@ _RULES = [
 
 _ORDER = {
     'order_no': ORDER_NO,
-    'order_type_id': 1,
+    'document_type_id': 1,
     'order_date': ORDER_DATE,
     'status': 'draft',
     'customer_account_id': 4,
@@ -465,8 +465,13 @@ def _upsert_order_line(ds, order_id: Any, line: Dict[str, Any]) -> Any:
         'unit_price': line.get('unit_price'),
         'status': 'open',
         'pricing_mode': 'standalone',
+        'configuration_id': None,
+        'parent_line_id': None,
     }
-    sql = 'SELECT id FROM sales_order_lines WHERE order_id = ? AND line_no = ?'
+    # 取回可重置列，_upsert 才能把演示展开留下的 configuration_id /
+    # parent_line_id / pricing_mode / status 归零
+    sql = ('SELECT id, configuration_id, parent_line_id, pricing_mode, status '
+           'FROM sales_order_lines WHERE order_id = ? AND line_no = ?')
     return _upsert(ds, 'sales_order_lines', sql,
                    [order_id, line['line_no']], data)
 
@@ -509,6 +514,12 @@ def seed_bom_scenario_data(ds) -> Dict[str, Any]:
                                            rule, line_ids)
 
     order_id = _upsert_order(ds, _ORDER)
+    # 幂等：真实库里 SCN-SO-BOM-1 可能已被演示展开过，先清掉展开出的子行；
+    # 父行的 configuration_id / parent_line_id 由 _upsert_order_line 归零，
+    # 保证种子始终产出「草稿订单 + 待展开行」。
+    ds.execute(
+        'DELETE FROM sales_order_lines WHERE order_id = ? AND parent_line_id IS NOT NULL',
+        (order_id,))
     order_lines: Dict[str, Any] = {}
     for line in _ORDER_LINES:
         order_lines[line['line_no']] = _upsert_order_line(ds, order_id, line)

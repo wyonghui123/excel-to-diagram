@@ -34,7 +34,7 @@ os.environ['ALLOW_RAW_SQL'] = '1'
 
 @pytest.fixture(scope="module")
 def pipeline_db():
-    """创建含 role_intents 表的测试 DB"""
+    """创建含 permission_set_intents 表的测试 DB"""
     tmp_dir = tempfile.mkdtemp(prefix='merge_manual_')
     db_path = os.path.join(tmp_dir, 'test.db')
 
@@ -42,7 +42,7 @@ def pipeline_db():
     conn.executescript('''
         CREATE TABLE permission_rules_v2 (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
-            role_id INTEGER NOT NULL,
+            permission_set_id INTEGER NOT NULL,
             resource_type VARCHAR(200) NOT NULL,
             permission_level VARCHAR(50) DEFAULT 'read',
             include_conditions TEXT,
@@ -55,7 +55,7 @@ def pipeline_db():
 
         CREATE TABLE permission_set_effective_intents (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
-            role_id INTEGER NOT NULL,
+            permission_set_id INTEGER NOT NULL,
             bo_id VARCHAR(100) NOT NULL,
             action_name VARCHAR(100) NOT NULL,
             data_scope TEXT,
@@ -64,12 +64,12 @@ def pipeline_db():
             is_stale INTEGER DEFAULT 0,
             created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
             updated_at DATETIME DEFAULT CURRENT_TIMESTAMP,
-            UNIQUE (role_id, bo_id, action_name)
+            UNIQUE (permission_set_id, bo_id, action_name)
         );
 
-        CREATE TABLE role_intents (
+        CREATE TABLE permission_set_intents (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
-            role_id INTEGER NOT NULL,
+            permission_set_id INTEGER NOT NULL,
             bo_id VARCHAR(100) NOT NULL,
             action_name VARCHAR(100) NOT NULL,
             parameters_hash VARCHAR(64),
@@ -77,7 +77,7 @@ def pipeline_db():
             source VARCHAR(50) DEFAULT 'manual',
             created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
             updated_at DATETIME DEFAULT CURRENT_TIMESTAMP,
-            UNIQUE (role_id, bo_id, action_name, parameters_hash)
+            UNIQUE (permission_set_id, bo_id, action_name, parameters_hash)
         );
     ''')
     conn.commit()
@@ -335,19 +335,19 @@ class TestMergeManualIntentsEndToEnd:
         # 插入 derived rule (sub_domain read)
         conn = sqlite3.connect(self.db_path)
         conn.execute(
-            "INSERT INTO permission_rules_v2 (role_id, resource_type, permission_level, include_conditions) "
+            "INSERT INTO permission_rules_v2 (permission_set_id, resource_type, permission_level, include_conditions) "
             "VALUES (500, 'sub_domain', 'read', ?)",
             [json.dumps([])]
         )
         # 插入 manual granted=true (sub_domain export, derived 不会推导出)
         conn.execute(
-            "INSERT INTO role_intents (role_id, bo_id, action_name, granted, source) "
+            "INSERT INTO permission_set_intents (permission_set_id, bo_id, action_name, granted, source) "
             "VALUES (500, 'sub_domain', 'export', 1, 'manual')"
         )
         conn.commit()
         conn.close()
 
-        self.pipeline.derive(role_id=500)
+        self.pipeline.derive(permission_set_id=500)
 
         intents = self.dao.list_for_role(500)
         action_names = {i['action_name'] for i in intents}
@@ -360,19 +360,19 @@ class TestMergeManualIntentsEndToEnd:
         """derive() 后 manual granted=false 应使 intent 永假"""
         conn = sqlite3.connect(self.db_path)
         conn.execute(
-            "INSERT INTO permission_rules_v2 (role_id, resource_type, permission_level, include_conditions) "
+            "INSERT INTO permission_rules_v2 (permission_set_id, resource_type, permission_level, include_conditions) "
             "VALUES (501, 'sub_domain', 'read', ?)",
             [json.dumps([])]
         )
         # manual deny sub_domain:read
         conn.execute(
-            "INSERT INTO role_intents (role_id, bo_id, action_name, granted, source) "
+            "INSERT INTO permission_set_intents (permission_set_id, bo_id, action_name, granted, source) "
             "VALUES (501, 'sub_domain', 'read', 0, 'manual')"
         )
         conn.commit()
         conn.close()
 
-        self.pipeline.derive(role_id=501)
+        self.pipeline.derive(permission_set_id=501)
 
         intents = self.dao.list_for_role(501)
         # read intent 应存在 (manual_deny), data_scope 含永假条件

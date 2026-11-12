@@ -51,3 +51,7 @@ app:
   allowed_platform_modules:
     - meta.core.bo_framework
     - meta.core.datasource
+    # 事件 handler（blueprints/handlers/on_outbound_completed.py）的真实依赖：
+    # 用平台 ActionRegistry 在本应用库建运单，并读元模型
+    - meta.core.action_executor
+    - meta.core.models

@@ -1,0 +1,116 @@
+# 工作流运行实例（G7 六表进统一元模型）
+# 定义源：原 meta/core/task_schema.py::_build_workflow_run_meta()（逐字段平移，DDL 等价）
+# 纪律：平台机制对象 —— 不进通用 BO CRUD / agent 工具 / 自动菜单。
+# 刻意不建 status 列：Run 进度由子任务状态派生聚合。
+id: workflow_run
+name: 工作流运行实例
+table_name: workflow_runs
+description: 编排实例层（无独立状态列；进度由子任务状态派生聚合）
+skip_auto_menu: true
+skip_generic_api: true
+
+fields:
+  - id: id
+    name: ID
+    type: string
+    db_column: id
+    required: true
+    unique: true
+    description: Run ID（uuid4 hex，主键）
+  - id: workflow_id
+    name: 工作流 ID
+    type: string
+    db_column: workflow_id
+    required: true
+    description: 所快照的 Workflow 版本行 ID（弱引用无 FK）
+  - id: workflow_key
+    name: 工作流业务键
+    type: string
+    db_column: workflow_key
+    description: 业务键（便于按 key 追溯）
+  - id: workflow_version
+    name: 工作流版本
+    type: integer
+    db_column: workflow_version
+    required: true
+    description: 快照版本号（在途 Run 不受定义升级影响）
+  - id: name
+    name: 名称
+    type: string
+    db_column: name
+    description: Run 显示名
+  - id: trigger_kind
+    name: 触发方式
+    type: string
+    db_column: trigger_kind
+    description: 实际触发方式 manual/schedule/event/api
+  - id: idempotency_key
+    name: 幂等键
+    type: string
+    db_column: idempotency_key
+    description: 事件触发幂等键（如 doc_flow.created:{trace_id}:{workflow_key}）；空 = 不参与去重
+  - id: definition_snapshot
+    name: 定义快照
+    type: json
+    db_column: definition_snapshot
+    description: Workflow 定义快照（§7.4 创建时快照 version）
+  - id: variables
+    name: 运行变量
+    type: json
+    db_column: variables
+    description: Run 内传递变量（上游 outputs 按 edge 注入下游 inputs）
+  - id: inputs
+    name: 入参
+    type: json
+    db_column: inputs
+    description: Run 入参
+  - id: outputs
+    name: 出参
+    type: json
+    db_column: outputs
+    description: Run 出参
+  - id: created_by
+    name: 创建人
+    type: string
+    db_column: created_by
+    description: 创建者
+  - id: created_at
+    name: 创建时间
+    type: datetime
+    db_column: created_at
+    description: 创建时间
+  - id: started_at
+    name: 开始时间
+    type: datetime
+    db_column: started_at
+    description: 开始时间
+  - id: finished_at
+    name: 结束时间
+    type: datetime
+    db_column: finished_at
+    description: 结束时间
+  - id: meta
+    name: 扩展元数据
+    type: json
+    db_column: meta
+    description: 业务自定义 KV
+  - id: updated_at
+    name: 更新时间
+    type: datetime
+    db_column: updated_at
+    description: 更新时间
+
+indexes:
+  - name: uq_run_idempotency
+    fields: [idempotency_key]
+    unique: true
+    description: 同一事件只起一个 Run（NULL 不参与唯一约束）
+  - name: idx_run_workflow
+    fields: [workflow_id]
+    description: 按定义版本回溯 Run
+  - name: idx_run_key
+    fields: [workflow_key]
+    description: 按业务键取历史 Run
+
+ui_view_config:
+  skip_auto_menu: true

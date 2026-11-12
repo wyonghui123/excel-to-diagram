@@ -33,6 +33,7 @@ from meta.core.redundancy_registry import (
     RedundancyType,
     JoinStep,
 )
+from meta.core.cache import LRUTTLCache, is_cache_disabled
 
 logger = logging.getLogger(__name__)
 
@@ -72,9 +73,36 @@ class EnrichmentEngine:
     def __init__(self, data_source, registry: RedundancyRegistry):
         self.ds = data_source
         self.registry = registry
-        
-        self._name_cache: Dict[str, Dict[Any, Any]] = {}
-        self._record_cache: Dict[str, Dict[Any, Dict[str, Any]]] = {}
+
+        # [FR-002] 有界缓存：默认 LRU + TTL，可用 META_ENRICHMENT_CACHE_DISABLED=1 关闭
+        if is_cache_disabled():
+            self._name_cache: Any = {}
+            self._record_cache: Any = {}
+        else:
+            self._name_cache = LRUTTLCache(max_size=10000, ttl_seconds=300)
+            self._record_cache = LRUTTLCache(max_size=10000, ttl_seconds=300)
+
+    @staticmethod
+    def _cache_get(cache, key: str, default=None):
+        """读取缓存桶，兼容 Dict 与 LRUTTLCache"""
+        value = cache.get(key)
+        return default if value is None else value
+
+    @staticmethod
+    def _cache_set(cache, key: str, value) -> None:
+        """写入缓存桶，兼容 Dict 与 LRUTTLCache"""
+        if isinstance(cache, LRUTTLCache):
+            cache.set(key, value)
+        else:
+            cache[key] = value
+
+    def _cache_bucket(self, cache, bucket_key: str) -> Dict[Any, Any]:
+        """获取（不存在则创建）缓存桶"""
+        bucket = self._cache_get(cache, bucket_key)
+        if bucket is None:
+            bucket = {}
+            self._cache_set(cache, bucket_key, bucket)
+        return bucket
     
     def enrich_one(self, object_type: str, record: Dict[str, Any]) -> Dict[str, Any]:
         """填充单条记录的虚拟冗余字段
@@ -102,10 +130,10 @@ class EnrichmentEngine:
             return record
         
         enriched = dict(record)
-        
-        for field_id, red_def in virtual_reds.items():
-            self._enrich_field(enriched, field_id, red_def)
-        
+
+        # [FR-003] 单条记录也走 batch 路径，避免 N+1 与两套解析逻辑
+        self.enrich_batch(object_type, [enriched])
+
         return enriched
     
     def enrich_batch(self, object_type: str, records: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
@@ -187,13 +215,11 @@ class EnrichmentEngine:
         
         table_name = self._get_table_name(derived_table)
         cache_key = f"{table_name}.{derived_field}"
-        
-        if cache_key not in self._name_cache:
-            self._name_cache[cache_key] = {}
-        
-        if source_id in self._name_cache[cache_key]:
-            return self._name_cache[cache_key][source_id]
-        
+        cache = self._cache_bucket(self._name_cache, cache_key)
+
+        if source_id in cache:
+            return cache[source_id]
+
         try:
             sql = f"SELECT {derived_field} FROM {table_name} WHERE id = ?"
             cursor = self.ds.execute(sql, (source_id,))
@@ -201,7 +227,7 @@ class EnrichmentEngine:
             
             if row:
                 value = row[0]
-                self._name_cache[cache_key][source_id] = value
+                cache[source_id] = value
                 return value
                 
         except Exception as e:
@@ -222,16 +248,14 @@ class EnrichmentEngine:
         
         table_name = self._get_table_name(derived_table)
         cache_key = f"{table_name}.{derived_field}"
-        
-        if cache_key not in self._name_cache:
-            self._name_cache[cache_key] = {}
-        
+        cache = self._cache_bucket(self._name_cache, cache_key)
+
         result = {}
         uncached_ids = []
         
         for sid in source_ids:
-            if sid in self._name_cache[cache_key]:
-                result[sid] = self._name_cache[cache_key][sid]
+            if sid in cache:
+                result[sid] = cache[sid]
             else:
                 uncached_ids.append(sid)
         
@@ -244,7 +268,7 @@ class EnrichmentEngine:
                 for row in cursor.fetchall():
                     sid, value = row[0], row[1]
                     result[sid] = value
-                    self._name_cache[cache_key][sid] = value
+                    cache[sid] = value
                     
             except Exception as e:
                 logger.warning(
@@ -272,11 +296,10 @@ class EnrichmentEngine:
             table_name = step.table
 
             cache_key = f"{table_name}_full"
-            if cache_key not in self._record_cache:
-                self._record_cache[cache_key] = {}
+            cache = self._cache_bucket(self._record_cache, cache_key)
 
-            if current_id in self._record_cache[cache_key]:
-                current_record = self._record_cache[cache_key][current_id]
+            if current_id in cache:
+                current_record = cache[current_id]
             else:
                 where_conditions = []
                 params = []
@@ -300,7 +323,7 @@ class EnrichmentEngine:
                         columns = [desc[0] for desc in cursor.description]
                         current_record = dict(zip(columns, row))
                         cache_id = current_id
-                        self._record_cache[cache_key][cache_id] = current_record
+                        cache[cache_id] = current_record
                     else:
                         return None
 
@@ -348,12 +371,11 @@ class EnrichmentEngine:
             table_name = step.table
 
             cache_key = f"{table_name}_full"
-            if cache_key not in self._record_cache:
-                self._record_cache[cache_key] = {}
+            cache = self._cache_bucket(self._record_cache, cache_key)
 
             uncached_ids = [
                 cid for cid in current_ids
-                if cid not in self._record_cache[cache_key]
+                if cid not in cache
             ]
 
             if uncached_ids:
@@ -382,7 +404,7 @@ class EnrichmentEngine:
                             record = dict(zip(columns, row))
                             cache_id = record.get(step.to_field)
                             if cache_id is not None:
-                                self._record_cache[cache_key][cache_id] = record
+                                cache[cache_id] = record
                         break
                     except Exception as e:
                         if retry < max_retries - 1 and ("closed database" in str(e) or "operational" in str(e).lower()):
@@ -402,7 +424,7 @@ class EnrichmentEngine:
                     if cid is None:
                         continue
 
-                    record = self._record_cache[cache_key].get(cid)
+                    record = cache.get(cid)
                     if record:
                         next_id = record.get(step.select)
                         if next_id is not None:
@@ -417,7 +439,9 @@ class EnrichmentEngine:
             if cid is None:
                 continue
 
-            record = self._record_cache.get(f"{last_step.table}_full", {}).get(cid)
+            record = self._cache_get(
+                self._record_cache, f"{last_step.table}_full", {}
+            ).get(cid)
             if record:
                 value = record.get(last_step.select)
                 if value is not None:
@@ -709,13 +733,37 @@ class EnrichmentEngine:
 
         return records
 
-    def get_cache_stats(self) -> Dict[str, Any]:
-        """获取缓存统计信息"""
+    @staticmethod
+    def _cache_stats(cache) -> Dict[str, Any]:
+        """单个缓存的统计信息（LRU 与普通 Dict 统一结构）"""
+        if isinstance(cache, LRUTTLCache):
+            return cache.stats()
         return {
-            "name_cache_tables": len(self._name_cache),
-            "name_cache_entries": sum(len(v) for v in self._name_cache.values()),
-            "record_cache_tables": len(self._record_cache),
-            "record_cache_entries": sum(len(v) for v in self._record_cache.values()),
+            "size": len(cache),
+            "max_size": 0,
+            "hits": 0,
+            "misses": 0,
+            "evictions": 0,
+            "expirations": 0,
+            "hit_rate": 0,
+            "inner_entries": sum(len(v) for v in cache.values()),
+        }
+
+    def get_cache_stats(self) -> Dict[str, Any]:
+        """获取缓存统计信息
+
+        [IF-002] 暴露 name / record 两组明细给 /diagnostics；
+        同时保留旧的扁平键，兼容既有调用方。
+        """
+        name_stats = self._cache_stats(self._name_cache)
+        record_stats = self._cache_stats(self._record_cache)
+        return {
+            "name": name_stats,
+            "record": record_stats,
+            "name_cache_tables": name_stats["size"],
+            "name_cache_entries": name_stats["inner_entries"],
+            "record_cache_tables": record_stats["size"],
+            "record_cache_entries": record_stats["inner_entries"],
         }
 
 

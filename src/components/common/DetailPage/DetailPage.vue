@@ -64,9 +64,20 @@
           @row-action="handleRowAction"
         >
           <template v-for="section in computedSections" :key="section.key" #[`section-${section.key}`]>
-            <slot :name="`section-${section.key}`" :data="data" />
+            <RuleTracePanel
+              v-if="section.key === 'rule_trace'"
+              :object-type="objectType"
+              :record-id="id"
+              :scenarios="ruleTraceConfig.scenarios || []"
+              :codes="ruleTraceConfig.codes || []"
+            />
+            <slot v-else :name="`section-${section.key}`" :data="data" />
           </template>
         </ObjectPage>
+        <div v-if="docFlowMatched" class="dp-doc-flow">
+          <h4 class="dp-doc-flow__title">单据流追溯</h4>
+          <DocFlowTracePanel :object-type="objectType" :record-id="id" />
+        </div>
         <div v-if="!$slots.default && !metaLoaded" class="dp-loading-inline">
           <AppIcon name="refresh" size="16" class="spin" />
           <span>加载配置中...</span>
@@ -136,16 +147,75 @@
         @row-action="handleRowAction"
       >
         <template v-for="section in computedSections" :key="section.key" #[`section-${section.key}`]="sectionData">
+          <RuleTracePanel
+            v-if="section.key === 'rule_trace'"
+            :object-type="objectType"
+            :record-id="id"
+            :scenarios="ruleTraceConfig.scenarios || []"
+            :codes="ruleTraceConfig.codes || []"
+          />
           <!-- Always render slot if provided by parent -->
-          <slot :name="`section-${section.key}`" :data="data" />
+          <slot v-else :name="`section-${section.key}`" :data="data" />
         </template>
       </ObjectPage>
+      <div v-if="docFlowMatched" class="dp-doc-flow">
+        <h4 class="dp-doc-flow__title">单据流追溯</h4>
+        <DocFlowTracePanel :object-type="objectType" :record-id="id" />
+      </div>
       <div v-if="!$slots.default && !metaLoaded" class="dp-loading-inline">
         <AppIcon name="refresh" size="16" class="spin" />
         <span>加载配置中...</span>
       </div>
     </div>
   </div>
+
+  <!-- [2026-11-12] detail.actions 入参弹窗：input_fields 声明由 YAML 提供，
+       形状对齐 StateTransitionButtons（field/label/type/required/options/default） -->
+  <AppModal
+    v-model="businessActionDialog.visible"
+    :title="businessActionDialog.action?.label || '填写操作参数'"
+    width="460"
+    :close-on-click-overlay="false"
+    @close="closeBusinessActionInputs(null)"
+  >
+    <div v-if="businessActionDialog.action?.confirmMessage" class="dp-action-confirm">
+      {{ businessActionDialog.action.confirmMessage }}
+    </div>
+    <el-form label-position="top" @submit.prevent>
+      <el-form-item
+        v-for="field in businessActionDialog.fields"
+        :key="field.field"
+        :label="field.label || field.field"
+        :required="!!field.required"
+      >
+        <el-select
+          v-if="Array.isArray(field.options) && field.options.length"
+          v-model="businessActionDialog.values[field.field]"
+          :placeholder="field.placeholder || '请选择'"
+          style="width: 100%"
+        >
+          <el-option
+            v-for="opt in field.options"
+            :key="opt.value !== undefined ? opt.value : opt"
+            :label="opt.label !== undefined ? opt.label : opt"
+            :value="opt.value !== undefined ? opt.value : opt"
+          />
+        </el-select>
+        <el-input
+          v-else
+          v-model="businessActionDialog.values[field.field]"
+          :type="field.type === 'textarea' ? 'textarea' : 'text'"
+          :rows="field.rows || 3"
+          :placeholder="field.placeholder || ''"
+        />
+      </el-form-item>
+      <p v-if="businessActionDialog.error" class="dp-action-error">{{ businessActionDialog.error }}</p>
+    </el-form>
+    <template #footer>
+      <AppButton variant="secondary" @click="closeBusinessActionInputs(null)">取消</AppButton>
+      <AppButton variant="primary" @click="confirmBusinessActionInputs">确定</AppButton>
+    </template>
+  </AppModal>
 
   <!-- [v70 2026-08-28] 权限体检弹窗：体检是权限集 object 的 validation action，
        入口在 ObjectPage/标题栏标准 action 区（objectType==='permission_set' 时显示） -->
@@ -177,9 +247,16 @@ import boService from '@/services/boService'
 import { objectTypeService } from '@/services/objectTypeService'
 import { AppButton } from '@/components/common/AppButton'
 import { AppIcon } from '@/components/common/AppIcon'
+import { AppModal } from '@/components/common/AppModal'
 import { ObjectPage } from '@/components/common/ObjectPage'
 import PermissionAuditDialog from '@/views/SystemManagement/components/PermissionAuditDialog.vue'
 import SalesOrderExpandDialog from '@/components/business/SalesOrderExpandDialog.vue'
+import RuleTracePanel from '@/components/common/RuleTrace/RuleTracePanel.vue'
+import DocFlowTracePanel from '@/components/business/DocFlow/DocFlowTracePanel.vue'
+import { listRules } from '@/services/docFlowService'
+import { useAuthStore } from '@/stores/authStore'
+import { useBoAction } from '@/composables/useBoAction'
+import { evaluateCondition } from '@/utils/safeExpression'
 
 // [FIX 2026-06-18] 关键修复：把 `const props = defineProps(...)` 移到 setup 顶部
 //   原因：line 160-164 的 coordinatorRefreshKey computed 内部访问 props.id/objectType，
@@ -218,6 +295,36 @@ const props = defineProps({
 //   L1 接入 coordinator；L2 让 ObjectPageContent 暴露 refreshAllSections()；
 //   L3 加 onActivated 保留状态（对齐 metalist FR-005）。
 const coordinator = inject('refreshCoordinator', null)
+
+// [v1.7 2026-11-07] 规则推导分区元数据：BO YAML 的 ui_view_config.detail.rule_trace
+const authStore = useAuthStore()
+const ruleTraceConfig = computed(
+  () => entityMeta.value?.ui_view_config?.detail?.rule_trace || {}
+)
+
+// [单据流 2026-11-08] 平台级追溯面板：规则命中当前 BO（源或目标）即渲染，
+//   不要求 BO YAML 重复声明 detail.facets。
+// [2026-11-12] 兼容行级规则：单据头（vendor_invoice）与行（vendor_invoice_line）
+//   是两张表，规则只声明到行级；头级实例通过 `<bo>_line` 等后缀规则关联，
+//   故按「等于或前缀命中」判定，否则头级详情页永不显示追溯面板。
+const docFlowRules = ref([])
+const docFlowMatched = computed(() => docFlowRules.value.some((rule) => {
+  const t = props.objectType
+  return rule.source_bo === t || rule.target_bo === t
+    || String(rule.source_bo || '').startsWith(`${t}_`)
+    || String(rule.target_bo || '').startsWith(`${t}_`)
+}))
+
+async function loadDocFlowRules() {
+  try {
+    const data = await listRules({})
+    docFlowRules.value = data.rules || []
+  } catch (error) {
+    docFlowRules.value = []
+  }
+}
+
+onMounted(loadDocFlowRules)
 
 // [L1] refreshKey：详情页用 objectType + id 区分实例。
 //   区别于 metalist 的 `list:${objectType}`（单 objectType 单实例），
@@ -585,6 +692,31 @@ const detailDescription = computed(() => {
   return entityMeta.value?.ui_view_config?.detail?.description || ''
 })
 
+// [2026-11-12] 编辑按钮门控（P0）：
+//   1) 权限：权限码 v249 起为单段式 `{bo}:{action}`；管理员直通。
+//   2) 状态：状态枚举含 draft 的单据类对象仅草稿可编辑（已提交/已过账走业务动作）；
+//      主数据（无 draft 生命周期）维持可编辑。
+//   此前无条件渲染 → 已过账单据仍显示编辑，点击后后端拒绝。
+const canEditRecord = computed(() => {
+  if (!authStore.user) return false
+  const bo = props.objectType
+  if (!(authStore.isAdmin
+    || authStore.hasPermission(`${bo}:edit`)
+    || authStore.hasPermission(`${bo}:update`))) {
+    return false
+  }
+  const statusField = getStatusFieldName()
+  const field = (entityMeta.value?.fields || []).find(
+    (f) => (f.id || f.name) === statusField
+  )
+  const options = field?.enum_values || field?.options || []
+  const hasDraftLifecycle = options.some(
+    (o) => String(o?.value ?? o).toLowerCase() === 'draft'
+  )
+  if (!hasDraftLifecycle) return true
+  return String(data.value?.[statusField] ?? '').toLowerCase() === 'draft'
+})
+
 const computedActions = computed(() => {
   if (props.readonly) return []
 
@@ -601,9 +733,34 @@ const computedActions = computed(() => {
 
   const detailConfig = entityMeta.value?.ui_view_config?.detail
   const yamlActions = detailConfig?.actions || []
+  // [spec §13] YAML 动作分两类：业务动作（含 action 字段，派发 BO Action）
+  //   与声明式动作（edit/delete 等，沿用 buildAction 语义）。
+  //   业务动作按 permission 门控；声明式动作保持「非空即替换默认按钮」旧语义。
+  const businessActions = yamlActions
+    .filter(a => a && typeof a === 'object' && a.action)
+    .filter(a => !a.permission || authStore.hasPermission(a.permission))
+    // [S8 Wave C T43] visible_when：按当前单据数据决定业务动作是否出现
+    //   （如订单未完全开票才显示「生成开票计划」、退货交货单不显示「生成销售发票」）
+    .filter(a => !a.visible_when || evaluateCondition(a.visible_when, data.value, 'record'))
+    .map(a => ({
+      id: a.id || a.action,
+      key: a.id || a.action,
+      label: a.label,
+      icon: a.icon,
+      variant: a.variant || a.type,
+      container: a.container,
+      action: a.action,
+      params: a.params,
+      // [2026-11-12] 确认文案与入参声明来自 detail.actions（后端 UIDetailViewConfig.actions）
+      confirmMessage: a.confirm_message || a.confirmMessage,
+      inputFields: a.input_fields || a.inputFields || []
+    }))
+  const declarativeActions = yamlActions.filter(
+    a => typeof a === 'string' || !(a && typeof a === 'object' && a.action)
+  )
 
-  if (yamlActions.length > 0) {
-    const actions = yamlActions.map(a => {
+  if (declarativeActions.length > 0) {
+    const actions = declarativeActions.map(a => {
       if (typeof a === 'string') {
         return buildAction(a)
       }
@@ -616,17 +773,21 @@ const computedActions = computed(() => {
         container: a.container
       }
     })
+    actions.push(...businessActions)
     appendRoleAuditAction(actions)
     return actions
   }
 
-  const actions = [buildAction('edit')]
+  // [2026-11-12] 编辑入口按权限 + 单据状态门控（见 canEditRecord）
+  const actions = canEditRecord.value ? [buildAction('edit')] : []
   if (internalEditing.value) {
     actions.push(buildAction('save'))
     actions.push(buildAction('cancel'))
-  }
-  if (props.showDelete && !internalEditing.value) {
-    actions.push(buildAction('delete'))
+  } else {
+    actions.push(...businessActions)
+    if (props.showDelete) {
+      actions.push(buildAction('delete'))
+    }
   }
   appendRoleAuditAction(actions)
   return actions
@@ -1058,6 +1219,22 @@ const computedSections = computed(() => {
         inlineEdit: cs.inlineEdit || null,
         columns: cs.columns || null,
         extraRowActions: cs.extraRowActions || null
+      })
+    }
+  }
+
+  // [v1.7 2026-11-07] 规则推导分区：由 BO YAML 的 ui_view_config.detail.rule_trace 声明，
+  //   无权限时不显示分区（权限码缺省 rule_center:trace）。
+  const traceSection = detailConfig?.rule_trace
+  if (traceSection?.enabled && !isAddMode) {
+    const tracePermission = traceSection.permission || 'rule_center:trace'
+    if (authStore.hasPermission(tracePermission)) {
+      sections.push({
+        key: 'rule_trace',
+        label: traceSection.label || '规则推导',
+        icon: 'rule',
+        type: 'custom',
+        display: 'always'
       })
     }
   }
@@ -1547,6 +1724,81 @@ function handleFieldDisplayUpdate({ key, displayValue }) {
 
 const objectPageRef = ref(null)
 
+// [2026-11-12] detail.actions 入参弹窗：声明 input_fields 的业务动作先收集参数
+//   （如调整方向 / 放行原因），再随 source_doc_id 一起派发 BO Action。
+const businessActionDialog = ref({
+  visible: false, action: null, fields: [], values: {}, error: '', resolve: null
+})
+
+function openBusinessActionInputs(action) {
+  const fields = action.inputFields || []
+  const values = {}
+  fields.forEach(field => {
+    if (field.default !== undefined) values[field.field] = field.default
+  })
+  return new Promise(resolve => {
+    businessActionDialog.value = {
+      visible: true, action, fields, values, error: '', resolve
+    }
+  })
+}
+
+function closeBusinessActionInputs(result) {
+  const resolve = businessActionDialog.value.resolve
+  businessActionDialog.value = {
+    visible: false, action: null, fields: [], values: {}, error: '', resolve: null
+  }
+  resolve?.(result)
+}
+
+function confirmBusinessActionInputs() {
+  const state = businessActionDialog.value
+  const missing = (state.fields || []).find(
+    field => field.required && !String(state.values[field.field] ?? '').trim()
+  )
+  if (missing) {
+    state.error = `请填写${missing.label || missing.field}`
+    return
+  }
+  closeBusinessActionInputs({ ...state.values })
+}
+
+// [spec §13] 业务 Action 派发：YAML detail.actions 中声明 action 的按钮
+//   → POST /api/v2/action/{actionId}，参数默认带 source_doc_id=当前对象 id。
+async function runBusinessAction(action) {
+  let values = { ...(action.params || {}) }
+  const fields = action.inputFields || []
+  if (fields.length > 0) {
+    const collected = await openBusinessActionInputs(action)
+    if (!collected) return
+    values = { ...values, ...collected }
+  } else {
+    const { ElMessageBox } = await import('element-plus')
+    try {
+      await ElMessageBox.confirm(
+        action.confirmMessage || '确定要执行此操作吗？',
+        action.label || '确认操作',
+        { type: 'info', confirmButtonText: '确定', cancelButtonText: '取消' }
+      )
+    } catch {
+      return
+    }
+  }
+
+  const { call } = useBoAction()
+  const result = await call(action.action, {
+    source_doc_id: props.id,
+    ...values
+  })
+
+  if (result?.success) {
+    message.success(result.message || '操作成功')
+    handleRefresh()
+  } else {
+    message.error(result?.message || '操作失败')
+  }
+}
+
 async function handleObjectPageAction({ action }) {
   const key = action.key || action.id
 
@@ -1588,7 +1840,16 @@ async function handleObjectPageAction({ action }) {
       showAuditDialog.value = true
       break
 
+    case 'print':
+      // [B6] 打印当前详情页（浏览器打印）
+      window.print()
+      break
+
     default:
+      // [spec §13] 业务 Action：YAML 声明 action 的按钮
+      if (action.action) {
+        await runBusinessAction(action)
+      }
   }
 }
 
@@ -1787,6 +2048,23 @@ const showAuditDialog = ref(false)
   }
 }
 
+/* [2026-11-12] detail.actions 入参弹窗：说明文案 / 校验错误提示 */
+.dp-action-confirm {
+  margin-bottom: var(--spacing-sm);
+  padding: var(--spacing-sm) var(--spacing-md);
+  border-radius: var(--radius-sm, 6px);
+  background: var(--color-bg-secondary, var(--color-fill-2, #f4f6f8));
+  color: var(--color-text-secondary);
+  font-size: 13px;
+  line-height: 1.6;
+}
+
+.dp-action-error {
+  margin: 0;
+  color: var(--color-danger, #d93026);
+  font-size: 12px;
+}
+
 /* [2026-10-21 自解释说明] 「这是什么」说明横幅：中性底 + 左侧信息图标，
    不抢主内容焦点，但一眼可读。 */
 .dp-self-note {
@@ -1820,6 +2098,21 @@ const showAuditDialog = ref(false)
   padding: var(--spacing-md);
   color: var(--color-text-secondary);
   font-size: 13px;
+}
+
+/* [单据流 2026-11-08] 平台级追溯面板容器 */
+.dp-doc-flow {
+  margin: var(--spacing-md);
+  padding: var(--spacing-md);
+  border: 1px solid var(--color-border-light, var(--el-border-color-lighter));
+  border-radius: var(--radius-sm, 6px);
+}
+
+.dp-doc-flow__title {
+  margin: 0 0 var(--spacing-sm);
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--color-text-primary);
 }
 
 .spin {

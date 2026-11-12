@@ -21,6 +21,28 @@ from meta.core.db_path import get_meta_db_path
 
 logger = logging.getLogger(__name__)
 
+# [2026-11-09 P0] 访问日志开关。
+# 原实现每次 DB 操作都做 2 次 os.stat + 1 次 JSONL 追加（实测 0.89ms/次），
+# 测试/建库场景下可达数十万次调用。语义上访问日志仅用于人工追踪，
+# 因此允许通过 DB_ACCESS_LOG=0 关闭；TESTING=true 时默认关闭。
+_ACCESS_LOG_OVERRIDE = None
+
+
+def _access_logging_enabled() -> bool:
+    """访问日志是否启用（每次调用实时读环境变量，便于测试动态切换）"""
+    if _ACCESS_LOG_OVERRIDE is not None:
+        return _ACCESS_LOG_OVERRIDE
+    if os.environ.get('DB_ACCESS_LOG', '1').lower() in ('0', 'false', 'no', 'off'):
+        return False
+    return os.environ.get('TESTING', '').lower() not in ('true', '1', 'yes')
+
+
+def set_access_logging_enabled(enabled: bool) -> None:
+    """显式开关访问日志；传 None 恢复按环境变量判断"""
+    global _ACCESS_LOG_OVERRIDE
+    _ACCESS_LOG_OVERRIDE = enabled
+
+
 class DBCorruptionMonitor:
     """DB 损坏监控器"""
 
@@ -35,6 +57,8 @@ class DBCorruptionMonitor:
 
     def log_access(self, operation: str, details: Dict[str, Any] = None):
         """记录 DB 访问"""
+        if not _access_logging_enabled():
+            return
         with self._lock:
             entry = {
                 "ts": datetime.now().isoformat(),

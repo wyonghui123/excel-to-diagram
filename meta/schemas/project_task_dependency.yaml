@@ -1,0 +1,286 @@
+# 项目活动依赖边 (Project Task Dependency) — 项目侧 P1.5 计划层
+# 依据:
+#   docs/specs/spec-project-type-object-model-research-2026-10-31.md §2.5 / §8.1 / AC-09
+#
+# 定位: 活动之间的排期依赖边，只表达 FS / SS / FF / SF + lag（分钟，可正可负）。
+#   ① 不承载执行动作（再强调 §8.2 硬规则 1：计划只产需求）；
+#   ② 唯一性 (predecessor_task_id, successor_task_id, dependency_type)；
+#   ③ 跨项目依赖由服务层拒绝（本表无 project_id 列，避免冗余键）。
+
+id: project_task_dependency
+name: 项目活动依赖
+table_name: project_task_dependencies
+description: 项目活动依赖边（FS / SS / FF / SF + lag）
+display_name_field: id
+aspects: [audit_aspect]
+
+semantics:
+  meaning: 项目活动依赖
+  category: business_object
+  business_key: [predecessor_task_id, successor_task_id, dependency_type]
+  aliases:
+    - 活动依赖
+    - 排期依赖
+    - Task Dependency
+
+deletion_policy:
+  mode: cascade
+
+audit:
+  enabled: true
+  create:
+    enabled: true
+    fields: all
+  update:
+    enabled: true
+    fields: changed_only
+    exclude:
+      - id
+      - created_at
+      - updated_at
+  delete:
+    enabled: true
+    fields: business_only
+    exclude:
+      - id
+      - created_at
+      - updated_at
+
+fields:
+  - id: id
+    name: ID
+    type: integer
+    db_column: id
+    required: true
+    unique: true
+    description: 技术主键
+    semantics:
+      meaning: 自增主键
+      primary_key: true
+
+  - id: predecessor_task_id
+    name: 前置活动
+    type: integer
+    db_column: predecessor_task_id
+    required: true
+    description: 前置活动（依赖从哪里出发）
+    semantics:
+      meaning: 前置活动
+      display:
+        type: association
+        target_type: project_task
+        display_field: task_no
+      filterable: true
+      filter_type: relation
+      filter_label: 前置活动
+      filter_scope: local
+    value_help:
+      source:
+        type: bo
+        target_bo: project_task
+        value_field: id
+        display_field: task_no
+        code_field: task_no
+        apply_target_permissions: true
+      behavior:
+        multiple: false
+        validation: true
+        binding_strength: strict
+        min_search_length: 0
+      presentation:
+        result_type: dropdown
+        display_format: "{task_no} {name}"
+        columns:
+          - field: task_no
+            label: 活动编号
+            width: 140
+          - field: name
+            label: 活动名称
+            width: 200
+    ui:
+      widget: select
+      relation: project_task
+      multiple: false
+
+  - id: successor_task_id
+    name: 后置活动
+    type: integer
+    db_column: successor_task_id
+    required: true
+    description: 后置活动（依赖指向谁）
+    semantics:
+      meaning: 后置活动
+      display:
+        type: association
+        target_type: project_task
+        display_field: task_no
+      filterable: true
+      filter_type: relation
+      filter_label: 后置活动
+      filter_scope: local
+    value_help:
+      source:
+        type: bo
+        target_bo: project_task
+        value_field: id
+        display_field: task_no
+        code_field: task_no
+        apply_target_permissions: true
+      behavior:
+        multiple: false
+        validation: true
+        binding_strength: strict
+        min_search_length: 0
+      presentation:
+        result_type: dropdown
+        display_format: "{task_no} {name}"
+        columns:
+          - field: task_no
+            label: 活动编号
+            width: 140
+          - field: name
+            label: 活动名称
+            width: 200
+    ui:
+      widget: select
+      relation: project_task
+      multiple: false
+
+  - id: dependency_type
+    name: 依赖类型
+    type: string
+    db_column: dependency_type
+    required: true
+    default: FS
+    description: 依赖类型（FS 完成-开始 / SS 开始-开始 / FF 完成-完成 / SF 开始-完成）
+    enum_values:
+      - value: FS
+        label: 完成-开始
+        color: primary
+        category: active
+        is_initial: true
+      - value: SS
+        label: 开始-开始
+        color: info
+        category: active
+      - value: FF
+        label: 完成-完成
+        color: info
+        category: active
+      - value: SF
+        label: 开始-完成
+        color: warning
+        category: active
+    semantics:
+      meaning: 依赖类型
+      filterable: true
+      filter_type: enum
+      filter_label: 依赖类型
+      filter_scope: local
+    ui:
+      widget: select
+
+  # 可正可负：正 = 滞后（lag），负 = 提前（lead）
+  - id: lag_minutes
+    name: 滞后分钟
+    type: integer
+    db_column: lag_minutes
+    required: true
+    default: 0
+    description: 滞后分钟（可正可负；正为 lag，负为 lead）
+    constraints:
+      - type: numeric_range
+        gte: -525600
+        lte: 525600
+        decimal_places: 0
+    semantics:
+      meaning: 依赖滞后（分钟，允许负值）
+    ui:
+      widget: number
+
+  - id: created_at
+    name: 创建时间
+    type: datetime
+    db_column: created_at
+    description: 创建时间
+    semantics:
+      meaning: 记录创建时间
+      audit_field: true
+
+  - id: updated_at
+    name: 更新时间
+    type: datetime
+    db_column: updated_at
+    description: 更新时间
+    semantics:
+      meaning: 记录更新时间
+      audit_field: true
+
+indexes:
+  - fields: [predecessor_task_id, successor_task_id, dependency_type]
+    unique: true
+    name: uidx_ptd_edge
+  - fields: [successor_task_id]
+    name: idx_ptd_successor
+
+relations:
+  - id: project_task_dependency_to_predecessor
+    name: 前置活动
+    type: reference
+    target: project_task
+    source_field: predecessor_task_id
+    target_field: id
+    cardinality: N:1
+    description: 前置活动引用（真外键）
+  - id: project_task_dependency_to_successor
+    name: 后置活动
+    type: reference
+    target: project_task
+    source_field: successor_task_id
+    target_field: id
+    cardinality: N:1
+    description: 后置活动引用（真外键）
+
+ui_view_config:
+  # 依赖边随活动维护，不单独建菜单
+  skip_auto_menu: true
+  list:
+    detail_mode: drawer
+    title: 活动依赖
+    columns:
+      - field: predecessor_task_id
+        width: 180
+      - field: successor_task_id
+        width: 180
+      - field: dependency_type
+        width: 130
+        filterable: true
+        filter_type: select
+      - field: lag_minutes
+        width: 110
+    selection:
+      enabled: true
+      mode: multiple
+  form:
+    title: 活动依赖
+    layout: vertical
+    sections:
+      - title: 依赖关系
+        columns:
+          - fields: [predecessor_task_id, successor_task_id]
+          - fields: [dependency_type, lag_minutes]
+  detail:
+    layout: tabs
+    title: 活动依赖详情
+    tabs:
+      - id: basic
+        label: 基本信息
+        type: fields
+        fields: [predecessor_task_id, successor_task_id, dependency_type,
+                 lag_minutes, created_at, updated_at]
+
+category_config:
+  create_permission: project_task:update
+  update_permission: project_task:update
+  delete_permission: project_task:update
+  owner_auto_permission: false

@@ -93,5 +93,18 @@ export default [
     name: 'AccountSettings',
     component: () => import('@/views/AccountSettings/index.vue'),
     meta: { title: '账户设置', requiresAuth: true }
+  },
+  // [P6a-2 v218 2026-11-05] 包装容器查询 / 封箱作业（custom_page 静态路由）。
+  {
+    path: '/warehouse/handling-unit-docs',
+    name: 'handling-unit-docs',
+    component: () => import('@/views/HandlingUnitDocs.vue'),
+    meta: { title: '包装容器查询', requiresAuth: true }
+  },
+  {
+    path: '/warehouse/handling-unit-seal',
+    name: 'handling-unit-seal',
+    component: () => import('@/views/HandlingUnitSeal.vue'),
+    meta: { title: '封箱作业', requiresAuth: true }
   }
 ]

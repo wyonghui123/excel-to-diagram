@@ -88,7 +88,8 @@ const EnumService = {
     if (!enumTypeId) {
       const error = new Error('[EnumService] enumTypeId is required');
       if (throwError) throw error;
-      console.error(error.message);
+      // throwError=false 表示调用方要求静默回退，只记 debug，避免污染控制台错误
+      console.debug(error.message);
       return [];
     }
 
@@ -124,7 +125,8 @@ const EnumService = {
           `[EnumService] Failed to load enum ${enumTypeId}: ${result.message}`
         );
         if (throwError) throw error;
-        console.error(error.message);
+        // throwError=false 表示调用方要求静默回退，只记 debug，避免污染控制台错误
+        console.debug(error.message);
         return [];
       }
 
@@ -142,7 +144,8 @@ const EnumService = {
         : new Error(`[EnumService] Failed to load enum ${enumTypeId}`);
 
       if (throwError) throw err;
-      console.error(err.message);
+      // throwError=false 表示调用方要求静默回退，只记 debug，避免污染控制台错误
+      console.debug(err.message);
       return [];
     }
   },

@@ -1,0 +1,257 @@
+# 调拨发货行 (Transfer Shipment Line) — TBD-3 独立发货单对象
+# 依据: docs/specs/tasks-transfer-order-object-model-2026-11-02.md §12 B2
+#
+# 定位: 调拨发货单行，唯一挂载点是调拨行（transfer_order_lines）。
+#       父子关系: parent_object=transfer_shipment，父字段 transfer_shipment_id；
+#       子表通过 transfer_shipment.yaml 的 child_sections 挂载，不单独成菜单。
+#
+# 服务层不变量（由 transfer_shipment_service 强制）:
+#   · qty > 0；
+#   · transfer_order_line_id 必须属于发货单头指向的调拨单，且行状态为 open；
+#   · 过账时由 TransferOrderService.ship 做超发校验，失败整体回滚。
+
+id: transfer_shipment_line
+name: 调拨发货行
+table_name: transfer_shipment_lines
+description: 调拨发货单行（挂载到调拨行）
+display_name_field: line_no
+parent_object: transfer_shipment
+
+hierarchy:
+  enabled: true
+  parent_field: transfer_shipment_id
+
+semantics:
+  meaning: 调拨发货单行
+  category: business_document_line
+  business_key: []
+  aliases:
+    - 发货行
+    - 调拨发货行
+    - Transfer Shipment Line
+
+deletion_policy:
+  mode: cascade
+
+audit:
+  enabled: true
+  create:
+    enabled: true
+    fields: all
+  update:
+    enabled: true
+    fields: changed_only
+    exclude:
+      - id
+      - created_at
+      - updated_at
+  delete:
+    enabled: true
+    fields: business_only
+    exclude:
+      - id
+      - created_at
+      - updated_at
+
+fields:
+  - id: id
+    name: ID
+    type: integer
+    db_column: id
+    required: true
+    unique: true
+    description: 技术主键
+    semantics:
+      meaning: 自增主键
+      primary_key: true
+
+  - id: transfer_shipment_id
+    name: 发货单
+    type: integer
+    db_column: transfer_shipment_id
+    required: true
+    description: 所属发货单（父字段）
+    semantics:
+      meaning: 所属调拨发货单
+      display:
+        type: association
+        target_type: transfer_shipment
+        display_field: shipment_no
+    ui:
+      widget: select
+      relation: transfer_shipment
+      hidden_in_form: true
+
+  - id: line_no
+    name: 行号
+    type: integer
+    db_column: line_no
+    required: true
+    description: 行号（单内唯一，按 10 递增）
+    semantics:
+      meaning: 发货行行号
+      data_category: code
+      searchable: true
+    ui:
+      widget: number
+
+  - id: transfer_order_line_id
+    name: 调拨行
+    type: integer
+    db_column: transfer_order_line_id
+    required: true
+    description: 调拨行引用（必须属于头指向的调拨单且行状态为 open）
+    semantics:
+      meaning: 发货对应的调拨行
+      display:
+        type: association
+        target_type: transfer_order_line
+        display_field: line_no
+      filterable: true
+      filter_type: relation
+      filter_label: 调拨行
+      filter_scope: local
+    value_help:
+      source:
+        type: bo
+        target_bo: transfer_order_line
+        value_field: id
+        display_field: line_no
+        code_field: line_no
+        apply_target_permissions: true
+        value_filter:
+          status: open
+      behavior:
+        multiple: false
+        validation: true
+        binding_strength: strict
+        min_search_length: 0
+      presentation:
+        result_type: dialog
+        display_format: "{line_no}"
+        columns:
+          - field: line_no
+            label: 行号
+            width: 90
+          - field: item_id
+            label: 物料
+            width: 160
+          - field: qty
+            label: 计划数量
+            width: 110
+          - field: qty_shipped
+            label: 已发数量
+            width: 110
+    ui:
+      widget: value_help
+      relation: transfer_order_line
+      multiple: false
+
+  - id: qty
+    name: 发货数量
+    type: number
+    db_column: qty
+    required: true
+    description: 本行发货量（> 0；单位 = 调拨行 uom_id）
+    constraints:
+      - type: numeric_range
+        gt: 0
+        decimal_places: 6
+    semantics:
+      meaning: 本行发货数量
+      filterable: false
+    ui:
+      widget: number
+
+  - id: remark
+    name: 备注
+    type: text
+    db_column: remark
+    nullable: true
+    description: 备注
+    semantics:
+      meaning: 发货行备注
+      searchable: true
+    ui:
+      widget: textarea
+
+  - id: created_at
+    name: 创建时间
+    type: datetime
+    db_column: created_at
+    description: 创建时间
+    semantics:
+      meaning: 记录创建时间
+      audit_field: true
+
+  - id: updated_at
+    name: 更新时间
+    type: datetime
+    db_column: updated_at
+    description: 更新时间
+    semantics:
+      meaning: 记录更新时间
+      audit_field: true
+
+indexes:
+  - fields: [transfer_shipment_id, line_no]
+    unique: true
+    name: uq_transfer_shipment_line_no
+  - fields: [transfer_shipment_id]
+    name: idx_transfer_shipment_line_shipment
+  - fields: [transfer_order_line_id]
+    name: idx_transfer_shipment_line_order_line
+
+relations:
+  - id: transfer_shipment_line_to_shipment
+    name: 所属发货单
+    type: reference
+    target: transfer_shipment
+    source_field: transfer_shipment_id
+    target_field: id
+    cardinality: N:1
+    description: 所属调拨发货单引用（真外键）
+  - id: transfer_shipment_line_to_order_line
+    name: 调拨行
+    type: reference
+    target: transfer_order_line
+    source_field: transfer_order_line_id
+    target_field: id
+    cardinality: N:1
+    description: 调拨行引用（真外键）
+
+ui_view_config:
+  # 作为发货单详情页的子表，不单独成菜单
+  skip_auto_menu: true
+  list:
+    detail_mode: drawer
+    title: 发货行
+    columns:
+      - field: line_no
+        width: 90
+      - field: transfer_order_line_id
+        width: 140
+      - field: qty
+        width: 110
+      - field: remark
+        width: 220
+    selection:
+      enabled: true
+      mode: multiple
+    defaultSort:
+      field: line_no
+      order: asc
+  form:
+    title: 发货行信息
+    layout: vertical
+    sections:
+      - title: 挂载
+        columns:
+          - fields: [transfer_order_line_id]
+          - fields: [line_no]
+      - title: 数量
+        columns:
+          - fields: [qty]
+      - title: 其他
+        columns:
+          - fields: [remark]

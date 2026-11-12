@@ -1,6 +1,6 @@
 ---
 description: Trae SOLO Spec 模式使用指南 - 涉及 3 阶段文档生成(SPEC/TASKS/CHECKLIST)、系统级重构、复杂任务规划时加载。封装 spec.md/tasks.md/checklist.md 模板 + 与项目已有 spec 流程关系。
-globs: ["**/.trae/specs/**", "**/spec.md", "**/tasks.md", "**/checklist.md"]
+globs: "**/.trae/specs/**,**/spec.md,**/tasks.md,**/checklist.md"
 version: "0.1.0"
 author: "AI"
 last_updated: "2026-09-02"
@@ -175,5 +175,5 @@ last_updated: "2026-09-02"
 
 - [docs.trae.cn/ide/solo-coder](https://docs.trae.cn/ide/solo-coder) —— SOLO Agent
 - [docs.trae.cn/ide/solo-mode](https://docs.trae.cn/ide/solo-mode) —— SOLO 模式概览
-- v5.4 深度研究：[2026-09-02-trae-ide-v5.4-deep-research.md](../../../excel-to-diagram/docs/governance/2026-09-02-trae-ide-v5.4-deep-research.md)
+- v5.4 深度研究：[2026-09-02-trae-ide-v5.4-deep-research.md](../../../../docs/governance/2026-09-02-trae-ide-v5.4-deep-research.md)
 - spec-rfc Skill：`excel-to-diagram/.trae/skills/spec-rfc/SKILL.md`（如存在）

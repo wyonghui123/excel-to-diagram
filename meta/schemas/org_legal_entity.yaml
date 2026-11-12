@@ -207,6 +207,33 @@ relations: []
 
 ui_view_config:
   skip_auto_menu: true
+  # [视图配置补齐 2026-11-06] 此前只有 detail，view-config API 返回空 list，
+  #   导致 test_all_objects_have_view_config 失败。本面与 org 同源，列表列直接对齐组织列表。
+  list:
+    detail_mode: drawer
+    title: 法人主体
+    columns:
+      - field: name
+        width: 220
+      - field: code
+        width: 140
+        sortable: true
+      - field: org_type
+        width: 110
+        filterable: true
+        filter_type: select
+      - field: parent_id
+        width: 160
+        filterable: true
+        filter_type: value_help
+        render_as: association
+        target_type: org
+        display_field: name
+        placeholder: "无上级"
+      - field: status
+        width: 100
+        filterable: true
+        filter_type: select
   # [详情页 2026-10-21] 补 detail 声明（本面此前只有 skip_auto_menu）。
   #   报障：手机端在往来关系详情点「归属法人」跳转失败。根因两层，本条治第二层：
   #     一层是路由守卫白名单缺本类型（已改 detailRouteGuard.js）；

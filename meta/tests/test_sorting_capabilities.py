@@ -353,8 +353,10 @@ class TestSortingEdgeCases:
             sort_order="asc"
         )
 
-        with pytest.raises(Exception):
-            qs.search(request)
+        # [2026-10-23 防御性语义] 不存在的排序列会被跳过并告警，不再抛 500。
+        # 判据见 query_builder.build_sql 的 skipped_sorts 分支。
+        result = qs.search(request)
+        assert isinstance(result.data, list)
 
     def test_empty_result_sort(self, sorting_query_service):
         ds, qs = sorting_query_service

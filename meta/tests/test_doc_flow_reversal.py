@@ -128,7 +128,8 @@ def ready_env(dbs):
     ensure_doc_flow_edge_tables(app_ds)
     ensure_doc_flow_rule_table(platform_ds)
     upsert_rules(platform_ds, [
-        {"rule_id": RULE_ID, "source_bo": SOURCE_BO, "target_bo": TARGET_BO},
+        {"rule_id": RULE_ID, "source_bo": SOURCE_BO, "target_bo": TARGET_BO,
+         "copied_fields": ["item_name", "unit"]},
         {"rule_id": RET_RULE_ID, "source_bo": TARGET_BO, "target_bo": RETURN_BO},
     ])
     return app_ds, platform_ds

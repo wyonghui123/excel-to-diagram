@@ -104,7 +104,7 @@ role:
 
 # ============================================
 # [v43 2026-09-02 Spec16 Phase7] 补真业务 BO 声明
-# 背景: v070 之前这些 rt 直接写在 permissions.resource_type (例 task_queue:task_queue_read),
+# 背景: v070 之前这些 rt 直接写在 permissions.resource_type (例 task_queue:read),
 #   但 resource_types.yaml 未声明, _build_role_matrices 通过 extra_rts 兜底显示 (无标签无维度).
 # 现在 yaml 是 SSOT, 这些 BO 正式进入资源矩阵管理, 可勾选动作 + 范围条件.
 # 仍在的表 (已验证存在): task_queues / enum_types

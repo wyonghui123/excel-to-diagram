@@ -349,7 +349,7 @@ class PermissionConfigLoader:
         """[P7-T2] 插入规则到 data_permission_rules"""
         sql = (
             "INSERT INTO data_permission_rules "
-            "(role_id, rule_type, resource_type, dimension_code, condition, "
+            "(permission_set_id, rule_type, resource_type, dimension_code, condition, "
             "scope_mode, permission_level, is_denied, inherit_to_children, "
             "propagate_to_parents, source_table, created_at, updated_at) "
             "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)"

@@ -1,0 +1,398 @@
+# 服务目录项（Service Catalog Item）— 统一需求入口 / M1
+# 依据: docs/specs/spec-shared-service-center-object-model-2026-10-31.md S1 / S-D6
+#       docs/specs/spec-unified-demand-execution-milestone-2026-10-31.md §2 M1
+#
+# 定位: 服务台「可申请清单」的最小主数据。请求行（service_request_line）与服务
+#       请求都从这里取可申请项；目录项只绑定分类、默认承接组织与审批策略，
+#       不携带价格（价格属于商务层 sales_order / 合同，见 S-D6）。
+#
+# 审批口径（M1）:
+#   · `requires_approval = false` 且 `approval_policy` 为空 → 提交即免审批（S7 出口判据②）；
+#   · `approval_policy` 只存策略快照（JSON），审批执行复用 tasks(type=approval)，
+#     不新建审批表（S-D5）。
+#
+# 生命周期: draft --activate--> active --deactivate--> inactive（复用平台标准动作池）。
+
+id: service_catalog_item
+name: 服务目录项
+table_name: service_catalog_items
+description: 服务目录项——服务台可申请清单（分类 / 默认承接组织 / 审批策略）
+display_name_field: name
+aspects: [audit_aspect]
+
+semantics:
+  meaning: 服务目录项
+  category: core_entity
+  business_key: [code]
+  display_name_field: name
+  aliases:
+    - 服务目录项
+    - 服务目录
+    - 可申请服务
+    - service catalog item
+
+deletion_policy:
+  mode: restrict
+  restrict_on:
+    - table: service_request_lines
+      foreign_key: catalog_item_id
+      message: 该目录项已被服务请求行引用，请先删除请求行或将目录项停用
+  cascade_delete: []
+
+audit:
+  enabled: true
+  create:
+    enabled: true
+    fields: all
+  update:
+    enabled: true
+    fields: changed_only
+    exclude:
+      - id
+      - created_at
+      - updated_at
+  delete:
+    enabled: true
+    fields: business_only
+    exclude:
+      - id
+      - created_at
+      - updated_at
+  associate:
+    enabled: true
+  dissociate:
+    enabled: true
+
+fields:
+  - id: id
+    name: ID
+    type: integer
+    db_column: id
+    required: true
+    unique: true
+    description: 技术主键
+    semantics:
+      meaning: 自增主键
+      primary_key: true
+
+  - id: code
+    name: 目录项编码
+    type: string
+    db_column: code
+    required: true
+    unique: true
+    max_length: 50
+    pattern: "^[A-Za-z][A-Za-z0-9_]*$"
+    description: 目录项唯一编码（字母开头，仅字母/数字/下划线，最长 50）
+    semantics:
+      meaning: 目录项业务编码
+      business_key: true
+      immutable: true
+      data_category: code
+    ui:
+      widget: input
+
+  - id: name
+    name: 目录项名称
+    type: string
+    db_column: name
+    required: true
+    max_length: 100
+    description: 目录项显示名称（用户在请求页看到的名字）
+    semantics:
+      meaning: 目录项显示名称
+      display_name: true
+      searchable: true
+      data_category: text
+    ui:
+      widget: input
+
+  - id: status
+    name: 状态
+    type: string
+    db_column: status
+    required: true
+    default: draft
+    description: 目录项生命周期状态
+    enum_values:
+      - value: draft
+        label: 草稿
+        color: default
+        category: draft
+        is_initial: true
+        description: 编辑中，不出现在可申请清单
+      - value: active
+        label: 启用
+        color: success
+        category: active
+        description: 出现在可申请清单
+      - value: inactive
+        label: 停用
+        color: info
+        category: inactive
+        description: 暂停申请，历史请求保留
+    semantics:
+      meaning: 生命周期状态
+      filterable: true
+      filter_type: enum
+      filter_label: 状态
+      filter_scope: local
+    ui:
+      widget: select
+
+  - id: default_priority
+    name: 默认优先级
+    type: string
+    db_column: default_priority
+    required: true
+    default: medium
+    max_length: 20
+    description: 新建请求时的默认优先级（请求头可覆盖）
+    enum_values:
+      - value: low
+        label: 低
+        color: info
+      - value: medium
+        label: 中
+        color: primary
+        is_initial: true
+      - value: high
+        label: 高
+        color: warning
+      - value: urgent
+        label: 紧急
+        color: danger
+    semantics:
+      meaning: 默认优先级
+      filterable: true
+      filter_type: enum
+      filter_label: 默认优先级
+      filter_scope: local
+    ui:
+      widget: select
+
+  - id: default_provider_org_id
+    name: 默认承接组织
+    type: integer
+    db_column: default_provider_org_id
+    nullable: true
+    description: 新建请求时带出的承接组织（请求头可覆盖；空 = 由派工队列决定）
+    semantics:
+      meaning: 默认承接组织
+      display:
+        type: association
+        target_type: org
+        display_field: name
+        placeholder: "由派工队列决定"
+    value_help:
+      source:
+        type: bo
+        target_bo: org
+        value_field: id
+        display_field: name
+        code_field: code
+        apply_target_permissions: true
+        value_filter:
+          status: active
+      behavior:
+        multiple: false
+        validation: true
+        binding_strength: strict
+        min_search_length: 0
+      presentation:
+        result_type: dropdown
+        display_format: "{code} - {name}"
+        columns:
+          - field: code
+            label: 组织编码
+            width: 140
+          - field: name
+            label: 组织名称
+            width: 220
+    ui:
+      widget: select
+      relation: org
+      multiple: false
+      clearable: true
+
+  - id: requires_approval
+    name: 需要审批
+    type: boolean
+    db_column: requires_approval
+    required: true
+    default: false
+    description: 该目录项产生的请求是否需要审批；false 且策略为空时提交即免审批
+    semantics:
+      meaning: 是否强制审批
+    ui:
+      widget: switch
+
+  - id: approval_policy
+    name: 审批策略
+    type: json
+    db_column: approval_policy
+    nullable: true
+    description: 审批策略快照（审批层级 / 条件 / 审批人选择规则）；空 = 免审批
+    semantics:
+      meaning: 审批策略快照，空表示免审批
+      hint: 审批执行复用 tasks(type=approval)，本字段只保存策略，不产生审批记录
+    ui:
+      widget: textarea
+
+  - id: description
+    name: 描述
+    type: text
+    db_column: description
+    nullable: true
+    max_length: 1000
+    description: 目录项说明（申请条件 / 交付范围 / 使用须知）
+    semantics:
+      meaning: 目录项说明
+      searchable: true
+    ui:
+      widget: textarea
+
+  - id: created_at
+    name: 创建时间
+    type: datetime
+    db_column: created_at
+    description: 创建时间
+    semantics:
+      meaning: 记录创建时间
+      audit_field: true
+
+  - id: updated_at
+    name: 更新时间
+    type: datetime
+    db_column: updated_at
+    description: 更新时间
+    semantics:
+      meaning: 记录更新时间
+      audit_field: true
+
+indexes:
+  - fields: [code]
+    unique: true
+    name: uidx_service_catalog_item_code
+  - fields: [status]
+    name: idx_service_catalog_item_status
+  - fields: [default_provider_org_id]
+    name: idx_service_catalog_item_provider
+
+relations:
+  - id: service_catalog_item_to_provider_org
+    name: 默认承接组织
+    type: reference
+    target: org
+    source_field: default_provider_org_id
+    target_field: id
+    cardinality: N:1
+    description: 默认承接组织引用（可空）
+
+rules:
+  - id: activate_service_catalog_item
+    name: 启用目录项
+    type: state_transition
+    action_ref: activate
+    state_field: status
+    from_states: [draft, inactive]
+    to_state: active
+    triggers: [before_update]
+    ui_hints:
+      label: 启用
+      icon: check_circle
+      confirm_message: "启用后该目录项将出现在可申请清单，确定要启用吗？"
+      highlight: true
+
+  - id: deactivate_service_catalog_item
+    name: 停用目录项
+    type: state_transition
+    action_ref: deactivate
+    state_field: status
+    from_states: [active]
+    to_state: inactive
+    triggers: [before_update]
+    ui_hints:
+      label: 停用
+      icon: pause_circle
+      confirm_message: "停用后不再接受新申请，历史请求保留。确定要停用吗？"
+
+ui_view_config:
+  showChangeHistory: true
+  list:
+    detail_mode: drawer
+    title: 服务目录
+    description: 服务台可申请清单
+    columns:
+      - field: code
+        width: 150
+        sortable: true
+      - field: name
+        width: 220
+      - field: default_priority
+        width: 110
+        filterable: true
+        filter_type: enum
+        render_as: tag
+      - field: default_provider_org_id
+        width: 160
+      - field: requires_approval
+        width: 100
+        render_as: tag
+      - field: status
+        width: 90
+        filterable: true
+        filter_type: select
+      - field: description
+        width: 260
+        type: ellipsis
+    selection:
+      enabled: true
+      mode: multiple
+    searchFields: [code, name]
+    actions:
+      - id: create
+        label: 新建目录项
+        icon: plus
+        type: primary
+        permission: service_catalog_item:create
+      - id: export
+        label: 导出
+        icon: download
+        type: default
+  form:
+    title: 服务目录项信息
+    layout: vertical
+    sections:
+      - title: 基本信息
+        columns:
+          - fields: [code, name]
+          - fields: [status, default_priority]
+          - fields: [default_provider_org_id, requires_approval]
+      - title: 审批与说明
+        columns:
+          - fields: [approval_policy]
+          - fields: [description]
+  detail:
+    page_route: ServiceCatalogItemDetailContent
+    layout: tabs
+    title: "{record.name} 详情"
+    tabs:
+      - id: basic
+        label: 基本信息
+        type: fields
+        fields: [code, name, status, default_priority, default_provider_org_id, requires_approval, approval_policy, description]
+
+category_config:
+  create_permission: service_catalog_item:create
+  update_permission: service_catalog_item:update
+  delete_permission: service_catalog_item:delete
+  owner_auto_permission: false
+
+import_export:
+  import_enabled: true
+  export_enabled: true
+  cascade_export: false
+  cascade_import: false
+  conflict_strategy: upsert
+  conflict_key: code

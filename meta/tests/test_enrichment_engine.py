@@ -412,11 +412,11 @@ class TestEnrichmentEngineRelationship:
 
 
 class TestEnrichmentEngineBusinessObjectIdFields:
-    """测试 business_object 的 ID 类型虚拟字段填充（回归测试）
+    """测试 business_object 的层级字段填充
 
-    覆盖 2026-05-04 修复的关键 bug：
-    - domain_id (integer) 和 sub_domain_id (integer) 返回 null
-    - 导致前端关系分类逻辑错误
+    domain_id / sub_domain_id 自 2026-06-28 起为 stored 冗余（DB trigger 维护），
+    enrichment 只负责 virtual 冗余（domain_name / sub_domain_name），
+    这里用同一 join_path 校验虚拟字段取值正确。
     """
 
     @pytest.fixture(autouse=True)
@@ -495,50 +495,46 @@ class TestEnrichmentEngineBusinessObjectIdFields:
         }
 
     def test_enrich_domain_id_field(self):
-        """测试 domain_id 字段正确填充（integer 类型）"""
+        """测试 domain_name 正确填充（domain_id 由 DB trigger 维护，不参与 enrichment）"""
         ids = self._insert_test_data()
 
         record = {'id': ids['bo_id'], 'code': 'BO1', 'name': '资产卡片',
                   'service_module_id': ids['service_module_id']}
         result = self.engine.enrich_one('business_object', record)
 
-        assert 'domain_id' in result, "domain_id 必须被填充"
-        assert result['domain_id'] == ids['domain_id'], \
-            f"domain_id 应该是 {ids['domain_id']}，实际是 {result.get('domain_id')}"
-        assert isinstance(result['domain_id'], int), "domain_id 应该是整数类型"
+        assert 'domain_id' not in result, "stored 冗余由 DB trigger 维护，enrichment 不应回填"
+        assert result.get('domain_name') == '资产云', \
+            f"domain_name 应该是 资产云，实际是 {result.get('domain_name')}"
 
     def test_enrich_sub_domain_id_field(self):
-        """测试 sub_domain_id 字段正确填充（integer 类型）"""
+        """测试 sub_domain_name 正确填充（sub_domain_id 由 DB trigger 维护）"""
         ids = self._insert_test_data()
 
         record = {'id': ids['bo_id'], 'code': 'BO1', 'name': '资产卡片',
                   'service_module_id': ids['service_module_id']}
         result = self.engine.enrich_one('business_object', record)
 
-        assert 'sub_domain_id' in result, "sub_domain_id 必须被填充"
-        assert result['sub_domain_id'] == ids['sub_domain_id'], \
-            f"sub_domain_id 应该是 {ids['sub_domain_id']}，实际是 {result.get('sub_domain_id')}"
-        assert isinstance(result['sub_domain_id'], int), "sub_domain_id 应该是整数类型"
+        assert 'sub_domain_id' not in result, "stored 冗余由 DB trigger 维护，enrichment 不应回填"
+        assert result.get('sub_domain_name') == '资产管理与经营', \
+            f"sub_domain_name 应该是 资产管理与经营，实际是 {result.get('sub_domain_name')}"
 
     def test_enrich_all_business_object_id_fields_together(self):
-        """测试所有 ID 字段一起正确填充"""
+        """测试所有虚拟层级字段一起正确填充"""
         ids = self._insert_test_data()
 
         record = {'id': ids['bo_id'], 'code': 'BO1', 'name': '资产卡片',
                   'service_module_id': ids['service_module_id']}
         result = self.engine.enrich_one('business_object', record)
 
-        assert 'domain_id' in result, 'enrichment engine did not return domain_id - check yaml redundancy config'
-        assert result['domain_id'] == ids['domain_id']
-        assert 'sub_domain_id' in result, 'enrichment engine did not return sub_domain_id - check yaml redundancy config'
-        assert result['sub_domain_id'] == ids['sub_domain_id']
+        assert 'domain_id' not in result, 'stored 冗余由 DB trigger 维护，enrichment 不应回填'
+        assert 'sub_domain_id' not in result, 'stored 冗余由 DB trigger 维护，enrichment 不应回填'
         assert result['service_module_id'] == ids['service_module_id']
 
         assert result.get('domain_name') == '资产云'
         assert result.get('sub_domain_name') == '资产管理与经营'
 
     def test_batch_enrich_preserves_id_fields(self):
-        """测试批量填充时 ID 字段保持正确"""
+        """测试批量填充时虚拟层级字段保持正确"""
         ids = self._insert_test_data()
 
         records = [
@@ -551,15 +547,12 @@ class TestEnrichmentEngineBusinessObjectIdFields:
         results = self.engine.enrich_batch('business_object', records)
 
         for r in results:
-            assert 'domain_id' in r, 'enrichment engine did not return domain_id - check yaml redundancy config'
-            assert r['domain_id'] == ids['domain_id']
-            assert r['sub_domain_id'] == ids['sub_domain_id']
-            assert 'domain_id' in r, 'enrichment engine did not return domain_id - check yaml redundancy config'
-            assert isinstance(r['domain_id'], int)
-            assert isinstance(r['sub_domain_id'], int)
+            assert r.get('domain_name') == '资产云'
+            assert r.get('sub_domain_name') == '资产管理与经营'
+            assert 'domain_id' not in r, 'stored 冗余由 DB trigger 维护，enrichment 不应回填'
 
     def test_different_domains_produce_different_ids(self):
-        """测试不同领域的业务对象产生不同的 domain_id"""
+        """测试不同领域的业务对象产生不同的 domain_name"""
         ids1 = self._insert_test_data()
 
         dom2_id = self.ds.insert('domains', {'code': 'DOM2', 'name': '财务云', 'version_id': 1})
@@ -574,10 +567,8 @@ class TestEnrichmentEngineBusinessObjectIdFields:
         result1 = self.engine.enrich_one('business_object', record1)
         result2 = self.engine.enrich_one('business_object', record2)
 
-        assert result1['domain_id'] != result2['domain_id'], \
-            "不同领域的 domain_id 必须不同"
-        assert result1['domain_id'] == ids1['domain_id']
-        assert result2['domain_id'] == dom2_id
+        assert result1.get('domain_name') == '资产云', "不同领域的 domain_name 必须不同"
+        assert result2.get('domain_name') == '财务云'
 
 
 class TestEnrichmentEngineErrorHandling:
@@ -666,10 +657,10 @@ class TestEnrichmentEngineErrorHandling:
 
 
 class TestEnrichmentEngineServiceModuleIdFields:
-    """测试 service_module 的 ID 类型虚拟字段填充（回归测试）
+    """测试 service_module 的层级虚拟字段填充
 
-    覆盖 2026-05-04 修复的 bug：
-    - service_module.domain_id 返回 None 导致编辑页面无法回显领域
+    domain_id 为 stored 冗余（DB trigger 维护），enrichment 负责
+    domain_name / sub_domain_name 等 virtual 冗余。
     """
 
     @pytest.fixture(autouse=True)
@@ -732,17 +723,16 @@ class TestEnrichmentEngineServiceModuleIdFields:
         return {'domain_id': dom_id, 'sub_domain_id': sub_id, 'sm_id': sm_id}
 
     def test_enrich_service_module_domain_id(self):
-        """测试 service_module.domain_id 正确填充（1步JOIN: sub_domains）"""
+        """测试 service_module.domain_name 正确填充（2步JOIN：sub_domains → domains）"""
         ids = self._insert_service_module_data()
 
         record = {'id': ids['sm_id'], 'code': 'AUM', 'name': '资产使用管理',
                   'sub_domain_id': ids['sub_domain_id']}
         result = self.engine.enrich_one('service_module', record)
 
-        assert 'domain_id' in result, "domain_id 必须被填充"
-        assert result['domain_id'] == ids['domain_id'], \
-            f"期望 domain_id={ids['domain_id']}，实际={result.get('domain_id')}"
-        assert isinstance(result['domain_id'], int), "domain_id 应为整数"
+        assert 'domain_id' not in result, "stored 冗余由 DB trigger 维护，enrichment 不应回填"
+        assert result.get('domain_name') == '资产云', \
+            f"期望 domain_name=资产云，实际={result.get('domain_name')}"
 
     def test_enrich_service_module_all_virtual_fields(self):
         """测试 service_module 所有虚拟字段一起正确填充"""
@@ -752,13 +742,12 @@ class TestEnrichmentEngineServiceModuleIdFields:
                   'sub_domain_id': ids['sub_domain_id']}
         result = self.engine.enrich_one('service_module', record)
 
-        assert 'domain_id' in result, 'enrichment engine did not return domain_id - check yaml redundancy config'
-        assert result['domain_id'] == ids['domain_id']
+        assert 'domain_id' not in result, 'stored 冗余由 DB trigger 维护，enrichment 不应回填'
         assert result.get('domain_name') == '资产云'
         assert result.get('sub_domain_name') == '资产管理与经营'
 
     def test_enrich_service_module_batch(self):
-        """测试批量填充 service_module 的 domain_id"""
+        """测试批量填充 service_module 的 domain_name"""
         ids = self._insert_service_module_data()
 
         sm2_id = self.ds.insert(
@@ -775,13 +764,11 @@ class TestEnrichmentEngineServiceModuleIdFields:
         results = self.engine.enrich_batch('service_module', records)
 
         for r in results:
-            assert 'domain_id' in r, 'enrichment engine did not return domain_id - check yaml redundancy config'
-            assert r['domain_id'] == ids['domain_id']
-            assert 'domain_id' in r, 'enrichment engine did not return domain_id - check yaml redundancy config'
-            assert isinstance(r['domain_id'], int)
+            assert r.get('domain_name') == '资产云'
+            assert 'domain_id' not in r, 'stored 冗余由 DB trigger 维护，enrichment 不应回填'
 
     def test_service_module_different_subdomains_different_domains(self):
-        """测试不同子领域的服务模块产生不同的 domain_id"""
+        """测试不同子领域的服务模块产生不同的 domain_name"""
         ids1 = self._insert_service_module_data()
 
         dom2_id = self.ds.insert('domains', {'code': 'DOM2', 'name': '财务云', 'version_id': 1})
@@ -797,9 +784,8 @@ class TestEnrichmentEngineServiceModuleIdFields:
         r2 = self.engine.enrich_one('service_module',
                                     {'id': sm2_id, 'code': 'FIN', 'sub_domain_id': sub2_id})
 
-        assert r1['domain_id'] != r2['domain_id'], "不同子领域的 domain_id 必须不同"
-        assert r1['domain_id'] == ids1['domain_id']
-        assert r2['domain_id'] == dom2_id
+        assert r1.get('domain_name') == '资产云', "不同子领域的 domain_name 必须不同"
+        assert r2.get('domain_name') == '财务云'
 
 
 if __name__ == "__main__":

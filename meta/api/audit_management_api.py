@@ -1,4 +1,5 @@
 from flask import Blueprint, request, jsonify
+from meta.core.query_spec import parse_query_spec
 from meta.services.auth_middleware import login_required, is_admin
 
 audit_mgmt_bp = Blueprint('audit_mgmt', __name__, url_prefix='/api/v1')
@@ -17,8 +18,8 @@ def get_failed_audit_logs():
     if not is_admin():
         return jsonify({'success': False, 'message': '您没有执行此操作的权限，需要管理员权限'}), 403
 
-    page = request.args.get('page', 1, type=int)
-    page_size = request.args.get('page_size', 20, type=int)
+    spec = parse_query_spec(request.args)
+    page, page_size = spec.page, spec.page_size
 
     result = _audit_service.get_failed_audit_logs(page=page, page_size=page_size)
 

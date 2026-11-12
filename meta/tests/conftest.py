@@ -23,8 +23,14 @@ from datetime import datetime
 
 import pytest
 
-# 在任何测试导入之前设置环境变量，确保 rate_limiter 被禁用
-os.environ['DISABLE_RATE_LIMIT'] = 'true'
+# 测试态环境开关的唯一声明源见 meta/tests/shared/env_flags.py。
+# 这里只做导入期注入（必须在 shared.* / 业务模块被导入之前生效）。
+try:
+    from meta.tests.shared.env_flags import apply_early_flags, apply_test_flags
+except ImportError:  # 相对导入回退（从 meta/tests 目录内运行时）
+    from .shared.env_flags import apply_early_flags, apply_test_flags
+
+apply_early_flags()
 
 # [NEW 2026-10-29] 排除脚本型伪测试:
 # test_export_e2e.py 模块顶层即连 http://localhost:3011 做 dev-login, 服务未起时
@@ -60,6 +66,13 @@ def get_shared_app():
         # 测试环境下强制清除, 让 _is_production() 返回 False, dev-login 可用.
         os.environ.pop('FLASK_ENV', None)
         os.environ.pop('FLASK_PRODUCTION', None)
+
+    # [FIX 2026-11-08] 与 shared_client 同源问题: _SHARED_APP 可能由被补丁的
+    # create_app() 预置（只写 app 不建 client），此处惰性补建，避免
+    # client_with_auth 返回 (None, headers) 造成 "NoneType has no attribute 'get'"。
+    if _SHARED_CLIENT is None:
+        _SHARED_APP.config['TESTING'] = True
+        _SHARED_CLIENT = _SHARED_APP.test_client()
 
     if hasattr(_SHARED_CLIENT, '_cookies'):
         _SHARED_CLIENT._cookies.clear()
@@ -183,45 +196,43 @@ def isolated_token_service():
 _PROGRESS_START_TIME = time.time()
 _PROGRESS_LAST_UPDATE = 0
 _PROGRESS_UPDATE_INTERVAL = 0.5
-_COUNTED_TESTS_FILE = None  # [DECORATIVE] v3.18: 文件记录已计数测试（xdist 多进程共享）
+
+# [TEST-EFF P2] xdist worker 进程完全不写进度文件/看板。
+# xdist 的 controller 会收到每个 worker 上报的 report 并触发
+# pytest_runtest_logreport，因此只在 controller 计数即可，不会漏计。
+# 旧实现让 worker 也写 progress（_write_progress 整份覆盖、无锁）+
+# <progress>.counted 跨进程去重（每次 read_text 全量扫描 → O(n²)），
+# 导致 controller 累加被覆盖（P=3248 vs 实际 5217、Total: 0）。
+_IS_XDIST_WORKER = bool(os.environ.get("PYTEST_XDIST_WORKER"))
+_COUNTED = set()  # 进程内去重（controller 独占，替代原 .counted 文件）
+
+# [TEST-EFF P2] 总数(total)的唯一可信数据源。
+# xdist controller 进程不收集用例（dsession.pytest_collection 直接 return True），
+# 因此 session.items 在 controller 上是空的，且 pytest_collection_finish 早于
+# worker 收集完成触发。真实总数由 dsession.worker_collectionfinish 写入
+# session.testscollected。用 _SESSION 记住 session 以便在首个 report 时兜底。
+_SESSION = None
+_PROGRESS_TOTAL_SEEDED = False
 
 
-def _get_counted_tests_file():
-    """获取已计数测试文件路径（xdist 多进程共享）"""
-    global _COUNTED_TESTS_FILE
-    if _COUNTED_TESTS_FILE is None:
-        progress_file = _get_progress_file()
-        if progress_file:
-            _COUNTED_TESTS_FILE = progress_file.with_suffix('.counted')
-    return _COUNTED_TESTS_FILE
+def _seed_total_from_session():
+    """兜底补写 total：collection_finish 拿不到总数时，首个 report 前补一次。
 
-
-def _is_test_counted(test_id):
-    """检查测试是否已计数（文件锁保护）"""
-    counted_file = _get_counted_tests_file()
-    if not counted_file:
-        return False
-    
-    try:
-        if not counted_file.exists():
-            return False
-        content = counted_file.read_text(encoding="utf-8")
-        return test_id in content.splitlines()
-    except Exception:
-        return False
-
-
-def _mark_test_counted(test_id):
-    """标记测试已计数（文件锁保护）"""
-    counted_file = _get_counted_tests_file()
-    if not counted_file:
+    _update_progress 是增量累加语义，total 只能写一次，故用幂等标志位，
+    不每次 report 都去读文件比较。
+    """
+    global _PROGRESS_TOTAL_SEEDED
+    if _PROGRESS_TOTAL_SEEDED:
         return
-    
-    try:
-        with open(counted_file, 'a', encoding="utf-8") as f:
-            f.write(test_id + '\n')
-    except Exception:
-        pass
+    _PROGRESS_TOTAL_SEEDED = True
+    if not _get_progress_file() or _SESSION is None:
+        return
+    total = getattr(_SESSION, "testscollected", 0) or 0
+    if total <= 0:
+        return
+    progress = _read_progress() or {}
+    if progress.get("progress", {}).get("total", 0) == 0:
+        _update_progress(total=total)
 
 
 def _get_progress_file():
@@ -469,6 +480,52 @@ def _block_unguarded_entry():
     os._exit(1)
 
 
+def _snapshot_db(src, dst):
+    """[TEST-EFF P2-3] 为 xdist worker 生成基础库快照，优先用 SQLite backup API。
+
+    旧实现 `shutil.copy2(164MB)` 有两点问题：
+      1. 源库处于 WAL 且有未 checkpoint 内容时，只拷主文件会丢掉最近提交
+         （快照不完整，表现为随机 "no such table/column"）；
+      2. 直接整文件复制不做一致性校验，源库正被写时可能拷到半页。
+    `Connection.backup()` 由 SQLite 按页加锁复制，得到的是一致性快照，
+    且同样只读源库；失败（非 SQLite 文件 / 权限 / 独占锁）再回落 copy2。
+
+    另外做一次幂等短路：上一轮中断残留的 worker 库若与源库同尺寸且不比源旧，
+    直接复用，省掉一次 164MB 复制（懒复制的最小可用形态）。
+    """
+    dst_path = Path(dst)
+    try:
+        d_stat, s_stat = dst_path.stat(), Path(src).stat()
+        if d_stat.st_size == s_stat.st_size and d_stat.st_mtime >= s_stat.st_mtime:
+            return
+    except OSError:
+        pass
+
+    for suffix in ('', '-wal', '-shm'):
+        stale = Path(str(dst_path) + suffix)
+        try:
+            stale.unlink(missing_ok=True)
+        except OSError:
+            pass
+
+    try:
+        src_conn = sqlite3.connect(f'file:{Path(src).as_posix()}?mode=ro', uri=True, timeout=10)
+        try:
+            dst_conn = sqlite3.connect(str(dst_path))
+            try:
+                src_conn.backup(dst_conn)
+            finally:
+                dst_conn.close()
+        finally:
+            src_conn.close()
+        return
+    except sqlite3.Error:
+        pass
+
+    import shutil as _shutil
+    _shutil.copy2(src, dst)
+
+
 def pytest_configure(config):
     """pytest 全局初始化 — 最早执行的 hook
 
@@ -481,7 +538,7 @@ def pytest_configure(config):
     6. 性能优化：降低日志级别
 
     注意：在并行模式下（PYTEST_XDIST_WORKER 存在），
-    为每个 worker 创建独立的 DB 副本，避免并发写入损坏。
+    为每个 worker 用 SQLite backup API 生成基础库一致性快照，避免并发写入损坏。
     """
     import tempfile
     import sys
@@ -501,23 +558,30 @@ def pytest_configure(config):
     _worker_id = os.environ.get("PYTEST_XDIST_WORKER", "")
     _base_db = os.environ.get("SQLITE_DB_PATH") or os.environ.get("TEST_DB_PATH")
     if _worker_id and _base_db and os.path.exists(_base_db):
-        import shutil as _shutil
+        # [TEST-EFF P2-3] backup API 一致性快照，替代 164MB 的整文件 copy2
         _worker_db = os.path.join(_test_temp_dir, f"worker_{_worker_id}.db")
-        _shutil.copy2(_base_db, _worker_db)
+        _snapshot_db(_base_db, _worker_db)
         os.environ["SQLITE_DB_PATH"] = _worker_db
         os.environ["ARCH_DB_PATH"] = _worker_db
         os.environ["TEST_DB_PATH"] = _worker_db
 
-    if _get_progress_file():
+    if _get_progress_file() and not _IS_XDIST_WORKER:
         _write_progress("starting", message="测试开始")
         _total_from_env = os.environ.get("TOTAL_TESTS", "0")
         if _total_from_env and int(_total_from_env) > 0:
             _update_progress(total=int(_total_from_env))
 
-    os.environ['TESTING'] = 'true'
-    os.environ['DISABLE_ASYNC_AUDIT_WRITER'] = 'true'
-    os.environ['DISABLE_TASK_SCHEDULER'] = 'true'
-    os.environ['DISABLE_WRITE_QUEUE'] = 'true'
+    # 测试态开关统一由 shared/env_flags.py 声明并注入（单一声明源）：
+    # TESTING / DISABLE_ASYNC_AUDIT_WRITER / DISABLE_TASK_SCHEDULER /
+    # DISABLE_WRITE_QUEUE / CRON_JOBS_ENABLED（TEST_ALLOW_CRON=1 可反制）/
+    # SKIP_DB_PREFLIGHT（setdefault）。新增开关请改注册表，勿在此散落赋值。
+    #
+    # [TEST-EFF P0-1] CRON_JOBS_ENABLED=0 关闭 create_app() 内的 3 个 cron
+    # 调度器（maintenance / platform / workflow），它们在测试进程里以 60s
+    # 轮询反复读写 SQLite，与用例事务争锁并累计后台线程。
+    # [TEST-EFF P1-5] SKIP_DB_PREFLIGHT 跳过整库 quick_check 预检
+    # （165MB 库实测 1.35-1.56s/进程；测试库由 SQLite backup 快照产生）。
+    apply_test_flags()
 
     _setup_strict_mode()
 
@@ -540,15 +604,62 @@ def pytest_configure(config):
     logging.getLogger('werkzeug').setLevel(logging.ERROR)
 
 
+_AUDIT_UNION_VIEW_CHECKED = False
+
+
+def _ensure_audit_union_view():
+    """测试库补齐 v_audit_all 视图。
+
+    生产库由迁移 v007_50 创建该视图；测试库由 SchemaMigrator 从 YAML 元模型建出，
+    不含该视图（它依赖 audit_logs / audit_logs_archive 的运行时列并集）。
+    缺视图会让审计派生查询直接 400，因此这里做等价补齐（幂等）。
+    """
+    if os.environ.get('TESTING') != 'true':
+        return
+    db_path = (os.environ.get('TEST_DB_PATH')
+               or os.environ.get('SQLITE_DB_PATH')
+               or str(Path(__file__).parent.parent / "architecture.db"))
+    try:
+        conn = sqlite3.connect(db_path, timeout=5)
+        try:
+            conn.execute(
+                "CREATE VIEW IF NOT EXISTS v_audit_all AS SELECT * FROM audit_logs"
+            )
+            conn.commit()
+        finally:
+            conn.close()
+    except sqlite3.Error:
+        pass
+
+
+def pytest_runtest_setup(item):
+    global _AUDIT_UNION_VIEW_CHECKED
+    if _AUDIT_UNION_VIEW_CHECKED:
+        return
+    _AUDIT_UNION_VIEW_CHECKED = True
+    _ensure_audit_union_view()
+
+
 def pytest_collection_finish(session):
+    if _IS_XDIST_WORKER:
+        return
     progress_file = _get_progress_file()
     if not progress_file:
         return
-    
+
+    # [TEST-EFF P2] xdist controller 的 session.items 为空（controller 不收集用例），
+    # 真正总数在 session.testscollected（由 worker_collectionfinish 写入）。
+    # 若此时仍拿不到（早于 worker 上报），交给 _seed_total_from_session() 兜底。
+    total = getattr(session, "testscollected", 0) or len(session.items)
+    if total <= 0:
+        return
+
     progress = _read_progress() or {}
     if progress.get("progress", {}).get("total", 0) == 0:
-        _update_progress(total=len(session.items))
-        _write_progress("collecting", message=f"收集到 {len(session.items)} 个测试")
+        global _PROGRESS_TOTAL_SEEDED
+        _PROGRESS_TOTAL_SEEDED = True
+        _update_progress(total=total)
+        _write_progress("collecting", message=f"收集到 {total} 个测试")
 
 
 def _append_jsonl(path, record):
@@ -564,20 +675,28 @@ def _get_failed_tests_file():
 
 
 def pytest_runtest_logreport(report):
+    # [TEST-EFF P2] controller 独占：worker 不写进度、不写 failed 记录
+    # （controller 会收到 worker 上报的同一份 report，不会漏计）。
+    if _IS_XDIST_WORKER:
+        return
     progress_file = _get_progress_file()
+
+    # [TEST-EFF P2] 首个 report 到达时 controller 已拿到 worker 上报的
+    # testscollected；若 collection_finish 没写成功，这里补一次（幂等）。
+    _seed_total_from_session()
     
     updates = {}
     is_failure = False
     is_skip = False
     
-    # [DECORATIVE] v3.18: 每个测试只计数一次（文件记录，xdist 多进程共享）
+    # 每个测试只计数一次（进程内 set，O(1)）
     test_id = report.nodeid
-    should_count = not _is_test_counted(test_id)
+    should_count = test_id not in _COUNTED
     
     if report.when == "call":
         if should_count:
             updates["completed"] = 1
-            _mark_test_counted(test_id)
+            _COUNTED.add(test_id)
         if report.passed:
             updates["passed"] = 1
         elif report.failed:
@@ -590,15 +709,19 @@ def pytest_runtest_logreport(report):
         if report.skipped:
             if should_count:
                 updates["completed"] = 1
-                _mark_test_counted(test_id)
+                _COUNTED.add(test_id)
             updates["skipped"] = 1
             is_skip = True
         elif report.failed:
             if should_count:
                 updates["completed"] = 1
-                _mark_test_counted(test_id)
+                _COUNTED.add(test_id)
             updates["errors"] = 1
             is_failure = True
+    elif report.when == "teardown" and report.failed:
+        # teardown 失败也要进 failed 清单 (否则该用例被 --failed 漏掉);
+        # 计数已在 call/setup 阶段完成, 这里不再重复累加。
+        is_failure = True
     
     if progress_file and updates:
         _update_progress(**updates)
@@ -666,15 +789,18 @@ def pytest_runtest_logreport(report):
 
 
 def pytest_sessionfinish(session, exitstatus):
-    progress = _read_progress()
-    if progress:
-        progress_info = progress.get("progress", {})
-        elapsed = time.time() - _PROGRESS_START_TIME
-        msg = f"完成: {progress_info.get('passed', 0)} 通过, {progress_info.get('failed', 0)} 失败, {progress_info.get('errors', 0)} 错误"
-        _write_progress("completed", message=msg)
-        _write_live_dashboard_from_hook(
-            "completed", progress_info, elapsed, message=msg
-        )
+    # [TEST-EFF P2] 只有 controller 写 completed/看板；worker 的 sessionfinish
+    # 也曾整份覆盖 progress（lost update）。worker 仍需各自清理 worker_db。
+    if not _IS_XDIST_WORKER:
+        progress = _read_progress()
+        if progress:
+            progress_info = progress.get("progress", {})
+            elapsed = time.time() - _PROGRESS_START_TIME
+            msg = f"完成: {progress_info.get('passed', 0)} 通过, {progress_info.get('failed', 0)} 失败, {progress_info.get('errors', 0)} 错误"
+            _write_progress("completed", message=msg)
+            _write_live_dashboard_from_hook(
+                "completed", progress_info, elapsed, message=msg
+            )
 
     # [DECORATIVE] v3.18: 清理 worker_db 并执行 WAL checkpoint（防止 DB 损坏）
     _cleanup_worker_dbs()
@@ -721,11 +847,46 @@ def _cleanup_worker_dbs():
             print(f"[WARN] 清理 worker_db 失败: {worker_db} - {e}")
 
 
+def _shutdown_test_resources():
+    """[TEST-EFF P0-3] 显式收尾：顺序与 server._cleanup_resources 一致。
+
+    P0-2 之后测试进程不再注册生产 atexit，因此这里必须自己关：
+    先停事件投递（内部 set + join(5s) + 置 None），再关所有数据源。
+    """
+    try:
+        from meta.core.event_outbox import stop_event_dispatcher
+        stop_event_dispatcher()
+    except Exception as e:  # noqa: BLE001 - 收尾失败不阻塞退出
+        logger.warning("[TEST-EFF] stop_event_dispatcher failed: %s", e)
+    try:
+        from meta.core.datasource import shutdown_all_data_sources
+        shutdown_all_data_sources(timeout=10.0)
+    except Exception as e:  # noqa: BLE001
+        logger.warning("[TEST-EFF] shutdown_all_data_sources failed: %s", e)
+
+
+def _report_leaked_threads():
+    """[TEST-EFF P0-3] 只诊断不阻塞：daemon 线程不 join，非 daemon 线程有限 join。"""
+    import threading
+    me = threading.current_thread()
+    leaked = [t for t in threading.enumerate()
+              if t is not me and t is not threading.main_thread()]
+    if not leaked:
+        return
+    logger.warning("[TEST-EFF] 残留线程 %d 个: %s", len(leaked),
+                   [(t.name, t.daemon, t.is_alive()) for t in leaked[:10]])
+    for t in leaked:
+        if not t.daemon:
+            t.join(timeout=1.0)
+
+
 def pytest_unconfigure(config):
     """pytest 最终清理（在 sessionfinish 之后）
 
     确保所有资源被正确释放。
     """
+    _shutdown_test_resources()
+    _report_leaked_threads()
     _cleanup_worker_dbs()
     WorkerAwareSession.clear()
 
@@ -1144,6 +1305,8 @@ def pytest_collection_modifyitems(config, items):
 
     # [P0 v3.18+] 调试铁律: raw SQL 检测 (conftest 自动 skip + 提示用 Factory)
     _check_raw_sql_in_tests(items)
+    # [TEST-EFF P2-3] 给实测慢文件统一补 slow 标记 (--fast 用 -m 'not slow' 跳过)
+    _mark_slow_files(items)
 
 
 # ─── [P0 v3.18+] 调试协议硬阻断 ───
@@ -1195,18 +1358,24 @@ def _check_raw_sql_in_tests(items):
     """
     dry_run = os.environ.get('DRY_RUN') == '1'
     skipped = 0
+    # [TEST-EFF P1-9] 按文件缓存判定结果: 旧实现每个 item 都重读同一文件并重复
+    # 全文正则, 全量 1.5 万 item 在 collection 阶段约 1.5 万次读盘 + 扫描。
+    verdict_cache = {}
     for item in items:
         fpath = str(item.fspath)
-        if not os.path.isfile(fpath):
-            continue
-        try:
-            with open(fpath, 'r', encoding='utf-8') as f:
-                content = f.read()
-        except (OSError, UnicodeDecodeError):
-            continue
-        if _is_raw_sql_allowed(fpath, content):
-            continue
-        if not _RAW_SQL_PATTERN.search(content):
+        violates = verdict_cache.get(fpath)
+        if violates is None:
+            violates = False
+            if os.path.isfile(fpath):
+                try:
+                    with open(fpath, 'r', encoding='utf-8') as f:
+                        content = f.read()
+                except (OSError, UnicodeDecodeError):
+                    content = ''
+                if not _is_raw_sql_allowed(fpath, content):
+                    violates = bool(_RAW_SQL_PATTERN.search(content))
+            verdict_cache[fpath] = violates
+        if not violates:
             continue
         basename = os.path.basename(fpath)
         if dry_run:
@@ -1228,6 +1397,40 @@ def _check_raw_sql_in_tests(items):
             )
             skipped += 1
     return skipped
+
+
+# [TEST-EFF P2-3] 实测最慢文件清单 (>=55s/文件, 数据源 test_temp/_analysis_report.txt)。
+# 集中登记而非逐文件改 pytestmark, 避免覆盖各文件既有的 unit/integration 标记。
+_SLOW_TEST_FILES = {
+    'meta/tests/import_export/test_export_pagination_and_options.py',
+    'meta/tests/_consolidated/test_p0_other_domains.py',
+    'meta/tests/_yaml_driver/test_yaml_driven_constraints.py',
+    'meta/tests/test_annotation_metadata_driven.py',
+    'meta/tests/_consolidated/test_p1_custom_domains.py',
+    'meta/tests/test_action_api.py',
+    'meta/tests/test_api_v2_association_endpoints.py',
+    'meta/tests/_consolidated/test_p1_api_domains.py',
+    'meta/tests/test_annotation_routes_api.py',
+    'meta/tests/test_app_table_name_collision_probe.py',
+    'meta/tests/api/test_permission_set_apis.py',
+    'meta/tests/api/test_role_permission_apis.py',
+    'meta/tests/test_audit_v1_permission_h1.py',
+    'meta/tests/import_export/test_import_export_apis.py',
+    'meta/tests/interceptors/test_validation_interceptors.py',
+}
+
+
+def _mark_slow_files(items):
+    """给 _SLOW_TEST_FILES 中的文件统一加 slow 标记 (幂等)。"""
+    if not _SLOW_TEST_FILES:
+        return
+    slow_paths = {
+        os.path.normcase(os.path.join(_PROJECT_ROOT, rel))
+        for rel in _SLOW_TEST_FILES
+    }
+    for item in items:
+        if os.path.normcase(str(item.fspath)) in slow_paths:
+            item.add_marker(pytest.mark.slow)
 
 
 def _safe_stderr_print(msg: str) -> None:
@@ -1297,6 +1500,8 @@ def pytest_sessionstart(session):
     若声明 → 校验最近 10 分钟有 e2e/smoke 跑过
     校验失败 → os._exit(1) 立即终止
     """
+    global _SESSION
+    _SESSION = session
     if not _check_claim_fixed():
         os._exit(1)
 
@@ -1344,8 +1549,17 @@ def shared_app():
 
 @pytest.fixture(scope="session")
 def shared_client(shared_app):
-    """Session 级别共享 Flask test_client"""
+    """Session 级别共享 Flask test_client
+
+    [FIX 2026-11-07] 某些用例在 shared_app fixture 之前直接调用了被补丁的
+    create_app()（该补丁只写 _SHARED_APP, 不建 _SHARED_CLIENT），导致
+    shared_app 判定 "已存在" 而跳过建 client, 后续 shared_client 拿到 None,
+    表现为成批 "'NoneType' object has no attribute 'get/post'"。
+    这里在 client 缺失时惰性补建一次。
+    """
     global _SHARED_CLIENT
+    if _SHARED_CLIENT is None:
+        _SHARED_CLIENT = shared_app.test_client()
     return _SHARED_CLIENT
 
 
@@ -1517,12 +1731,12 @@ def db_connection():
     conn.execute("""
         CREATE TABLE org_permission_sets (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
-            group_id INTEGER NOT NULL,
+            org_id INTEGER NOT NULL,
             permission_set_id INTEGER NOT NULL,
             created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-            FOREIGN KEY (group_id) REFERENCES user_groups(id) ON DELETE CASCADE,
-            FOREIGN KEY (permission_set_id) REFERENCES roles(id) ON DELETE CASCADE,
-            UNIQUE(group_id, permission_set_id)
+            FOREIGN KEY (org_id) REFERENCES orgs(id) ON DELETE CASCADE,
+            FOREIGN KEY (permission_set_id) REFERENCES permission_sets(id) ON DELETE CASCADE,
+            UNIQUE(org_id, permission_set_id)
         )
     """)
     conn.execute("""
@@ -1538,10 +1752,10 @@ def db_connection():
         CREATE TABLE org_members (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
             user_id INTEGER NOT NULL,
-            group_id INTEGER NOT NULL,
+            org_id INTEGER NOT NULL,
             created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
             FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE,
-            FOREIGN KEY (group_id) REFERENCES user_groups(id) ON DELETE CASCADE
+            FOREIGN KEY (org_id) REFERENCES orgs(id) ON DELETE CASCADE
         )
     """)
 
@@ -1644,15 +1858,15 @@ def user_with_role(db_connection, created_user, created_role):
     cursor.execute("INSERT INTO orgs (code, name) VALUES (?, ?)",
         ('test_role_group', 'Test PermissionSet Group'))
     group_id = cursor.lastrowid
-    cursor.execute("INSERT INTO org_members (user_id, group_id) VALUES (?, ?)",
+    cursor.execute("INSERT INTO org_members (user_id, org_id) VALUES (?, ?)",
         (created_user['id'], group_id))
-    cursor.execute("INSERT INTO org_permission_sets (group_id, permission_set_id) VALUES (?, ?)",
+    cursor.execute("INSERT INTO org_permission_sets (org_id, permission_set_id) VALUES (?, ?)",
         (group_id, created_role['id']))
     db_connection.commit()
     return {
         'user': dict(created_user),
         'permission_set': dict(created_role),
-        'group_id': group_id,
+        'org_id': group_id,
     }
 
 
@@ -1668,7 +1882,7 @@ def user_in_group(db_connection, created_user):
     cursor.execute("SELECT * FROM orgs WHERE id = ?", (group_id,))
     group = cursor.fetchone()
     cursor.execute("""
-        INSERT INTO org_members (user_id, group_id)
+        INSERT INTO org_members (user_id, org_id)
         VALUES (?, ?)
     """, (created_user['id'], group_id))
     db_connection.commit()
@@ -2016,4 +2230,59 @@ def pytest_runtest_makereport(item, call):
                     report._trace_id = tid
         except Exception:
             pass
+
+
+# ============================================================================
+# [FIX 2026-11-08] 已关闭 DataSource 的模块级缓存自愈
+# ============================================================================
+# 背景: _clear_data_source_cache_for_testing() 会 disconnect() 所有缓存实例,
+# 但 meta.api.* / meta.core.* 里的模块级 _data_source 仍持有这些已关闭实例
+# (_pool=None)。同进程后续用例再用共享 app 请求时抛
+# 'NoneType' object has no attribute 'reader' / cursor, 造成大批伪失败
+# (实测 test_datasource_cache 跑完后同 worker 全部 500)。
+# 处理: 每个用例前扫描 meta.* 模块级引用, 把持有已关闭实例的引用重置为 None,
+# 让各模块惰性重建连接。
+
+
+def _is_closed_data_source(obj):
+    return getattr(obj, '_pool', None) is None and hasattr(obj, '_pool')
+
+
+def _heal_stale_data_sources():
+    # 1) 扫描所有 meta.* 模块的模块级数据源缓存
+    for name, mod in list(sys.modules.items()):
+        if mod is None or not name.startswith('meta.'):
+            continue
+        ds = getattr(mod, '_data_source', None)
+        if ds is not None and _is_closed_data_source(ds):
+            setattr(mod, '_data_source', None)
+        provider = getattr(mod, '_auth_provider', None)
+        if provider is not None and _is_closed_data_source(getattr(provider, '_data_source', None)):
+            setattr(mod, '_auth_provider', None)
+
+    # 2) 全局 BOFramework 持有的平台库实例
+    try:
+        from meta.core.bo_framework import bo_framework as _bf
+        if _is_closed_data_source(getattr(_bf, '_data_source', None)):
+            _bf._data_source = None
+    except Exception:
+        pass
+
+    # 3) 异步审计写入器持有的连接
+    try:
+        from meta.core.datasource import get_platform_data_source
+        from meta.services.async_audit_writer import AsyncAuditWriter
+        writer = AsyncAuditWriter()
+        writer_ds = getattr(writer, '_ds', None)
+        if writer_ds is not None and _is_closed_data_source(writer_ds):
+            writer.set_data_source(get_platform_data_source())
+    except Exception:
+        pass
+
+
+@pytest.fixture(autouse=True)
+def _autouse_heal_stale_data_sources():
+    """每个用例前自愈已关闭的 DataSource 缓存, 避免跨用例级联 500。"""
+    _heal_stale_data_sources()
+    yield
 

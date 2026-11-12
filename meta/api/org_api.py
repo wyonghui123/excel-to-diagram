@@ -6,6 +6,8 @@
 """
 
 from flask import Blueprint, request, jsonify, g
+from meta.api._response_contract import ok, error_response
+from meta.core.query_spec import parse_query_spec
 from meta.api._deprecation import v1_deprecated
 from meta.services.auth_middleware import login_required, require_permission, require_permission_any, is_admin, get_current_user
 from meta.services.org_service import OrgService
@@ -25,7 +27,7 @@ def admin_required(f):
     def decorated(*args, **kwargs):
         user = get_current_user()
         if not user or not is_admin(user):
-            return jsonify({'success': False, 'message': '您没有执行此操作的权限，需要管理员权限'}), 403
+            return error_response('您没有执行此操作的权限，需要管理员权限', status=403)
         return f(*args, **kwargs)
     return decorated
 
@@ -130,9 +132,9 @@ def get_group_members(org_id):
     try:
         service = _get_group_service()
         members = service.get_group_members(org_id)
-        return jsonify({'success': True, 'data': members})
+        return ok(members)
     except Exception as e:
-        return jsonify({'success': False, 'message': str(e)}), 500
+        return error_response(str(e), status=500)
 
 
 @org_bp.route('/orgs/<int:org_id>/members', methods=['POST'])
@@ -161,21 +163,21 @@ def add_group_member(org_id):
                 '[v088 deprecated] add_group_member(is_manager=True) 拒绝; '
                 '请改用资源矩阵 org 行级规则配置委托'
             )
-            return jsonify({
-                'success': False,
-                'error_code': 'DEPRECATED_IS_MANAGER',
-                'message': (
+            return error_response(
+                (
                     'is_manager 入参已废弃 (Spec 19 M4 软删 v088). '
                     '受托管理员授权应改用资源矩阵 org 行级规则配置委托. '
                     '详细见 docs/spec_权限体系升级/19_org_admin_delegation.md §8 M4.'
-                )
-            }), 400
+                ),
+                error_code='DEPRECATED_IS_MANAGER',
+                status=400
+            )
 
         if user_id:
             user_ids = [user_id]
 
         if not user_ids:
-            return jsonify({'success': False, 'message': 'user_id is required'}), 400
+            return error_response('user_id is required', status=400)
 
         current_user = get_current_user()
         _set_user_context()
@@ -200,11 +202,11 @@ def add_group_member(org_id):
             if result.success:
                 added_count += 1
 
-        return jsonify({'success': True, 'data': {'added_count': added_count}})
+        return ok({'added_count': added_count})
     except Exception as e:
         import traceback
         traceback.print_exc()
-        return jsonify({'success': False, 'message': str(e)}), 500
+        return error_response(str(e), status=500)
 
 
 @org_bp.route('/orgs/<int:org_id>/members', methods=['PUT'])
@@ -255,17 +257,14 @@ def set_group_members(org_id):
                 if result.success:
                     added_count += 1
 
-        return jsonify({
-            'success': True,
-            'data': {
-                'added_count': added_count,
-                'removed_count': removed_count
-            }
+        return ok({
+            'added_count': added_count,
+            'removed_count': removed_count
         })
     except Exception as e:
         import traceback
         traceback.print_exc()
-        return jsonify({'success': False, 'message': str(e)}), 500
+        return error_response(str(e), status=500)
 
 
 @org_bp.route('/orgs/<int:org_id>/members/<int:user_id>', methods=['DELETE'])
@@ -288,9 +287,9 @@ def remove_group_member(org_id, user_id):
         
         if result.success:
             return jsonify({'success': True})
-        return jsonify({'success': False, 'message': result.message}), 500
+        return error_response(result.message, status=500)
     except Exception as e:
-        return jsonify({'success': False, 'message': str(e)}), 500
+        return error_response(str(e), status=500)
 
 
 @org_bp.route('/orgs/<int:org_id>/data-permissions', methods=['GET'])
@@ -305,7 +304,7 @@ def get_org_data_permissions(org_id):
         return jsonify({'success': True, 'data': perms,
                         '_hint': '建议使用 /orgs/{id}/roles 接口通过角色间接分配数据权限'})
     except Exception as e:
-        return jsonify({'success': False, 'message': str(e)}), 500
+        return error_response(str(e), status=500)
 
 
 @org_bp.route('/orgs/<int:org_id>/data-permissions', methods=['POST'])
@@ -323,14 +322,14 @@ def add_group_data_permission(org_id):
         inherit_to_children = data.get('inherit_to_children', True)
 
         if not resource_type or not resource_id:
-            return jsonify({'success': False, 'message': '资源类型和资源 ID 不能为空'}), 400
+            return error_response('资源类型和资源 ID 不能为空', status=400)
 
         perm_id = service.add_group_data_permission(org_id, resource_type, resource_id, permission_level, inherit_to_children)
         if perm_id:
-            return jsonify({'success': True, 'data': {'id': perm_id}})
-        return jsonify({'success': False, 'message': 'Failed to add permission'}), 500
+            return ok({'id': perm_id})
+        return error_response('Failed to add permission', status=500)
     except Exception as e:
-        return jsonify({'success': False, 'message': str(e)}), 500
+        return error_response(str(e), status=500)
 
 
 @org_bp.route('/orgs/<int:org_id>/data-permissions/<int:perm_id>', methods=['DELETE'])
@@ -344,9 +343,9 @@ def remove_group_data_permission(org_id, perm_id):
         success = service.remove_group_data_permission(perm_id)
         if success:
             return jsonify({'success': True})
-        return jsonify({'success': False, 'message': 'Failed to delete permission'}), 500
+        return error_response('Failed to delete permission', status=500)
     except Exception as e:
-        return jsonify({'success': False, 'message': str(e)}), 500
+        return error_response(str(e), status=500)
 
 
 @org_bp.route('/orgs/<int:org_id>/permission-preview', methods=['GET'])
@@ -356,9 +355,9 @@ def get_org_permission_preview(org_id):
     """权限预览：org 有效权限全集（含父级继承与来源追溯）"""
     try:
         service = _get_group_service()
-        return jsonify({'success': True, 'data': service.get_permission_preview('org', org_id)})
+        return ok(service.get_permission_preview('org', org_id))
     except Exception as e:
-        return jsonify({'success': False, 'message': str(e)}), 500
+        return error_response(str(e), status=500)
 
 
 @org_bp.route('/orgs/<int:org_id>/permission-config', methods=['GET'])
@@ -368,11 +367,11 @@ def get_org_permission_config(org_id):
     """融合权限配置：org 下所有有效权限集合并为「完整的一份」（菜单+矩阵+数据范围）"""
     try:
         service = _get_group_service()
-        return jsonify({'success': True, 'data': service.get_fused_permission_config('org', org_id)})
+        return ok(service.get_fused_permission_config('org', org_id))
     except Exception as e:
         import traceback
         traceback.print_exc()
-        return jsonify({'success': False, 'message': str(e)}), 500
+        return error_response(str(e), status=500)
 
 
 @org_bp.route('/orgs/<int:org_id>/roles', methods=['GET'])
@@ -387,9 +386,9 @@ def get_org_permission_sets(org_id):
     try:
         service = _get_group_service()
         roles = service.get_org_permission_sets(org_id)
-        return jsonify({'success': True, 'data': roles})
+        return ok(roles)
     except Exception as e:
-        return jsonify({'success': False, 'message': str(e)}), 500
+        return error_response(str(e), status=500)
 
 
 @org_bp.route('/orgs/<int:org_id>/roles', methods=['POST'])
@@ -443,17 +442,14 @@ def set_org_permission_sets(org_id):
         # [最小范围] 挂/摘权限集影响 org 子树全部成员，失效令牌强制刷新
         _bump_org_subtree_users(org_id)
 
-        return jsonify({
-            'success': True,
-            'data': {
-                'added_count': added_count,
-                'removed_count': removed_count
-            }
+        return ok({
+            'added_count': added_count,
+            'removed_count': removed_count
         })
     except Exception as e:
         import traceback
         traceback.print_exc()
-        return jsonify({'success': False, 'message': str(e)}), 500
+        return error_response(str(e), status=500)
 
 
 @org_bp.route('/orgs/<int:org_id>/roles/<int:permission_set_id>', methods=['POST'])
@@ -477,9 +473,9 @@ def add_group_role(org_id, permission_set_id):
         if result.success:
             _bump_org_subtree_users(org_id)
             return jsonify({'success': True})
-        return jsonify({'success': False, 'message': result.message}), 400
+        return error_response(result.message, status=400)
     except Exception as e:
-        return jsonify({'success': False, 'message': str(e)}), 500
+        return error_response(str(e), status=500)
 
 
 @org_bp.route('/orgs/<int:org_id>/roles/<int:permission_set_id>', methods=['DELETE'])
@@ -503,9 +499,9 @@ def remove_group_role(org_id, permission_set_id):
         if result.success:
             _bump_org_subtree_users(org_id)
             return jsonify({'success': True})
-        return jsonify({'success': False, 'message': result.message}), 500
+        return error_response(result.message, status=500)
     except Exception as e:
-        return jsonify({'success': False, 'message': str(e)}), 500
+        return error_response(str(e), status=500)
 
 
 @org_bp.route('/orgs/<int:org_id>/roles/available', methods=['GET'])
@@ -516,9 +512,9 @@ def get_available_roles_for_group(org_id):
     try:
         service = _get_group_service()
         roles = service.get_roles_not_in_group(org_id)
-        return jsonify({'success': True, 'data': roles})
+        return ok(roles)
     except Exception as e:
-        return jsonify({'success': False, 'message': str(e)}), 500
+        return error_response(str(e), status=500)
 
 
 @org_bp.route('/system/migrate-group-permissions-to-roles', methods=['POST'])
@@ -529,13 +525,12 @@ def migrate_group_permissions():
     try:
         service = _get_group_service()
         migrated_count = service.migrate_org_data_permissions_to_roles()
-        return jsonify({
-            'success': True,
-            'data': {'migrated_group_count': migrated_count},
-            'message': f'成功迁移 {migrated_count} 个组织的直接数据权限到对应角色'
-        })
+        return ok(
+            {'migrated_group_count': migrated_count},
+            message=f'成功迁移 {migrated_count} 个组织的直接数据权限到对应角色'
+        )
     except Exception as e:
-        return jsonify({'success': False, 'message': str(e)}), 500
+        return error_response(str(e), status=500)
 
 
 @org_bp.route('/orgs/<int:org_id>/logs', methods=['GET'])
@@ -546,12 +541,10 @@ def get_user_group_logs(org_id):
         cursor = _data_source.execute("SELECT id, name FROM orgs WHERE id = ?", [org_id])
         group = cursor.fetchone()
         if not group:
-            return jsonify({'success': False, 'message': '组织不存在'}), 404
+            return error_response('组织不存在', status=404)
 
-        page = request.args.get('page', 1, type=int)
-        page_size = request.args.get('page_size', 20, type=int)
-
-        offset = (page - 1) * page_size
+        spec = parse_query_spec(request.args)
+        page, page_size, offset = spec.page, spec.page_size, spec.offset
 
         cursor = _data_source.execute("""
             SELECT * FROM audit_logs
@@ -581,4 +574,4 @@ def get_user_group_logs(org_id):
     except Exception as e:
         import traceback
         traceback.print_exc()
-        return jsonify({'success': False, 'message': str(e)}), 500
+        return error_response(str(e), status=500)

@@ -1,4 +1,5 @@
 from flask import Blueprint, request, jsonify
+from meta.core.query_spec import parse_query_spec
 from meta.services.auth_middleware import login_required, get_current_user, is_admin
 from meta.services.cascade_service import get_type_order, HierarchyConfigLoader
 from meta.core.datasource import get_data_source
@@ -427,8 +428,8 @@ def _list_relationships_impl(ds, user, user_id, user_is_admin):
         annotation_category = data.get('annotation_category')
         annotation_content_search = data.get('annotation_content_search')
     else:
-        page = request.args.get('page', 1, type=int)
-        page_size = int(request.args.get('pageSize', request.args.get('page_size', 20)))
+        spec = parse_query_spec(request.args)
+        page, page_size = spec.page, spec.page_size
         version_id = request.args.get('version_id', type=int)
         business_objects = request.args.getlist('business_objects', type=int)
         business_object_ids = request.args.getlist('business_object_id', type=int)

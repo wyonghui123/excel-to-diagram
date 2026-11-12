@@ -1,0 +1,544 @@
+# 作业定义工序（Work Definition Operation）—— 统一资源模型 P2b
+# 依据: docs/specs/spec-unified-resource-model-2026-11-01-v1.0.md
+#       §9.3 数据模型表 / §9.3 关联结构
+#
+# 定位: 作业定义（work_definition）下的工序行，按 seq 顺序执行；
+#   承载 6 类工时与 qty_per，是工序-资源要求（operation_resource_requirement）
+#   的父行。
+#
+# 口径:
+#   ① (definition_id, seq) 唯一。
+#   ② 6 类工时（setup / teardown / run / queue / move / travel）默认 0，整数分钟。
+#   ③ 被 operation_resource_requirement 引用时删除被拒绝（restrict）。
+
+id: work_definition_operation
+name: 作业定义工序
+table_name: work_definition_operations
+description: 作业定义下的工序（顺序、工时、产量倍数、资源组）
+display_name_field: operation_name
+aspects: [audit_aspect]
+
+semantics:
+  meaning: 作业定义工序
+  category: business_document_line
+  aliases:
+    - 作业定义工序
+    - 工艺工序
+    - work definition operation
+
+deletion_policy:
+  mode: restrict
+  restrict_on:
+    - table: operation_resource_requirements
+      foreign_key: operation_id
+      message: 该工序仍被资源要求引用，请先处理资源要求后再删除
+    - table: work_definition_operation_outputs
+      foreign_key: operation_id
+      message: 该工序仍有产出，请先处理产出后再删除
+    - table: process_instructions
+      foreign_key: operation_id
+      message: 该工序仍有过程指令，请先处理指令后再删除
+  cascade_delete: []
+
+audit:
+  enabled: true
+  create:
+    enabled: true
+    fields: all
+  update:
+    enabled: true
+    fields: changed_only
+    exclude: [id, created_at, updated_at]
+  delete:
+    enabled: true
+    fields: business_only
+    exclude: [id, created_at, updated_at]
+  associate:
+    enabled: true
+  dissociate:
+    enabled: true
+
+fields:
+  - id: id
+    name: ID
+    type: integer
+    db_column: id
+    required: true
+    unique: true
+    description: 技术主键
+    semantics:
+      meaning: 自增主键
+      primary_key: true
+
+  - id: definition_id
+    name: 作业定义
+    type: integer
+    db_column: definition_id
+    required: true
+    description: 所属作业定义
+    semantics:
+      meaning: 作业定义引用
+      display:
+        type: association
+        target_type: work_definition
+        display_field: name
+    value_help:
+      source:
+        type: bo
+        target_bo: work_definition
+        value_field: id
+        display_field: name
+        code_field: code
+        apply_target_permissions: true
+      behavior:
+        multiple: false
+        validation: true
+        binding_strength: strict
+        min_search_length: 0
+      presentation:
+        result_type: dialog
+        display_format: "{code} - {name}"
+        columns:
+          - field: code
+            label: 定义编码
+            width: 150
+          - field: name
+            label: 定义名称
+            width: 220
+    ui:
+      widget: select
+      relation: work_definition
+      multiple: false
+      hidden_in_form: true
+      fieldGroup: 关联
+      fieldGroupPosition: 10
+
+  - id: seq
+    name: 工序序号
+    type: integer
+    db_column: seq
+    required: true
+    description: 工序顺序号（同一定义内唯一）
+    constraints:
+      - type: numeric_range
+        gte: 1
+        decimal_places: 0
+    semantics:
+      meaning: 工序顺序
+    ui:
+      widget: number
+      fieldGroup: 关联
+      fieldGroupPosition: 20
+
+  - id: sequence_id
+    name: 所属序列
+    type: integer
+    db_column: sequence_id
+    nullable: true
+    description: 所属路线序列；空表示标准序列（存量行全部为空）
+    semantics:
+      meaning: 作业定义序列引用
+      display:
+        type: association
+        target_type: work_definition_sequence
+        display_field: seq_no
+        placeholder: "空 = 标准序列"
+    value_help:
+      source:
+        type: bo
+        target_bo: work_definition_sequence
+        value_field: id
+        display_field: seq_no
+        apply_target_permissions: true
+      behavior:
+        multiple: false
+        validation: true
+        binding_strength: strict
+        min_search_length: 0
+      presentation:
+        result_type: dialog
+        display_format: "{seq_no} - {seq_type}"
+        columns:
+          - field: seq_no
+            label: 序列号
+            width: 100
+          - field: seq_type
+            label: 序列类型
+            width: 120
+          - field: description
+            label: 说明
+            width: 240
+    ui:
+      widget: select
+      relation: work_definition_sequence
+      multiple: false
+      clearable: true
+      fieldGroup: 关联
+      fieldGroupPosition: 25
+
+  - id: operation_name
+    name: 工序名称
+    type: string
+    db_column: operation_name
+    required: true
+    max_length: 128
+    description: 工序名称
+    semantics:
+      meaning: 工序显示名称
+      display_name: true
+      data_category: text
+      searchable: true
+    ui:
+      widget: input
+      fieldGroup: 基本信息
+      fieldGroupPosition: 30
+
+  - id: resource_group_id
+    name: 资源组
+    type: integer
+    db_column: resource_group_id
+    nullable: true
+    description: 默认执行该工序的资源组；空表示仅由资源要求指定
+    semantics:
+      meaning: 资源组引用
+      display:
+        type: association
+        target_type: resource_group
+        display_field: name
+        placeholder: "由资源要求指定"
+    value_help:
+      source:
+        type: bo
+        target_bo: resource_group
+        value_field: id
+        display_field: name
+        code_field: code
+        apply_target_permissions: true
+      behavior:
+        multiple: false
+        validation: true
+        binding_strength: strict
+        min_search_length: 0
+      presentation:
+        result_type: dialog
+        display_format: "{code} - {name}"
+        columns:
+          - field: code
+            label: 组编码
+            width: 150
+          - field: name
+            label: 组名称
+            width: 220
+    ui:
+      widget: select
+      relation: resource_group
+      multiple: false
+      clearable: true
+      fieldGroup: 关联
+      fieldGroupPosition: 40
+
+  - id: setup_minutes
+    name: 准备工时（分钟）
+    type: integer
+    db_column: setup_minutes
+    required: true
+    default: 0
+    description: 准备工时（分钟）
+    constraints:
+      - type: numeric_range
+        gte: 0
+        decimal_places: 0
+    semantics:
+      meaning: 准备工时
+    ui:
+      widget: number
+      fieldGroup: 工时
+      fieldGroupPosition: 50
+
+  - id: teardown_minutes
+    name: 拆卸工时（分钟）
+    type: integer
+    db_column: teardown_minutes
+    required: true
+    default: 0
+    description: 拆卸工时（分钟）
+    constraints:
+      - type: numeric_range
+        gte: 0
+        decimal_places: 0
+    semantics:
+      meaning: 拆卸工时
+    ui:
+      widget: number
+      fieldGroup: 工时
+      fieldGroupPosition: 60
+
+  - id: run_minutes
+    name: 加工工时（分钟）
+    type: integer
+    db_column: run_minutes
+    required: true
+    default: 0
+    description: 单件加工工时（分钟）
+    constraints:
+      - type: numeric_range
+        gte: 0
+        decimal_places: 0
+    semantics:
+      meaning: 加工工时
+    ui:
+      widget: number
+      fieldGroup: 工时
+      fieldGroupPosition: 70
+
+  - id: queue_minutes
+    name: 排队工时（分钟）
+    type: integer
+    db_column: queue_minutes
+    required: true
+    default: 0
+    description: 排队等待工时（分钟）
+    constraints:
+      - type: numeric_range
+        gte: 0
+        decimal_places: 0
+    semantics:
+      meaning: 排队工时
+    ui:
+      widget: number
+      fieldGroup: 工时
+      fieldGroupPosition: 80
+
+  - id: move_minutes
+    name: 搬运工时（分钟）
+    type: integer
+    db_column: move_minutes
+    required: true
+    default: 0
+    description: 工序间搬运工时（分钟）
+    constraints:
+      - type: numeric_range
+        gte: 0
+        decimal_places: 0
+    semantics:
+      meaning: 搬运工时
+    ui:
+      widget: number
+      fieldGroup: 工时
+      fieldGroupPosition: 90
+
+  - id: travel_minutes
+    name: 路程工时（分钟）
+    type: integer
+    db_column: travel_minutes
+    required: true
+    default: 0
+    description: 上门路程工时（分钟，服务场景）
+    constraints:
+      - type: numeric_range
+        gte: 0
+        decimal_places: 0
+    semantics:
+      meaning: 路程工时
+    ui:
+      widget: number
+      fieldGroup: 工时
+      fieldGroupPosition: 100
+
+  - id: qty_per
+    name: 产量倍数
+    type: number
+    db_column: qty_per
+    required: true
+    default: 1
+    description: 每执行一次工序产出/消耗的倍数（默认 1）
+    semantics:
+      meaning: 工序产量倍数
+    ui:
+      widget: number
+      fieldGroup: 工时
+      fieldGroupPosition: 110
+
+  - id: status
+    name: 状态
+    type: string
+    db_column: status
+    required: true
+    default: draft
+    description: 状态（草稿 / 生效 / 作废）
+    enum_values:
+      - value: draft
+        label: 草稿
+        color: info
+        is_initial: true
+      - value: active
+        label: 生效
+        color: success
+      - value: obsolete
+        label: 作废
+        color: danger
+    value_help:
+      source:
+        type: enum
+        enum_type_id: work_definition_status
+        sort_by: sort_order
+      behavior:
+        validation: true
+        binding_strength: strict
+        multiple: false
+      presentation:
+        result_type: dropdown
+    semantics:
+      meaning: 工序状态
+      filterable: true
+      filter_type: enum
+      filter_label: 状态
+      filter_scope: local
+    ui:
+      widget: select
+      fieldGroup: 基本信息
+      fieldGroupPosition: 120
+
+  - id: created_at
+    name: 创建时间
+    type: datetime
+    db_column: created_at
+    description: 创建时间
+    semantics:
+      meaning: 记录创建时间
+      audit_field: true
+
+  - id: updated_at
+    name: 更新时间
+    type: datetime
+    db_column: updated_at
+    description: 更新时间
+    semantics:
+      meaning: 记录更新时间
+      audit_field: true
+
+indexes:
+  - fields: [definition_id, seq]
+    unique: true
+    name: uq_work_definition_operation_seq
+  - fields: [resource_group_id]
+    name: idx_work_definition_operation_group
+  - fields: [status]
+    name: idx_work_definition_operation_status
+  - fields: [sequence_id]
+    name: idx_work_definition_operation_sequence
+
+relations:
+  - id: work_definition_operation_to_definition
+    name: 作业定义
+    type: reference
+    target: work_definition
+    source_field: definition_id
+    target_field: id
+    cardinality: N:1
+    description: 所属作业定义引用（真外键）
+  - id: work_definition_operation_to_group
+    name: 资源组
+    type: reference
+    target: resource_group
+    source_field: resource_group_id
+    target_field: id
+    cardinality: N:1
+    description: 资源组引用（可空；真外键）
+  - id: work_definition_operation_to_sequence
+    name: 所属序列
+    type: reference
+    target: work_definition_sequence
+    source_field: sequence_id
+    target_field: id
+    cardinality: N:1
+    description: 路线序列引用（可空；空 = 标准序列；真外键）
+
+ui_view_config:
+  # 菜单由迁移 v176 手工声明（挂 master-data），不让自动生成器产出孤儿行
+  skip_auto_menu: true
+  list:
+    detail_mode: drawer
+    title: 作业定义工序
+    columns:
+      - field: definition_id
+        width: 210
+        filterable: true
+        filter_type: value_help
+        render_as: association
+        target_type: work_definition
+        display_field: name
+      - field: seq
+        width: 90
+        sortable: true
+      - field: sequence_id
+        width: 140
+        filterable: true
+        filter_type: value_help
+        render_as: association
+        target_type: work_definition_sequence
+        display_field: seq_no
+      - field: operation_name
+        width: 200
+      - field: resource_group_id
+        width: 180
+        filterable: true
+        filter_type: value_help
+        render_as: association
+        target_type: resource_group
+        display_field: name
+      - field: setup_minutes
+        width: 110
+      - field: run_minutes
+        width: 110
+      - field: qty_per
+        width: 100
+      - field: status
+        width: 90
+        filterable: true
+        filter_type: select
+    selection:
+      enabled: true
+      mode: multiple
+    searchFields: [operation_name]
+    actions:
+      - id: create
+        label: 新建工序
+        icon: plus
+        type: primary
+        permission: work_definition_operation:create
+    defaultSort:
+      field: seq
+      order: asc
+  form:
+    title: 作业定义工序
+    layout: vertical
+    sections:
+      - title: 基本信息
+        columns:
+          - fields: [definition_id, seq]
+          - fields: [sequence_id, operation_name]
+          - fields: [resource_group_id]
+          - fields: [status]
+      - title: 工时与产量
+        columns:
+          - fields: [setup_minutes, teardown_minutes, run_minutes]
+          - fields: [queue_minutes, move_minutes, travel_minutes]
+          - fields: [qty_per]
+  detail:
+    layout: tabs
+    title: "{record.operation_name} 详情"
+    tabs:
+      - id: basic
+        label: 基本信息
+        type: fields
+        fields: [definition_id, seq, sequence_id, operation_name,
+                 resource_group_id, setup_minutes, teardown_minutes,
+                 run_minutes, queue_minutes, move_minutes, travel_minutes,
+                 qty_per, status]
+
+category_config:
+  create_permission: work_definition_operation:create
+  update_permission: work_definition_operation:update
+  delete_permission: work_definition_operation:delete
+  owner_auto_permission: false

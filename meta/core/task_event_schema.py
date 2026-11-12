@@ -30,10 +30,6 @@ import uuid
 from datetime import datetime
 from typing import Any, Dict, List, Optional, Tuple
 
-from meta.core.models import (
-    FieldType, IndexSource, MetaField, MetaIndex, MetaObject,
-)
-
 logger = logging.getLogger(__name__)
 
 # [G3 审批闭环] 审批类任务终止态 → 回写仍停在 submitted 的 change_request。
@@ -62,154 +58,24 @@ WORKLOG_ENTRY_TYPES: Tuple[str, ...] = (
     "transition", "bo_call", "agent_tool", "heartbeat", "note",
 )
 
-
-def _f(fid: str, ftype: FieldType, *, required: bool = False,
-       unique: bool = False, default=None, description: str = "") -> MetaField:
-    return MetaField(
-        id=fid, name=fid, field_type=ftype, db_column=fid,
-        required=required, unique=unique, default=default, description=description,
-    )
-
-
-def _idx(name: str, columns, *, unique: bool = False, description: str = "") -> MetaIndex:
-    return MetaIndex(
-        fields=list(columns), db_columns=list(columns), name=name,
-        unique=unique, source=IndexSource.SCHEMA, description=description,
-    )
-
-
 # ─────────────────────────────────────────────────────────────────────────────
-# 1. TASK_EVENT（事件账：每次迁移一条；兼 hold/release）
+# MetaObject 兼容入口（[G7 2026-11-02] 定义唯一来源 = YAML）
+#   meta/schemas/task_event.yaml  /  meta/schemas/task_worklog.yaml
 # ─────────────────────────────────────────────────────────────────────────────
 
-def _build_task_event_meta() -> MetaObject:
-    """构造 TASK_EVENT 表 MetaObject（who / when / what / task / run + OCED 对象关联）。"""
-    fields = [
-        _f("id", FieldType.STRING, required=True, unique=True,
-           description="事件 ID（uuid4 hex，主键）"),
-        _f("task_id", FieldType.STRING, required=True,
-           description="所属任务 ID（弱引用无 FK）"),
-        _f("workflow_run_id", FieldType.STRING,
-           description="所属 Run（弱引用无 FK；OCED 关联）"),
-        _f("event_type", FieldType.STRING, required=True, default="status_changed",
-           description="created / status_changed / hold / release / legacy_execution"),
-        _f("from_status", FieldType.STRING,
-           description="迁移前状态（created / hold / release 事件为空）"),
-        _f("to_status", FieldType.STRING,
-           description="迁移后状态（created 事件 = pending；hold / release 为空）"),
-        _f("actor", FieldType.STRING,
-           description="who：操作者 user_id / agent_id / system"),
-        _f("actor_kind", FieldType.STRING,
-           description="human / agent / system（executor 维度）"),
-        _f("reason", FieldType.STRING,
-           description="what：触发原因 / 守卫说明 / 审核意见摘要"),
-        _f("payload", FieldType.JSON,
-           description="what 细节（如 outputs hash、hold 原因编码、edge 判定结果）"),
+def get_task_event_meta_objects() -> List:
+    """返回事件账两表 MetaObject（从 registry 取 YAML 定义）。"""
+    from meta.core.task_schema import get_task_meta_objects
 
-        # OCED event-observes-objects（§16.4）
-        _f("doc_ref", FieldType.STRING,
-           description="业务对象弱引用（OCED 对象关联键）；无 FK"),
-        _f("line_refs", FieldType.JSON,
-           description="行级弱引用数组（行级 hold 场景；无 FK）"),
-        _f("agent_session_id", FieldType.STRING,
-           description="Agent 会话 ID（非 agent 来源为空）"),
-        _f("trace_id", FieldType.STRING, description="OTel trace id"),
-
-        _f("occurred_at", FieldType.DATETIME, required=True,
-           description="when：业务发生时间（append-only 时间轴）"),
-        _f("created_at", FieldType.DATETIME, description="落账时间"),
-    ]
-
-    indexes = [
-        _idx("idx_task_events_task", ["task_id", "occurred_at"],
-             description="按任务取事件轴（状态回放 / 派生视图）"),
-        _idx("idx_task_events_run", ["workflow_run_id"],
-             description="按 Run 聚合（Run 进度 / OCED 导出）"),
-        _idx("idx_task_events_type", ["event_type", "occurred_at"],
-             description="按类型扫描（hold 派生视图：hold/release 配对）"),
-        _idx("idx_task_events_doc", ["doc_ref"],
-             description="按单据追过程（OCED event-observes-objects）"),
-        _idx("idx_task_events_trace", ["trace_id"],
-             description="trace 关联"),
-    ]
-
-    return MetaObject(
-        id=TASK_EVENT_ID,
-        name="任务事件",
-        table_name=TASK_EVENT_TABLE,
-        description="任务生命周期事件账（append-only，不可删；≈ OCED 底座；兼 hold/release）",
-        fields=fields,
-        indexes=indexes,
-    )
-
-
-# ─────────────────────────────────────────────────────────────────────────────
-# 2. WORKLOG（执行记录 / 审计；与迁移事件配对）
-# ─────────────────────────────────────────────────────────────────────────────
-
-def _build_worklog_meta() -> MetaObject:
-    """构造 WORKLOG 表 MetaObject（who / when / what + 输入输出哈希，不可删除）。"""
-    fields = [
-        _f("id", FieldType.STRING, required=True, unique=True,
-           description="记录 ID（uuid4 hex，主键）"),
-        _f("task_id", FieldType.STRING, required=True,
-           description="所属任务 ID（弱引用无 FK）"),
-        _f("workflow_run_id", FieldType.STRING,
-           description="所属 Run（弱引用无 FK）"),
-        _f("event_id", FieldType.STRING,
-           description="配对的 TASK_EVENT ID（迁移类记录；弱引用无 FK）"),
-        _f("entry_type", FieldType.STRING, required=True, default="transition",
-           description="transition / bo_call / agent_tool / heartbeat / note"),
-        _f("actor", FieldType.STRING, description="who：操作者"),
-        _f("actor_kind", FieldType.STRING, description="human / agent / system"),
-        _f("summary", FieldType.STRING, description="what：人读摘要"),
-        _f("detail", FieldType.JSON, description="what 明细（审核意见、BO 调用参数等）"),
-        _f("inputs_hash", FieldType.STRING,
-           description="入参哈希（防篡改 / 幂等比对）"),
-        _f("outputs_hash", FieldType.STRING,
-           description="出参哈希（防篡改 / 幂等比对）"),
-        _f("progress_pct", FieldType.INTEGER,
-           description="心跳进度（长任务；驱动超时判定）"),
-        _f("doc_ref", FieldType.STRING, description="业务对象弱引用；无 FK"),
-        _f("trace_id", FieldType.STRING, description="OTel trace id"),
-        _f("occurred_at", FieldType.DATETIME, required=True, description="业务发生时间"),
-        _f("created_at", FieldType.DATETIME, description="落账时间"),
-    ]
-
-    indexes = [
-        _idx("idx_task_worklogs_task", ["task_id", "occurred_at"],
-             description="按任务取执行记录（含 claim→done 时长统计）"),
-        _idx("idx_task_worklogs_run", ["workflow_run_id"],
-             description="按 Run 聚合审计"),
-        _idx("idx_task_worklogs_event", ["event_id"],
-             description="与事件配对回溯"),
-    ]
-
-    return MetaObject(
-        id=WORKLOG_ID,
-        name="任务执行记录",
-        table_name=WORKLOG_TABLE,
-        description="任务执行记录 / 审计日志（append-only，不可删；每次迁移与事件配对）",
-        fields=fields,
-        indexes=indexes,
-    )
-
-
-# ─────────────────────────────────────────────────────────────────────────────
-# 建表入口
-# ─────────────────────────────────────────────────────────────────────────────
-
-def build_task_event_meta_objects() -> List[MetaObject]:
-    """返回 A3 两表 MetaObject。"""
-    return [_build_task_event_meta(), _build_worklog_meta()]
+    by_id = {obj.id: obj for obj in get_task_meta_objects()}
+    return [by_id[i] for i in (TASK_EVENT_ID, WORKLOG_ID) if i in by_id]
 
 
 def ensure_task_event_tables(data_source):
     """在**平台库**建 task_events / task_worklogs 两表 + 索引（幂等，启动期调用）。
 
-    与 A1 四表同一机制（sync_schema_from_meta）：表存在跳过、缺列补、索引
-    `CREATE INDEX IF NOT EXISTS`。两表是**平台机制表**（非业务 BO），
-    故显式登记进表名安全白名单。
+    定义来自 YAML，走 sync_schema_from_meta：表存在跳过、缺列补、索引
+    `CREATE INDEX IF NOT EXISTS`。两表是**平台机制表**，故显式登记进表名安全白名单。
 
     Returns:
         本次执行的 SQL 语句列表（首次 = 2 建表 + 索引；幂等重放仅索引 IF NOT EXISTS）。
@@ -219,7 +85,7 @@ def ensure_task_event_tables(data_source):
 
     for name in (TASK_EVENT_TABLE, WORKLOG_TABLE):
         register_table_name(name)
-    return sync_schema_from_meta(data_source, build_task_event_meta_objects())
+    return sync_schema_from_meta(data_source, get_task_event_meta_objects())
 
 
 def task_event_tables_exist(data_source) -> Dict[str, bool]:

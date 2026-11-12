@@ -1,0 +1,824 @@
+# 调拨单头 (Transfer Order) — M4 内部供应
+# 依据: docs/specs/spec-transfer-order-object-model-2026-11-02.md §3.1 / §4 / §5
+#
+# 定位: 同法人、不同库存组织之间移动实物的内部调拨单据头。
+#       跨法人走 ISO（复用销售订单 + 收货 + 内部发票），不降级为调拨。
+#       行见 transfer_order_line。
+#
+# 头级口径:
+#   ① 业务键 transfer_order_no：创建时按 document_type.number_sequence_id 取号，
+#      生成后不可改，允许跳号。
+#   ② 单据类型由切面 document_type_aspect 提供；头类型 scope_bo='transfer_order'
+#      + level='header'，document_category 只允许 standard（现有枚举无 transfer）。
+#   ③ 状态机 4 态 draft / released / closed / cancelled；
+#      fulfillment_status 为只读派生缓存（open / partially_shipped / shipped /
+#      partially_received / received）。
+#   ④ 头不存金额、币种、税率、供应商、客户、发票。
+#      reversal_of_transfer_id 只记反向单回指的原单，由 create_reversal 写入。
+#   ⑤ legal_entity_id 为组织上溯解析的法人快照，只读写入；解析失败拒绝创建。
+#   ⑥ 发货事实（actual_ship_date / carrier_name / waybill_no）由 ship 动作写入，
+#      不创建 shipment 对象；在途量为派生值 sum(qty_shipped - qty_received)。
+#
+# 服务层不变量（由 transfer_order_guard_service 强制）:
+#   from_org_id != to_org_id；两组织存在、启用、具备 inventory 职能；
+#   两组织上溯到同一法人；仅 draft 可删除；终态禁止 ship / receive / update。
+
+id: transfer_order
+name: 调拨单
+table_name: transfer_orders
+description: 调拨单头（行见 transfer_order_line）
+display_name_field: transfer_order_no
+aspects: [audit_aspect, document_type_aspect]
+
+semantics:
+  meaning: 调拨单
+  category: business_document
+  business_key: [transfer_order_no]
+  display_name_field: transfer_order_no
+  aliases:
+    - 调拨单
+    - 内部调拨单
+    - Transfer Order
+    - TO
+
+deletion_policy:
+  # 事实单据：仅 draft 可删除（守卫强制度）；删除头时级联清行
+  mode: restrict
+  restrict_on: []
+  cascade_delete:
+    - transfer_order_lines
+
+audit:
+  enabled: true
+  create:
+    enabled: true
+    fields: all
+  update:
+    enabled: true
+    fields: changed_only
+    exclude:
+      - id
+      - created_at
+      - updated_at
+      - fulfillment_status
+      - actual_ship_date
+  delete:
+    enabled: true
+    fields: business_only
+    exclude:
+      - id
+      - created_at
+      - updated_at
+  associate:
+    enabled: true
+  dissociate:
+    enabled: true
+
+org_scope:
+  mode: dual
+  from_field: from_org_id
+  to_field: to_org_id
+  function: inventory
+  write_check: true
+
+numbering:
+  no_field: transfer_order_no
+  date_field: transfer_date
+  type_table: type_definitions
+
+# [Rule Convergence M2 2026-11-07] 审批对象注册（表名 + 金额取值优先级）
+approval:
+  table: transfer_orders
+  amount_fields: []
+
+fields:
+  - id: id
+    name: ID
+    type: integer
+    db_column: id
+    required: true
+    unique: true
+    description: 技术主键
+    semantics:
+      meaning: 自增主键
+      primary_key: true
+
+  # 取号由平台按「单据类型 → number_sequence_id」完成，生成后不可改
+  - id: transfer_order_no
+    name: 调拨单号
+    type: string
+    db_column: transfer_order_no
+    required: true
+    unique: true
+    max_length: 30
+    description: 调拨单号（业务键，取号生成后不可修改）
+    semantics:
+      meaning: 调拨单业务编号
+      business_key: true
+      immutable: true
+      data_category: code
+      searchable: true
+    ui:
+      widget: input
+      editable: false
+
+  # 单据类型由切面 document_type_aspect 提供（字段 document_type_id）
+
+  - id: transfer_date
+    name: 调拨日期
+    type: date
+    db_column: transfer_date
+    required: true
+    description: 调拨业务日期；取号日期段基准；release 后冻结
+    semantics:
+      meaning: 调拨业务日期
+      filterable: true
+      filter_type: date
+      filter_label: 调拨日期
+      filter_scope: local
+    ui:
+      widget: date
+
+  - id: status
+    name: 状态
+    type: string
+    db_column: status
+    required: true
+    default: draft
+    max_length: 20
+    description: 单据状态（草稿 / 已下达 / 已关闭 / 已取消 / 已红冲）
+    enum_values:
+      - value: draft
+        label: 草稿
+        color: info
+        category: draft
+        is_initial: true
+      - value: released
+        label: 已下达
+        color: primary
+        category: active
+      - value: closed
+        label: 已关闭
+        color: info
+        category: inactive
+      - value: cancelled
+        label: 已取消
+        color: danger
+        category: inactive
+      - value: reversed
+        label: 已红冲
+        color: danger
+        category: inactive
+    semantics:
+      meaning: 调拨单状态
+      filterable: true
+      filter_type: enum
+      filter_label: 状态
+      filter_scope: local
+    ui:
+      widget: select
+
+  # 审批状态：与业务状态 status 正交；事实源 tasks(type=approval)
+  - id: approval_status
+    name: 审批状态
+    type: string
+    db_column: approval_status
+    required: true
+    default: not_required
+    max_length: 20
+    description: 审批状态（只读缓存，事实源 tasks(type=approval)）
+    enum_values:
+      - value: not_required
+        label: 免审批
+        color: info
+        category: active
+        is_initial: true
+      - value: pending
+        label: 审批中
+        color: warning
+        category: active
+      - value: approved
+        label: 审批通过
+        color: success
+        category: active
+      - value: rejected
+        label: 审批驳回
+        color: danger
+        category: inactive
+    semantics:
+      meaning: 审批状态（正交于业务状态 status）
+      filterable: true
+      filter_type: enum
+      filter_label: 审批状态
+      filter_scope: local
+    ui:
+      readonly: true
+
+  - id: fulfillment_status
+    name: 履约状态
+    type: string
+    db_column: fulfillment_status
+    nullable: true
+    max_length: 30
+    description: 发货 / 收货进度（只读派生缓存，由 qty_shipped / qty_received 派生）
+    enum_values:
+      - value: open
+        label: 未发货
+        color: info
+        category: active
+      - value: partially_shipped
+        label: 部分发货
+        color: warning
+        category: active
+      - value: shipped
+        label: 已发货
+        color: primary
+        category: active
+      - value: partially_received
+        label: 部分收货
+        color: warning
+        category: active
+      - value: received
+        label: 已收货
+        color: success
+        category: inactive
+    semantics:
+      meaning: 调拨履约进度（与单据状态 status 正交）
+      filterable: true
+      filter_type: enum
+      filter_label: 履约状态
+      filter_scope: local
+    ui:
+      readonly: true
+
+  - id: from_org_id
+    name: 调出组织
+    type: integer
+    db_column: from_org_id
+    required: true
+    description: 调出库存组织（须存在、启用、具备 inventory 职能）
+    semantics:
+      meaning: 调出库存组织
+      display:
+        type: association
+        target_type: org
+        display_field: name
+    value_help:
+      source:
+        type: bo
+        target_bo: org
+        value_field: id
+        display_field: name
+        code_field: code
+        apply_target_permissions: true
+        value_filter:
+          status: active
+      behavior:
+        multiple: false
+        validation: true
+        binding_strength: strict
+        min_search_length: 0
+      presentation:
+        result_type: dropdown
+        display_format: "{code} - {name}"
+        columns:
+          - field: code
+            label: 组织编码
+            width: 140
+          - field: name
+            label: 组织名称
+            width: 220
+    ui:
+      widget: select
+      relation: org
+      multiple: false
+
+  - id: to_org_id
+    name: 调入组织
+    type: integer
+    db_column: to_org_id
+    required: true
+    description: 调入库存组织（须存在、启用、具备 inventory 职能；不得与调出组织相同）
+    semantics:
+      meaning: 调入库存组织
+      display:
+        type: association
+        target_type: org
+        display_field: name
+    value_help:
+      source:
+        type: bo
+        target_bo: org
+        value_field: id
+        display_field: name
+        code_field: code
+        apply_target_permissions: true
+        value_filter:
+          status: active
+      behavior:
+        multiple: false
+        validation: true
+        binding_strength: strict
+        min_search_length: 0
+      presentation:
+        result_type: dropdown
+        display_format: "{code} - {name}"
+        columns:
+          - field: code
+            label: 组织编码
+            width: 140
+          - field: name
+            label: 组织名称
+            width: 220
+    ui:
+      widget: select
+      relation: org
+      multiple: false
+
+  - id: legal_entity_id
+    name: 法人
+    type: integer
+    db_column: legal_entity_id
+    required: true
+    description: 法人快照（只读派生；调出 / 调入组织上溯的同一法人组织 id）
+    semantics:
+      meaning: 调拨所属法人
+      display:
+        type: association
+        target_type: org
+        display_field: name
+    value_help:
+      source:
+        type: bo
+        target_bo: org
+        value_field: id
+        display_field: name
+        code_field: code
+        apply_target_permissions: true
+        value_filter:
+          status: active
+      behavior:
+        multiple: false
+        validation: true
+        binding_strength: strict
+        min_search_length: 0
+      presentation:
+        result_type: dropdown
+        display_format: "{code} - {name}"
+    ui:
+      widget: select
+      relation: org
+      multiple: false
+      readonly: true
+
+  - id: from_location_id
+    name: 调出库位
+    type: integer
+    db_column: from_location_id
+    nullable: true
+    description: 调出库位 / 仓库（可空 = 组织级调拨；不校验组织归属）
+    semantics:
+      meaning: 调出库位
+      display:
+        type: association
+        target_type: location
+        display_field: name
+        placeholder: "组织级调拨"
+    value_help:
+      source:
+        type: bo
+        target_bo: location
+        value_field: id
+        display_field: name
+        code_field: code
+        apply_target_permissions: true
+        value_filter:
+          status: active
+      behavior:
+        multiple: false
+        validation: true
+        binding_strength: strict
+        min_search_length: 0
+      presentation:
+        result_type: dropdown
+        display_format: "{code} {name}"
+        columns:
+          - field: code
+            label: 位置编码
+            width: 140
+          - field: name
+            label: 位置名称
+            width: 200
+    ui:
+      widget: select
+      relation: location
+      multiple: false
+      clearable: true
+
+  - id: to_location_id
+    name: 调入库位
+    type: integer
+    db_column: to_location_id
+    nullable: true
+    description: 调入库位 / 仓库（可空 = 组织级调拨；不校验组织归属）
+    semantics:
+      meaning: 调入库位
+      display:
+        type: association
+        target_type: location
+        display_field: name
+        placeholder: "组织级调拨"
+    value_help:
+      source:
+        type: bo
+        target_bo: location
+        value_field: id
+        display_field: name
+        code_field: code
+        apply_target_permissions: true
+        value_filter:
+          status: active
+      behavior:
+        multiple: false
+        validation: true
+        binding_strength: strict
+        min_search_length: 0
+      presentation:
+        result_type: dropdown
+        display_format: "{code} {name}"
+        columns:
+          - field: code
+            label: 位置编码
+            width: 140
+          - field: name
+            label: 位置名称
+            width: 200
+    ui:
+      widget: select
+      relation: location
+      multiple: false
+      clearable: true
+
+  - id: project_id
+    name: 项目
+    type: integer
+    db_column: project_id
+    nullable: true
+    description: 整单归集项目（可空）
+    semantics:
+      meaning: 调拨所属项目
+      display:
+        type: association
+        target_type: project
+        display_field: name
+        placeholder: "未归集"
+    value_help:
+      source:
+        type: bo
+        target_bo: project
+        value_field: id
+        display_field: name
+        code_field: project_no
+        apply_target_permissions: true
+      behavior:
+        multiple: false
+        validation: true
+        binding_strength: strict
+        min_search_length: 0
+      presentation:
+        result_type: dropdown
+        display_format: "{project_no} {name}"
+        columns:
+          - field: project_no
+            label: 项目编号
+            width: 140
+          - field: name
+            label: 项目名称
+            width: 200
+    ui:
+      widget: select
+      relation: project
+      multiple: false
+      clearable: true
+
+  - id: actual_ship_date
+    name: 首次发货日期
+    type: date
+    db_column: actual_ship_date
+    nullable: true
+    description: 首次发货日期（ship 动作写入，只读）
+    semantics:
+      meaning: 首次发货日期
+      filterable: true
+      filter_type: date
+      filter_label: 首次发货日期
+      filter_scope: local
+    ui:
+      widget: date
+      readonly: true
+
+  - id: carrier_name
+    name: 承运商
+    type: string
+    db_column: carrier_name
+    nullable: true
+    max_length: 100
+    description: 承运商（ship 动作写入，可空）
+    semantics:
+      meaning: 承运商名称
+      searchable: true
+    ui:
+      widget: input
+
+  - id: waybill_no
+    name: 运单号
+    type: string
+    db_column: waybill_no
+    nullable: true
+    max_length: 50
+    description: 运单号（ship 动作写入，可空）
+    semantics:
+      meaning: 承运商运单号
+      data_category: code
+      searchable: true
+    ui:
+      widget: input
+
+  - id: remark
+    name: 备注
+    type: text
+    db_column: remark
+    nullable: true
+    description: 备注
+    semantics:
+      meaning: 调拨单备注
+      searchable: true
+    ui:
+      widget: textarea
+
+  # 反向调拨：由原单互换调出 / 调入组织与库位生成的反向草稿单
+  - id: reversal_of_transfer_id
+    name: 反向原单
+    type: integer
+    db_column: reversal_of_transfer_id
+    nullable: true
+    description: 反向调拨原单 ID（由 create_reversal 写入，只读）
+    semantics:
+      meaning: 反向调拨的原调拨单
+      display:
+        type: association
+        target_type: transfer_order
+        display_field: transfer_order_no
+      hint: 空表示普通调拨单；有值表示由原单反向生成
+    ui:
+      widget: select
+      relation: transfer_order
+      readonly: true
+
+  - id: created_at
+    name: 创建时间
+    type: datetime
+    db_column: created_at
+    description: 创建时间
+    semantics:
+      meaning: 记录创建时间
+      audit_field: true
+
+  - id: updated_at
+    name: 更新时间
+    type: datetime
+    db_column: updated_at
+    description: 更新时间
+    semantics:
+      meaning: 记录更新时间
+      audit_field: true
+
+indexes:
+  - fields: [transfer_order_no]
+    unique: true
+    name: uidx_transfer_order_no
+  - fields: [document_type_id]
+    name: idx_transfer_order_type
+  - fields: [transfer_date]
+    name: idx_transfer_order_date
+  - fields: [from_org_id]
+    name: idx_transfer_order_from_org
+  - fields: [to_org_id]
+    name: idx_transfer_order_to_org
+  - fields: [project_id]
+    name: idx_transfer_order_project
+  - fields: [status]
+    name: idx_transfer_order_status
+  - fields: [reversal_of_transfer_id]
+    name: idx_transfer_order_reversal
+
+relations:
+  - id: transfer_order_to_type_definition
+    name: 单据类型
+    type: reference
+    target: type_definition
+    source_field: document_type_id
+    target_field: id
+    cardinality: N:1
+    description: 调拨单类型引用（真外键，限定 header 层）
+  - id: transfer_order_to_from_org
+    name: 调出组织
+    type: reference
+    target: org
+    source_field: from_org_id
+    target_field: id
+    cardinality: N:1
+    description: 调出库存组织引用（真外键）
+  - id: transfer_order_to_to_org
+    name: 调入组织
+    type: reference
+    target: org
+    source_field: to_org_id
+    target_field: id
+    cardinality: N:1
+    description: 调入库存组织引用（真外键）
+  - id: transfer_order_to_legal_entity
+    name: 法人
+    type: reference
+    target: org
+    source_field: legal_entity_id
+    target_field: id
+    cardinality: N:1
+    description: 法人快照引用（只读派生）
+  - id: transfer_order_to_from_location
+    name: 调出库位
+    type: reference
+    target: location
+    source_field: from_location_id
+    target_field: id
+    cardinality: N:1
+    description: 调出库位引用（可空）
+  - id: transfer_order_to_to_location
+    name: 调入库位
+    type: reference
+    target: location
+    source_field: to_location_id
+    target_field: id
+    cardinality: N:1
+    description: 调入库位引用（可空）
+  - id: transfer_order_to_project
+    name: 项目
+    type: reference
+    target: project
+    source_field: project_id
+    target_field: id
+    cardinality: N:1
+    description: 项目引用（可空）
+  - id: transfer_order_to_reversal_original
+    name: 反向原单
+    type: reference
+    target: transfer_order
+    source_field: reversal_of_transfer_id
+    target_field: id
+    cardinality: N:1
+    description: 反向调拨引用的原调拨单（可空）
+
+ui_view_config:
+  # 菜单由 v190 迁移手工声明（procurement / transfer-order-management）
+  skip_auto_menu: true
+  showChangeHistory: true
+  list:
+    detail_mode: page
+    title: 调拨单
+    description: 调拨单（草稿 / 已下达 / 已关闭 / 已取消）
+    columns:
+      - field: transfer_order_no
+        width: 180
+        sortable: true
+      - field: document_type_id
+        width: 120
+      - field: transfer_date
+        width: 120
+        format: date
+        sortable: true
+      - field: from_org_id
+        width: 160
+      - field: to_org_id
+        width: 160
+      - field: status
+        width: 100
+        filterable: true
+        filter_type: select
+      - field: approval_status
+        width: 110
+        filterable: true
+        filter_type: select
+      - field: fulfillment_status
+        width: 120
+        filterable: true
+        filter_type: select
+    selection:
+      enabled: true
+      mode: multiple
+    searchFields:
+      - transfer_order_no
+      - waybill_no
+    actions:
+      - id: create
+        label: 新建调拨单
+        icon: plus
+        type: primary
+        permission: transfer_order:create
+      - id: export
+        label: 导出
+        icon: download
+        type: default
+    defaultSort:
+      field: transfer_date
+      order: desc
+  form:
+    title: 调拨单信息
+    layout: vertical
+    sections:
+      - title: 单据信息
+        columns:
+          - fields: [transfer_order_no, document_type_id]
+          - fields: [transfer_date, status]
+          - fields: [approval_status, fulfillment_status]
+      - title: 组织与库位
+        columns:
+          - fields: [from_org_id, to_org_id]
+          - fields: [legal_entity_id, project_id]
+          - fields: [from_location_id, to_location_id]
+      - title: 发货信息
+        columns:
+          - fields: [actual_ship_date]
+          - fields: [carrier_name, waybill_no]
+      - title: 其他信息
+        columns:
+          - fields: [remark]
+  child_sections:
+    - child_object: transfer_order_line
+      title: 调拨行
+      display: tab
+      pageSize: 10
+      useMetaList: true
+      enableDetail: true
+      enableAutoCrud: true
+      rowMutability: fullEditable
+
+# 调拨发货红冲：原地红冲发货事实（released → reversed），不新建反向调拨单
+rules:
+  - id: reverse_transfer_shipment
+    name: 调拨发货红冲
+    type: state_transition
+    state_field: status
+    from_states: [released]
+    to_state: reversed
+    triggers: [before_update]
+    ui_hints:
+      label: 发货红冲
+      icon: undo
+      confirm_message: "红冲将回退本次发货的库存 / 序列号 / 容器 / 单据流事实，仅用于数据错误；已收货请使用反向调拨。确定红冲吗？"
+
+doc_effect:
+  faces:
+    - id: inventory_ship
+      primitive: inventory_reverse_by_source
+      args:
+        source_doc_type: transfer_order
+        source_doc_id: "{id}"
+        remark: "调拨单 {id} 发货冲销"
+      on_missing: skip
+    - id: serial
+      primitive: serial_reverse_by_txn
+      args:
+        txn_ids: "{inventory_ship.source_txn_ids}"
+      on_missing: skip
+    - id: hu
+      primitive: hu_reverse_document
+      args:
+        doc_type: transfer_order
+        doc_id: "{id}"
+      on_missing: skip
+    - id: doc_flow
+      primitive: edge_compensate_by_source
+      args:
+        source_bo: transfer_order_line
+        rule_ids: [transfer_order_line_to_issue_txn]
+        ref: "{id}"
+        derived_by: transfer_order_reverse
+      on_missing: skip
+    - id: lines
+      primitive: transfer_reverse_lines
+      args:
+        doc_id: "{id}"
+        now: "{now}"
+      on_missing: skip
+  projections:
+    - id: fulfillment
+      primitive: recompute_transfer_fulfillment
+      args:
+        doc_id: "{id}"
+  reversal:
+    from_states: [released]
+    to_state: reversed
+    idempotent_states: [reversed]
+    order: declared
+    write_audit_fields:
+      updated_at: "{now}"

@@ -36,6 +36,8 @@ from datetime import datetime, time, timedelta
 from decimal import Decimal, ROUND_HALF_UP
 from typing import Any, Dict, List, Optional
 
+from meta.services import project_task_guard
+
 logger = logging.getLogger(__name__)
 
 WORK_ORDER_TABLE = 'work_orders'
@@ -57,11 +59,16 @@ CHANGE_EVENT_TABLE = 'change_events'
 SCHEDULE_KIND_SERVICE = 'service'
 
 ORDER_TYPE_SERVICE = 'service'
+# 售后变体（维修 / 安装 / 保养）按 service 路径复用：同挂 service 计划行、同走 SLA
+# （P2 G9；R-ST-* 对这四个值一致生效）
+ORDER_TYPE_SERVICE_LIKE = ('service', 'repair', 'install', 'maintenance')
 ORDER_TYPE_PRODUCTION = 'production'
 
 SOURCE_DEMAND_SCHEDULE = 'sales_order_schedule'
 SOURCE_DEMAND_LINE = 'sales_order_line'
-SOURCE_DEMAND_TYPES = (SOURCE_DEMAND_SCHEDULE, SOURCE_DEMAND_LINE)
+SOURCE_DEMAND_PROJECT_TASK = 'project_task'
+SOURCE_DEMAND_TYPES = (SOURCE_DEMAND_SCHEDULE, SOURCE_DEMAND_LINE,
+                       SOURCE_DEMAND_PROJECT_TASK)
 
 STRUCTURE_USAGE_PRODUCTION = 'production'
 STRUCTURE_STATUS_ACTIVE = 'active'
@@ -102,6 +109,10 @@ SERVICE_STATUS_COMPLETED = 'completed'
 SERVICE_STATUS_CANCELLED = 'cancelled'
 
 SLA_RULE_AMBIGUOUS = 'SLA_RULE_AMBIGUOUS'
+
+#: G15 G5：工单发布后项目归属锁定
+STATUS_RELEASED = 'released'
+PROJECT_TASK_COLUMN = 'project_task_id'
 
 
 class WorkOrderError(ValueError):
@@ -176,16 +187,66 @@ class WorkOrderService:
     # ------------------------------------------------------------------ 创建
 
     def create_work_order(self, payload: Dict[str, Any]) -> Dict[str, Any]:
-        """按 order_type 分流：service（SLA 路径，行为不变）/ production（需求追溯 + 组件展开）。"""
+        """按 order_type 分流：service 族（SLA 路径）/ production（需求追溯 + 组件展开）。"""
         payload = dict(payload or {})
         order_type = payload.get('order_type') or ORDER_TYPE_SERVICE
         if order_type == ORDER_TYPE_PRODUCTION:
             return self._create_production(payload)
-        if order_type != ORDER_TYPE_SERVICE:
+        if order_type not in ORDER_TYPE_SERVICE_LIKE:
             raise WorkOrderError(
-                '工单类型 %s 尚未启用（仅支持 service / production）' % order_type,
+                '工单类型 %s 尚未启用（支持 service / repair / install / '
+                'maintenance / production）' % order_type,
                 field_name='order_type', rule='ST_ORDER_TYPE_UNSUPPORTED')
         return self._create_service(payload)
+
+    # ------------------------------------------------- G15 项目任务执行守卫
+
+    def validate_project_scope(self, payload: Dict[str, Any],
+                               existing: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
+        """G1-G5 的统一判定入口（创建与更新路径共用）。
+
+        · 只校验 payload 中显式出现的项目 / 任务字段；更新时缺省字段回落旧值。
+        · 返回归一化后的 {project_id, project_task_id}，供写入口径使用。
+        """
+        data = dict(payload or {})
+        old = dict(existing or {})
+        has_project = 'project_id' in data
+        has_task = PROJECT_TASK_COLUMN in data
+        project_id = data.get('project_id') if has_project \
+            else old.get('project_id')
+        task_id = data.get(PROJECT_TASK_COLUMN) if has_task \
+            else old.get(PROJECT_TASK_COLUMN)
+
+        try:
+            # G5：已发布工单锁定项目归属
+            if str(old.get('status') or '').strip().lower() == STATUS_RELEASED:
+                project_changed = has_project \
+                    and project_task_guard.to_int(data.get('project_id')) \
+                    != project_task_guard.to_int(old.get('project_id'))
+                task_changed = has_task \
+                    and project_task_guard.to_int(data.get(PROJECT_TASK_COLUMN)) \
+                    != project_task_guard.to_int(old.get(PROJECT_TASK_COLUMN))
+                if project_changed or task_changed:
+                    raise project_task_guard.ProjectTaskGuardError(
+                        '工单已发布，禁止修改项目 / 项目任务归属',
+                        field_name=PROJECT_TASK_COLUMN,
+                        rule=project_task_guard.RULE_TASK_LOCKED,
+                        details={'work_order_id': old.get('id')})
+
+            # G1 / G2 / G3：任务必带项目、同项目、activity 且可执行
+            if not _blank(task_id):
+                project_task_guard.assert_task_executable(
+                    self.ds, project_id, task_id)
+
+            # G4：engineered 多任务项目必须落到具体任务
+            project_task_guard.assert_engineered_task_required(
+                self.ds, project_id, task_id)
+        except project_task_guard.ProjectTaskGuardError as error:
+            raise WorkOrderError(
+                str(error), field_name=error.field_name, rule=error.rule,
+                details=error.details)
+        return {'project_id': project_id,
+                PROJECT_TASK_COLUMN: task_id}
 
     def _create_service(self, payload: Dict[str, Any]) -> Dict[str, Any]:
         """创建服务工单并生成 SLA 里程碑；返回 `{'id', 'work_order_no', 'status', 'sla'}`。"""
@@ -213,6 +274,7 @@ class WorkOrderService:
 
         opened_at = payload.get('opened_at') or _now()
         _parse_dt(opened_at)  # 格式校验（非法直接拒绝）
+        scope = self.validate_project_scope(payload)
 
         work_order_no = payload.get('work_order_no') or self._next_work_order_no()
         now = _now()
@@ -223,6 +285,8 @@ class WorkOrderService:
             'order_id': order_id,
             'order_line_id': order_line_id,
             'customer_account_id': payload.get('customer_account_id'),
+            'project_id': scope.get('project_id'),
+            PROJECT_TASK_COLUMN: scope.get(PROJECT_TASK_COLUMN),
             'severity': severity,
             'channel': payload.get('channel'),
             'status': payload.get('status') or STATUS_NEW,
@@ -262,7 +326,7 @@ class WorkOrderService:
                 % WORK_ORDER_TABLE, [coverage.get('id'), now, work_order_id])
             milestones = self._create_milestones(
                 work_order_id, match['rule'], coverage.get('calendar_id'),
-                opened_at)
+                opened_at, row.get('project_id'))
             sla = {
                 'code': None,
                 'reason': None,
@@ -319,6 +383,26 @@ class WorkOrderService:
 
         demand = self._resolve_demand(str(demand_type), demand_id)
 
+        # AC-09：project_task 来源时工单与任务必须归属同一项目（缺省则回填任务项目）
+        project_id = payload.get('project_id')
+        demand_project_id = demand.get('project_id')
+        if not _blank(demand_project_id):
+            if not _blank(project_id) \
+                    and str(project_id) != str(demand_project_id):
+                raise WorkOrderError(
+                    '工单项目与项目任务归属不一致',
+                    field_name='project_id', rule='ST_PROJECT_MISMATCH')
+            project_id = project_id if not _blank(project_id) else demand_project_id
+
+        # G15：项目任务来源的工单默认挂该任务；G1-G4 统一校验
+        task_id = payload.get(PROJECT_TASK_COLUMN)
+        if _blank(task_id) and str(demand_type) == SOURCE_DEMAND_PROJECT_TASK:
+            task_id = demand_id
+        scope = self.validate_project_scope({
+            'project_id': project_id, PROJECT_TASK_COLUMN: task_id})
+        project_id = scope.get('project_id')
+        task_id = scope.get(PROJECT_TASK_COLUMN)
+
         schedule_id = payload.get('schedule_id')
         if not _blank(schedule_id):
             self._reject_service_schedule(schedule_id)
@@ -356,6 +440,8 @@ class WorkOrderService:
             'order_id': demand.get('order_id'),
             'order_line_id': order_line_id,
             'customer_account_id': customer_account_id,
+            'project_id': project_id,
+            PROJECT_TASK_COLUMN: task_id,
             'severity': payload.get('severity'),
             'channel': payload.get('channel'),
             'status': payload.get('status') or STATUS_NEW,
@@ -454,6 +540,11 @@ class WorkOrderService:
             logger.warning('[work_order] 读取 production 结构行失败: %s', e)
             lines = []
 
+        # 重展开保留逐组件任务归属（structure_line_id 稳定键），无值时继承工单头任务
+        assignments = self._component_task_assignments(work_order_id)
+        header_task_id = self._work_order_task_id(work_order_id)
+        can_store_task = PROJECT_TASK_COLUMN in project_task_guard.table_columns(
+            self.ds, COMPONENT_TABLE)
         self.ds.execute('DELETE FROM %s WHERE work_order_id = ?'
                         % COMPONENT_TABLE, [work_order_id])
 
@@ -461,7 +552,7 @@ class WorkOrderService:
         created: List[Dict[str, Any]] = []
         for line in lines:
             qty_required = self._component_qty_required(line, quantity)
-            self._insert(COMPONENT_TABLE, {
+            row = {
                 'work_order_id': work_order_id,
                 'structure_id': structure_id,
                 'structure_line_id': line.get('id'),
@@ -474,13 +565,27 @@ class WorkOrderService:
                 'optional_flag': 1 if bool(line.get('optional_flag')) else 0,
                 'created_at': now,
                 'updated_at': now,
-            })
+            }
+            if can_store_task:
+                task_id = assignments.get(
+                    project_task_guard.to_int(line.get('id'))) or header_task_id
+                row[PROJECT_TASK_COLUMN] = task_id
+            self._insert(COMPONENT_TABLE, row)
             created.append({
                 'structure_line_id': line.get('id'),
                 'component_item_id': line.get('component_item_id'),
                 'line_no': line.get('line_no'),
                 'qty_required': qty_required,
             })
+
+        try:
+            from meta.services.inventory_reservation_service import (
+                InventoryReservationService,
+            )
+            InventoryReservationService(self.ds).sync_work_order_components(
+                work_order_id)
+        except Exception as error:  # 预留失败不得阻断工单展开
+            logger.warning('[work_order] 组件预留同步跳过: %s', error)
 
         return {'code': 'expanded', 'structure_id': structure_id,
                 'components': created}
@@ -506,9 +611,54 @@ class WorkOrderService:
                      + (_num(line.get('fixed_qty')) or 0.0)) * (1 + scrap)
         return _round4(value)
 
+    def _component_task_assignments(self,
+                                    work_order_id: Any) -> Dict[int, int]:
+        """重展开前的逐组件任务归属；`structure_line_id` 为稳定键。"""
+        try:
+            rows = self.ds.query(
+                'SELECT structure_line_id, project_task_id FROM %s '
+                'WHERE work_order_id = ?' % COMPONENT_TABLE, [work_order_id])
+        except Exception:  # 旧库/测试库缺列 → 无归属可保留
+            return {}
+        assignments = {}
+        for row in rows:
+            line_id = project_task_guard.to_int(row.get('structure_line_id'))
+            task_id = project_task_guard.to_int(row.get('project_task_id'))
+            if line_id > 0 and task_id > 0:
+                assignments[line_id] = task_id
+        return assignments
+
+    def _work_order_task_id(self, work_order_id: Any) -> int:
+        """工单头任务，作为组件任务段的默认归属。"""
+        try:
+            rows = self.ds.query(
+                'SELECT project_task_id FROM %s WHERE id = ?'
+                % WORK_ORDER_TABLE, [work_order_id])
+        except Exception:  # 旧库缺列 → 无默认任务段
+            return 0
+        return project_task_guard.to_int(rows[0].get('project_task_id')) \
+            if rows else 0
+
     def _resolve_demand(self, demand_type: str,
                         demand_id: Any) -> Dict[str, Any]:
         """回查需求来源，冗余 order_id / order_line_id / customer_account_id / item_id / qty。"""
+        if demand_type == SOURCE_DEMAND_PROJECT_TASK:
+            # 计划层只产需求：项目任务不提供单据 / 物料 / 数量，仅锚定 project_id
+            rows = self.ds.query(
+                'SELECT id, project_id FROM project_tasks WHERE id = ?', [demand_id])
+            if not rows:
+                raise WorkOrderError('需求来源项目任务不存在',
+                                     field_name='source_demand_id',
+                                     rule='ST_SOURCE_DEMAND_INVALID')
+            return {
+                'order_id': None,
+                'order_line_id': None,
+                'customer_account_id': None,
+                'item_id': None,
+                'qty': None,
+                'project_id': rows[0].get('project_id'),
+            }
+
         if demand_type == SOURCE_DEMAND_SCHEDULE:
             rows = self.ds.query(
                 'SELECT id, order_id, line_id, schedule_kind, promised_qty '
@@ -688,6 +838,44 @@ class WorkOrderService:
                 cursor = datetime.combine(
                     day + timedelta(days=1), time(BUSINESS_START_HOUR, 0))
         return _fmt(cursor)
+
+    # -------------------------------------------------------------- 开始作业
+
+    def start_work_order(self, work_order_id: Any, now: Any = None,
+                         actor: Any = None, created_by: Any = None,
+                         executor_type: str = 'human') -> Dict[str, Any]:
+        """G13：New → In Progress；project_task 来源的工单同步创建执行 tasks。
+
+        §8.2 硬规则 1：只有 `source_demand_type='project_task'` 的工单在开工时
+        桥接 tasks；其它来源（计划行 / 订单行）保持原开工语义，不生成 tasks。
+        事务边界由调用方控制（本方法不自开事务）。
+        """
+        occurred = now or _now()
+        work_order = self._require_work_order(work_order_id)
+        if str(work_order.get('status')) != STATUS_NEW:
+            raise WorkOrderError(
+                '仅新建工单可开始作业（当前 %s）' % work_order.get('status'),
+                field_name='status', rule='ST_STATE_INVALID')
+
+        task_ids: List[str] = []
+        if str(work_order.get('source_demand_type')) == SOURCE_DEMAND_PROJECT_TASK:
+            from meta.services.work_order_execution_service import (
+                create_operation_tasks,
+            )
+            task_ids = create_operation_tasks(
+                self.ds, work_order.get('id'),
+                created_by=created_by or 'system',
+                executor_type=executor_type)
+
+        self.ds.execute(
+            'UPDATE %s SET status = ?, updated_at = ? WHERE id = ?'
+            % WORK_ORDER_TABLE,
+            [STATUS_IN_PROGRESS, occurred, work_order.get('id')])
+        self._append_event(work_order.get('id'), 'start', occurred, actor, {})
+        self._append_change_event(work_order.get('id'), 'state_change',
+                                  {'status': (STATUS_NEW, STATUS_IN_PROGRESS)})
+        return {'id': work_order.get('id'), 'status': STATUS_IN_PROGRESS,
+                'task_ids': task_ids}
 
     # -------------------------------------------------------------- 暂停/恢复
 
@@ -871,7 +1059,8 @@ class WorkOrderService:
 
     def _create_milestones(self, work_order_id: int, rule: Dict[str, Any],
                            calendar_id: Any,
-                           started_at: Any) -> List[Dict[str, Any]]:
+                           started_at: Any,
+                           project_id: Any = None) -> List[Dict[str, Any]]:
         now = _now()
         pairs = (
             (MILESTONE_FIRST_RESPONSE,
@@ -892,6 +1081,7 @@ class WorkOrderService:
                     calendar_id)
             self._insert(MILESTONE_TABLE, {
                 'work_order_id': work_order_id,
+                'project_id': project_id,
                 'milestone_type': milestone_type,
                 'state': MILESTONE_RUNNING,
                 'due_at': due_at,
@@ -1033,8 +1223,8 @@ class WorkOrderService:
                                  rule='ST_NOT_FOUND')
         rows = self.ds.query(
             'SELECT id, work_order_no, status, schedule_id, coverage_id, '
-            'resolved_at FROM %s WHERE id = ?' % WORK_ORDER_TABLE,
-            [work_order_id])
+            'source_demand_type, resolved_at FROM %s WHERE id = ?'
+            % WORK_ORDER_TABLE, [work_order_id])
         if not rows:
             raise WorkOrderError('工单不存在', field_name='id',
                                  rule='ST_NOT_FOUND')
@@ -1081,6 +1271,12 @@ class WorkOrderService:
 
     def _insert(self, table: str, row: Dict[str, Any]) -> int:
         columns = list(row.keys())
+        # 旧库（P1-2 列迁移尚未落地）不写 project_task_id，保持建单可用
+        if table in (WORK_ORDER_TABLE, COMPONENT_TABLE) \
+                and PROJECT_TASK_COLUMN in columns:
+            available = project_task_guard.table_columns(self.ds, table)
+            if PROJECT_TASK_COLUMN not in available:
+                columns.remove(PROJECT_TASK_COLUMN)
         sql = 'INSERT INTO %s (%s) VALUES (%s)' % (
             table, ', '.join(columns), ', '.join('?' * len(columns)))
         cursor = self.ds.execute(sql, [row[c] for c in columns])

@@ -1,12 +1,11 @@
 """
-test_ai_agent_role.py - M11 AI Agent 角色注入测试
+test_ai_agent_role.py - AI Agent 角色注入测试
 
-TODO-1 验证：
-- inject_ai_agent_role 函数 4 个核心场景
-- 边界条件（None / 无 roles 字段 / 已存在 / 异常）
-- X-Agent-Id header 检测
-- flask g 回写
-- 与 rls YAML 协同（applies_to: [role:ai-agent]）
+[T14] 安全契约变更（2026-11-11）：
+- 不再依据未签名的 X-Agent-Id HTTP 请求头注入 'ai-agent' 角色；
+  PermissionInterceptor 中的 inject_ai_agent_role 已移除。
+- AI Agent 身份只来自 MCP 内部上下文（mcp.rls_integration._normalize_user_context）。
+- rls_rules 中 role:ai-agent 的放行规则本身仍有效。
 """
 import os
 import sys
@@ -20,123 +19,77 @@ _PROJECT_ROOT = Path(__file__).resolve().parent.parent.parent
 sys.path.insert(0, str(_PROJECT_ROOT))
 
 
-class TestInjectAIAgentRole(unittest.TestCase):
-    """inject_ai_agent_role 单元测试"""
+class TestHeaderInjectionRemoved(unittest.TestCase):
+    """X-Agent-Id 请求头不再具备角色自抬能力"""
 
-    def _patch_request(self, headers=None):
-        """Mock flask.request"""
+    def test_inject_function_removed(self):
+        """inject_ai_agent_role 已从拦截器移除"""
+        import meta.core.interceptors.permission_interceptor as pi
+        self.assertFalse(hasattr(pi, 'inject_ai_agent_role'))
+
+    def test_x_agent_id_header_does_not_grant_ai_agent(self):
+        """带 X-Agent-Id 且无权限的用户读 user 实体 → 必须 403"""
+        from types import SimpleNamespace
+
         mock_request = MagicMock()
-        mock_request.headers = headers or {}
-        # patch flask.request 即可（函数内部 from flask import request 取的是 flask 模块的 request）
-        return patch('flask.request', mock_request)
+        mock_request.headers = {'X-Agent-Id': 'agent-001'}
+        original_user = {
+            'id': 1,
+            'username': 'alice',
+            'permissions': set(),
+            'roles': ['user'],
+        }
+        mock_g = MagicMock()
+        mock_g.get.return_value = original_user
 
-    def test_01_no_x_agent_id_returns_unchanged(self):
-        """无 X-Agent-Id header → 原样返回"""
-        with self._patch_request(headers={}):
-            from meta.core.interceptors.permission_interceptor import inject_ai_agent_role
-            user_info = {'id': 1, 'roles': ['user']}
-            result = inject_ai_agent_role(user_info)
-            self.assertEqual(result, user_info)
-            self.assertNotIn('ai-agent', result['roles'])
+        with patch('flask.request', mock_request), \
+                patch('flask.g', mock_g), \
+                patch('meta.services.auth_middleware.is_admin', return_value=False), \
+                patch('meta.core.permission_audit.log_permission_decision'):
+            from meta.core.interceptors.permission_interceptor import (
+                PermissionInterceptor, PermissionDenied,
+            )
 
-    def test_02_with_x_agent_id_injects_role(self):
-        """有 X-Agent-Id header → 注入 'ai-agent' 角色"""
-        with self._patch_request(headers={'X-Agent-Id': 'agent-001'}):
-            from meta.core.interceptors.permission_interceptor import inject_ai_agent_role
-            user_info = {'id': 1, 'roles': ['user']}
-            result = inject_ai_agent_role(user_info)
-            self.assertIn('ai-agent', result['roles'])
-            self.assertIn('user', result['roles'])
+            class _ConcretePermissionInterceptor(PermissionInterceptor):
+                def after_action(self, context):
+                    super().after_action(context)
 
-    def test_03_already_has_role_no_change(self):
-        """已有 'ai-agent' 角色 → 不重复添加（不创建新 dict）"""
-        with self._patch_request(headers={'X-Agent-Id': 'agent-001'}):
-            from meta.core.interceptors.permission_interceptor import inject_ai_agent_role
-            user_info = {'id': 1, 'roles': {'ai-agent', 'user'}}
-            result = inject_ai_agent_role(user_info)
-            # 返回原对象（is 检查）
-            self.assertIs(result, user_info)
+                @property
+                def name(self):
+                    return 'permission'
 
-    def test_04_no_existing_roles_creates_set(self):
-        """user_info 无 roles 字段 → 创建新 set"""
-        with self._patch_request(headers={'X-Agent-Id': 'agent-001'}):
-            from meta.core.interceptors.permission_interceptor import inject_ai_agent_role
-            user_info = {'id': 1}
-            result = inject_ai_agent_role(user_info)
-            self.assertEqual(result['roles'], {'ai-agent'})
+                @property
+                def priority(self):
+                    return 30
 
-    def test_05_roles_as_list_converted_to_set(self):
-        """roles 字段是 list（不是 set）→ 转为 set"""
-        with self._patch_request(headers={'X-Agent-Id': 'agent-001'}):
-            from meta.core.interceptors.permission_interceptor import inject_ai_agent_role
-            user_info = {'id': 1, 'roles': ['user', 'admin']}
-            result = inject_ai_agent_role(user_info)
-            self.assertIsInstance(result['roles'], set)
-            self.assertEqual(result['roles'], {'user', 'admin', 'ai-agent'})
+                def should_execute(self, context):
+                    return context.action.startswith('crud_')
 
-    def test_06_does_not_modify_original(self):
-        """原 user_info dict 不被修改（不可变性）"""
-        with self._patch_request(headers={'X-Agent-Id': 'agent-001'}):
-            from meta.core.interceptors.permission_interceptor import inject_ai_agent_role
-            user_info = {'id': 1, 'roles': ['user']}
-            original_roles = list(user_info['roles'])
-            inject_ai_agent_role(user_info)
-            # 原 dict 的 roles 不变
-            self.assertEqual(user_info['roles'], original_roles)
-            self.assertNotIn('ai-agent', user_info['roles'])
+            context = SimpleNamespace(action='crud_read', object_type='user')
+            with self.assertRaises(PermissionDenied):
+                _ConcretePermissionInterceptor().before_action(context)
 
-    def test_07_none_user_info_returns_none(self):
-        """user_info=None → 返回 None（不抛错）"""
-        with self._patch_request(headers={'X-Agent-Id': 'agent-001'}):
-            from meta.core.interceptors.permission_interceptor import inject_ai_agent_role
-            result = inject_ai_agent_role(None)
-            self.assertIsNone(result)
+            # 角色未被篡改
+            self.assertNotIn('ai-agent', original_user['roles'])
 
-    def test_08_with_flask_g_writes_back(self):
-        """flask_g 不为 None → 回写 g.current_user"""
-        with self._patch_request(headers={'X-Agent-Id': 'agent-001'}):
-            from meta.core.interceptors.permission_interceptor import inject_ai_agent_role
-            user_info = {'id': 1, 'roles': ['user']}
-            mock_g = MagicMock()
-            result = inject_ai_agent_role(user_info, flask_g=mock_g)
-            # 验证 mock_g.current_user 被设置
-            self.assertEqual(mock_g.current_user, result)
-            self.assertIn('ai-agent', mock_g.current_user['roles'])
 
-    def test_09_with_flask_g_already_has_role_writes_back(self):
-        """flask_g 不为 None + 已有角色 → 也回写 g.current_user"""
-        with self._patch_request(headers={'X-Agent-Id': 'agent-001'}):
-            from meta.core.interceptors.permission_interceptor import inject_ai_agent_role
-            user_info = {'id': 1, 'roles': {'ai-agent'}}
-            mock_g = MagicMock()
-            result = inject_ai_agent_role(user_info, flask_g=mock_g)
-            self.assertIs(result, user_info)
-            self.assertEqual(mock_g.current_user, user_info)
+class TestMcpInternalAiAgentContext(unittest.TestCase):
+    """MCP 内部上下文（可信来源）仍然可以声明 AI Agent 身份"""
 
-    def test_10_no_request_object(self):
-        """无 flask.request → 原样返回"""
-        with patch('flask.request', None):
-            from meta.core.interceptors.permission_interceptor import inject_ai_agent_role
-            user_info = {'id': 1, 'roles': ['user']}
-            result = inject_ai_agent_role(user_info)
-            self.assertEqual(result, user_info)
+    def test_is_ai_agent_flag_injects(self):
+        from mcp.rls_integration import _normalize_user_context
+        ctx = _normalize_user_context({'id': 5, 'is_ai_agent': True})
+        self.assertIn('ai-agent', ctx['roles'])
 
-    def test_11_x_agent_id_empty_string(self):
-        """X-Agent-Id header 为空字符串 → 不注入"""
-        with self._patch_request(headers={'X-Agent-Id': ''}):
-            from meta.core.interceptors.permission_interceptor import inject_ai_agent_role
-            user_info = {'id': 1, 'roles': ['user']}
-            result = inject_ai_agent_role(user_info)
-            # 空字符串的 header.get 返回 ''，falsy → 不注入
-            self.assertEqual(result, user_info)
+    def test_agent_id_injects(self):
+        from mcp.rls_integration import _normalize_user_context
+        ctx = _normalize_user_context({'id': 5, 'agent_id': 'claude-3.5'})
+        self.assertIn('ai-agent', ctx['roles'])
 
-    def test_12_x_agent_id_with_special_chars(self):
-        """X-Agent-Id 含特殊字符 → 仍注入角色"""
-        with self._patch_request(headers={'X-Agent-Id': 'agent-001/claude-3.5'}):
-            from meta.core.interceptors.permission_interceptor import inject_ai_agent_role
-            user_info = {'id': 1}
-            result = inject_ai_agent_role(user_info)
-            self.assertIn('ai-agent', result['roles'])
+    def test_plain_user_not_injected(self):
+        from mcp.rls_integration import _normalize_user_context
+        ctx = _normalize_user_context({'id': 5, 'roles': ['user']})
+        self.assertNotIn('ai-agent', ctx['roles'])
 
 
 class TestAIAgentRoleWithRLS(unittest.TestCase):
@@ -194,88 +147,6 @@ actions:
         """ai-agent 角色不可以 create user"""
         from rls.enforce import check_action
         self.assertFalse(check_action('ai-agent', 'user', 'create', self.tmpdir))
-
-    def test_combined_user_role_user_ai_agent(self):
-        """user 角色 + ai-agent 角色都注入（多角色）"""
-        mock_request = MagicMock()
-        mock_request.headers = {'X-Agent-Id': 'agent-001'}
-        with patch('flask.request', mock_request):
-            from meta.core.interceptors.permission_interceptor import inject_ai_agent_role
-            user_info = {'id': 1, 'roles': ['user']}
-            result = inject_ai_agent_role(user_info)
-            self.assertEqual(result['roles'], {'user', 'ai-agent'})
-
-
-class TestAIAgentPermissionInterceptorBeforeAction(unittest.TestCase):
-    """PermissionInterceptor.before_action 集成测试（完整流程）"""
-
-    def _build_mock_context(self, action='crud_read', object_type='user'):
-        """构建 mock ActionContext"""
-        from types import SimpleNamespace
-        context = SimpleNamespace()
-        context.action = action
-        context.object_type = object_type
-        return context
-
-    def test_full_flow_with_x_agent_id(self):
-        """完整流程：X-Agent-Id → AI 角色注入 → 权限检查"""
-        mock_request = MagicMock()
-        mock_request.headers = {'X-Agent-Id': 'agent-001'}
-        mock_g = MagicMock()
-        mock_g.get.return_value = {
-            'id': 1,
-            'username': 'alice',
-            'permissions': {'user:read'},
-            'roles': ['user'],
-        }
-        with patch('flask.request', mock_request), patch('flask.g', mock_g):
-            from meta.core.interceptors.permission_interceptor import (
-                PermissionInterceptor, PermissionDenied,
-            )
-            from meta.core.interceptors.base import Interceptor
-
-            # PermissionInterceptor 是 abstract - 创建具体子类
-            class _ConcretePermissionInterceptor(PermissionInterceptor):
-                def before_action(self, context):
-                    super().before_action(context)
-                def after_action(self, context):
-                    super().after_action(context)
-                @property
-                def name(self):
-                    return 'permission'
-                @property
-                def priority(self):
-                    return 30
-                def should_execute(self, context):
-                    return context.action.startswith('crud_')
-
-            # Mock is_admin 返回 False
-            with patch('meta.services.auth_middleware.is_admin', return_value=False):
-                interceptor = _ConcretePermissionInterceptor()
-                context = self._build_mock_context('crud_read', 'user')
-                try:
-                    interceptor.before_action(context)
-                except PermissionDenied:
-                    pass  # 预期 PermissionDenied，但 inject 已在前面执行
-                # 验证 mock_g.current_user 已被设置
-                self.assertTrue(mock_g.setattr.called or hasattr(mock_g, 'current_user') or True)
-
-    def test_full_flow_without_x_agent_id(self):
-        """完整流程：无 X-Agent-Id → 不注入角色（直接调 inject_ai_agent_role 验证）"""
-        mock_request = MagicMock()
-        mock_request.headers = {}
-        with patch('flask.request', mock_request):
-            from meta.core.interceptors.permission_interceptor import inject_ai_agent_role
-            user_info = {
-                'id': 1,
-                'username': 'alice',
-                'permissions': {'user:read'},
-                'roles': ['user'],
-            }
-            # 无 X-Agent-Id，role 不变
-            result = inject_ai_agent_role(user_info)
-            self.assertEqual(result['roles'], ['user'])
-            self.assertNotIn('ai-agent', result['roles'])
 
 
 if __name__ == '__main__':

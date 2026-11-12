@@ -339,6 +339,145 @@ class TestEdgeDomain:
 
 
 # ---------------------------------------------------------------------------
+# ④ 库存事务互检（ORPHAN_TXN / DANGLING_EDGE，AC-14）
+# ---------------------------------------------------------------------------
+
+def _txn_table(app_ds):
+    app_ds.execute(
+        "CREATE TABLE inventory_transactions ("
+        "id INTEGER PRIMARY KEY, source_doc_type TEXT, source_doc_id INTEGER, "
+        "reversal_of_transaction_id INTEGER DEFAULT 0)")
+
+
+def _insert_txn(app_ds, txn_id, doc_type, reversal_of=0, source_doc_id=1):
+    app_ds.insert("inventory_transactions", {
+        "id": txn_id, "source_doc_type": doc_type,
+        "source_doc_id": source_doc_id, "reversal_of_transaction_id": reversal_of,
+    })
+
+
+def _insert_inv_edge(app_ds, edge_id, target_id, quantity=100.0, status="active"):
+    app_ds.insert("doc_flow_edges", {
+        "id": edge_id, "source_bo": SOURCE_BO, "source_id": "1",
+        "source_item": "", "target_bo": "inventory_transaction",
+        "target_id": str(target_id), "target_item": str(target_id),
+        "quantity": quantity, "quantity_sign": "normal", "rule_id": RULE_ID,
+        "status": status, "pool": "inventory_receipt",
+    })
+
+
+class TestInventoryCrossCheck:
+
+    def test_edge_and_txn_match(self, ready_env):
+        app_ds, _ = ready_env
+        _txn_table(app_ds)
+        _insert_txn(app_ds, 1, "receipt")
+        _insert_inv_edge(app_ds, "inv-edge-1", "1")
+
+        report = scan(app_ds)
+        assert report.ok, report.codes()
+
+    def test_orphan_txn_without_edge(self, ready_env):
+        app_ds, _ = ready_env
+        _txn_table(app_ds)
+        _insert_txn(app_ds, 2, "shipment")
+
+        assert "ORPHAN_TXN" in scan(app_ds).codes()
+
+    def test_transfer_order_txn_is_checked(self, ready_env):
+        app_ds, _ = ready_env
+        _txn_table(app_ds)
+        _insert_txn(app_ds, 3, "transfer_order")
+
+        assert "ORPHAN_TXN" in scan(app_ds).codes()
+
+    def test_reversal_txn_exempt_and_reversed_edge_still_counts(self, ready_env):
+        """REVERSAL 分录不要求边；原边即使 reversed 仍算引用。"""
+        app_ds, _ = ready_env
+        _txn_table(app_ds)
+        _insert_txn(app_ds, 1, "receipt")
+        _insert_inv_edge(app_ds, "inv-edge-1", "1", status="reversed")
+        _insert_txn(app_ds, 2, "receipt", reversal_of=1)
+
+        report = scan(app_ds)
+        assert report.ok, report.codes()
+
+    def test_dangling_edge(self, ready_env):
+        app_ds, _ = ready_env
+        _txn_table(app_ds)
+        _insert_inv_edge(app_ds, "inv-edge-x", "999")
+
+        assert "DANGLING_EDGE" in scan(app_ds).codes()
+
+    def test_skips_when_txn_table_absent(self, ready_env):
+        app_ds, _ = ready_env
+        _insert_inv_edge(app_ds, "inv-edge-x", "999")
+
+        assert "DANGLING_EDGE" not in scan(app_ds).codes()
+
+
+# ---------------------------------------------------------------------------
+# ④-b 调整/盘点来源对账（P2 B+：事实引用成立，不建转单边）
+# ---------------------------------------------------------------------------
+
+def _ref_table(app_ds, name, ids=(1,)):
+    """造来源单据表（仅 id 主键），模拟 inventory_adjustments / inventory_counts。"""
+    app_ds.execute(
+        "CREATE TABLE {0} (id INTEGER PRIMARY KEY)".format(name))
+    for ref_id in ids:
+        app_ds.insert(name, {"id": ref_id})
+
+
+class TestAdjustmentSourceRef:
+
+    def test_adjustment_txn_with_source_and_no_edge_is_clean(self, ready_env):
+        """调整事务保留事实引用、无转单边 → 零发现（B+ 目标形态）。"""
+        app_ds, _ = ready_env
+        _txn_table(app_ds)
+        _ref_table(app_ds, "inventory_adjustments", ids=(1,))
+        _insert_txn(app_ds, 1, "inventory_adjustment")
+
+        report = scan(app_ds)
+        assert report.ok, report.codes()
+        assert "ORPHAN_TXN" not in report.codes()
+
+    def test_count_txn_missing_source_doc(self, ready_env):
+        """盘点事务引用的盘点单不存在 → MISSING_SOURCE_DOC（error）。"""
+        app_ds, _ = ready_env
+        _txn_table(app_ds)
+        _ref_table(app_ds, "inventory_counts", ids=(1,))
+        _insert_txn(app_ds, 1, "inventory_count", source_doc_id=999)
+
+        report = scan(app_ds)
+        assert "MISSING_SOURCE_DOC" in report.codes()
+        assert not report.ok
+
+    def test_adjustment_edge_is_flagged(self, ready_env):
+        """调整事务被转单边引用 → UNEXPECTED_ADJUSTMENT_EDGE（违反 B+ 口径）。"""
+        app_ds, _ = ready_env
+        _txn_table(app_ds)
+        _ref_table(app_ds, "inventory_adjustments", ids=(1,))
+        _insert_txn(app_ds, 1, "inventory_adjustment")
+        _insert_inv_edge(app_ds, "adj-edge-1", "1")
+
+        report = scan(app_ds)
+        assert "UNEXPECTED_ADJUSTMENT_EDGE" in report.codes()
+        # 调整类不要求边，不得误报孤儿；目标事务存在，不得误报悬空
+        assert "ORPHAN_TXN" not in report.codes()
+        assert "DANGLING_EDGE" not in report.codes()
+
+    def test_unknown_source_doc_type_is_warn(self, ready_env):
+        """来源类型未注册 → warn（提示新入口绕开注册表），不阻断退出码。"""
+        app_ds, _ = ready_env
+        _txn_table(app_ds)
+        _insert_txn(app_ds, 1, "mystery_doc")
+
+        report = scan(app_ds)
+        assert "UNKNOWN_SOURCE_DOC_TYPE" in report.codes()
+        assert report.ok
+
+
+# ---------------------------------------------------------------------------
 # 重建（显式触发）
 # ---------------------------------------------------------------------------
 

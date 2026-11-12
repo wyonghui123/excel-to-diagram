@@ -109,7 +109,7 @@ class SalesOrderAmountService:
 
         decimals = self._currency_decimals(order.get('currency_id'))
         sign = Decimal('-1') if self._document_category(
-            order.get('order_type_id')) == 'return' else Decimal('1')
+            order.get('document_type_id')) == 'return' else Decimal('1')
 
         qty = _dec(line.get('qty'))
         unit_price = _dec(line.get('unit_price'))
@@ -177,7 +177,7 @@ class SalesOrderAmountService:
 
     def _load_order(self, order_id: Any) -> Optional[Dict[str, Any]]:
         rows = self.ds.query(
-            'SELECT id, order_type_id, order_date, currency_id '
+            'SELECT id, document_type_id, order_date, currency_id '
             'FROM sales_orders WHERE id = ?', [order_id])
         return rows[0] if rows else None
 
@@ -204,13 +204,13 @@ class SalesOrderAmountService:
             return DEFAULT_DECIMALS
         return decimals if 0 <= decimals <= 8 else DEFAULT_DECIMALS
 
-    def _document_category(self, order_type_id: Any) -> Optional[str]:
-        if order_type_id in (None, ''):
+    def _document_category(self, document_type_id: Any) -> Optional[str]:
+        if document_type_id in (None, ''):
             return None
         try:
             rows = self.ds.query(
                 'SELECT document_category FROM type_definitions WHERE id = ?',
-                [order_type_id])
+                [document_type_id])
         except Exception as e:
             logger.warning(f'[sales_order_amount] 读取单据类别失败: {e}')
             return None

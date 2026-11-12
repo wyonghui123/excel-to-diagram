@@ -9,6 +9,7 @@
 
 import { ref, computed } from 'vue'
 import { useRouter, useRoute } from 'vue-router'
+import { resolveDetailPath } from '@/router/detailPathResolver'
 
 export function useNavigation(options = {}) {
   const router = useRouter()
@@ -24,7 +25,7 @@ export function useNavigation(options = {}) {
     if (params.showDelete === false) query.showDelete = 'false'
     if (params.showHistory === false) query.showHistory = 'false'
 
-    const path = `/detail/${objectType}/${id}`
+    const path = resolveDetailPath(objectType, id)
 
     addToHistory({
       path: route.fullPath,
@@ -115,7 +116,7 @@ export function useNavigation(options = {}) {
     }
 
     crumbs.push({
-      path: `/detail/${objectType}/${route.params.id}`,
+      path: resolveDetailPath(objectType, route.params.id),
       title: objectName || `${label}详情`,
       active: true
     })

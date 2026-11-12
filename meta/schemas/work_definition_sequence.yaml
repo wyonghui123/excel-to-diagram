@@ -1,0 +1,385 @@
+# 作业定义序列（Work Definition Sequence）—— 统一资源模型 P4a
+# 依据: docs/specs/spec-unified-resource-model-2026-11-01-v1.0.md
+#       §TBD-15 / 附 B.1；研究稿 spec-routing-process-manufacturing-benchmark-2026-11-01.md §5.2
+#
+# 定位: 工艺主数据内的"路线序列"分组——把 work_definition_operations.sequence_id
+#   收拢成一条标准路线（std）或整条替代路线（alternative）。
+#
+# 口径（已定，勿重复讨论）:
+#   ① 与 workflow_task / project_task **不复用**：本对象是静态工艺主数据，
+#      随 work_definition 版本存续；后者是运行态待办/审批或 WBS 计划节点。
+#   ② P5 已扩 seq_type = std / parallel / alternative；alternative 必须成对
+#      branch/return，parallel 只需 branch（return 可选作汇合点）。
+#   ③ 存量 work_definition_operations.sequence_id 为 NULL ⇒ 视为标准序列。
+#   ④ 工序不带序列时不建分组行，避免为每条老路线补一行空 std。
+#   ⑤ 从表对象 ⇒ 不建独立菜单（skip_auto_menu），但保留完整三态 UI 配置。
+
+id: work_definition_sequence
+name: 作业定义序列
+table_name: work_definition_sequences
+description: 作业定义下的路线序列（标准 / 整条替代），供工序按序列归组
+display_name_field: description
+aspects: [audit_aspect]
+
+semantics:
+  meaning: 作业定义序列
+  category: business_document_line
+  aliases:
+    - 作业定义序列
+    - 工艺路线序列
+    - 替代路线
+    - work definition sequence
+
+deletion_policy:
+  mode: restrict
+  restrict_on:
+    - table: work_definition_operations
+      foreign_key: sequence_id
+      message: 该序列下仍有工序，请先调整工序所属序列后再删除
+  cascade_delete: []
+
+audit:
+  enabled: true
+  create:
+    enabled: true
+    fields: all
+  update:
+    enabled: true
+    fields: changed_only
+    exclude: [id, created_at, updated_at]
+  delete:
+    enabled: true
+    fields: business_only
+    exclude: [id, created_at, updated_at]
+  associate:
+    enabled: true
+  dissociate:
+    enabled: true
+
+fields:
+  - id: id
+    name: ID
+    type: integer
+    db_column: id
+    required: true
+    unique: true
+    description: 技术主键
+    semantics:
+      meaning: 自增主键
+      primary_key: true
+
+  - id: definition_id
+    name: 作业定义
+    type: integer
+    db_column: definition_id
+    required: true
+    description: 所属作业定义
+    semantics:
+      meaning: 作业定义引用
+      display:
+        type: association
+        target_type: work_definition
+        display_field: name
+    value_help:
+      source:
+        type: bo
+        target_bo: work_definition
+        value_field: id
+        display_field: name
+        code_field: code
+        apply_target_permissions: true
+      behavior:
+        multiple: false
+        validation: true
+        binding_strength: strict
+        min_search_length: 0
+      presentation:
+        result_type: dialog
+        display_format: "{code} - {name}"
+        columns:
+          - field: code
+            label: 定义编码
+            width: 150
+          - field: name
+            label: 定义名称
+            width: 220
+    ui:
+      widget: select
+      relation: work_definition
+      multiple: false
+      hidden_in_form: true
+      fieldGroup: 关联
+      fieldGroupPosition: 10
+
+  - id: seq_no
+    name: 序列号
+    type: integer
+    db_column: seq_no
+    required: true
+    description: 序列顺序号（同一定义内唯一）
+    constraints:
+      - type: numeric_range
+        gte: 1
+        decimal_places: 0
+    semantics:
+      meaning: 序列顺序
+    ui:
+      widget: number
+      fieldGroup: 关联
+      fieldGroupPosition: 20
+
+  - id: seq_type
+    name: 序列类型
+    type: string
+    db_column: seq_type
+    required: true
+    default: std
+    description: 序列类型（标准 / 并行 / 替代）；替代序列必须成对 branch/return
+    enum_values:
+      - value: std
+        label: 标准
+        color: primary
+        is_initial: true
+      - value: parallel
+        label: 并行
+        color: info
+      - value: alternative
+        label: 替代
+        color: warning
+    value_help:
+      source:
+        type: enum
+        enum_type_id: sequence_type
+        sort_by: sort_order
+      behavior:
+        validation: true
+        binding_strength: strict
+        multiple: false
+      presentation:
+        result_type: dropdown
+    semantics:
+      meaning: 序列类型
+      filterable: true
+      filter_type: enum
+      filter_label: 序列类型
+      filter_scope: local
+    ui:
+      widget: select
+      fieldGroup: 基本信息
+      fieldGroupPosition: 30
+
+  - id: description
+    name: 说明
+    type: string
+    db_column: description
+    nullable: true
+    max_length: 255
+    description: 序列说明（如"替代路线 A：免热处理"）
+    semantics:
+      meaning: 序列说明
+      display_name: true
+      searchable: true
+    ui:
+      widget: input
+      fieldGroup: 基本信息
+      fieldGroupPosition: 40
+
+  - id: branch_operation_seq
+    name: 分支工序号
+    type: integer
+    db_column: branch_operation_seq
+    nullable: true
+    description: 分支工序号；引用同定义的工序 seq（非外键，服务层校验）
+    constraints:
+      - type: numeric_range
+        gte: 1
+        decimal_places: 0
+    semantics:
+      meaning: 分支工序号
+    ui:
+      widget: number
+      fieldGroup: 分支
+      fieldGroupPosition: 50
+
+  - id: return_operation_seq
+    name: 返回工序号
+    type: integer
+    db_column: return_operation_seq
+    nullable: true
+    description: 返回/汇合工序号；替代序列必填，并行序列可选
+    constraints:
+      - type: numeric_range
+        gte: 1
+        decimal_places: 0
+    semantics:
+      meaning: 返回/汇合工序号
+    ui:
+      widget: number
+      fieldGroup: 分支
+      fieldGroupPosition: 60
+
+  - id: lot_min
+    name: 批量下限
+    type: number
+    db_column: lot_min
+    nullable: true
+    description: 该序列适用的批量下限；空 = 不限下限
+    constraints:
+      - type: numeric_range
+        gte: 0
+    semantics:
+      meaning: 适用批量下限
+    ui:
+      widget: number
+      fieldGroup: 适用范围
+      fieldGroupPosition: 70
+
+  - id: lot_max
+    name: 批量上限
+    type: number
+    db_column: lot_max
+    nullable: true
+    description: 该序列适用的批量上限；空 = 无上限
+    constraints:
+      - type: numeric_range
+        gte: 0
+    semantics:
+      meaning: 适用批量上限
+    ui:
+      widget: number
+      fieldGroup: 适用范围
+      fieldGroupPosition: 80
+
+  - id: priority
+    name: 优先级
+    type: integer
+    db_column: priority
+    required: true
+    default: 1
+    description: 同一分支下多个替代序列的取用顺序（小者优先）
+    constraints:
+      - type: numeric_range
+        gte: 1
+        decimal_places: 0
+    semantics:
+      meaning: 替代序列取用优先级
+    ui:
+      widget: number
+      fieldGroup: 适用范围
+      fieldGroupPosition: 90
+
+  - id: created_at
+    name: 创建时间
+    type: datetime
+    db_column: created_at
+    description: 创建时间
+    semantics:
+      meaning: 记录创建时间
+      audit_field: true
+
+  - id: updated_at
+    name: 更新时间
+    type: datetime
+    db_column: updated_at
+    description: 更新时间
+    semantics:
+      meaning: 记录更新时间
+      audit_field: true
+
+indexes:
+  - fields: [definition_id, seq_no]
+    unique: true
+    name: uq_work_definition_sequence_no
+  - fields: [seq_type]
+    name: idx_work_definition_sequence_type
+  - fields: [definition_id, branch_operation_seq, priority]
+    unique: true
+    type: partial
+    name: uq_work_definition_sequence_branch_priority
+    condition: "seq_type = 'alternative' AND branch_operation_seq IS NOT NULL"
+  - fields: [definition_id, branch_operation_seq]
+    name: idx_work_definition_sequence_branch
+
+relations:
+  - id: work_definition_sequence_to_definition
+    name: 作业定义
+    type: reference
+    target: work_definition
+    source_field: definition_id
+    target_field: id
+    cardinality: N:1
+    description: 所属作业定义引用（真外键 restrict）
+
+ui_view_config:
+  # 从表对象，菜单由迁移 v188 不建（工艺主数据随 work_definition 维护）
+  skip_auto_menu: true
+  list:
+    detail_mode: drawer
+    title: 作业定义序列
+    columns:
+      - field: definition_id
+        width: 210
+        filterable: true
+        filter_type: value_help
+        render_as: association
+        target_type: work_definition
+        display_field: name
+      - field: seq_no
+        width: 90
+        sortable: true
+      - field: seq_type
+        width: 110
+        filterable: true
+        filter_type: select
+      - field: branch_operation_seq
+        width: 110
+      - field: return_operation_seq
+        width: 110
+      - field: priority
+        width: 90
+        sortable: true
+      - field: description
+        width: 240
+    selection:
+      enabled: true
+      mode: multiple
+    searchFields: [description]
+    actions:
+      - id: create
+        label: 新建序列
+        icon: plus
+        type: primary
+        permission: work_definition_sequence:create
+    defaultSort:
+      field: seq_no
+      order: asc
+  form:
+    title: 作业定义序列
+    layout: vertical
+    sections:
+      - title: 基本信息
+        columns:
+          - fields: [definition_id, seq_no]
+          - fields: [seq_type, description]
+      - title: 分支
+        columns:
+          - fields: [branch_operation_seq, return_operation_seq]
+      - title: 适用范围
+        columns:
+          - fields: [lot_min, lot_max, priority]
+  detail:
+    layout: tabs
+    title: "序列 {record.seq_no}"
+    tabs:
+      - id: basic
+        label: 基本信息
+        type: fields
+        fields: [definition_id, seq_no, seq_type, description,
+                 branch_operation_seq, return_operation_seq,
+                 lot_min, lot_max, priority]
+
+category_config:
+  create_permission: work_definition_sequence:create
+  update_permission: work_definition_sequence:update
+  delete_permission: work_definition_sequence:delete
+  owner_auto_permission: false

@@ -109,7 +109,7 @@ class TestV2_1_2GetRolePermCodes:
     def test_returns_role_specific_perms(self):
         """返回 role 自身的 perm codes (从 permission_set_permissions JOIN permissions)"""
         ds = MockDataSource(rows_by_query={
-            'role_permissions': [
+            'permission_set_permissions': [
                 ('service_module:read',),
                 ('service_module:update',),
             ]
@@ -129,7 +129,7 @@ class TestV2_1_2GetRolePermCodes:
     def test_cached_per_request(self):
         """同 request 内重复调用走缓存"""
         ds = MockDataSource(rows_by_query={
-            'role_permissions': [('service_module:update',)]
+            'permission_set_permissions': [('service_module:update',)]
         })
         ctx = MockActionContext(data_source=ds)
         result1 = self.interceptor._get_role_perm_codes(ctx, 5970)
@@ -137,7 +137,7 @@ class TestV2_1_2GetRolePermCodes:
         # 缓存命中, 不应该再查
         # (允许查询数 = 1)
         perm_queries = [q for q in ds.executed_queries
-                        if 'role_permissions' in q[0].lower()]
+                        if 'permission_set_permissions' in q[0].lower()]
         assert len(perm_queries) == 1
 
     def test_exception_returns_empty_set(self):
@@ -225,7 +225,7 @@ class TestV2_1_2RoleSpecificPermCheck:
                             # role 5433 应被记录为 skipped='missing_functional_perm'
                             skipped = [r for r in result['roles_checked']
                                        if r.get('skipped') == 'missing_functional_perm']
-                            assert any(r['role_id'] == 5433 for r in skipped)
+                            assert any(r['permission_set_id'] == 5433 for r in skipped)
 
     def test_role_b_with_perm_and_dim_match_allowed(self, app_ctx, set_current_user):
         """role B 有 perm + dim scope 命中 → 通过"""
@@ -251,7 +251,13 @@ class TestV2_1_2RoleSpecificPermCheck:
                             'meta.core.interceptors.write_scope_interceptor._WRITE_SCOPE_V2_1_PERM_CHECK',
                             True,
                         ):
-                            ctx = MockActionContext(object_type='service_module', action='crud_update')
+                            ctx = MockActionContext(
+                                object_type='service_module', action='crud_update',
+                                data_source=MockDataSource(rows_by_query={
+                                    'from service_modules': [(138,)],
+                                    'from sub_domains': [(703,)],
+                                }),
+                            )
                             record = {'id': 137, 'sub_domain_id': 138}
                             result = self.interceptor._check_dim_scope(
                                 ctx, 'service_module', record, user_id=3385
@@ -282,7 +288,13 @@ class TestV2_1_2RoleSpecificPermCheck:
                             'meta.core.interceptors.write_scope_interceptor._WRITE_SCOPE_V2_1_PERM_CHECK',
                             True,
                         ):
-                            ctx = MockActionContext(object_type='service_module', action='crud_update')
+                            ctx = MockActionContext(
+                                object_type='service_module', action='crud_update',
+                                data_source=MockDataSource(rows_by_query={
+                                    'from service_modules': [(138,)],
+                                    'from sub_domains': [(703,)],
+                                }),
+                            )
                             record = {'id': 1}
                             result = self.interceptor._check_dim_scope(
                                 ctx, 'service_module', record, user_id=1
@@ -313,7 +325,13 @@ class TestV2_1_2RoleSpecificPermCheck:
                             'meta.core.interceptors.write_scope_interceptor._WRITE_SCOPE_V2_1_PERM_CHECK',
                             True,
                         ):
-                            ctx = MockActionContext(object_type='service_module', action='crud_update')
+                            ctx = MockActionContext(
+                                object_type='service_module', action='crud_update',
+                                data_source=MockDataSource(rows_by_query={
+                                    'from service_modules': [(138,)],
+                                    'from sub_domains': [(703,)],
+                                }),
+                            )
                             record = {'id': 1}
                             result = self.interceptor._check_dim_scope(
                                 ctx, 'service_module', record, user_id=1
@@ -429,7 +447,7 @@ class TestV2_1_2_RoleSpecificPerm:
                             assert result['matched'] is True
                             skipped = [r for r in result['roles_checked']
                                        if r.get('skipped') == 'missing_functional_perm']
-                            assert any(r['role_id'] == 100 for r in skipped)
+                            assert any(r['permission_set_id'] == 100 for r in skipped)
 
     def test_role_perm_higher_priority(self, app_ctx, set_current_user):
         """角色 perm 优先于默认 perm
@@ -630,4 +648,4 @@ class TestV2_1_2_RoleSpecificPerm:
                             assert result['matched'] is True
                             skipped = [r for r in result['roles_checked']
                                        if r.get('skipped') == 'missing_functional_perm']
-                            assert any(r['role_id'] == 5433 for r in skipped)
+                            assert any(r['permission_set_id'] == 5433 for r in skipped)

@@ -1,4 +1,5 @@
 from flask import Blueprint, jsonify, request, g
+from meta.api._response_contract import error_response, ok
 from meta.core.datasource import get_data_source
 from meta.services.auth_middleware import get_current_user
 import json
@@ -188,10 +189,7 @@ def get_stats_overview():
             'scoped': scoped
         })
     except Exception as e:
-        return jsonify({
-            'success': False,
-            'message': str(e)
-        }), 500
+        return error_response(str(e), status=500)
 
 
 @stats_bp.route('/stats/aggregates', methods=['GET'])
@@ -205,10 +203,7 @@ def list_aggregates():
         })
 
     except Exception as e:
-        return jsonify({
-            'success': False,
-            'message': str(e)
-        }), 500
+        return error_response(str(e), status=500)
 
 
 @stats_bp.route('/stats/aggregates/<aggregate_id>/query', methods=['POST'])
@@ -236,10 +231,7 @@ def query_aggregate(aggregate_id):
         })
 
     except Exception as e:
-        return jsonify({
-            'success': False,
-            'message': str(e)
-        }), 500
+        return error_response(str(e), status=500)
 
 
 @stats_bp.route('/stats/aggregates/<aggregate_id>/refresh', methods=['POST'])
@@ -249,20 +241,14 @@ def refresh_aggregate(aggregate_id):
 
         row_count = manager.refresh(aggregate_id, force=True)
 
-        return jsonify({
-            'success': True,
-            'data': {
-                'aggregate_id': aggregate_id,
-                'row_count': row_count,
-                'freshness': manager.get_freshness(aggregate_id),
-            }
+        return ok({
+            'aggregate_id': aggregate_id,
+            'row_count': row_count,
+            'freshness': manager.get_freshness(aggregate_id),
         })
 
     except Exception as e:
-        return jsonify({
-            'success': False,
-            'message': str(e)
-        }), 500
+        return error_response(str(e), status=500)
 
 
 @stats_bp.route('/stats/aggregates/freshness', methods=['GET'])
@@ -276,10 +262,7 @@ def get_all_freshness():
         })
 
     except Exception as e:
-        return jsonify({
-            'success': False,
-            'message': str(e)
-        }), 500
+        return error_response(str(e), status=500)
 
 
 @stats_bp.route('/stats/olap/<object_type>', methods=['POST'])
@@ -289,10 +272,7 @@ def execute_olap_query(object_type):
 
         model = engine.get_analytical_model(object_type)
         if not model or not model.enabled:
-            return jsonify({
-                'success': False,
-                'message': f'对象类型 {object_type} 未启用分析模型'
-            }), 404
+            return error_response(f'对象类型 {object_type} 未启用分析模型', status=404)
 
         body = request.get_json() or {}
 
@@ -304,16 +284,10 @@ def execute_olap_query(object_type):
         use_cache = body.get('use_cache', True)
 
         if not dimensions:
-            return jsonify({
-                'success': False,
-                'message': '至少需要指定一个维度'
-            }), 400
+            return error_response('至少需要指定一个维度')
 
         if not measures:
-            return jsonify({
-                'success': False,
-                'message': '至少需要指定一个度量'
-            }), 400
+            return error_response('至少需要指定一个度量')
 
         results = engine.execute_olap_query(
             object_type, dimensions, measures, filters, order_by, limit,
@@ -332,10 +306,7 @@ def execute_olap_query(object_type):
         })
 
     except Exception as e:
-        return jsonify({
-            'success': False,
-            'message': str(e)
-        }), 500
+        return error_response(str(e), status=500)
 
 
 @stats_bp.route('/stats/olap/<object_type>/drill-down', methods=['POST'])
@@ -345,10 +316,7 @@ def drill_down_query(object_type):
 
         model = engine.get_analytical_model(object_type)
         if not model or not model.enabled:
-            return jsonify({
-                'success': False,
-                'message': f'对象类型 {object_type} 未启用分析模型'
-            }), 404
+            return error_response(f'对象类型 {object_type} 未启用分析模型', status=404)
 
         body = request.get_json() or {}
 
@@ -358,10 +326,7 @@ def drill_down_query(object_type):
         filters = body.get('filters')
 
         if not drill_dimension:
-            return jsonify({
-                'success': False,
-                'message': '需要指定下钻维度'
-            }), 400
+            return error_response('需要指定下钻维度')
 
         results = engine.drill_down(
             object_type, current_dimensions, drill_dimension, measures, filters
@@ -389,10 +354,7 @@ def drill_down_query(object_type):
         })
 
     except Exception as e:
-        return jsonify({
-            'success': False,
-            'message': str(e)
-        }), 500
+        return error_response(str(e), status=500)
 
 
 @stats_bp.route('/stats/olap/<object_type>/roll-up', methods=['POST'])
@@ -402,10 +364,7 @@ def roll_up_query(object_type):
 
         model = engine.get_analytical_model(object_type)
         if not model or not model.enabled:
-            return jsonify({
-                'success': False,
-                'message': f'对象类型 {object_type} 未启用分析模型'
-            }), 404
+            return error_response(f'对象类型 {object_type} 未启用分析模型', status=404)
 
         body = request.get_json() or {}
 
@@ -415,10 +374,7 @@ def roll_up_query(object_type):
         filters = body.get('filters')
 
         if not roll_to_dimensions:
-            return jsonify({
-                'success': False,
-                'message': '需要指定上卷目标维度'
-            }), 400
+            return error_response('需要指定上卷目标维度')
 
         results = engine.roll_up(
             object_type, current_dimensions, roll_to_dimensions, measures, filters
@@ -443,10 +399,7 @@ def roll_up_query(object_type):
         })
 
     except Exception as e:
-        return jsonify({
-            'success': False,
-            'message': str(e)
-        }), 500
+        return error_response(str(e), status=500)
 
 
 @stats_bp.route('/stats/model/<object_type>', methods=['GET'])
@@ -456,21 +409,12 @@ def get_analytical_model_info(object_type):
 
         model = engine.get_analytical_model(object_type)
         if not model or not model.enabled:
-            return jsonify({
-                'success': False,
-                'message': f'对象类型 {object_type} 未启用分析模型'
-            }), 404
+            return error_response(f'对象类型 {object_type} 未启用分析模型', status=404)
 
-        return jsonify({
-            'success': True,
-            'data': engine.get_analytical_summary(object_type)
-        })
+        return ok(engine.get_analytical_summary(object_type))
 
     except Exception as e:
-        return jsonify({
-            'success': False,
-            'message': str(e)
-        }), 500
+        return error_response(str(e), status=500)
 
 
 @stats_bp.route('/stats/model/<object_type>/navigation', methods=['POST'])
@@ -480,32 +424,23 @@ def get_hierarchy_navigation(object_type):
 
         model = engine.get_analytical_model(object_type)
         if not model or not model.enabled:
-            return jsonify({
-                'success': False,
-                'message': f'对象类型 {object_type} 未启用分析模型'
-            }), 404
+            return error_response(f'对象类型 {object_type} 未启用分析模型', status=404)
 
         body = request.get_json() or {}
         current_dimensions = body.get('current_dimensions', [])
 
         nav = engine.get_hierarchy_navigation(object_type, current_dimensions)
 
-        return jsonify({
-            'success': True,
-            'data': {
-                'object_type': nav.object_type,
-                'current_dimensions': nav.current_dimensions,
-                'drill_down_options': nav.drill_down_options,
-                'roll_up_options': nav.roll_up_options,
-                'hierarchy_path': nav.hierarchy_path,
-            }
+        return ok({
+            'object_type': nav.object_type,
+            'current_dimensions': nav.current_dimensions,
+            'drill_down_options': nav.drill_down_options,
+            'roll_up_options': nav.roll_up_options,
+            'hierarchy_path': nav.hierarchy_path,
         })
 
     except Exception as e:
-        return jsonify({
-            'success': False,
-            'message': str(e)
-        }), 500
+        return error_response(str(e), status=500)
 
 
 @stats_bp.route('/stats/model/<object_type>/dimensions/<dimension_id>/members', methods=['GET'])
@@ -515,10 +450,7 @@ def get_dimension_members(object_type, dimension_id):
 
         model = engine.get_analytical_model(object_type)
         if not model or not model.enabled:
-            return jsonify({
-                'success': False,
-                'message': f'对象类型 {object_type} 未启用分析模型'
-            }), 404
+            return error_response(f'对象类型 {object_type} 未启用分析模型', status=404)
 
         filters = {}
         for key, value in request.args.items():
@@ -560,10 +492,7 @@ def get_dimension_members(object_type, dimension_id):
         })
 
     except Exception as e:
-        return jsonify({
-            'success': False,
-            'message': str(e)
-        }), 500
+        return error_response(str(e), status=500)
 
 
 @stats_bp.route('/stats/cache', methods=['GET'])
@@ -571,16 +500,10 @@ def get_cache_stats():
     try:
         engine = _get_analytical_engine()
 
-        return jsonify({
-            'success': True,
-            'data': engine.get_cache_stats()
-        })
+        return ok(engine.get_cache_stats())
 
     except Exception as e:
-        return jsonify({
-            'success': False,
-            'message': str(e)
-        }), 500
+        return error_response(str(e), status=500)
 
 
 @stats_bp.route('/stats/cache/invalidate', methods=['POST'])
@@ -593,16 +516,10 @@ def invalidate_cache():
 
         engine.invalidate_cache(object_type)
 
-        return jsonify({
-            'success': True,
-            'data': {
-                'invalidated': object_type or 'all',
-                'cache_stats': engine.get_cache_stats(),
-            }
+        return ok({
+            'invalidated': object_type or 'all',
+            'cache_stats': engine.get_cache_stats(),
         })
 
     except Exception as e:
-        return jsonify({
-            'success': False,
-            'message': str(e)
-        }), 500
+        return error_response(str(e), status=500)

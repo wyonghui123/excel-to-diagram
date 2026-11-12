@@ -1,6 +1,7 @@
 ---
 alwaysApply: false
 description: "组件配置治理 - 元模型 + API + 枚举 + 验证"
+globs: "src/**,meta/schemas/*.yaml,meta/api/*.py"
 ---
 
 # 组件配置治理（v4.0 拆分）

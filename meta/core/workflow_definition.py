@@ -19,7 +19,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from typing import Any, Dict, Iterable, List, Optional, Sequence
+from typing import Any, Dict, Iterable, List, Optional, Sequence, Tuple
 
 #: 节点必填键（与 task_templates 的 required 列对齐）
 NODE_REQUIRED_KEYS = ("node_id", "title", "executor_type")
@@ -32,6 +32,54 @@ DEFAULT_WHEN = "done"
 
 #: 主干标记（parent_step_number 空 / 0 = 主干）
 TRUNK_PARENT = 0
+
+#: 输入模板 `run.inputs` 前缀（S2 outputs→inputs）
+INPUT_RUN_PREFIX = "run.inputs."
+
+
+def parse_ref_expr(expr: str) -> Optional[Tuple[Optional[str], str]]:
+    """解析单个 `{{...}}` 内部表达式 → `(node_id 或 None=run.inputs, dot_path)`。
+
+    只支持 `run.inputs.<path>` 与 `<node_id>.outputs.<path>`；非法返回 None。
+    """
+    text = str(expr or "").strip()
+    if not text:
+        return None
+    if text.startswith(INPUT_RUN_PREFIX):
+        path = text[len(INPUT_RUN_PREFIX):].strip().strip(".")
+        return (None, path) if path else None
+    if ".outputs." in text:
+        node_id, _, path = text.partition(".outputs.")
+        node_id, path = node_id.strip(), path.strip().strip(".")
+        return (node_id, path) if node_id and path else None
+    return None
+
+
+def placeholder_refs(value: str) -> Optional[List[Tuple[Optional[str], str]]]:
+    """解析字符串中的全部 `{{...}}` 引用。
+
+    Returns:
+        None = 语法非法（未闭合 / 表达式非法）；否则引用列表。
+    """
+    if "{{" not in value and "}}" not in value:
+        return []
+    if value.count("{{") != value.count("}}"):
+        return None
+    refs: List[Tuple[Optional[str], str]] = []
+    start = 0
+    while True:
+        begin = value.find("{{", start)
+        if begin < 0:
+            break
+        end = value.find("}}", begin + 2)
+        if end < 0:
+            return None
+        ref = parse_ref_expr(value[begin + 2:end])
+        if ref is None:
+            return None
+        refs.append(ref)
+        start = end + 2
+    return refs
 
 
 class WorkflowDefinitionError(ValueError):
@@ -257,6 +305,7 @@ def validate_definition(nodes: Any,
     findings.extend(_validate_edges(normalized, edges))
     findings.extend(_validate_no_cross_branch_merge(normalized, edges))
     findings.extend(_validate_cycles(normalized, edges))
+    findings.extend(_validate_input_templates(normalized, edges))
     return findings
 
 
@@ -382,6 +431,51 @@ def _validate_cycles(nodes: Sequence[Dict[str, Any]],
         if colors.get(node_id, 0) == 0:
             walk(node_id, [])
 
+    return findings
+
+
+def _validate_input_templates(nodes: Sequence[Dict[str, Any]],
+                              edges: Optional[Iterable[Any]],
+                              ) -> List[DefinitionFinding]:
+    """S2 发布期闸门：`meta.inputs_template` 引用必须指向直接上游。"""
+    findings: List[DefinitionFinding] = []
+    upstream = {
+        target: {item["from"] for item in items}
+        for target, items in incoming_edges(nodes, edges).items()
+    }
+    for node in nodes:
+        meta = node.get("meta")
+        if not isinstance(meta, dict) or "inputs_template" not in meta:
+            continue
+        node_id = node_id_of(node)
+        template = meta.get("inputs_template")
+        if not isinstance(template, dict):
+            findings.append(DefinitionFinding(
+                "INPUT_TEMPLATE_INVALID",
+                f"node '{node_id}' 的 meta.inputs_template 需为对象"))
+            continue
+        for key, value in template.items():
+            if not isinstance(key, str) or not key.strip():
+                findings.append(DefinitionFinding(
+                    "INPUT_TEMPLATE_INVALID",
+                    f"node '{node_id}' 的 inputs_template 键必须为非空字符串"))
+                continue
+            if not isinstance(value, str):
+                continue  # 字面量（数字 / 布尔 / 对象）原样注入
+            refs = placeholder_refs(value)
+            if refs is None:
+                findings.append(DefinitionFinding(
+                    "INPUT_TEMPLATE_INVALID",
+                    f"node '{node_id}' inputs_template['{key}'] 引用语法非法"
+                    "（仅支持 {{run.inputs.<path>}} / {{<node_id>.outputs.<path>}}）"))
+                continue
+            allowed = upstream.get(node_id, set())
+            for ref_node, path in refs:
+                if ref_node is not None and ref_node not in allowed:
+                    findings.append(DefinitionFinding(
+                        "INPUT_TEMPLATE_INVALID",
+                        f"node '{node_id}' inputs_template['{key}'] 引用 "
+                        f"'{ref_node}.outputs.{path}'，但 '{ref_node}' 不是直接上游"))
     return findings
 
 

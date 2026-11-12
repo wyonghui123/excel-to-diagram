@@ -74,7 +74,7 @@ description: "Trae IDE 生成 Git 提交信息时自动应用..."
 
 ### 2.3 本项目配置
 
-[git-commit-message.md](file:///d:/filework/.trae/rules/scenarios/4-git/git-commit-message.md) 已含 `scene: git_message`：
+[git-commit-message.md](file:///d:/filework/excel-to-diagram/.trae/rules/git-commit-message.md) 已含 `scene: git_message`：
 - Conventional Commits + 中文 + 项目标签
 - 11 个 type / 9 个 scope / 5 个项目标签
 - 严禁 7 大反模式
@@ -185,9 +185,9 @@ logs/
 **本项目应对**：
 - 已启用「始终自动运行」（高效）
 - 配套规则：
-  - [powershell-execution-guide.md](file:///d:/filework/.trae/rules/scenarios/8-meta-trae/powershell-execution-guide.md) — 沙箱陷阱
+  - [powershell-execution-guide.md](file:///d:/filework/excel-to-diagram/.trae/rules/powershell-execution-guide.md) — 沙箱陷阱
   - [IRON-RULES-CHEATSHEET.md L5/L6](file:///d:/filework/.trae/rules/IRON-RULES-CHEATSHEET.md) — 假成功铁律
-  - [multi-agent-coordination.md](file:///d:/filework/.trae/rules/scenarios/7-ai-collaboration/multi-agent-coordination.md) — 多 agent 隔离
+  - [multi-agent-coordination.md](file:///d:/filework/excel-to-diagram/.trae/rules/scenarios/7-ai-collaboration/multi-agent-coordination.md) — 多 agent 隔离
 
 ### 6.2 文件删除的恢复
 
@@ -221,9 +221,9 @@ logs/
 
 | 日期 | 变更 | 内容 |
 |---|---|---|
-| 2026-09-02 | v5.1 | 整合 Trae 官方 IDE 设置文档深度学习成果；[git-commit-message.md](file:///d:/filework/.trae/rules/scenarios/4-git/git-commit-message.md) 加 `scene: git_message` 字段 |
+| 2026-09-02 | v5.1 | 整合 Trae 官方 IDE 设置文档深度学习成果；[git-commit-message.md](file:///d:/filework/excel-to-diagram/.trae/rules/git-commit-message.md) 加 `scene: git_message` 字段 |
 | 2026-09-02 | v5.0 | 场景化重构 |
-| 2026-06-20 | v1.0 | [trae-tips-from-forum.md](file:///d:/filework/.trae/rules/scenarios/8-meta-trae/trae-tips-from-forum.md) 创建（forum 实战 FAQ）|
+| 2026-06-20 | v1.0 | [trae-tips-from-forum.md](file:///d:/filework/excel-to-diagram/.trae/rules/trae-tips-from-forum.md) 创建（forum 实战 FAQ）|
 
 ---
 

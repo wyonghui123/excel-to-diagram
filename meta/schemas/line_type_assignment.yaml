@@ -192,6 +192,12 @@ fields:
         label: 停用
         color: info
         category: inactive
+      # draft 仅由配置发布流内部置位，表单层不提供该选项
+      - value: draft
+        label: 草稿
+        color: warning
+        category: draft
+        hidden: true
     semantics:
       meaning: 确定规则启用状态
       filterable: true

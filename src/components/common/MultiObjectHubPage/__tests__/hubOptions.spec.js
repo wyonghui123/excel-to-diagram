@@ -95,6 +95,45 @@ describe('resolveHubOptions', () => {
     expect(options.filterStrategies.item_group(filters, {})).toBe(filters)
   })
 
+  it('mode: direct 只取勾选节点（嵌套容器树逐层列直接子级）', () => {
+    const { options } = resolveHubOptions({
+      object_types: ['handling_unit', 'handling_unit_item', 'hu_transaction'],
+      default_tab: 'handling_unit',
+      tabs: { handling_unit: '子容器', handling_unit_item: '容器内容', hu_transaction: '容器事件' },
+      scope: {
+        type: 'hierarchy',
+        object: 'handling_unit',
+        scope_key: 'handling_unit',
+        parent_field: 'parent_hu_id',
+        label_field: 'hu_no',
+        code_field: 'hu_no'
+      },
+      filters: {
+        handling_unit: { field: 'parent_hu_id', mode: 'direct' },
+        handling_unit_item: { field: 'hu_id' },
+        hu_transaction: { field: 'hu_id' }
+      }
+    })
+    const scopeIds = { handling_unit: { selected: [1], effective: [1, 2, 3] } }
+
+    // 子容器 tab：只列 1 的直接子级（parent_hu_id = 1）
+    expect(options.filterStrategies.handling_unit({}, scopeIds))
+      .toEqual({ parent_hu_id__in: '1' })
+    // 内容 / 事件 tab：整棵子树
+    expect(options.filterStrategies.handling_unit_item({}, scopeIds))
+      .toEqual({ hu_id__in: '1,2,3' })
+    expect(options.filterStrategies.hu_transaction({}, scopeIds))
+      .toEqual({ hu_id__in: '1,2,3' })
+
+    // 容器无 name/code，树节点显示字段必须是 hu_no
+    expect(options.scopeTree.props.labelField).toBe('hu_no')
+    expect(options.scopeTree.props.codeField).toBe('hu_no')
+    expect(options.scopeTree.props.parentField).toBe('parent_hu_id')
+    // 未勾选范围 = 全量，不是空集
+    expect(options.filterStrategies.handling_unit({}, { handling_unit: { selected: [], effective: [] } }))
+      .toEqual({})
+  })
+
   it('scope-change 同步 selected / effective 到 scopeIds[scope_key]', () => {
     const { options } = resolveHubOptions(ITEM_HUB)
     const scopeIds = { item: { selected: [], effective: [] } }

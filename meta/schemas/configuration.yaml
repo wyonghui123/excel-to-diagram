@@ -106,6 +106,53 @@ fields:
       relation: item_structure
       multiple: false
 
+  # G10（D6 不新建表）：项目上下文只加可空 project_id；
+  # 扩展上下文（WBS / 客户 / 合同号）继续走 context_json，不新增列
+  - id: project_id
+    name: 项目
+    type: integer
+    db_column: project_id
+    nullable: true
+    description: 所属项目（可空；空 = 与项目无关的通用配置）
+    semantics:
+      meaning: 所属项目
+      display:
+        type: association
+        target_type: project
+        display_field: name
+        placeholder: "未归集"
+      filterable: true
+      filter_type: relation
+      filter_label: 所属项目
+      filter_scope: local
+    value_help:
+      source:
+        type: bo
+        target_bo: project
+        value_field: id
+        display_field: name
+        code_field: project_no
+        apply_target_permissions: true
+      behavior:
+        multiple: false
+        validation: true
+        binding_strength: strict
+        min_search_length: 0
+      presentation:
+        result_type: dropdown
+        display_format: "{project_no} {name}"
+        columns:
+          - field: project_no
+            label: 项目编号
+            width: 150
+          - field: name
+            label: 项目名称
+            width: 200
+    ui:
+      widget: select
+      relation: project
+      clearable: true
+
   - id: status
     name: 状态
     type: string
@@ -190,10 +237,10 @@ fields:
     type: string
     db_column: match_policy_used
     required: true
-    default: no
+    default: 'no'
     description: 求解时实际使用的匹配策略
     enum_values:
-      - value: no
+      - value: 'no'
         label: 不匹配
       - value: one_time_standard
         label: 一次性标准
@@ -298,24 +345,28 @@ fields:
 # ────────────────────────────────────────────
 # 操作定义
 # ────────────────────────────────────────────
-# [Variant Item Materialization Phase 1 2026-10-30]
-# manual 物化：把已求解 / 已冻结的实例固化为 draft 变式物料（幂等键
-# (model_item_id, config_hash)）。依据 docs/superpowers/specs/
-# 2026-10-30-variant-item-materialization-spec.md §3。本期不新增权限点迁移
-# （D10），端点仅 login_required。
+# [Variant Item Materialization v1.1 2026-10-31]
+# 物化：把已求解 / 已冻结的实例固化为变式物料（幂等键
+# (model_item_id, config_hash)，真源 items.variant_of_item_id / variant_config_hash）。
+# 依据 docs/superpowers/specs/2026-10-30-variant-item-materialization-spec.md。
+# 权限点 configuration:materialize 由 v167 落库。
 actions:
   - id: materialize
     name: 物化为物料
     type: custom
     method: POST
     path: /api/v1/config/materialize
-    description: 把已求解/已冻结的配置实例固化为 draft 变式物料（幂等复用）
+    permission: configuration:materialize
+    description: manual 产物为 draft（须签发）；auto 产物在配置冻结时直接 active（幂等复用）
 
 indexes:
   - fields: [structure_id, config_hash]
     name: idx_configuration_structure_hash
   - fields: [model_item_id, status]
     name: idx_configuration_model_status
+  # 项目配置归集路径（G10 / P3）
+  - fields: [project_id, status]
+    name: idx_configuration_project_status
 
 relations:
   - id: configuration_to_model_item
@@ -362,6 +413,10 @@ ui_view_config:
         width: 200
       - field: structure_id
         width: 160
+      - field: project_id
+        width: 180
+        filterable: true
+        filter_type: select
       - field: status
         width: 100
         filterable: true
@@ -385,7 +440,7 @@ ui_view_config:
     sections:
       - title: 基本信息
         columns:
-          - fields: [model_item_id, structure_id]
+          - fields: [model_item_id, structure_id, project_id]
           - fields: [status, revision]
           - fields: [config_hash]
       - title: 上下文

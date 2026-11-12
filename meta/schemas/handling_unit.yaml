@@ -1,0 +1,688 @@
+# 包装容器（Handling Unit / LPN）—— P6a-2 §11
+# 依据: docs/specs/p6-serial-number-model/spec.md §11.2.1 / §11.6
+#
+# 口径（已定，勿重复讨论）:
+#   ① HU 是库存之上的物流层：inventory_balances 不增加 hu_id（§11.1 / H5）。
+#   ② 单父 + 冗余根（parent_hu_id + root_hu_id），禁止 DAG（H2）。
+#   ③ 组织内唯一 (org_id, hu_no)；跨组织靠复制结构，不改 org_id（H1）。
+#   ④ open → sealed → shipped，加 void；状态只由 handling_unit_service 流转（H4）。
+#   ⑤ 不生成 SSCC，仅校验 18 位纯数字的 GS1 校验位（H6）。
+#   ⑥ 不自动汇总重量体积（H7）；允许混物料混批次（H9）。
+#
+# 枚举值由迁移 v211 注册；本文件只声明 enum_values 与 value_help 引用。
+
+id: handling_unit
+name: 包装容器
+table_name: handling_units
+description: 包装容器（HU/LPN）——托盘、箱、料箱的当前状态与内容归属
+display_name_field: hu_no
+aspects: [audit_aspect]
+
+authorization:
+  check: true
+  permissions:
+    read: handling_unit:read
+    create: handling_unit:create
+    update: handling_unit:update
+    delete: handling_unit:delete
+
+semantics:
+  meaning: 包装容器
+  category: core_entity
+  aliases:
+    - 包装容器
+    - 容器
+    - 托盘
+    - handling unit
+    - HU
+    - LPN
+
+deletion_policy:
+  mode: restrict
+  restrict_on:
+    - table: handling_unit_items
+      foreign_key: hu_id
+      message: 该容器仍有内容，禁止删除
+    - table: handling_units
+      foreign_key: parent_hu_id
+      message: 该容器仍有子容器，请先处理子容器
+    - table: hu_transactions
+      foreign_key: hu_id
+      message: 该容器存在事件记录，禁止删除
+  cascade_delete: []
+
+audit:
+  enabled: true
+  create:
+    enabled: true
+    fields: all
+  update:
+    enabled: true
+    fields: changed_only
+    exclude: [id, created_at, updated_at]
+  delete:
+    enabled: true
+    fields: business_only
+    exclude: [id, created_at, updated_at]
+
+org_scope:
+  mode: direct
+  field: org_id
+  write_check: true
+
+fields:
+  - id: id
+    name: ID
+    type: integer
+    db_column: id
+    required: true
+    unique: true
+    description: 技术主键
+    semantics:
+      meaning: 自增主键
+      primary_key: true
+
+  - id: hu_no
+    name: 容器号
+    type: string
+    db_column: hu_no
+    required: true
+    max_length: 40
+    description: 容器号；可放 SSCC-18（18 位纯数字时校验 GS1 校验位）
+    semantics:
+      meaning: 容器业务标识
+      business_key: true
+      data_category: code
+      searchable: true
+      immutable: true
+    ui:
+      widget: input
+      fieldGroup: 身份
+      fieldGroupPosition: 10
+
+  - id: hu_type
+    name: 容器类型
+    type: string
+    db_column: hu_type
+    required: true
+    default: carton
+    max_length: 20
+    description: 容器类型（托盘 / 纸箱 / 料箱 / 集装箱 / 其他）
+    enum_values:
+      - value: pallet
+        label: 托盘
+        color: primary
+      - value: carton
+        label: 纸箱
+        color: info
+        is_initial: true
+      - value: bin
+        label: 料箱
+        color: success
+      - value: container
+        label: 集装箱
+        color: warning
+      - value: other
+        label: 其他
+        color: default
+    value_help:
+      source:
+        type: enum
+        enum_type_id: hu_type
+        sort_by: sort_order
+      behavior:
+        validation: true
+        binding_strength: strict
+        multiple: false
+      presentation:
+        result_type: dropdown
+    semantics:
+      meaning: 容器类型
+      filterable: true
+      filter_type: enum
+      filter_label: 容器类型
+      filter_scope: local
+    ui:
+      widget: select
+      fieldGroup: 身份
+      fieldGroupPosition: 20
+
+  - id: packaging_item_id
+    name: 容器物料
+    type: integer
+    db_column: packaging_item_id
+    nullable: true
+    description: 容器物料（托盘 / 箱型），对应 Oracle Container Item
+    semantics:
+      meaning: 容器物料引用
+      display:
+        type: association
+        target_type: item
+        display_field: name
+        placeholder: "无容器物料"
+    ui:
+      widget: select
+      relation: item
+      multiple: false
+      clearable: true
+      fieldGroup: 身份
+      fieldGroupPosition: 30
+
+  - id: org_id
+    name: 库存组织
+    type: integer
+    db_column: org_id
+    required: true
+    description: 归属库存组织
+    semantics:
+      meaning: 库存组织引用
+      filterable: true
+      filter_type: value_help
+      filter_label: 库存组织
+    ui:
+      widget: select
+      relation: org
+      multiple: false
+      fieldGroup: 归属
+      fieldGroupPosition: 40
+
+  - id: location_id
+    name: 当前库位
+    type: integer
+    db_column: location_id
+    nullable: true
+    description: 当前库位；open 未定库位时为空，sealed 后必填
+    semantics:
+      meaning: 当前库位引用
+    ui:
+      widget: select
+      relation: location
+      multiple: false
+      clearable: true
+      fieldGroup: 归属
+      fieldGroupPosition: 50
+
+  - id: parent_hu_id
+    name: 上层容器
+    type: integer
+    db_column: parent_hu_id
+    nullable: true
+    description: 上层容器（单父）；禁止成环
+    semantics:
+      meaning: 上层容器引用
+      immutable: true
+      display:
+        type: association
+        target_type: handling_unit
+        display_field: hu_no
+        placeholder: "无上层容器"
+    ui:
+      widget: select
+      relation: handling_unit
+      multiple: false
+      clearable: true
+      fieldGroup: 嵌套
+      fieldGroupPosition: 60
+
+  - id: root_hu_id
+    name: 最外层容器
+    type: integer
+    db_column: root_hu_id
+    nullable: true
+    description: 最外层容器（自身为顶层时等于 id）
+    semantics:
+      meaning: 最外层容器引用
+      immutable: true
+    ui:
+      widget: number
+      fieldGroup: 嵌套
+      fieldGroupPosition: 70
+
+  - id: status
+    name: 状态
+    type: string
+    db_column: status
+    required: true
+    default: open
+    max_length: 20
+    description: 容器状态；只由 handling_unit_service 流转
+    enum_values:
+      - value: planned
+        label: 已计划
+        color: info
+      - value: open
+        label: 打开
+        color: info
+        is_initial: true
+      - value: sealed
+        label: 已密封
+        color: success
+      - value: in_transit
+        label: 在途
+        color: warning
+      - value: shipped
+        label: 已发运
+        color: primary
+      - value: void
+        label: 已作废
+        color: danger
+    value_help:
+      source:
+        type: enum
+        enum_type_id: hu_status
+        sort_by: sort_order
+      behavior:
+        validation: true
+        binding_strength: strict
+        multiple: false
+      presentation:
+        result_type: dropdown
+    semantics:
+      meaning: 容器状态
+      immutable: true
+      filterable: true
+      filter_type: enum
+      filter_label: 状态
+      filter_scope: local
+    ui:
+      widget: select
+      fieldGroup: 状态
+      fieldGroupPosition: 80
+
+  - id: is_reusable
+    name: 是否复用
+    type: boolean
+    db_column: is_reusable
+    default: false
+    description: 周转箱 / 托盘复用开关
+    semantics:
+      meaning: 是否可复用
+      filterable: true
+      filter_type: boolean
+      filter_label: 可复用
+    ui:
+      widget: switch
+      fieldGroup: 状态
+      fieldGroupPosition: 90
+
+  - id: cycle_no
+    name: 使用次数
+    type: integer
+    db_column: cycle_no
+    default: 1
+    description: 第几次使用（复用箱递增）
+    semantics:
+      meaning: 使用轮次
+      immutable: true
+    ui:
+      widget: number
+      fieldGroup: 状态
+      fieldGroupPosition: 100
+
+  - id: sealed_at
+    name: 密封时间
+    type: datetime
+    db_column: sealed_at
+    nullable: true
+    description: 密封时间
+    semantics:
+      meaning: 容器密封时间
+      immutable: true
+    ui:
+      widget: datetime
+      fieldGroup: 状态
+      fieldGroupPosition: 110
+
+  - id: shipped_at
+    name: 发运时间
+    type: datetime
+    db_column: shipped_at
+    nullable: true
+    description: 发运时间
+    semantics:
+      meaning: 容器发运时间
+      immutable: true
+    ui:
+      widget: datetime
+      fieldGroup: 状态
+      fieldGroupPosition: 120
+
+  - id: voided_at
+    name: 作废时间
+    type: datetime
+    db_column: voided_at
+    nullable: true
+    description: 作废时间
+    semantics:
+      meaning: 容器作废时间
+      immutable: true
+    ui:
+      widget: datetime
+      fieldGroup: 状态
+      fieldGroupPosition: 130
+
+  - id: gross_weight
+    name: 毛重
+    type: number
+    db_column: gross_weight
+    nullable: true
+    description: 毛重（录入值，不自动汇总）
+    semantics:
+      meaning: 毛重
+    ui:
+      widget: number
+      fieldGroup: 重量体积
+      fieldGroupPosition: 140
+
+  - id: tare_weight
+    name: 皮重
+    type: number
+    db_column: tare_weight
+    nullable: true
+    description: 皮重（录入值，不自动汇总）
+    semantics:
+      meaning: 皮重
+    ui:
+      widget: number
+      fieldGroup: 重量体积
+      fieldGroupPosition: 150
+
+  - id: net_weight
+    name: 净重
+    type: number
+    db_column: net_weight
+    nullable: true
+    description: 净重（录入值，不自动汇总）
+    semantics:
+      meaning: 净重
+    ui:
+      widget: number
+      fieldGroup: 重量体积
+      fieldGroupPosition: 160
+
+  - id: volume
+    name: 体积
+    type: number
+    db_column: volume
+    nullable: true
+    description: 体积（录入值，不自动汇总）
+    semantics:
+      meaning: 体积
+    ui:
+      widget: number
+      fieldGroup: 重量体积
+      fieldGroupPosition: 170
+
+  - id: uom_id
+    name: 重量体积单位
+    type: integer
+    db_column: uom_id
+    nullable: true
+    description: 重量 / 体积单位
+    semantics:
+      meaning: 计量单位引用
+    ui:
+      widget: select
+      relation: uom
+      multiple: false
+      clearable: true
+      fieldGroup: 重量体积
+      fieldGroupPosition: 180
+
+  - id: source_doc_type
+    name: 来源单据类型
+    type: string
+    db_column: source_doc_type
+    nullable: true
+    max_length: 50
+    description: 建箱来源单据类型
+    semantics:
+      meaning: 来源单据类型
+      filterable: true
+      filter_type: input
+      filter_label: 来源单据类型
+    ui:
+      widget: input
+      fieldGroup: 来源
+      fieldGroupPosition: 190
+
+  - id: source_doc_id
+    name: 来源单据
+    type: integer
+    db_column: source_doc_id
+    nullable: true
+    description: 建箱来源单据主键
+    semantics:
+      meaning: 来源单据引用
+    ui:
+      widget: number
+      fieldGroup: 来源
+      fieldGroupPosition: 200
+
+  - id: remark
+    name: 备注
+    type: string
+    db_column: remark
+    nullable: true
+    max_length: 255
+    description: 备注
+    semantics:
+      meaning: 备注
+      searchable: true
+    ui:
+      widget: textarea
+      fieldGroup: 来源
+      fieldGroupPosition: 210
+
+  - id: created_at
+    name: 创建时间
+    type: datetime
+    db_column: created_at
+    description: 创建时间
+    semantics:
+      meaning: 记录创建时间
+      audit_field: true
+
+  - id: updated_at
+    name: 更新时间
+    type: datetime
+    db_column: updated_at
+    description: 更新时间
+    semantics:
+      meaning: 记录更新时间
+      audit_field: true
+
+indexes:
+  - fields: [org_id, hu_no]
+    unique: true
+    name: uq_hu_no
+    description: 同一组织内容器号唯一
+  - fields: [parent_hu_id]
+    name: idx_hu_parent
+  - fields: [root_hu_id]
+    name: idx_hu_root
+  - fields: [location_id]
+    name: idx_hu_location
+  - fields: [status]
+    name: idx_hu_status
+
+relations:
+  - id: handling_unit_to_org
+    name: 库存组织
+    type: reference
+    target: org
+    source_field: org_id
+    target_field: id
+    cardinality: N:1
+  - id: handling_unit_to_location
+    name: 当前库位
+    type: reference
+    target: location
+    source_field: location_id
+    target_field: id
+    cardinality: N:1
+  - id: handling_unit_to_item
+    name: 容器物料
+    type: reference
+    target: item
+    source_field: packaging_item_id
+    target_field: id
+    cardinality: N:1
+  - id: handling_unit_to_parent
+    name: 上层容器
+    type: reference
+    target: handling_unit
+    source_field: parent_hu_id
+    target_field: id
+    cardinality: N:1
+  - id: handling_unit_to_item_line
+    name: 容器内容
+    type: reference
+    target: handling_unit_item
+    source_field: id
+    target_field: hu_id
+    cardinality: 1:N
+  - id: handling_unit_to_transaction
+    name: 容器事件
+    type: reference
+    target: hu_transaction
+    source_field: id
+    target_field: hu_id
+    cardinality: 1:N
+
+ui_view_config:
+  list:
+    detail_mode: drawer
+    title: 包装容器
+    columns:
+      - field: hu_no
+        width: 180
+        sortable: true
+      - field: hu_type
+        width: 110
+        filterable: true
+        filter_type: select
+      - field: org_id
+        width: 160
+        filterable: true
+        filter_type: value_help
+        render_as: association
+        target_type: org
+        display_field: name
+      - field: location_id
+        width: 160
+        filterable: true
+        filter_type: value_help
+        render_as: association
+        target_type: location
+        display_field: name
+      - field: parent_hu_id
+        width: 160
+        render_as: association
+        target_type: handling_unit
+        display_field: hu_no
+      - field: root_hu_id
+        width: 160
+        render_as: association
+        target_type: handling_unit
+        display_field: hu_no
+      - field: status
+        width: 110
+        filterable: true
+        filter_type: select
+      - field: is_reusable
+        width: 100
+        filterable: true
+        filter_type: boolean
+      - field: cycle_no
+        width: 90
+    selection:
+      enabled: true
+    searchFields: [hu_no]
+    actions:
+      - action: create
+        label: 新建容器
+      - action: update
+        label: 修改
+      - action: delete
+        label: 删除
+    defaultSort:
+      field: id
+      order: desc
+  form:
+    title: 包装容器
+    layout: vertical
+    sections:
+      - title: 身份
+        columns:
+          - fields: [hu_no, hu_type, packaging_item_id]
+      - title: 归属
+        columns:
+          - fields: [org_id, location_id]
+      - title: 嵌套
+        columns:
+          - fields: [parent_hu_id, root_hu_id]
+      - title: 状态
+        columns:
+          - fields: [status, is_reusable, cycle_no, sealed_at, shipped_at, voided_at]
+      - title: 重量体积
+        columns:
+          - fields: [gross_weight, tare_weight, net_weight, volume, uom_id]
+      - title: 来源
+        columns:
+          - fields: [source_doc_type, source_doc_id, remark]
+  detail:
+    layout: tabs
+    title: "容器 {record.hu_no}"
+    tabs:
+      - id: basic
+        label: 基本信息
+        type: fields
+        fields: [hu_no, hu_type, org_id, location_id, status, is_reusable,
+                 cycle_no, parent_hu_id, root_hu_id, packaging_item_id,
+                 gross_weight, tare_weight, net_weight, volume, uom_id,
+                 remark, created_at, updated_at]
+
+  # [D4 查询 UI 2026-11-04] page_type=multi_object_hub 时，MultiObjectHubPage 读本块
+  #   构建「容器树 + 三个 tab」；契约见 MultiObjectHubPage/hubOptions.js。
+  # 形态：左树按 parent_hu_id 组嵌套（容器可套容器），右表按当前 tab 展示：
+  #   子容器 tab 只列直接子级（mode: direct → 取 selected 而非 effective）；
+  #   容器内容 / 事件 tab 取整棵子树（effective = 勾选 ∪ 全部子孙）。
+  hub:
+    object_types: [handling_unit, handling_unit_item, hu_transaction,
+                   document_hu_link_view]
+    default_tab: handling_unit
+    tabs:
+      handling_unit: 子容器
+      handling_unit_item: 容器内容
+      hu_transaction: 容器事件
+      document_hu_link_view: 关联单据
+    state_key: handlingUnitManagerState
+    disable_version_context: true
+    scope:
+      type: hierarchy
+      object: handling_unit
+      scope_key: handling_unit
+      parent_field: parent_hu_id
+      label_field: hu_no
+      code_field: hu_no
+      order_by: hu_no
+      badge_field: status
+      badge_map:
+        planned:   { label: 已计划, type: info }
+        open:      { label: 未封箱, type: info }
+        sealed:    { label: 已封箱, type: success }
+        in_transit: { label: 在途, type: warning }
+        shipped:   { label: 已发运, type: warning }
+        void:      { label: 已作废, type: danger }
+      node_icon: folder
+      search_placeholder: 输入容器号搜索
+      empty_text: 暂无包装容器
+      paginate_all: true
+    filters:
+      handling_unit: { field: parent_hu_id, mode: direct }
+      handling_unit_item: { field: hu_id }
+      hu_transaction: { field: hu_id }
+      # 关联单据取整棵子树（effective）：link 通常写在装货的叶子箱，
+      # 父托盘自身往往没有 link，direct 会让托盘选中时永远空表。
+      document_hu_link_view: { field: hu_id }

@@ -108,13 +108,13 @@ class TestEnumProtectionInterceptorCreate:
         })
         ctx = _make_context(
             'enum_value', 'crud_create',
-            params={'enum_type_id': 1, 'value': 'new_val'},
+            params={'enum_type_id': 1, 'code': 'NEW_VAL', 'name': 'New Val'},
             data_source=ds,
         )
         interceptor.before_action(ctx)
         assert ctx.result is not None
         assert ctx.result.success is False
-        assert 'ENUM_LOCKED' in ctx.result.errors
+        assert 'enum_value_locked' in ctx.result.errors
 
     def test_allows_create_value_for_extensible_enum(self):
         interceptor = EnumProtectionInterceptor()
@@ -124,7 +124,7 @@ class TestEnumProtectionInterceptorCreate:
         })
         ctx = _make_context(
             'enum_value', 'crud_create',
-            params={'enum_type_id': 1, 'value': 'new_val'},
+            params={'enum_type_id': 1, 'code': 'NEW_VAL', 'name': 'New Val'},
             data_source=ds,
         )
         interceptor.before_action(ctx)
@@ -138,20 +138,22 @@ class TestEnumProtectionInterceptorCreate:
         })
         ctx = _make_context(
             'enum_value', 'crud_create',
-            params={'enum_type_id': 1, 'value': 'new_val'},
+            params={'enum_type_id': 1, 'code': 'NEW_VAL', 'name': 'New Val'},
             data_source=ds,
         )
         interceptor.before_action(ctx)
         assert ctx.result is None
 
-    def test_skips_create_without_enum_type_id(self):
+    def test_blocks_create_without_required_params(self):
+        """FR-006: enum_type_id / code / name 必填，缺失即拒绝"""
         interceptor = EnumProtectionInterceptor()
         ctx = _make_context(
             'enum_value', 'crud_create',
             params={'value': 'new_val'},
         )
         interceptor.before_action(ctx)
-        assert ctx.result is None
+        assert ctx.result is not None
+        assert 'action_params_missing' in ctx.result.errors
 
     def test_skips_create_for_enum_type_object(self):
         interceptor = EnumProtectionInterceptor()
@@ -170,7 +172,7 @@ class TestEnumProtectionInterceptorCreate:
         ds.execute.return_value = cursor
         ctx = _make_context(
             'enum_value', 'crud_create',
-            params={'enum_type_id': 999},
+            params={'enum_type_id': 999, 'code': 'NEW_VAL', 'name': 'New Val'},
             data_source=ds,
         )
         interceptor.before_action(ctx)
@@ -189,7 +191,7 @@ class TestEnumProtectionInterceptorUpdate:
         interceptor.before_action(ctx)
         assert ctx.result is not None
         assert ctx.result.success is False
-        assert 'SYSTEM_ENUM_IMMUTABLE' in ctx.result.errors
+        assert 'system_enum_immutable' in ctx.result.errors
 
     def test_allows_update_business_enum_type(self):
         interceptor = EnumProtectionInterceptor()
@@ -215,7 +217,7 @@ class TestEnumProtectionInterceptorUpdate:
         interceptor.before_action(ctx)
         assert ctx.result is not None
         assert ctx.result.success is False
-        assert 'ENUM_LOCKED' in ctx.result.errors
+        assert 'enum_value_locked' in ctx.result.errors
 
     def test_allows_update_value_for_extensible_enum(self):
         interceptor = EnumProtectionInterceptor()
@@ -264,7 +266,7 @@ class TestEnumProtectionInterceptorDelete:
         interceptor.before_action(ctx)
         assert ctx.result is not None
         assert ctx.result.success is False
-        assert 'SYSTEM_ENUM_IMMUTABLE' in ctx.result.errors
+        assert 'system_enum_immutable' in ctx.result.errors
 
     def test_blocks_delete_enum_type_with_values(self):
         interceptor = EnumProtectionInterceptor()
@@ -278,7 +280,7 @@ class TestEnumProtectionInterceptorDelete:
         interceptor.before_action(ctx)
         assert ctx.result is not None
         assert ctx.result.success is False
-        assert 'HAS_VALUES' in ctx.result.errors
+        assert 'has_values' in ctx.result.errors
 
     def test_allows_delete_empty_business_enum_type(self):
         interceptor = EnumProtectionInterceptor()
@@ -302,7 +304,7 @@ class TestEnumProtectionInterceptorDelete:
         interceptor.before_action(ctx)
         assert ctx.result is not None
         assert ctx.result.success is False
-        assert 'SYSTEM_VALUE_IMMUTABLE' in ctx.result.errors
+        assert 'system_value_immutable' in ctx.result.errors
 
     def test_blocks_delete_value_for_locked_enum(self):
         interceptor = EnumProtectionInterceptor()
@@ -318,7 +320,7 @@ class TestEnumProtectionInterceptorDelete:
         interceptor.before_action(ctx)
         assert ctx.result is not None
         assert ctx.result.success is False
-        assert 'ENUM_LOCKED' in ctx.result.errors
+        assert 'enum_value_locked' in ctx.result.errors
 
     def test_allows_delete_non_system_value_for_extensible_enum(self):
         interceptor = EnumProtectionInterceptor()
@@ -372,7 +374,7 @@ class TestEnumProtectionInterceptorErrorHandling:
         ds.execute.side_effect = Exception("DB error")
         ctx = _make_context(
             'enum_value', 'crud_create',
-            params={'enum_type_id': 1},
+            params={'enum_type_id': 1, 'code': 'NEW_VAL', 'name': 'New Val'},
             data_source=ds,
         )
         interceptor.before_action(ctx)

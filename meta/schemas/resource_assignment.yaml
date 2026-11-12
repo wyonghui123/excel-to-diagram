@@ -1,0 +1,395 @@
+# 资源分配（Resource Assignment）—— 统一资源模型 P2b / FR-008
+# 依据: docs/specs/spec-unified-resource-model-2026-11-01-v1.0.md
+#       §9.3 数据模型表 / 关联结构
+#
+# 定位: 作业步骤（work_order_operation）× 资源（resource）× 计划时间窗，
+#   一行 = 一个资源承诺在某时间窗内做某步骤的一部分/全部数量。
+#   作业定义侧只声明"要求"（operation_resource_requirement），
+#   本表才是"实际分配"，是排程结果与成本归集的落点。
+#
+# 口径:
+#   ① (work_order_operation_id, resource_id, planned_start) 唯一。
+#   ② 计划量 ≤ 步骤量，同一资源时间窗不重叠（服务层校验，显式超产标记例外）。
+#   ③ 本表为叶子表，不被其他对象引用，restrict_on 为空。
+
+id: resource_assignment
+name: 资源分配
+table_name: resource_assignments
+description: 作业步骤的资源分配（资源 + 计划时间窗 + 计划量 + 状态 + 来源）
+display_name_field: resource_id
+aspects: [audit_aspect]
+
+semantics:
+  meaning: 资源分配
+  category: business_document_line
+  aliases:
+    - 资源分配
+    - 派工
+    - resource assignment
+
+deletion_policy:
+  mode: restrict
+  restrict_on: []
+  cascade_delete: []
+
+audit:
+  enabled: true
+  create:
+    enabled: true
+    fields: all
+  update:
+    enabled: true
+    fields: changed_only
+    exclude: [id, created_at, updated_at]
+  delete:
+    enabled: true
+    fields: business_only
+    exclude: [id, created_at, updated_at]
+  associate:
+    enabled: true
+  dissociate:
+    enabled: true
+
+fields:
+  - id: id
+    name: ID
+    type: integer
+    db_column: id
+    required: true
+    unique: true
+    description: 技术主键
+    semantics:
+      meaning: 自增主键
+      primary_key: true
+
+  - id: work_order_operation_id
+    name: 作业步骤
+    type: integer
+    db_column: work_order_operation_id
+    required: true
+    description: 被分配的作业步骤
+    semantics:
+      meaning: 作业步骤引用
+      display:
+        type: association
+        target_type: work_order_operation
+        display_field: id
+    value_help:
+      source:
+        type: bo
+        target_bo: work_order_operation
+        value_field: id
+        display_field: id
+        apply_target_permissions: true
+      behavior:
+        multiple: false
+        validation: true
+        binding_strength: strict
+        min_search_length: 0
+      presentation:
+        result_type: dialog
+        display_format: "{id}"
+        columns:
+          - field: id
+            label: 步骤ID
+            width: 120
+          - field: operation_name
+            label: 步骤名称
+            width: 200
+    ui:
+      widget: select
+      relation: work_order_operation
+      multiple: false
+      hidden_in_form: true
+      fieldGroup: 关联
+      fieldGroupPosition: 10
+
+  - id: resource_id
+    name: 资源
+    type: integer
+    db_column: resource_id
+    required: true
+    description: 承担该步骤的资源
+    semantics:
+      meaning: 资源引用
+      display:
+        type: association
+        target_type: resource
+        display_field: name
+    value_help:
+      source:
+        type: bo
+        target_bo: resource
+        value_field: id
+        display_field: name
+        code_field: code
+        apply_target_permissions: true
+        value_filter:
+          is_active: true
+      behavior:
+        multiple: false
+        validation: true
+        binding_strength: strict
+        min_search_length: 0
+      presentation:
+        result_type: dialog
+        display_format: "{code} - {name}"
+        columns:
+          - field: code
+            label: 资源编码
+            width: 150
+          - field: name
+            label: 资源名称
+            width: 220
+    ui:
+      widget: select
+      relation: resource
+      multiple: false
+      fieldGroup: 关联
+      fieldGroupPosition: 20
+
+  - id: planned_start
+    name: 计划开始
+    type: datetime
+    db_column: planned_start
+    nullable: true
+    description: 计划开始时间；空表示未排定时间窗
+    semantics:
+      meaning: 计划开始时刻
+    ui:
+      widget: datetime
+      fieldGroup: 计划
+      fieldGroupPosition: 30
+
+  - id: planned_end
+    name: 计划结束
+    type: datetime
+    db_column: planned_end
+    nullable: true
+    description: 计划结束时间；空表示未排定时间窗
+    semantics:
+      meaning: 计划结束时刻
+    ui:
+      widget: datetime
+      fieldGroup: 计划
+      fieldGroupPosition: 40
+
+  - id: planned_qty
+    name: 计划量
+    type: number
+    db_column: planned_qty
+    nullable: true
+    description: 本次分配承担的数量；空表示承担整个步骤
+    semantics:
+      meaning: 计划分配数量
+    ui:
+      widget: number
+      fieldGroup: 计划
+      fieldGroupPosition: 50
+
+  - id: status
+    name: 状态
+    type: string
+    db_column: status
+    required: true
+    default: planned
+    description: 分配状态（计划 / 已确认 / 执行中 / 已完成 / 已取消）
+    enum_values:
+      - value: planned
+        label: 计划
+        color: info
+        is_initial: true
+      - value: confirmed
+        label: 已确认
+        color: primary
+      - value: in_progress
+        label: 执行中
+        color: warning
+      - value: completed
+        label: 已完成
+        color: success
+      - value: canceled
+        label: 已取消
+        color: danger
+    value_help:
+      source:
+        type: enum
+        enum_type_id: assignment_status
+        sort_by: sort_order
+      behavior:
+        validation: true
+        binding_strength: strict
+        multiple: false
+      presentation:
+        result_type: dropdown
+    semantics:
+      meaning: 资源分配状态
+      filterable: true
+      filter_type: enum
+      filter_label: 状态
+      filter_scope: local
+    ui:
+      widget: select
+      fieldGroup: 状态
+      fieldGroupPosition: 60
+
+  - id: source
+    name: 分配来源
+    type: string
+    db_column: source
+    required: true
+    default: manual
+    description: 分配来源（手工指定 / 自动排程）
+    enum_values:
+      - value: manual
+        label: 手工
+        color: primary
+        is_initial: true
+      - value: auto
+        label: 自动排程
+        color: success
+    value_help:
+      source:
+        type: enum
+        enum_type_id: assignment_source
+        sort_by: sort_order
+      behavior:
+        validation: true
+        binding_strength: strict
+        multiple: false
+      presentation:
+        result_type: dropdown
+    semantics:
+      meaning: 资源分配来源
+      filterable: true
+      filter_type: enum
+      filter_label: 分配来源
+      filter_scope: local
+    ui:
+      widget: select
+      fieldGroup: 状态
+      fieldGroupPosition: 70
+
+  - id: created_at
+    name: 创建时间
+    type: datetime
+    db_column: created_at
+    description: 创建时间
+    semantics:
+      meaning: 记录创建时间
+      audit_field: true
+
+  - id: updated_at
+    name: 更新时间
+    type: datetime
+    db_column: updated_at
+    description: 更新时间
+    semantics:
+      meaning: 记录更新时间
+      audit_field: true
+
+indexes:
+  - fields: [work_order_operation_id, resource_id, planned_start]
+    unique: true
+    name: uq_resource_assignment
+  - fields: [resource_id]
+    name: idx_resource_assignment_resource
+  - fields: [work_order_operation_id]
+    name: idx_resource_assignment_operation
+
+relations:
+  - id: resource_assignment_to_operation
+    name: 作业步骤
+    type: reference
+    target: work_order_operation
+    source_field: work_order_operation_id
+    target_field: id
+    cardinality: N:1
+    description: 作业步骤引用（真外键）
+  - id: resource_assignment_to_resource
+    name: 资源
+    type: reference
+    target: resource
+    source_field: resource_id
+    target_field: id
+    cardinality: N:1
+    description: 资源引用（真外键）
+
+ui_view_config:
+  # 菜单由迁移 v176 手工声明（挂 master-data），不让自动生成器产出孤儿行
+  skip_auto_menu: true
+  list:
+    detail_mode: drawer
+    title: 资源分配
+    columns:
+      - field: work_order_operation_id
+        width: 170
+        filterable: true
+        filter_type: value_help
+        render_as: association
+        target_type: work_order_operation
+        display_field: id
+      - field: resource_id
+        width: 190
+        filterable: true
+        filter_type: value_help
+        render_as: association
+        target_type: resource
+        display_field: name
+      - field: planned_start
+        width: 160
+        sortable: true
+      - field: planned_end
+        width: 160
+      - field: planned_qty
+        width: 110
+      - field: status
+        width: 110
+        filterable: true
+        filter_type: select
+      - field: source
+        width: 110
+        filterable: true
+        filter_type: select
+    selection:
+      enabled: true
+      mode: multiple
+    searchFields: [resource_id]
+    actions:
+      - id: create
+        label: 新建分配
+        icon: plus
+        type: primary
+        permission: resource_assignment:create
+    defaultSort:
+      field: planned_start
+      order: asc
+  form:
+    title: 资源分配
+    layout: vertical
+    sections:
+      - title: 关联
+        columns:
+          - fields: [work_order_operation_id, resource_id]
+      - title: 计划
+        columns:
+          - fields: [planned_start, planned_end]
+          - fields: [planned_qty]
+      - title: 状态
+        columns:
+          - fields: [status, source]
+  detail:
+    layout: tabs
+    title: 资源分配 详情
+    tabs:
+      - id: basic
+        label: 基本信息
+        type: fields
+        fields: [work_order_operation_id, resource_id, planned_start, planned_end,
+                 planned_qty, status, source]
+
+category_config:
+  create_permission: resource_assignment:create
+  update_permission: resource_assignment:update
+  delete_permission: resource_assignment:delete
+  owner_auto_permission: false

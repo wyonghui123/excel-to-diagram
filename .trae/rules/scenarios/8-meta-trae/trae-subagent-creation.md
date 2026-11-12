@@ -1,6 +1,6 @@
 ---
 description: Trae IDE Subagent 创建指南 - 在 UI 中创建可被其他智能体调用的 Subagent 时加载。说明真实 Subagent 路径、必填字段、与 .md 文件的关系。
-globs: ["**/.trae/agents/**", "**/.trae/agents/*.md"]
+globs: "**/.trae/agents/**,**/.trae/agents/*.md"
 version: "0.1.0"
 author: "AI"
 last_updated: "2026-09-02"
@@ -105,4 +105,4 @@ AI 对话输入框 → 输入 @ → 浮起面板底部"创建智能体"按钮
 
 - [docs.trae.cn/ide/agent](https://docs.trae.cn/ide/agent) —— 创建并管理智能体
 - [docs.trae.cn/ide/solo-coder](https://docs.trae.cn/ide/solo-coder) —— SOLO Agent（含 Subagent 调用）
-- v5.4 深度研究：[2026-09-02-trae-ide-v5.4-deep-research.md](../../../excel-to-diagram/docs/governance/2026-09-02-trae-ide-v5.4-deep-research.md)
+- v5.4 深度研究：[2026-09-02-trae-ide-v5.4-deep-research.md](../../../../docs/governance/2026-09-02-trae-ide-v5.4-deep-research.md)

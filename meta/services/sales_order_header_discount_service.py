@@ -468,7 +468,7 @@ class SalesOrderHeaderDiscountService:
     # ------------------------------------------------------------------
     def _load_order(self, order_id: Any) -> Optional[Dict[str, Any]]:
         rows = self.ds.query(
-            'SELECT id, order_type_id, order_date, currency_id, '
+            'SELECT id, document_type_id, order_date, currency_id, '
             'header_discount_percent, header_surcharge_percent '
             'FROM sales_orders WHERE id = ?', [order_id])
         return rows[0] if rows else None

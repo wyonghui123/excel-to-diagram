@@ -120,17 +120,14 @@ class TestVirtualFieldSortBusinessObject:
         assert order_alias == '_j3.name'
 
     def test_build_join_for_bo_domain_id(self, query_service):
-        """测试 business_object.domain_id 的 JOIN 构建"""
+        """business_object.domain_id 为 stored 列 (2026-06-28 起) → 不需要虚拟字段 JOIN"""
         meta_obj = registry.get('business_object')
         
         result = query_service._build_virtual_field_order_join(
             meta_obj, 'domain_id', 'asc'
         )
         
-        assert result is not None
-        join_clause, order_alias, _ = result
-        
-        assert order_alias == '_j2.domain_id'
+        assert result is None
 
 
 class TestVirtualFieldSortIntegration:

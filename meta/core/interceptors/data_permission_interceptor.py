@@ -702,15 +702,16 @@ class DataPermissionInterceptor(Interceptor):
         pass
 
     def _is_admin(self, context: 'ActionContext') -> bool:
+        # 优先看上下文里显式标记 (不依赖请求上下文, 单测/异步任务里 get_current_user 会抛错)
+        if context.extra.get('is_admin'):
+            return True
+        perms = context.extra.get('permissions', [])
+        if '*' in perms or 'admin' in perms:
+            return True
         try:
             from meta.services.auth_middleware import is_admin, get_current_user
             user = get_current_user()
             if user and is_admin(user):
-                return True
-            if context.extra.get('is_admin'):
-                return True
-            perms = context.extra.get('permissions', [])
-            if '*' in perms or 'admin' in perms:
                 return True
         except Exception:
             pass

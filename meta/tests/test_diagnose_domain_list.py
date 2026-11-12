@@ -34,31 +34,46 @@ def ds():
     return _ds
 
 
+def _pick_version_id(ds):
+    """挑一个 domain 最多的 version_id (不再硬编码 1)"""
+    row = ds.execute(
+        "SELECT version_id FROM domains WHERE version_id IS NOT NULL "
+        "GROUP BY version_id ORDER BY COUNT(*) DESC LIMIT 1"
+    ).fetchone()
+    return row[0] if row else None
+
+
 class TestDomainListMixedSelection:
     """诊断：混合选择节点时 domain 列表数据丢失"""
 
     def test_1_show_actual_domain_data(self, ds):
         """步骤1: 查看数据库中实际的 domain 数据"""
-        rows = ds.execute("""
+        vid = _pick_version_id(ds)
+        if vid is None:
+            pytest.skip("测试库无 domain 数据")
+        rows = ds.execute(f"""
             SELECT id, code, name, version_id 
             FROM domains 
-            WHERE version_id = 1 
+            WHERE version_id = {vid}
             ORDER BY id
         """).fetchall()
         
-        print(f"\n[步骤1] 版本1中的所有domain ({len(rows)}条):")
+        print(f"\n[步骤1] 版本{vid}中的所有domain ({len(rows)}条):")
         for r in rows:
             print(f"  id={r[0]}, code={r[1]}, name={r[2]}")
         
         if len(rows) < 2:
-            pytest.fail("Need at least 2 domains to test mixed selection")
+            pytest.skip("Need at least 2 domains to test mixed selection")
         
         assert len(rows) >= 2, "至少需要2个domain才能测试"
 
     def test_2_simulate_buildOriginalFilter(self, ds):
         """步骤2: 模拟前端 buildOriginalFilter 的输出"""
-        rows = ds.execute("""
-            SELECT id FROM domains WHERE version_id = 1 ORDER BY id
+        vid = _pick_version_id(ds)
+        if vid is None:
+            pytest.skip("测试库无 domain 数据")
+        rows = ds.execute(f"""
+            SELECT id FROM domains WHERE version_id = {vid} ORDER BY id
         """).fetchall()
         
         domain_ids = [r[0] for r in rows]
@@ -99,14 +114,17 @@ class TestDomainListMixedSelection:
 
     def test_3_simulate_currentFilterParams_for_domain_tab(self, ds):
         """步骤3: 模拟前端 currentFilterParams (领域标签页)"""
-        rows = ds.execute("""
-            SELECT id FROM domains WHERE version_id = 1 ORDER BY id
+        vid = _pick_version_id(ds)
+        if vid is None:
+            pytest.skip("测试库无 domain 数据")
+        rows = ds.execute(f"""
+            SELECT id FROM domains WHERE version_id = {vid} ORDER BY id
         """).fetchall()
         
         domain_ids = [r[0] for r in rows]
         
         hierarchy_filter = {
-            'version_id': 1,
+            'version_id': vid,
             'domain_id': domain_ids,
             'sub_domain_id': [999],
             'service_module_id': [888],
@@ -137,13 +155,16 @@ class TestDomainListMixedSelection:
         query_svc = QueryService(ds)
         svc = HierarchyFilterService(query_svc, ds)
         
-        rows = ds.execute("""
-            SELECT id FROM domains WHERE version_id = 1 ORDER BY id
+        vid = _pick_version_id(ds)
+        if vid is None:
+            pytest.skip("测试库无 domain 数据")
+        rows = ds.execute(f"""
+            SELECT id FROM domains WHERE version_id = {vid} ORDER BY id
         """).fetchall()
         domain_ids = [str(r[0]) for r in rows]
         
         args_dict = {
-            'version_id': ['1'],
+            'version_id': [str(vid)],
             'domain_id': domain_ids,
         }
         
@@ -168,12 +189,15 @@ class TestDomainListMixedSelection:
         
         client, headers = client_with_auth
         
-        rows = ds.execute("""
-            SELECT id FROM domains WHERE version_id = 1 ORDER BY id
+        vid = _pick_version_id(ds)
+        if vid is None:
+            pytest.skip("测试库无 domain 数据")
+        rows = ds.execute(f"""
+            SELECT id FROM domains WHERE version_id = {vid} ORDER BY id
         """).fetchall()
         domain_ids = [r[0] for r in rows]
         
-        query_string = 'version_id=1'
+        query_string = f'version_id={vid}'
         for did in domain_ids:
             query_string += f'&domain_id={did}'
         query_string += '&page=1&pageSize=20'
@@ -223,12 +247,15 @@ class TestDomainListMixedSelection:
         """
         client, headers = client_with_auth
         
-        all_domains = ds.execute("""
-            SELECT id, name, code FROM domains WHERE version_id = 1 ORDER BY id
+        vid = _pick_version_id(ds)
+        if vid is None:
+            pytest.skip("测试库无 domain 数据")
+        all_domains = ds.execute(f"""
+            SELECT id, name, code FROM domains WHERE version_id = {vid} ORDER BY id
         """).fetchall()
         
         if len(all_domains) < 3:
-            pytest.fail("需要至少3个domain来测试混合选择场景")
+            pytest.skip("需要至少3个domain来测试混合选择场景")
         
         simulating_domain = all_domains[0]
         leaf_domain_1 = all_domains[-2] if len(all_domains) >= 2 else None
@@ -248,8 +275,8 @@ class TestDomainListMixedSelection:
         checked_ids = [f'domain_{did}' for did in selected_domain_ids]
         
         sub_domains_under_first = ds.execute("""
-            SELECT id FROM sub_domains WHERE domain_id = ? AND version_id = 1
-        """, (simulating_domain[0],)).fetchall()
+            SELECT id FROM sub_domains WHERE domain_id = ? AND version_id = ?
+        """, (simulating_domain[0], vid)).fetchall()
         
         for sd in sub_domains_under_first[:3]:
             checked_ids.append(f'sub_domain_{sd[0]}')
@@ -262,7 +289,7 @@ class TestDomainListMixedSelection:
         app = Flask(__name__)
         app.register_blueprint(manage_bp)
         
-        query_parts = ['version_id=1']
+        query_parts = [f'version_id={vid}']
         for did in selected_domain_ids:
             query_parts.append(f'domain_id={did}')
         for sd in sub_domains_under_first[:3]:

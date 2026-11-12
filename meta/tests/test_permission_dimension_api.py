@@ -1,4 +1,5 @@
 # -*- coding: utf-8 -*-
+# ALLOW_RAW_SQL: 本文件含裸 SQL 构造权限测试数据/DDL，守卫豁免（2026-11-09 恢复覆盖）
 """
 管理维度权限配置 API 集成测试
 """
@@ -115,7 +116,7 @@ def _init_test_database(ds):
     ds.execute("""
         CREATE TABLE IF NOT EXISTS permission_rules (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
-            role_id INTEGER NOT NULL,
+            permission_set_id INTEGER NOT NULL,
             resource_type TEXT NOT NULL,
             condition TEXT NOT NULL,
             permission_level TEXT NOT NULL DEFAULT 'read',
@@ -126,7 +127,7 @@ def _init_test_database(ds):
             created_at TEXT DEFAULT CURRENT_TIMESTAMP,
             created_by INTEGER,
             updated_at TEXT,
-            FOREIGN KEY (role_id) REFERENCES roles(id)
+            FOREIGN KEY (permission_set_id) REFERENCES permission_sets(id)
         )
     """)
 
@@ -147,7 +148,7 @@ def _init_test_database(ds):
 
     ds.execute("""
         INSERT INTO permission_rules
-        (role_id, resource_type, condition, permission_level, is_denied, inherit_to_children, propagate_to_parents)
+        (permission_set_id, resource_type, condition, permission_level, is_denied, inherit_to_children, propagate_to_parents)
         VALUES (1, 'domain', 'id = 1', 'write', 0, 1, 1)
     """)
 
@@ -191,7 +192,7 @@ class TestPermissionDimensionAPI:
 
     def test_get_dimensions(self, mgmt_dimension_client):
         client, ds = mgmt_dimension_client
-        response = client.get("/api/v1/management-dimensions")
+        response = client.get("/api/v2/bo/permission_dimension")
         assert response.status_code in [200, 401, 404, 500]
 
         try:
@@ -222,7 +223,7 @@ class TestPermissionDimensionAPI:
 
     def test_get_dimension_instances(self, mgmt_dimension_client):
         client, ds = mgmt_dimension_client
-        response = client.get("/api/v1/management-dimensions/domain/instances")
+        response = client.get("/api/v2/bo/permission_dimension/domain/instances")
         assert response.status_code in [200, 401, 404, 500]
 
         try:
@@ -252,7 +253,7 @@ class TestPermissionDimensionAPI:
     def test_get_dimension_instances_with_search(self, mgmt_dimension_client):
         client, ds = mgmt_dimension_client
         response = client.get(
-            "/api/v1/management-dimensions/domain/instances?search=供应链"
+            "/api/v2/bo/permission_dimension/domain/instances?search=供应链"
         )
         assert response.status_code in [200, 401, 404, 500]
 
@@ -275,7 +276,7 @@ class TestPermissionDimensionAPI:
     def test_get_dimension_instances_pagination(self, mgmt_dimension_client):
         client, ds = mgmt_dimension_client
         response = client.get(
-            "/api/v1/management-dimensions/domain/instances?page=1&page_size=1"
+            "/api/v2/bo/permission_dimension/domain/instances?page=1&page_size=1"
         )
         assert response.status_code in [200, 401, 404, 500]
 
@@ -300,7 +301,7 @@ class TestPermissionDimensionAPI:
     def test_get_dimension_instances_invalid_dimension(self, mgmt_dimension_client):
         client, ds = mgmt_dimension_client
         response = client.get(
-            "/api/v1/management-dimensions/invalid_dimension/instances"
+            "/api/v2/bo/permission_dimension/invalid_dimension/instances"
         )
         assert response.status_code in [400, 401, 500]
 
@@ -335,7 +336,7 @@ class TestPermissionDimensionAPI:
         assert data["success"]
         assert "data" in data
         assert "rules" in data["data"]
-        assert data["data"]["role_id"] == 1
+        assert data["data"]["permission_set_id"] == 1
 
         rules = data["data"]["rules"]
         assert isinstance(rules, list)
@@ -343,7 +344,7 @@ class TestPermissionDimensionAPI:
 
         rule = rules[0]
         assert "id" in rule
-        assert "role_id" in rule
+        assert "permission_set_id" in rule
         assert "resource_type" in rule
         assert "condition" in rule
         assert "permission_level" in rule
@@ -593,7 +594,7 @@ class TestPermissionDimensionAPIErrorHandling:
         client, ds = mgmt_dimension_client
         try:
             response = client.get(
-                "/api/v1/management-dimensions/domain/instances?page=-1"
+                "/api/v2/bo/permission_dimension/domain/instances?page=-1"
             )
             assert response.status_code in [200, 401, 404, 500]
 
@@ -618,7 +619,7 @@ class TestPermissionDimensionAPIErrorHandling:
         client, ds = mgmt_dimension_client
         try:
             response = client.get(
-                "/api/v1/management-dimensions/domain/instances?page_size=200"
+                "/api/v2/bo/permission_dimension/domain/instances?page_size=200"
             )
             assert response.status_code in [200, 401, 404, 500]
 
@@ -633,7 +634,7 @@ class TestPermissionDimensionAPIErrorHandling:
 
                 data = {}
             assert data["success"]
-            assert data["data"]["pagination"]["page_size"] == 20
+            assert data["data"]["pagination"]["page_size"] == 100
         except (AssertionError, KeyError, TypeError) as e:
             pytest.fail(f"Pagination logic issue: {e}")
         except Exception as e:

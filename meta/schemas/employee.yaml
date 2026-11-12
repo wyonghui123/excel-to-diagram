@@ -1,0 +1,702 @@
+# 员工（Employee）—— 统一资源模型 P3 / FR-015（薄主数据）
+# 依据: docs/specs/spec-unified-resource-model-2026-11-01-v1.0.md §FR-015
+#
+# 定位: `person_profile`（自然人）之上的**雇佣关系**（薄 assignment），
+#   只承载「谁被我方雇佣、在哪个组织/地点、什么岗位、何时在职」；
+#   不承载薪酬/考勤/绩效，也不新建自然人。
+#
+# 与 resource 的关系（关键决策 v1.10）:
+#   ① **不含 resource_id**：资源与员工都指向 person_profile，按 person 求交
+#     （resource.person_ref = employees.person_profile_id AND status='active'）；
+#   ② 同一人可跨厂/跨组织存在多个人资源实例，两实例都解析到同一条在职员工记录；
+#   ③ 员工历史行（离职/再入职）不使个人资源失效。
+#
+# 唯一性口径（部分唯一索引，见 indexes）:
+#   · employee_no 按**法人雇主**唯一（`(org_id, employee_no) WHERE status='active'`）；
+#     再入职沿用原号，历史 terminated 行可同号；跨法人可复用同一工号；
+#   · person_profile_id 仅在职唯一（同一自然人在同一时刻只能有一条在职雇佣）。
+#
+# 口径（v1.18 关闭 TBD-9/10/11/12）:
+#   ① `org_id` 语义 = **法人雇主（legal employer）**，即 Oracle Work Relationship 的
+#     person ↔ 法人 段；employee 首期压成「person → 单条在职雇佣」两层（TBD-12）；
+#   ② `name` 是**缓存列**：真源 `person_profile → party` 名称，改名由服务同步；
+#   ③ 派遣人员（employment_type=dispatched）必须填 `supplier_party_id`（服务层校验）；
+#     外协主体仍走 party + resource(external)，不建员工行（TBD-10）；
+#   ④ 不建 `employee_org_assignment`、不加矩阵汇报虚线字段（TBD-11 关闭，P4 再评估）；
+#   ⑤ status='terminated' 时 termination_date 必填（服务层校验）；
+#   ⑥ termination_date >= hire_date（服务层校验）；
+#   ⑦ manager_employee_id 不得成环（服务层校验，向上追溯）；
+#   ⑧ employee 是主体实体 ⇒ 独立菜单（v185，menu_code='employee-list'）。
+
+id: employee
+name: 员工
+table_name: employees
+description: 员工薄主数据——person_profile 之上的雇佣关系（组织/地点/岗位/在职区间）
+display_name_field: name
+aspects: [audit_aspect]
+
+semantics:
+  meaning: 雇佣关系（薄员工主数据）
+  category: core_entity
+  aliases:
+    - 员工
+    - 员工主数据
+    - 雇佣关系
+    - employee
+
+deletion_policy:
+  mode: restrict
+  restrict_on:
+    - table: employee_shift_assignments
+      foreign_key: employee_id
+      message: 该员工仍有排班记录，请先处理排班后再删除
+    - table: employees
+      foreign_key: manager_employee_id
+      message: 该员工仍是其他员工的直属主管，请先调整汇报关系后再删除
+  cascade_delete: []
+
+audit:
+  enabled: true
+  create:
+    enabled: true
+    fields: all
+  update:
+    enabled: true
+    fields: changed_only
+    exclude: [id, created_at, updated_at]
+  delete:
+    enabled: true
+    fields: business_only
+    exclude: [id, created_at, updated_at]
+  associate:
+    enabled: true
+  dissociate:
+    enabled: true
+
+org_scope:
+  mode: direct
+  field: org_id
+  write_check: true
+
+fields:
+  - id: id
+    name: ID
+    type: integer
+    db_column: id
+    required: true
+    unique: true
+    description: 技术主键
+    semantics:
+      meaning: 自增主键
+      primary_key: true
+
+  - id: employee_no
+    name: 工号
+    type: string
+    db_column: employee_no
+    required: true
+    max_length: 200
+    description: 工号（再入职沿用原号；按法人雇主 + status='active' 唯一）
+    semantics:
+      meaning: 工号
+      business_key: true
+      searchable: true
+    ui:
+      widget: input
+      fieldGroup: 基本信息
+      fieldGroupPosition: 10
+
+  - id: name
+    name: 姓名
+    type: string
+    db_column: name
+    required: true
+    max_length: 200
+    description: 姓名（缓存列，真源 person_profile 对应 party 名称；改名走服务同步）
+    semantics:
+      meaning: 员工姓名
+      display_name: true
+      searchable: true
+    ui:
+      widget: input
+      fieldGroup: 基本信息
+      fieldGroupPosition: 20
+
+  - id: person_profile_id
+    name: 自然人档案
+    type: integer
+    db_column: person_profile_id
+    required: true
+    description: 自然人档案（雇佣关系指向 person_profile；仅在职唯一）
+    semantics:
+      meaning: 人员档案引用
+      display:
+        type: association
+        target_type: person_profile
+        display_field: mobile
+    value_help:
+      source:
+        type: bo
+        target_bo: person_profile
+        value_field: id
+        display_field: mobile
+        apply_target_permissions: true
+      behavior:
+        multiple: false
+        validation: true
+        binding_strength: strict
+        min_search_length: 0
+      presentation:
+        result_type: dialog
+        display_format: "{id} - {mobile}"
+        columns:
+          - field: id
+            label: 档案 ID
+            width: 120
+          - field: mobile
+            label: 手机号
+            width: 180
+    ui:
+      widget: select
+      relation: person_profile
+      multiple: false
+      clearable: false
+      fieldGroup: 基本信息
+      fieldGroupPosition: 30
+
+  - id: user_id
+    name: 登录账号
+    type: integer
+    db_column: user_id
+    nullable: true
+    description: 登录账号（可后绑）
+    semantics:
+      meaning: 登录账号引用
+      display:
+        type: association
+        target_type: user
+        display_field: username
+    value_help:
+      source:
+        type: bo
+        target_bo: user
+        value_field: id
+        display_field: username
+        apply_target_permissions: true
+      behavior:
+        multiple: false
+        validation: true
+        binding_strength: strict
+        min_search_length: 0
+      presentation:
+        result_type: dialog
+        display_format: "{username}"
+        columns:
+          - field: username
+            label: 用户名
+            width: 160
+    ui:
+      widget: select
+      relation: user
+      multiple: false
+      clearable: true
+      fieldGroup: 基本信息
+      fieldGroupPosition: 40
+
+  - id: org_id
+    name: 所属组织
+    type: integer
+    db_column: org_id
+    required: true
+    description: 法人雇主（legal employer，Oracle work relationship 的 person↔法人 段）
+    semantics:
+      meaning: 组织引用
+      display:
+        type: association
+        target_type: org
+        display_field: name
+    value_help:
+      source:
+        type: bo
+        target_bo: org
+        value_field: id
+        display_field: name
+        code_field: code
+        apply_target_permissions: true
+      behavior:
+        multiple: false
+        validation: true
+        binding_strength: strict
+        min_search_length: 0
+      presentation:
+        result_type: dialog
+        display_format: "{code} - {name}"
+        columns:
+          - field: code
+            label: 组织编码
+            width: 140
+          - field: name
+            label: 组织名称
+            width: 200
+    ui:
+      widget: select
+      relation: org
+      multiple: false
+      clearable: false
+      fieldGroup: 雇佣
+      fieldGroupPosition: 50
+
+  - id: location_id
+    name: 工作地点
+    type: integer
+    db_column: location_id
+    nullable: true
+    description: 工作地点
+    semantics:
+      meaning: 地点引用
+      display:
+        type: association
+        target_type: location
+        display_field: name
+    value_help:
+      source:
+        type: bo
+        target_bo: location
+        value_field: id
+        display_field: name
+        code_field: code
+        apply_target_permissions: true
+      behavior:
+        multiple: false
+        validation: true
+        binding_strength: strict
+        min_search_length: 0
+      presentation:
+        result_type: dialog
+        display_format: "{code} - {name}"
+        columns:
+          - field: code
+            label: 地点编码
+            width: 140
+          - field: name
+            label: 地点名称
+            width: 200
+    ui:
+      widget: select
+      relation: location
+      multiple: false
+      clearable: true
+      fieldGroup: 雇佣
+      fieldGroupPosition: 60
+
+  - id: position
+    name: 岗位
+    type: string
+    db_column: position
+    nullable: true
+    max_length: 200
+    description: 岗位名称（首期自由文本，不建岗位主数据）
+    semantics:
+      meaning: 岗位名称
+      searchable: true
+    ui:
+      widget: input
+      fieldGroup: 雇佣
+      fieldGroupPosition: 70
+
+  - id: job_grade
+    name: 职级
+    type: string
+    db_column: job_grade
+    nullable: true
+    max_length: 200
+    description: 职级
+    semantics:
+      meaning: 职级
+      searchable: true
+    ui:
+      widget: input
+      fieldGroup: 雇佣
+      fieldGroupPosition: 80
+
+  - id: employment_type
+    name: 用工类型
+    type: string
+    db_column: employment_type
+    required: true
+    default: full_time
+    description: 用工类型（全职 / 兼职 / 外包 / 实习 / 派遣）
+    enum_values:
+      - value: full_time
+        label: 全职
+        color: primary
+        is_initial: true
+      - value: part_time
+        label: 兼职
+        color: success
+      - value: contractor
+        label: 外包
+        color: warning
+      - value: intern
+        label: 实习
+        color: info
+      - value: dispatched
+        label: 派遣
+        color: purple
+    value_help:
+      source:
+        type: enum
+        enum_type_id: employment_type
+        sort_by: sort_order
+      behavior:
+        validation: true
+        binding_strength: strict
+        multiple: false
+      presentation:
+        result_type: dropdown
+    semantics:
+      meaning: 用工类型
+      filterable: true
+      filter_type: enum
+      filter_label: 用工类型
+      filter_scope: local
+    ui:
+      widget: select
+      fieldGroup: 雇佣
+      fieldGroupPosition: 90
+
+  # 派遣供应商（TBD-10）: employment_type=dispatched 时必填（服务层校验）
+  - id: supplier_party_id
+    name: 派遣供应商
+    type: integer
+    db_column: supplier_party_id
+    nullable: true
+    description: 派遣供应商往来单位（party.id）；employment_type=dispatched 时必填
+    semantics:
+      meaning: 派遣供应商
+      display:
+        type: association
+        target_type: party
+        display_field: name
+    value_help:
+      source:
+        type: bo
+        target_bo: party
+        value_field: id
+        display_field: name
+        code_field: name
+        apply_target_permissions: true
+        value_filter:
+          status: active
+      behavior:
+        multiple: false
+        validation: true
+        binding_strength: strict
+        min_search_length: 0
+      presentation:
+        result_type: dialog
+        display_format: "{name}"
+        columns:
+          - field: name
+            label: 供应商
+            width: 220
+    ui:
+      widget: select
+      relation: party
+      multiple: false
+      clearable: true
+      fieldGroup: 雇佣
+      fieldGroupPosition: 95
+
+  - id: status
+    name: 在职状态
+    type: string
+    db_column: status
+    required: true
+    default: active
+    description: 在职状态（在职 / 停职 / 离职）
+    enum_values:
+      - value: active
+        label: 在职
+        color: success
+        is_initial: true
+      - value: inactive
+        label: 停职
+        color: info
+      - value: terminated
+        label: 离职
+        color: warning
+    value_help:
+      source:
+        type: enum
+        enum_type_id: employment_status
+        sort_by: sort_order
+      behavior:
+        validation: true
+        binding_strength: strict
+        multiple: false
+      presentation:
+        result_type: dropdown
+    semantics:
+      meaning: 在职状态
+      filterable: true
+      filter_type: enum
+      filter_label: 在职状态
+      filter_scope: local
+    ui:
+      widget: select
+      fieldGroup: 雇佣
+      fieldGroupPosition: 100
+
+  - id: hire_date
+    name: 入职日期
+    type: datetime
+    db_column: hire_date
+    required: true
+    description: 入职日期
+    semantics:
+      meaning: 入职日期
+    ui:
+      widget: datetime
+      fieldGroup: 在职区间
+      fieldGroupPosition: 110
+
+  - id: termination_date
+    name: 离职日期
+    type: datetime
+    db_column: termination_date
+    nullable: true
+    description: 离职日期（status='terminated' 时必填）
+    semantics:
+      meaning: 离职日期
+    ui:
+      widget: datetime
+      fieldGroup: 在职区间
+      fieldGroupPosition: 120
+
+  - id: manager_employee_id
+    name: 直属主管
+    type: integer
+    db_column: manager_employee_id
+    nullable: true
+    description: 直属主管（自引用 employees；不得成环）
+    semantics:
+      meaning: 直属主管引用
+      display:
+        type: association
+        target_type: employee
+        display_field: name
+    value_help:
+      source:
+        type: bo
+        target_bo: employee
+        value_field: id
+        display_field: name
+        code_field: employee_no
+        apply_target_permissions: true
+      behavior:
+        multiple: false
+        validation: true
+        binding_strength: strict
+        min_search_length: 0
+      presentation:
+        result_type: dialog
+        display_format: "{employee_no} - {name}"
+        columns:
+          - field: employee_no
+            label: 工号
+            width: 140
+          - field: name
+            label: 姓名
+            width: 160
+    ui:
+      widget: select
+      relation: employee
+      multiple: false
+      clearable: true
+      fieldGroup: 在职区间
+      fieldGroupPosition: 130
+
+  - id: created_at
+    name: 创建时间
+    type: datetime
+    db_column: created_at
+    description: 创建时间
+    semantics:
+      meaning: 记录创建时间
+      audit_field: true
+
+  - id: updated_at
+    name: 更新时间
+    type: datetime
+    db_column: updated_at
+    description: 更新时间
+    semantics:
+      meaning: 记录更新时间
+      audit_field: true
+
+indexes:
+  # 工号按法人雇主（org_id）唯一；再入职沿用原号，历史 terminated 行可同号；
+  # 跨法人可复用同一工号（v1.18 / TBD-12：org_id 语义 = legal employer）
+  - fields: [org_id, employee_no]
+    unique: true
+    type: partial
+    condition: "status = 'active'"
+    name: uq_employee_active_org_no
+  # 同一自然人在同一时刻只能有一条在职雇佣
+  - fields: [person_profile_id]
+    unique: true
+    type: partial
+    condition: "status = 'active'"
+    name: uq_employee_active_person
+  - fields: [org_id]
+    name: idx_employee_org
+  # person_profile_id 已有部分唯一索引 uq_employee_active_person 覆盖，
+  # 不再声明同列普通索引（平台索引去重：唯一索引覆盖普通索引）
+  - fields: [status]
+    name: idx_employee_status
+
+relations:
+  - id: employee_to_person_profile
+    name: 自然人档案
+    type: reference
+    target: person_profile
+    source_field: person_profile_id
+    target_field: id
+    cardinality: N:1
+    description: 自然人档案引用（必填；真外键 restrict）
+  - id: employee_to_user
+    name: 登录账号
+    type: reference
+    target: user
+    source_field: user_id
+    target_field: id
+    cardinality: N:1
+    description: 登录账号引用（可空；真外键）
+  - id: employee_to_org
+    name: 所属组织
+    type: reference
+    target: org
+    source_field: org_id
+    target_field: id
+    cardinality: N:1
+    description: 雇佣组织引用（必填；真外键）
+  - id: employee_to_location
+    name: 工作地点
+    type: reference
+    target: location
+    source_field: location_id
+    target_field: id
+    cardinality: N:1
+    description: 工作地点引用（可空；真外键）
+  - id: employee_to_manager
+    name: 直属主管
+    type: reference
+    target: employee
+    source_field: manager_employee_id
+    target_field: id
+    cardinality: N:1
+    description: 直属主管引用（可空；自引用真外键）
+  - id: employee_to_supplier_party
+    name: 派遣供应商
+    type: reference
+    target: party
+    source_field: supplier_party_id
+    target_field: id
+    cardinality: N:1
+    description: 派遣供应商引用（可空；employment_type=dispatched 时必填）
+
+ui_view_config:
+  # 菜单由迁移 v185 手工声明（挂 master-data），不让自动生成器产出孤儿行
+  skip_auto_menu: true
+  list:
+    detail_mode: drawer
+    title: 员工
+    columns:
+      - field: employee_no
+        width: 140
+        sortable: true
+      - field: name
+        width: 160
+        sortable: true
+      - field: org_id
+        width: 180
+        filterable: true
+        filter_type: value_help
+        render_as: association
+        target_type: org
+        display_field: name
+      - field: location_id
+        width: 160
+        filterable: true
+        filter_type: value_help
+        render_as: association
+        target_type: location
+        display_field: name
+      - field: position
+        width: 160
+      - field: supplier_party_id
+        width: 180
+        filterable: true
+        filter_type: value_help
+        render_as: association
+        target_type: party
+        display_field: name
+      - field: employment_type
+        width: 120
+        filterable: true
+        filter_type: select
+      - field: status
+        width: 110
+        filterable: true
+        filter_type: select
+      - field: hire_date
+        width: 130
+    selection:
+      enabled: true
+      mode: multiple
+    searchFields: [employee_no, name]
+    actions:
+      - id: create
+        label: 新建员工
+        icon: plus
+        type: primary
+        permission: employee:create
+    defaultSort:
+      field: hire_date
+      order: desc
+  form:
+    title: 员工
+    layout: vertical
+    sections:
+      - title: 基本信息
+        columns:
+          - fields: [employee_no, name]
+          - fields: [person_profile_id, user_id]
+      - title: 雇佣
+        columns:
+          - fields: [org_id, location_id]
+          - fields: [position, job_grade]
+          - fields: [employment_type, supplier_party_id]
+          - fields: [status]
+      - title: 在职区间
+        columns:
+          - fields: [hire_date, termination_date]
+          - fields: [manager_employee_id]
+  detail:
+    layout: tabs
+    title: 员工 详情
+    tabs:
+      - id: basic
+        label: 基本信息
+        type: fields
+        fields: [employee_no, name, person_profile_id, user_id, org_id,
+                 location_id, position, job_grade, employment_type,
+                 supplier_party_id, status, hire_date, termination_date,
+                 manager_employee_id]
+
+category_config:
+  create_permission: employee:create
+  update_permission: employee:update
+  delete_permission: employee:delete
+  owner_auto_permission: false

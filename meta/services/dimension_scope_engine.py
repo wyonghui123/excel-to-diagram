@@ -21,7 +21,13 @@ from meta.core.models import registry
 from meta.core.dimension_object_mapping_loader import (
     get_dimension_object_mapping_loader,
 )
-from meta.core.hierarchy_loader import get_fk_chain
+from meta.core.hierarchy_loader import (
+    get_extra_entity_table_map,
+    get_fk_chain,
+    get_parent_info_map,
+    get_scope_chain,
+    get_table_map,
+)
 from meta.services.permission_dimension_engine import RESOURCE_TABLE_MAP, \
     PARENT_FIELD_MAP, CODE_FIELD_MAP, expand_generic_dimension_subtree
 
@@ -134,10 +140,9 @@ def _permission_code_exists(ds, code: str) -> bool:
     _permission_code_cache[code] = exists
     return exists
 
-# [REMOVED] 2026-06-03: service_module 和 business_object 从管理维度移除
-# 新的层级链: product → version → domain → sub_domain (4层)
-HIERARCHY_CHAIN = ['product', 'version', 'domain', 'sub_domain']
-                   # 'service_module', 'business_object' 已移除
+# [Rule Convergence M1 2026-11-07] 授权链统一读 hierarchies.yaml
+# TBD-4 保持现状: product → version → domain → sub_domain (4 层)
+HIERARCHY_CHAIN = get_scope_chain()
 
 # [ADDED] 2026-06-03: 系统级业务对象，这些菜单不受维度约束，始终可见
 # 自动推导时应排除这些菜单
@@ -155,42 +160,26 @@ SYSTEM_LEVEL_BOS = [
     'ai_async_task',  # AI异步任务
 ]
 
-# [ADDED v3.18.1 2026-06-09] BO 派生过滤分类 (3 类)
-#   HIERARCHY_CHAIN:  4 层维度内的 BO, 用 id + parent_field 派生
-#   VERSION_AWARE_BOS: 有 version_id 列但不在 HIERARCHY 的 BO, 用 version_id IN (...) 派生
-#   ALWAYS_VISIBLE_BOS: 系统级 BO, 始终可见, 不参与 dimension 过滤
-#
-# 之前 derive_data_conditions 函数内定义的 2 个 dict, 在 _get_all_resource_types()
-# 走 fallback 时无法被看到, 导致 business_object / service_module / relationship
-# 等 BO 的 dimension scope 派生条件缺失, 退回到 owner_id 过滤 → 0 条
-# (即 v3.18.0 修复未生效, 用户报告 TEST60 关系范围空)
-#
-# 修复: 提升到模块级, fallback 时也包含它们
-VERSION_AWARE_BOS = {
-    'service_module': 'service_modules',
-    'business_object': 'business_objects',
-    'relationship': 'relationships',
-}
+# [Rule Convergence M1 2026-11-07] 非授权链 BO 的表名与父级映射由 loader 推导。
+_LEVEL_TABLE_MAP = get_table_map()
+_LEVEL_PARENT_INFO = get_parent_info_map()
+_EXTENDED_OBJECTS = [
+    obj for obj in _LEVEL_PARENT_INFO if obj not in HIERARCHY_CHAIN
+]
 
-# [V1.1.8 2026-06-15] 非 HIERARCHY_CHAIN 的 BO 的 chain 配置
-#   用途: 让 _build_chain_condition 支持 service_module / business_object
-#   例: service_module 的 parent_field=sub_domain_id, sub_domain 的 parent_field=domain_id
-#   从 service_module 向上追到 domain:
-#     service_module.sub_domain_id → sub_domains.id → sub_domains.domain_id → domains.id
-#   从 service_module 向上追到 product:
-#     service_module.sub_domain_id → sub_domains.id → ... → products.id
-#
-#   EXTENDED_CHAIN_PARENT: 每个非 HIERARCHY BO 的直接 parent_field
-#   EXTENDED_CHAIN_STEPS: 从 (非 HIERARCHY BO) 到 (HIERARCHY BO 锚点) 的步进
-EXTENDED_CHAIN_PARENT = {
-    'service_module': 'sub_domain_id',
-    'business_object': 'service_module_id',
+VERSION_AWARE_BOS = {
+    obj: _LEVEL_TABLE_MAP[obj]
+    for obj in _EXTENDED_OBJECTS
+    if obj in _LEVEL_TABLE_MAP
 }
-# 锚点 HIERARCHY BO (从 EXTENDED_CHAIN_PARENT 出发, 第一跳到达的 HIERARCHY BO)
-# 后续的 chain 继续沿 HIERARCHY_CHAIN 走
+VERSION_AWARE_BOS.update(get_extra_entity_table_map('relationship'))
+
+EXTENDED_CHAIN_PARENT = {
+    obj: _LEVEL_PARENT_INFO[obj][2] for obj in _EXTENDED_OBJECTS
+}
+# 锚点 HIERARCHY BO/上层对象：第一跳到达的父对象
 EXTENDED_CHAIN_ANCHOR = {
-    'service_module': 'sub_domain',  # SM.sub_domain_id → sub_domain
-    'business_object': 'service_module',  # BO.service_module_id → SM (再 → SD → ...)
+    obj: _LEVEL_PARENT_INFO[obj][0] for obj in _EXTENDED_OBJECTS
 }
 
 # [V1.1.8 2026-06-15] 关系类 BO 的"叶子字段 + 目标 BO"映射

@@ -78,7 +78,9 @@ async function applyHeaderDiscount(page, orderId) {
 
 /** 抬头折扣归零 + 重算（短路恢复业务快照） */
 async function resetHeaderDiscount(page, orderId) {
-  await putJson(page, `/api/v2/bo/sales_order/${orderId}`, { header_discount_percent: null })
+  // [M2 修订策略] header_discount_percent 变更必须带原因码
+  await putJson(page, `/api/v2/bo/sales_order/${orderId}`,
+    { header_discount_percent: null, reason_code: 'E2E 抬头折扣归零' })
   await applyHeaderDiscount(page, orderId)
 }
 
@@ -128,7 +130,8 @@ test.describe('SO-BILLING: billing 计划行守卫', () => {
       },
       {
         name: 'billing 行填 plant_location_id',
-        patch: { plant_location_id: 1 },
+        // 发货点必须是有效 site 位置，否则先被选项校验拦截（库内有效值：3=SITE-SH）
+        patch: { plant_location_id: 3 },
         pattern: /plant_location_id/,
       },
       {
@@ -147,8 +150,15 @@ test.describe('SO-BILLING: billing 计划行守卫', () => {
         pattern: /收款比例须大于 0/,
       },
       {
-        name: 'schedule_kind = service（未启用）',
+        name: 'schedule_kind = service（已启用，缺服务次数）',
+        // [口径变更] service 计划行已解禁（B6 服务工单接线），门控不再报「尚未启用」，
+        // 该行缺 service_visit_no 时由 R-SCH-4 拦下
         patch: { schedule_kind: 'service' },
+        pattern: /服务次数/,
+      },
+      {
+        name: 'schedule_kind = unknown_kind（未启用类型）',
+        patch: { schedule_kind: 'unknown_kind' },
         pattern: /尚未启用/,
       },
     ]
@@ -229,7 +239,8 @@ test.describe('SO-HDISC: 抬头折扣分摊', () => {
 
       await withStep(page, testInfo, '保存 10% 只落比例，不落金额（compute/apply 分离）', async () => {
         const { status, body } = await putJson(
-          page, `/api/v2/bo/sales_order/${ORDER_ID}`, { header_discount_percent: 10 })
+          page, `/api/v2/bo/sales_order/${ORDER_ID}`,
+          { header_discount_percent: 10, reason_code: 'E2E 抬头折扣验证' })
         expect(status, `保存 10% 应 200，实际 ${status}：${JSON.stringify(body)}`).toBe(200)
         const { body: read } = await readOrder(page, ORDER_ID)
         expect(close(read.data.header_discount_percent, 10)).toBe(true)
@@ -373,7 +384,8 @@ test.describe('SO-HDISC: 抬头折扣分摊', () => {
           return
         }
         const { status, body } = await putJson(
-          page, `/api/v2/bo/sales_order/${locked.id}`, { header_discount_percent: 10 })
+          page, `/api/v2/bo/sales_order/${locked.id}`,
+          { header_discount_percent: 10, reason_code: 'E2E 冻结守卫验证' })
         expect(status, `非草稿订单应 400，实际 ${status}`).toBe(400)
         expect(body?.errors?.[0]?.rule, '应回规则码 HEADER_DISCOUNT_LOCKED').toBe('HEADER_DISCOUNT_LOCKED')
       })

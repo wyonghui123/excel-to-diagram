@@ -3,6 +3,8 @@ title: 双端自适应基础设施规范
 scenario: 5-development
 status: 活跃
 last_updated: 2026-10-13
+alwaysApply: false
+description: "双端自适应基础设施：断点/安全区/隧道/品牌名/CSS 五铁律/验收标准"
 ---
 
 # 双端自适应基础设施规范
@@ -236,7 +238,7 @@ for (const ss of document.styleSheets) {
 | [file-encoding-rules.md](../../file-encoding-rules.md) | `start-mobile.ps1` 必须带 BOM |
 | [../3-local-server-mgmt/project_startup.md](../3-local-server-mgmt/project_startup.md) | 本地服务启动顺序 |
 | [../6-test-debug/browser-test-verification.md](../../browser-test-verification.md) | 前端验证方法 |
-| [DEPLOYMENT_STANDARDS.md](../../../excel-to-diagram/docs/DEPLOYMENT_STANDARDS.md) §9.2 | 部署级环境变量 |
+| [DEPLOYMENT_STANDARDS.md](../../../../docs/DEPLOYMENT_STANDARDS.md) §9.2 | 部署级环境变量 |
 
 ---
 

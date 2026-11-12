@@ -46,7 +46,7 @@ CREATE TABLE sales_orders (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     customer_account_id INTEGER,
     sales_org_id INTEGER,
-    order_type_id INTEGER,
+    document_type_id INTEGER,
     payment_term_id INTEGER,
     incoterm_code TEXT
 );
@@ -74,7 +74,7 @@ OVERRIDE_DEFAULTS = {
 ORDER_DEFAULTS = {
     'customer_account_id': 1,
     'sales_org_id': 318,
-    'order_type_id': 1,
+    'document_type_id': 1,
     'payment_term_id': None,
     'incoterm_code': None,
 }

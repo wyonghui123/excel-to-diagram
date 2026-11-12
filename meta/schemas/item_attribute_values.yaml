@@ -53,6 +53,9 @@ hierarchy:
   enabled: true
   parent_field: item_id
 
+org_scope:
+  mode: global
+
 fields:
   - id: id
     name: ID

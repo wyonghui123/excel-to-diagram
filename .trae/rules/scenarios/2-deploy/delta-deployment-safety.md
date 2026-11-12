@@ -9,7 +9,7 @@ globs: "**/staging*"
 > **Active rule** (since 2026-09-01 incident)
 > **Owner**: PM review before any modification
 > **Audience**: ALL AI Agents + human deployers
-> **Migrated from**: [excel-to-diagram/.trae/rules/active/delta-deployment-safety.md](file:///d:/filework/excel-to-diagram/.trae/rules/active/delta-deployment-safety.md) v1.0 (2026-09-01)
+> **Migrated from**: （原引用：excel-to-diagram/.trae/rules/active/delta-deployment-safety.md，目标文件已不存在） v1.0 (2026-09-01)
 
 This rule captures lessons from the 2026-09-01 spec16 Plan D staging deployment,
 where the AI Agent inadvertently killed core_service 19200 by using a too-broad

@@ -94,6 +94,32 @@ def _query_audit_logs(session, *, object_type=None, object_id=None,
         return r.status_code, {'raw': r.text[:500]}
 
 
+def _wait_until(predicate, timeout=3.0, interval=0.1):
+    """有界等待: 条件满足立即返回 True, 超时返回 False (替代固定 time.sleep)。"""
+    deadline = time.monotonic() + timeout
+    while not predicate():
+        if time.monotonic() >= deadline:
+            return False
+        time.sleep(interval)
+    return True
+
+
+def _wait_audit_logs(session, *, expect_total=1, timeout=3.0, **kwargs):
+    """轮询 audit logs 直到 total >= expect_total (或超时), 返回最后一次 (status, body)。"""
+    last = {}
+
+    def _ready():
+        status, body = _query_audit_logs(session, **kwargs)
+        last['value'] = (status, body)
+        return (status == 200
+                and isinstance(body, dict)
+                and body.get('success') is True
+                and body.get('total', 0) >= expect_total)
+
+    _wait_until(_ready, timeout=timeout, interval=0.1)
+    return last['value']
+
+
 def _create_role(session, code=None, name=None) -> int:
     """建一个测试用角色, 返回 permission_set_id"""
     code = code or _gen_unique_code('audit_role')
@@ -143,9 +169,8 @@ class TestRoleMenuParentQueryE2E:
 
             # 查 audit logs (parent_object_type=permission_set + parent_object_id=permission_set_id)
             # 稍等异步 writer flush
-            time.sleep(0.5)
-            status, body = _query_audit_logs(
-                admin_session,
+            status, body = _wait_audit_logs(
+                admin_session, expect_total=1,
                 object_type='permission_set',
                 object_id=permission_set_id,
                 parent_object_type='permission_set',
@@ -184,9 +209,8 @@ class TestRolePermissionsParentQueryE2E:
             assert r.status_code == 200, f"set permissions failed: {r.status_code} {r.text[:300]}"
             assert r.json().get('success') is True, f"set permissions not success: {r.json()}"
 
-            time.sleep(0.5)
-            status, body = _query_audit_logs(
-                admin_session,
+            status, body = _wait_audit_logs(
+                admin_session, expect_total=1,
                 object_type='permission_set',
                 object_id=permission_set_id,
                 parent_object_type='permission_set',
@@ -233,9 +257,8 @@ class TestRoleDataPermissionParentQueryE2E:
             assert r.status_code == 201, f"add data-permission failed: {r.status_code} {r.text[:300]}"
             assert r.json().get('success') is True
 
-            time.sleep(0.5)
-            status, body = _query_audit_logs(
-                admin_session,
+            status, body = _wait_audit_logs(
+                admin_session, expect_total=1,
                 object_type='permission_set',
                 object_id=permission_set_id,
                 parent_object_type='permission_set',
@@ -275,10 +298,9 @@ class TestRoleSelfCUDLogsE2E:
                 pytest.skip("Server treats test permission_set as system, skip update assertion")
             assert r.status_code == 200, f"update permission_set failed: {r.status_code} {r.text[:300]}"
 
-            time.sleep(0.5)
             # 查 self 自身日志 (object_type=permission_set + object_id=permission_set_id)
-            status, body = _query_audit_logs(
-                admin_session,
+            status, body = _wait_audit_logs(
+                admin_session, expect_total=2,
                 object_type='permission_set',
                 object_id=permission_set_id,
             )
@@ -344,9 +366,8 @@ class TestProductVersionSelfLogsE2E:
         """product CREATE 应有 object_type=product + object_id=新ID 的日志"""
         pid = self._create_product(admin_session)
         try:
-            time.sleep(0.5)
-            status, body = _query_audit_logs(
-                admin_session, object_type='product', object_id=pid,
+            status, body = _wait_audit_logs(
+                admin_session, expect_total=1, object_type='product', object_id=pid,
             )
             assert status == 200, f"audit query failed: {status} {body}"
             assert body.get('success') is True
@@ -366,9 +387,8 @@ class TestProductVersionSelfLogsE2E:
         try:
             vid = self._create_version(admin_session, pid)
             try:
-                time.sleep(0.5)
-                status, body = _query_audit_logs(
-                    admin_session, object_type='version', object_id=vid,
+                status, body = _wait_audit_logs(
+                    admin_session, expect_total=1, object_type='version', object_id=vid,
                 )
                 assert status == 200, f"audit query failed: {status} {body}"
                 assert body.get('success') is True
@@ -407,11 +427,9 @@ class TestAuditApiParentOrUnionE2E:
             )
             assert r.status_code == 200
 
-            time.sleep(0.5)
-
             # 同时传 self + parent, 应走 OR 联合
-            status, body = _query_audit_logs(
-                admin_session,
+            status, body = _wait_audit_logs(
+                admin_session, expect_total=2,
                 object_type='permission_set',
                 object_id=permission_set_id,
                 parent_object_type='permission_set',
@@ -445,11 +463,9 @@ class TestAuditApiParentOrUnionE2E:
             )
             assert r.status_code == 200
 
-            time.sleep(0.5)
-
             # 只传 parent, 应走纯 parent_object 查询
-            status, body = _query_audit_logs(
-                admin_session,
+            status, body = _wait_audit_logs(
+                admin_session, expect_total=1,
                 parent_object_type='permission_set',
                 parent_object_id=permission_set_id,
             )
@@ -465,9 +481,8 @@ class TestAuditApiParentOrUnionE2E:
         """只传 self (object_type+object_id), 应能查到 self 自身日志"""
         permission_set_id = _create_role(admin_session)
         try:
-            time.sleep(0.5)
-            status, body = _query_audit_logs(
-                admin_session,
+            status, body = _wait_audit_logs(
+                admin_session, expect_total=1,
                 object_type='permission_set',
                 object_id=permission_set_id,
             )

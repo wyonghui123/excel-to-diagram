@@ -45,7 +45,7 @@ def up(db_path: str) -> None:
         conn.executescript('''
             CREATE TABLE permission_rules_v2 (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
-                role_id INTEGER NOT NULL,
+                permission_set_id INTEGER NOT NULL,
                 resource_type VARCHAR(200) NOT NULL,
                 permission_level VARCHAR(50) DEFAULT 'read',
                 include_conditions TEXT,
@@ -58,7 +58,7 @@ def up(db_path: str) -> None:
             );
 
             CREATE INDEX idx_perm_rules_v2_role
-                ON permission_rules_v2(role_id);
+                ON permission_rules_v2(permission_set_id);
             CREATE INDEX idx_perm_rules_v2_resource
                 ON permission_rules_v2(resource_type);
             CREATE INDEX idx_perm_rules_v2_stale

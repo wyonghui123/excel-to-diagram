@@ -18,7 +18,8 @@
 - 本模块不碰 Flask / BO registry
 
 边界（本模块不做）:
-- 上游 `outputs` 按 edge 注入下游 `inputs`（运行期数据流）—— 留待实例层后续
+- `inputs_template` 只做点路径取值（`run.inputs` / 直接上游 `outputs`），
+  不做表达式运算 / 函数调用
 - 任务的实际执行（executor 分派）—— 归 A5/A4
 - 补偿的**业务红字**执行：任务不写对象表（B4 写权单通道），`compensate_task()`
   只携带 `bo_action` 声明，真正调用归 B 系列 / E6 三档冲销
@@ -26,6 +27,7 @@
 from __future__ import annotations
 
 import json
+import re
 import uuid
 from datetime import datetime
 from typing import Any, Dict, List, Optional, Sequence
@@ -37,7 +39,7 @@ from meta.core.task_schema import (
     WORKFLOW_RUN_TABLE,
 )
 from meta.core.task_state_machine import TransitionContext, require_transition
-from meta.core.workflow_definition import incoming_edges
+from meta.core.workflow_definition import incoming_edges, parse_ref_expr
 from meta.core.workflow_store import load_definition
 
 #: Run 派生状态口径（非 DB 列）
@@ -49,10 +51,14 @@ _TERMINAL_OK = ("done", "skipped", "cancelled")
 #: 派生「进行中」的状态集合
 _RUNNING = ("ready", "claimed", "in_progress", "waiting_approval", "blocked")
 
+#: 输入模板占位符（S2）：`{{run.inputs.<path>}}` / `{{<node_id>.outputs.<path>}}`
+_TEMPLATE_TOKEN = re.compile(r"\{\{(.*?)\}\}")
+
 _RUN_COLUMNS = (
     "id", "workflow_id", "workflow_key", "workflow_version", "name",
     "trigger_kind", "definition_snapshot", "variables", "inputs", "outputs",
     "created_by", "created_at", "started_at", "finished_at", "meta", "updated_at",
+    "idempotency_key",
 )
 
 _TASK_COLUMNS = (
@@ -124,6 +130,31 @@ def get_run(data_source, run_id: str) -> Optional[Dict[str, Any]]:
     return rows[0] if rows else None
 
 
+def find_run_by_idempotency_key(data_source, idempotency_key: str
+                                ) -> Optional[Dict[str, Any]]:
+    """按幂等键查既有 Run（S4：重复事件直接复用，不再实例化）。"""
+    if not idempotency_key:
+        return None
+    rows = _select(data_source,
+                   f"SELECT {', '.join(_RUN_COLUMNS)} FROM {WORKFLOW_RUN_TABLE} "
+                   "WHERE idempotency_key = ? LIMIT 1",
+                   (idempotency_key,), _RUN_JSON)
+    return rows[0] if rows else None
+
+
+def _started_view(data_source, run: Dict[str, Any]) -> Dict[str, Any]:
+    """把既有 Run 行还原成 `start_run()` 同形返回值（幂等重放路径）。"""
+    tasks = list_run_tasks(data_source, run["id"])
+    node_task_ids = {
+        task["workflow_node_id"]: task["id"]
+        for task in tasks if task.get("workflow_node_id")
+    }
+    return {"run_id": run["id"], "workflow_key": run.get("workflow_key", ""),
+            "workflow_version": run.get("workflow_version"),
+            "trigger_kind": run.get("trigger_kind", ""),
+            "task_ids": node_task_ids, "task_count": len(tasks)}
+
+
 def list_run_tasks(data_source, run_id: str) -> List[Dict[str, Any]]:
     """Run 内全部任务（按定义顺序：主干 step_number → node_id）。"""
     return _select(data_source,
@@ -173,12 +204,21 @@ def start_run(
     line_refs: Any = None,
     app_id: str = "",
     created_by: str = "",
+    idempotency_key: str = "",
 ) -> Dict[str, Any]:
     """按定义版本实例化一个 Run（定义快照 + 节点克隆为任务）。
+
+    S4 幂等：`idempotency_key` 非空且已存在同键 Run 时，直接返回既有 Run
+    （不新建版本快照 / 任务），配合 `workflow_runs.uq_run_idempotency` 兜底。
 
     Raises:
         WorkflowEngineError: 定义为空 / 版本不存在（后者由 store 抛 WorkflowStoreError）
     """
+    if idempotency_key:
+        existing = find_run_by_idempotency_key(data_source, idempotency_key)
+        if existing is not None:
+            return _started_view(data_source, existing)
+
     definition = load_definition(data_source, workflow_key, version)
     workflow = definition["workflow"]
     nodes = definition["nodes"]
@@ -208,6 +248,7 @@ def start_run(
                 _json_text(snapshot), _json_text(variables), _json_text(inputs),
                 None, created_by or None, ts, ts, None,
                 _json_text(run_meta or None), ts,
+                idempotency_key or None,
             ),
         )
 
@@ -288,17 +329,94 @@ def deps_satisfied(deps: Any, status_by_task_id: Dict[str, str]) -> bool:
     return True
 
 
+def _resolve_path(root: Any, path: str):
+    """按点路径取值（dict 键 / list 下标）；缺失返回 (False, None)。"""
+    current = root
+    for part in path.split("."):
+        if isinstance(current, dict) and part in current:
+            current = current[part]
+        elif isinstance(current, list) and part.isdigit() and int(part) < len(current):
+            current = current[int(part)]
+        else:
+            return False, None
+    return True, current
+
+
+def _resolve_ref(ref, run_inputs: Dict[str, Any],
+                 outputs_by_node: Dict[str, Any]):
+    """解析一个引用 → `(True, value)` / `(False, 缺失路径标签)`。"""
+    if ref is None:
+        return False, "INPUT_TEMPLATE_INVALID"
+    node_id, path = ref
+    if node_id is None:
+        label = "run.inputs.{0}".format(path)
+        ok, value = _resolve_path(run_inputs, path)
+        return (True, value) if ok else (False, label)
+    label = "{0}.outputs.{1}".format(node_id, path)
+    if node_id not in outputs_by_node:
+        return False, label
+    ok, value = _resolve_path(outputs_by_node.get(node_id) or {}, path)
+    return (True, value) if ok else (False, label)
+
+
+def _resolve_inputs_template(template: Dict[str, Any],
+                             run_inputs: Dict[str, Any],
+                             outputs_by_node: Dict[str, Any]):
+    """解析 `meta.inputs_template` → `(True, resolved)` / `(False, 缺失路径)`。
+
+    整值占位保留原类型（list/dict），字符串内嵌占位按 `str()` 拼接。
+    """
+    resolved: Dict[str, Any] = {}
+    for key, value in template.items():
+        if not isinstance(value, str) or "{{" not in value:
+            resolved[key] = value
+            continue
+        matches = list(_TEMPLATE_TOKEN.finditer(value))
+        whole = len(matches) == 1 and matches[0].span() == (0, len(value))
+        if whole:
+            ok, result = _resolve_ref(parse_ref_expr(matches[0].group(1)),
+                                      run_inputs, outputs_by_node)
+            if not ok:
+                return False, result
+            resolved[key] = result
+            continue
+        chunks: List[str] = []
+        cursor = 0
+        for match in matches:
+            chunks.append(value[cursor:match.start()])
+            ok, result = _resolve_ref(parse_ref_expr(match.group(1)),
+                                      run_inputs, outputs_by_node)
+            if not ok:
+                return False, result
+            chunks.append(str(result))
+            cursor = match.end()
+        chunks.append(value[cursor:])
+        resolved[key] = "".join(chunks)
+    return True, resolved
+
+
 def advance_run(data_source, run_id: str, *, actor: str = "engine",
                 actor_kind: str = "system") -> Dict[str, Any]:
     """把 deps 已满足的 `pending` 任务提升为 `ready`（幂等：可重复调用）。
 
+    S2：提升前按 `task.meta.inputs_template` 注入上游 outputs / run.inputs；
+    解析失败不提升，保持 `pending` 并写 `blocked_reasons`。
+
     Returns:
-        {"run_id", "promoted": [task_id...], "blocked": [task_id...]}
+        {"run_id", "promoted": [task_id...], "blocked": [task_id...],
+         "blocked_reasons": {task_id: "INPUT_TEMPLATE_UNRESOLVED:<path>"}}
     """
     tasks = list_run_tasks(data_source, run_id)
+    run = get_run(data_source, run_id)
+    run_inputs = (run or {}).get("inputs") or {}
+    outputs_by_node = {
+        task["workflow_node_id"]: (task.get("outputs") or {})
+        for task in tasks if task.get("workflow_node_id")
+    }
     status_by_task_id = {t["id"]: t["status"] for t in tasks}
     promoted: List[str] = []
     blocked: List[str] = []
+    blocked_reasons: Dict[str, str] = {}
 
     for task in tasks:
         if task["status"] != "pending":
@@ -307,15 +425,38 @@ def advance_run(data_source, run_id: str, *, actor: str = "engine",
             blocked.append(task["id"])
             continue
 
+        meta = task.get("meta")
+        template = meta.get("inputs_template") if isinstance(meta, dict) else None
+        inputs_text: Optional[str] = None
+        if isinstance(template, dict) and template:
+            ok, resolved = _resolve_inputs_template(
+                template, run_inputs, outputs_by_node)
+            if not ok:
+                blocked.append(task["id"])
+                blocked_reasons[task["id"]] = (
+                    "INPUT_TEMPLATE_UNRESOLVED:{0}".format(resolved))
+                continue
+            inputs_text = _json_text(resolved)
+
         require_transition("pending", "ready",
                            TransitionContext(deps_satisfied=True, actor=actor,
                                              actor_kind=actor_kind))
         with data_source.transaction():
-            cursor = data_source.execute(
-                f"UPDATE {TASK_TABLE} SET status = ?, started_at = COALESCE(started_at, ?), "
-                "updated_at = ? WHERE id = ? AND status = ?",
-                ("ready", _now_iso(), _now_iso(), task["id"], "pending"),
-            )
+            if inputs_text is None:
+                cursor = data_source.execute(
+                    f"UPDATE {TASK_TABLE} SET status = ?, "
+                    "started_at = COALESCE(started_at, ?), "
+                    "updated_at = ? WHERE id = ? AND status = ?",
+                    ("ready", _now_iso(), _now_iso(), task["id"], "pending"),
+                )
+            else:
+                cursor = data_source.execute(
+                    f"UPDATE {TASK_TABLE} SET status = ?, inputs = ?, "
+                    "started_at = COALESCE(started_at, ?), "
+                    "updated_at = ? WHERE id = ? AND status = ?",
+                    ("ready", inputs_text, _now_iso(), _now_iso(),
+                     task["id"], "pending"),
+                )
             if cursor.rowcount == 0:      # 并发下已被提升 → 视为已推进
                 continue
             record_transition(
@@ -328,7 +469,8 @@ def advance_run(data_source, run_id: str, *, actor: str = "engine",
         promoted.append(task["id"])
         status_by_task_id[task["id"]] = "ready"
 
-    return {"run_id": run_id, "promoted": promoted, "blocked": blocked}
+    return {"run_id": run_id, "promoted": promoted, "blocked": blocked,
+            "blocked_reasons": blocked_reasons}
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -341,10 +483,10 @@ _RECOVERY_COLUMNS = (
     "executor_assignee", "executor_candidates", "assign_policy",
     "executor_config", "executor_fallback", "claim_timeout_seconds",
     "timeout_seconds", "retry_policy", "due_at", "sla", "workflow_run_id",
-    "workflow_node_id", "doc_ref", "trace_id", "meta",
+    "workflow_node_id", "doc_ref", "trace_id", "meta", "outputs",
 )
 _RECOVERY_JSON = ("executor_candidates", "executor_config", "executor_fallback",
-                  "retry_policy", "sla", "meta")
+                  "retry_policy", "sla", "meta", "outputs")
 
 
 def _task_for_recovery(data_source, task_id: str) -> Optional[Dict[str, Any]]:
@@ -415,6 +557,54 @@ def skip_task(
     return result
 
 
+#: 补偿 mode 语义名 → 归一（历史函数名双兼容；档位语义见 E6 doc_flow_reversal）
+_COMPENSATION_MODES = {
+    "cancel": "cancel", "reverse": "cancel", "reverse_edge": "cancel",
+    "partial": "partial", "counter": "partial", "counter_edge": "partial",
+    "update": "update", "red_ink": "update", "red_ink_edge": "update",
+    "compensate": "compensate", "compensate_edge": "compensate",
+    "none": "none",
+}
+_REF_REQUIRED_MODES = ("partial", "update", "compensate")
+_SYSTEM_EXECUTORS = ("system", "cron")
+
+
+def _compensation_mode(bo_action: Any, params: Optional[Dict[str, Any]]) -> str:
+    """从 `bo_action` 声明 / `params.mode` 归一补偿档位。"""
+    declared = (params or {}).get("mode")
+    if declared in (None, ""):
+        if isinstance(bo_action, dict):
+            declared = bo_action.get("mode") or bo_action.get("action") or "cancel"
+        else:
+            declared = bo_action if isinstance(bo_action, str) and bo_action.strip() else "cancel"
+    mode = _COMPENSATION_MODES.get(str(declared).strip().lower())
+    if mode is None:
+        raise WorkflowEngineError(f"未知补偿 mode: {declared}")
+    return mode
+
+
+def _compensation_action(original: Dict[str, Any], mode: str,
+                         params: Optional[Dict[str, Any]],
+                         ref_id: Any = None) -> Optional[Dict[str, Any]]:
+    """S3 接缝：把跨域补偿声明翻译成 `doc_flow.reverse` 执行配置。
+
+    仅当原任务由 `system`/`cron` 执行（即业务动作由引擎产生）时改写
+    `executor_config`；人工任务保持原执行方式。返回的 dict 同时作为补偿任务
+    `inputs` 写入（`BOActionExecutor` 以 `task.inputs` 作为 Action 入参）。
+    """
+    if original.get("executor_type") not in _SYSTEM_EXECUTORS:
+        return None
+    action_params: Dict[str, Any] = dict(params or {})
+    action_params["mode"] = mode
+    if str(ref_id or "") != "":
+        action_params.setdefault("ref_id", str(ref_id))
+    outputs = original.get("outputs")
+    outputs = outputs if isinstance(outputs, dict) else {}
+    if action_params.get("edge_ids") in (None, "") and outputs.get("edge_ids"):
+        action_params["edge_ids"] = list(outputs["edge_ids"])
+    return {"action_id": "doc_flow.reverse", "params": action_params}
+
+
 def compensate_task(
     data_source,
     task_id: str,
@@ -423,6 +613,8 @@ def compensate_task(
     actor_kind: str = "system",
     reason: str = "",
     bo_action: Any = None,
+    ref_id: Any = None,
+    params: Optional[Dict[str, Any]] = None,
 ) -> Dict[str, Any]:
     """受控转移「补偿」：为已完成任务新建一张**补偿任务**。
 
@@ -433,13 +625,18 @@ def compensate_task(
     - 新旧链路：`meta.compensates_task_id`（直接前驱）+
       `meta.reference_task_id`（链根，对齐 Oracle `REFERENCE_STEP_INSTANCE_ID`）。
     - 幂等**不在本层**：同一任务可多次补偿；业务幂等由 E6 红字单锚保证。
+    - S3 接缝：`system`/`cron` 原任务的补偿新任务写入
+      `executor_config={"action_id":"doc_flow.reverse"}` 且 `inputs=params`；
+      `partial/update/compensate` 必须传 `ref_id`（否则 `REF_ID_REQUIRED`），
+      `mode=none` 直接返回 `skipped` 不建单。
 
     Returns:
         {"task_id", "compensates_task_id", "reference_task_id",
          "workflow_run_id", "promoted": [...]}
 
     Raises:
-        WorkflowEngineError: 任务不存在 / 原任务非 `done` / 原任务不属任何 Run
+        WorkflowEngineError: 任务不存在 / 原任务非 `done` / 原任务不属任何 Run /
+            未知补偿 mode / 缺 ref_id
     """
     original = _task_for_recovery(data_source, task_id)
     if original is None:
@@ -464,6 +661,22 @@ def compensate_task(
     if bo_action is not None:
         comp_meta["bo_action"] = bo_action
 
+    # S3 接缝：档位归一 + 业务权威锚校验 + system 任务执行配置改写
+    mode = _compensation_mode(bo_action, params) if bo_action is not None else None
+    if mode is not None:
+        comp_meta["compensation_mode"] = mode
+        if mode in _REF_REQUIRED_MODES and str(ref_id or "") == "":
+            raise WorkflowEngineError(
+                "REF_ID_REQUIRED: mode={0} 必须携带业务权威锚 ref_id".format(mode))
+        if mode == "none":
+            return {"task_id": None, "compensates_task_id": task_id,
+                    "reference_task_id": chain_root, "workflow_run_id": run_id,
+                    "promoted": [], "skipped": True, "mode": mode}
+    action_config = (_compensation_action(original, mode, params, ref_id)
+                     if mode is not None else None)
+    executor_config = action_config if action_config else original.get("executor_config")
+    task_inputs = action_config.get("params") if action_config else None
+
     new_id = uuid.uuid4().hex
     ts = _now_iso()
     with data_source.transaction():
@@ -478,13 +691,14 @@ def compensate_task(
                 original.get("executor_assignee"),
                 _json_text(original.get("executor_candidates")),
                 original.get("assign_policy") or "direct",
-                _json_text(original.get("executor_config")),
+                _json_text(executor_config),
                 _json_text(original.get("executor_fallback")),
                 original.get("claim_timeout_seconds", 300),
                 original.get("timeout_seconds"),
                 _json_text(original.get("retry_policy")),
                 original.get("due_at"), _json_text(original.get("sla")), None,
-                run_id, original.get("workflow_node_id"), None, None,
+                run_id, original.get("workflow_node_id"), None,
+                _json_text(task_inputs),
                 None, None, None, None, 1, original.get("trace_id"), None,
                 original.get("doc_ref"), None, actor or None, ts, None, None,
                 None, _json_text(comp_meta), ts,

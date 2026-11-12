@@ -7,6 +7,10 @@ import threading
 
 _M_LIST = list
 
+# [T1] 权限后缀同义归一：list/query/view 复用 read
+# （list/query 与 permission_gate.ACTION_PERMISSION_SUFFIX 同口径）
+_PERMISSION_SUFFIX_ALIASES = {'list': 'read', 'query': 'read', 'view': 'read'}
+
 from meta.core.action_constants import (
     CRUD_CREATE, CRUD_UPDATE, CRUD_DELETE,
     ASSOCIATE, DISSOCIATE,
@@ -35,6 +39,8 @@ from meta.core.models_ui_config import (
     UIDetailViewConfig, UIFormColumn, UIFormSection, UIFormViewConfig,
     UIFilterDefinition, UIFilterViewConfig, ChangeEventConfig,
     WebhookConfig, ChangeNotificationConfig, UIViewConfig,
+    UIReportConfig, UIReportFilterConfig, UIReportKpiConfig,
+    UIReportChartConfig, UIReportTableConfig, UIReportDrilldownConfig,
 )
 
 
@@ -155,6 +161,21 @@ class MetaRule:
     triggers: List[RuleTrigger] = field(default_factory=list)
     condition: str = ""              # 触发条件表达式
     action: str = ""                 # 执行动作/规则表达式
+    # [规则模型 M1 2026-11-10] 处置动作：命中后做什么，取值受
+    # rule_action_matrix 的 rule_type × action 矩阵约束。
+    # 与 action（表达式）语义不同，不得互换。
+    disposition: str = ""
+    # [规则模型 M5 2026-11-10] 命中策略：first / all / unique（空值按 first）。
+    # unique 仅参与加载期静态重叠检查，不进入运行期（FR-006）。
+    hit_policy: str = ""
+    # [规则模型 M6b 2026-11-10] 判定聚合方式：any / all（空值按 all）。
+    # 当前由 constraint 规则的多 key 判定使用；合法性由
+    # rule_declaration_validator.validate_combine_modes 在加载期校验。
+    combine_mode: str = ""
+    # [规则模型 M5 2026-11-10] 治理字段（时效档，FR-007）：可声明、可展示，
+    # 存量规则未声明时留空，不做臆造默认值。
+    version: str = ""
+    effective_from: str = ""
     priority: int = 100              # 优先级，数字越小越先执行
     enabled: bool = True             # 是否启用
     message: str = ""                # 错误/提示信息
@@ -197,7 +218,14 @@ class MetaConstraint(MetaRule):
     rule_type: RuleType = field(default=RuleType.CONSTRAINT)
     constraint_type: str = "check"   # unique / foreign_key / check / exclusion
     deferrable: bool = False         # 是否可延迟
-    
+    # [规则模型 M6b 2026-11-10] 多 key 判定声明（容差规则等）：
+    # 每项 {parameter, metric, severity?, disposition?}，parameter 引用
+    # control_parameter_defs.code，metric 引用 BO metrics 段的度量 code。
+    # 空列表 = 该约束不使用多键判定（兼容既有 unique / foreign_key）。
+    keys: List[Dict[str, Any]] = field(default_factory=list)
+    # [规则模型 M6b] disposition=hold 时必须声明的释放动作。
+    release_action: str = ""
+
     def __post_init__(self):
         if not self.triggers:
             self.triggers = [RuleTrigger.BEFORE_SAVE]
@@ -287,6 +315,9 @@ class StateTransitionUIHints:
     icon: str = ""
     confirm_message: str = ""
     highlight: bool = False
+    #: 迁移前需要用户补录的字段（如红冲原因）；每项为
+    #: {field, label, type, required, placeholder}
+    input_fields: List[Dict[str, Any]] = field(default_factory=list)
 
 
 @dataclass
@@ -517,6 +548,34 @@ class FieldPolicy:
 
 
 @dataclass
+class MetaStateDefinition:
+    """对象级状态定义（S1 状态目录）
+
+    对标 SAP 状态参数文件（BS02/TJ30）的「状态目录」部分：
+    只声明状态本身与分类；状态迁移仍由 MetaStateTransition 表达。
+    """
+    code: str = ""                       # 状态值（state_field 的实际取值）
+    label: str = ""                      # 展示名
+    # initial / normal / terminal / system；system = 系统置位、业务不可手工设置
+    category: str = "normal"
+    is_system_locked: bool = False
+    seq: int = 0                         # 展示排序
+
+
+@dataclass
+class MetaStateFieldPolicy:
+    """状态 × 字段矩阵（S1）
+
+    对标 SAP 状态参数文件对字段选择（field selection）的控制：
+    某状态下强制只读 / 必填 / 隐藏的字段集合。
+    求值优先级：系统字段 > 本矩阵（命中短路）> 字段级 determination > ui 默认。
+    """
+    readonly: List[str] = field(default_factory=list)
+    required: List[str] = field(default_factory=list)
+    hidden: List[str] = field(default_factory=list)
+
+
+@dataclass
 class EnhancedMetaField(MetaField):
     """增强版元数据字段（继承现有MetaField并扩展）
     
@@ -652,7 +711,18 @@ class MetaAction:
         return StandardActionLoader.get_suffix_map().get(self.id, self.id)
     
     def get_permission_code(self, object_id: str) -> str:
-        return f"{object_id}:{self.get_permission_suffix()}"
+        """[T1] 权限码统一为单段 ``{object_id}:{action}``。
+
+        动作 id 可能冗余携带对象前缀（``ensure_crud_actions`` 自动补全产出
+        ``{bo}_create``，手写动作如 ``receipt_post``），这里统一剥掉，
+        避免出现 ``sales_order:sales_order_create`` 这类双段码。
+        ``list`` / ``query`` 与 ``read`` 同义（见 permission_gate）。
+        """
+        suffix = self.get_permission_suffix()
+        prefix = f"{object_id}_"
+        if suffix.startswith(prefix):
+            suffix = suffix[len(prefix):]
+        return f"{object_id}:{_PERMISSION_SUFFIX_ALIASES.get(suffix, suffix)}"
     
     def to_tool_schema(self) -> Dict[str, Any]:
         """转换为 LLM Tool Schema（OpenAI Function Calling 格式）"""
@@ -1059,6 +1129,11 @@ class MetaObject:
     
     # 分析模型配置
     analytical_model: Dict[str, Any] = field(default_factory=dict)
+
+    # [Rule Model M6a-3 2026-11-10] 派生度量声明（metrics: 段），元素为
+    # rule_metrics.MetricDefinition；加载期灌入 DEFAULT_METRIC_REGISTRY。
+    # 与分析模型（fact/measures/aggregates 报表语义）互不混用。
+    metrics: List[Any] = field(default_factory=list)
     
     # KeyTemplate 编码规则配置
     key_template: Dict[str, Any] = field(default_factory=dict)
@@ -1090,6 +1165,26 @@ class MetaObject:
     # ── 新增：上下文配置 ──
     context: Optional[Dict[str, Any]] = None
 
+    # [Reversal Platform D1 2026-11-06] 逆向写面声明（规格 §7）；
+    # 空 = 未声明逆向能力（编排器拒绝，D8）
+    doc_effect: Dict[str, Any] = field(default_factory=dict)
+
+    # [Spec 24 T1 2026-11-06] 业务对象组织边界声明（owning org）；
+    # 空 = 未声明（V6 一致性测试拦截，不阻塞启动）
+    org_scope: Dict[str, Any] = field(default_factory=dict)
+
+    # [Rule Convergence M1 2026-11-07] 单据编号声明（no_field / date_field /
+    # type_table / scope_bo / fallback_sequence_code）；空 = 未声明取号规则
+    numbering: Dict[str, Any] = field(default_factory=dict)
+
+    # [Rule Convergence M2 2026-11-07] 审批对象注册声明（table / amount_fields）；
+    # 空 = 该对象不参与审批注册（新增对象只改 YAML）
+    approval: Dict[str, Any] = field(default_factory=dict)
+
+    # [S8 Wave D FR-8 2026-11-10] 行来源策略：document_role → 允许的行来源种类；
+    # 空 = 不校验（向后兼容）；内核按角色 fail-closed 读取
+    line_source_policy: Dict[str, List[str]] = field(default_factory=dict)
+
     # ── 新增：级联选择配置 ──
     cascade_select: Optional[List[Dict[str, Any]]] = None
 
@@ -1098,6 +1193,27 @@ class MetaObject:
 
     # ── 新增：变更策略（M1 只解析，不启用版本） ──
     revision_policy: Optional[MetaRevisionPolicy] = None
+
+    # [G7 2026-11-02] 平台机制对象开关：True = 对象仍注册进 registry / 进 DDL，
+    # 但不生成通用 CRUD API、不生成 agent 工具、不自动补 CRUD actions。
+    # 用于 tasks / task_events 等必须由专属服务与状态机写入口的对象。
+    skip_generic_api: bool = False
+
+    # [P3 2026-11-10] 通用 BO API 档位（替代「全开/全关」二值）：
+    #   full      = 通用读写（默认，向后兼容）
+    #   read_only = 通用列表/详情可读，写操作一律 404（执行账本等只读对象）
+    #   disabled  = 通用 API 全部 404（等价 skip_generic_api=True）
+    # 由 `generic_api_mode_of()` 归一，skip_generic_api 优先。
+    generic_api_mode: str = 'full'
+
+    # [G7 2026-11-02] YAML 显式声明「需要状态机」：优先于分类模板的
+    # default_state_machine；供通用更新路径做 status 迁移守卫。
+    state_machine_required: bool = False
+
+    # [S1 2026-11-06] 状态目录 + 状态×字段矩阵（对标 SAP 状态参数文件）。
+    # 默认空 = 完全向后兼容；未声明 state_field_policies 的对象行为不变。
+    states: List[MetaStateDefinition] = field(default_factory=list)
+    state_field_policies: Dict[str, MetaStateFieldPolicy] = field(default_factory=dict)
 
     def __post_init__(self):
         """初始化时自动应用分类模板"""
@@ -1326,7 +1442,9 @@ class MetaObject:
         return self.bo_category == BusinessObjectCategory.CONFIGURATION
     
     def requires_state_machine(self) -> bool:
-        """是否需要状态机"""
+        """是否需要状态机（YAML 显式声明优先于分类模板默认值）"""
+        if self.state_machine_required:
+            return True
         if self.category_config:
             return self.category_config.default_state_machine
         return False
@@ -1414,6 +1532,29 @@ def migrate_to_unified_value_help(field: EnhancedMetaField) -> Optional[ValueHel
         return ValueHelpConfig(source=source, behavior=behavior, presentation=presentation)
 
     return None
+
+
+GENERIC_API_MODES = ('full', 'read_only', 'disabled')
+_READ_METHODS = frozenset({'GET', 'HEAD', 'OPTIONS'})
+
+
+def generic_api_mode_of(obj) -> str:
+    """归一对象声明的通用 API 档位；skip_generic_api 优先（向后兼容）。"""
+    if obj is None:
+        return 'disabled'
+    if getattr(obj, 'skip_generic_api', False):
+        return 'disabled'
+    mode = getattr(obj, 'generic_api_mode', 'full') or 'full'
+    return mode if mode in GENERIC_API_MODES else 'full'
+
+
+def generic_api_allows(mode: str, method: str) -> bool:
+    """给定档位与 HTTP 方法，判断通用 API 是否放行。"""
+    if mode == 'disabled':
+        return False
+    if mode == 'read_only':
+        return (method or '').upper() in _READ_METHODS
+    return True
 
 
 class MetaRegistry:
@@ -1518,7 +1659,16 @@ class MetaRegistry:
             self._version = datetime.now().strftime("%Y%m%d%H%M%S")
             self._rule_chain_cache = {}
             self._ui_config_cache = {}
-        
+
+        # 热重载只用单个目录重建 _objects，apps/<app>/schemas 的 BO 会被丢弃；
+        # 重放已加载应用的 schema，避免 /api/v2/bo/<app_bo> 报 Unknown object type。
+        # legacy 模式（未加载任何应用）为空操作，零行为变化。
+        try:
+            from meta.core.app_registry import reapply_app_schemas
+            reapply_app_schemas()
+        except Exception:
+            pass
+
         return count
 
     def get_rule_chain(self, object_id: str):

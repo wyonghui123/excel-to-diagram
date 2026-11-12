@@ -8,6 +8,7 @@
  */
 
 import metaService from '@/services/metaService'
+import { resolveDetailPath } from '@/router/detailPathResolver'
 
 // [party 族 2026-10-21] 补齐身份轴五个类型。
 //   起因（手机端报障「关系详情中业务伙伴/组织点击跳转失败」）：本白名单是硬编码的，
@@ -73,7 +74,17 @@ const SUPPORTED_OBJECT_TYPES = [
   //   list.detail_mode = page 却未列入白名单 ⇒ 行点击 / 展开入口一律弹回首页。
   //   sales_order 自身声明了 ui_view_config.detail（child_sections 订单行），
   //   加进来不是放开任意类型，而是补齐 list 已声明 page 详情的对象。
-  'sales_order'
+  'sales_order',
+  // 采购轴 2026-11-01: purchase_order 与 sales_order 同构（ui_view_config.detail 的
+  //   child_sections 承载订单行 / 到货计划子表）。未列入白名单时，列表行点击 /
+  //   手拼 /detail/purchase_order/<id> 一律 reason=unsupported_object_type 弹回首页。
+  'purchase_order',
+  // 收货轴 2026-11-01: receipt 的 list.detail_mode=page，detail 子表为收货行；
+  //   与 purchase_order 同口径纳入白名单。
+  // 采购发票轴 2026-11-11: vendor_invoice 的 detail 子表为发票行，列表行点击
+  //   与 /detail/vendor_invoice/<id> 需要可导航。
+  'receipt',
+  'vendor_invoice'
 ]
 
 export async function validateDetailRoute(to, from, next) {
@@ -142,7 +153,12 @@ export function getBreadcrumbs(objectType, id, objectName = null) {
     'location': '库位',
     'calendar': '日历',
     'address': '地址',
-    'party_relation': '业务伙伴关系'
+    'party_relation': '业务伙伴关系',
+    // [采购轴 2026-11-01] 与 SUPPORTED_OBJECT_TYPES 同步，缺了面包屑会回退英文 id
+    'purchase_order': '采购订单',
+    'receipt': '收货单',
+    // 采购发票轴 2026-11-11
+    'vendor_invoice': '采购发票'
   }
 
   const label = typeLabels[normalizedType] || objectType
@@ -193,7 +209,7 @@ export function getBreadcrumbs(objectType, id, objectName = null) {
   }
 
   breadcrumbs.push({
-    path: `/detail/${objectType}/${id}`,
+    path: resolveDetailPath(objectType, id),
     title: objectName || `${label}详情`,
     active: true
   })

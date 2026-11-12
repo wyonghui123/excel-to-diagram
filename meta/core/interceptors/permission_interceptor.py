@@ -10,22 +10,20 @@ import logging
 import os
 from typing import TYPE_CHECKING
 from meta.core.interceptors.base import Interceptor
+from meta.core.permission_gate import (
+    ACTION_PERMISSION_SUFFIX as _ACTION_PERMISSION_SUFFIX,
+    evaluate,
+    evaluate_code,
+    user_has_permission,
+)
 
 if TYPE_CHECKING:
     from meta.core.action_context import ActionContext
 
 logger = logging.getLogger(__name__)
 
-# crud_* 标准动作 → 权限后缀映射
-# [v1.0.1 FR-001] 合并 read/list: list 和 query 复用 read 权限, 避免缺 product:list 时 403
-_ACTION_PERMISSION_SUFFIX = {
-    'crud_create': 'create',
-    'crud_read':   'read',
-    'crud_update': 'update',
-    'crud_delete': 'delete',
-    'crud_list':   'read',  # v1.0.1: 合并到 read
-    'crud_query':  'read',  # v1.0.1: 合并到 read
-}
+# [FR-005] 后缀映射唯一真源已迁至 meta.core.permission_gate
+# 此处保留模块级别名以兼容既有测试 import。
 
 # [v1.0.1 D9] 父读 audit-only 严格模式开关 (env 升级用)
 _PARENT_READ_STRICT_MODE = os.environ.get('PARENT_READ_STRICT_MODE', '').lower() == 'true'
@@ -82,12 +80,11 @@ class ChainInstanceOutOfScope(Exception):
 
 
 def user_info_has_perm(permissions, required: str) -> bool:
-    """[v1.0.1] helper: 检查 permissions 集合/列表中是否含 required (支持通配 *)"""
-    if not permissions:
-        return False
-    if '*' in permissions:
-        return True
-    return required in permissions
+    """[v1.0.1] helper: 检查 permissions 集合/列表中是否含 required (支持通配 *)
+
+    [FR-005] 实现已收敛到 PermissionGate.user_has_permission，此处保留兼容入口。
+    """
+    return user_has_permission(permissions, required)
 
 
 class PermissionInterceptor(Interceptor):
@@ -107,7 +104,8 @@ class PermissionInterceptor(Interceptor):
 
     @classmethod
     def _get_permission_suffix(cls, action: str) -> str:
-        return _ACTION_PERMISSION_SUFFIX.get(action, '')
+        from meta.core.permission_gate import permission_suffix
+        return permission_suffix(action)
 
     def should_execute(self, context: 'ActionContext') -> bool:
         return context.action.startswith('crud_')
@@ -120,9 +118,9 @@ class PermissionInterceptor(Interceptor):
         if not user_info:
             raise PermissionDenied('未登录')
 
-        # [DECORATIVE] M11 v1.1.0: AI Agent 角色自动识别（X-Agent-Id header → 'ai-agent' 角色）
-        user_info = inject_ai_agent_role(user_info, g)
-        g.current_user = user_info
+        # [T14] 不再依据未签名的 X-Agent-Id 请求头注入 'ai-agent' 角色。
+        # 该请求头由客户端任意构造，等同于角色自抬（可绕过 rls_rules 中的 role:ai-agent 放行）。
+        # AI Agent 的合法身份只来自 MCP 内部上下文（mcp/rls_integration._normalize_user_context）。
 
         if is_admin(user_info):
             return
@@ -146,18 +144,13 @@ class PermissionInterceptor(Interceptor):
         if context.action in ('crud_create', 'crud_update', 'crud_delete'):
             self._check_chain_read(context, user_info, target_id=getattr(context, 'target_id', None))
 
-        permissions = user_info.get('permissions', [])
-        if not isinstance(permissions, set):
-            permissions = set(permissions)
-
-        if '*' in permissions:
-            return
-
         suffix = self._get_permission_suffix(context.action)
         if not suffix:
             return
 
-        required = f"{context.object_type}:{suffix}"
+        # [FR-005] 功能权限判定统一走 PermissionGate（与 API 装饰器共用同一解析结果）
+        decision = evaluate(user_info, context.object_type, context.action)
+        required = decision.required or f"{context.object_type}:{suffix}"
 
         # [DECORATIVE] M11 v1.2.0: YAML 集中化权限（rls_rules/*.yaml 优先于 JWT permissions）
         # 行为：
@@ -171,7 +164,7 @@ class PermissionInterceptor(Interceptor):
             raise PermissionDenied(f'RLS denied: {required}')
 
         # 回退到现有逻辑
-        if required not in permissions:
+        if not decision.allowed:
             # [FIX BUG-V058 2026-07-12] annotation 功能权限跟随 parent 对象
             # annotation 是辅助对象, 写权限应继承自 parent (target_type)
             # 例: 用户有 business_object:update 权限 → 应允许对该 BO 创建/更新/删除备注
@@ -192,7 +185,9 @@ class PermissionInterceptor(Interceptor):
                     parent_type = parent_type.split(' - ')[0].strip()
                 if parent_type:
                     parent_perm = f'{parent_type}:{suffix}'
-                    if parent_perm in permissions:
+                    # [T14] 走 PermissionGate，而不是直接比对原始 JWT 列表：
+                    # 保证 shadow/off 门禁与 '*' 管理员语义一致，不再绕过 L1 判定。
+                    if evaluate_code(user_info, parent_perm):
                         logger.info(
                             f'PermissionInterceptor: annotation:{suffix} bypassed via '
                             f'parent perm {parent_perm} for user {user_info.get("username")}'
@@ -506,49 +501,6 @@ class PermissionInterceptor(Interceptor):
                         chain=[p['bo'] for p in actual_parents],
                         out_of_scope_parents=out_of_scope,
                     )
-
-
-def inject_ai_agent_role(user_info, flask_g=None):
-    """[DECORATIVE] M11 v1.1.0: AI Agent 角色自动识别
-
-    通过 X-Agent-Id header 识别 AI Agent 调用，向 user_info['roles'] 注入 'ai-agent' 角色。
-    与 rls YAML 中的 applies_to: [role:ai-agent] 协同。
-
-    Args:
-        user_info: dict（来自 g.current_user）
-        flask_g: flask.g（用于 setattr 回写，可选）
-
-    Returns:
-        修改后的 user_info（dict）。原 dict 不修改（浅拷贝）。
-
-    行为：
-    1. 无 X-Agent-Id header → 原样返回
-    2. 有 X-Agent-Id header + 无 'ai-agent' 角色 → 注入（深拷贝）
-    3. 有 X-Agent-Id header + 已有 'ai-agent' 角色 → 原样返回
-    4. flask_g 不为 None → 同时回写 g.current_user
-    """
-    if user_info is None:
-        return user_info
-    try:
-        from flask import request
-    except ImportError:
-        return user_info
-    if not request or not request.headers.get('X-Agent-Id'):
-        return user_info
-
-    existing_roles = user_info.get('roles', [])
-    if not isinstance(existing_roles, set):
-        existing_roles = set(existing_roles)
-    if 'ai-agent' in existing_roles:
-        if flask_g is not None:
-            flask_g.current_user = user_info
-        return user_info  # 已存在
-
-    new_user_info = dict(user_info)  # 浅拷贝，避免修改原 dict
-    new_user_info['roles'] = existing_roles | {'ai-agent'}
-    if flask_g is not None:
-        flask_g.current_user = new_user_info
-    return new_user_info
 
 
 def _check_yaml_permission(user_info, object_type, action_suffix):

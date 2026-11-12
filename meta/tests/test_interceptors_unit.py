@@ -1,3 +1,4 @@
+# ALLOW_RAW_SQL: 本文件含裸 SQL 构造拦截器单测数据/DDL，守卫豁免（2026-11-09 恢复覆盖）
 import pytest
 
 pytestmark = pytest.mark.unit
@@ -634,6 +635,8 @@ class TestHierarchyValidationInterceptor:
         mock_validate.return_value = mock_result
 
         interceptor = HierarchyValidationInterceptor()
+        # BUG-V011: 无 composition 子关联时产品会跳过删除校验；本用例验证违规收集，强制走校验分支
+        interceptor._all_children_cascade_delete = lambda object_type: False
         ctx = _make_context(action='crud_delete', params={'id': 1})
         interceptor.before_action(ctx)
         assert ctx.extra.get('violations') is not None

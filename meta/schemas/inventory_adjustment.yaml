@@ -1,0 +1,579 @@
+# 库存调整单（Inventory Adjustment）—— INV-4
+# 依据: .trae/specs/excel-to-diagram/define-inventory-adjustment/spec.md FR-001/002/003/008/013
+#
+# 定位:
+#   统一承载手工数量调整（qty_increase / qty_decrease）、报废（scrap）、
+#   库存状态变更（status_transfer）、盘点差异（count_difference，仅系统生成）
+#   与期初导入（opening）。所有库存数量变化仍只经 inventory_transactions 落账。
+#
+# 父子关系:
+#   头 + 行两表；行见 inventory_adjustment_line，通过 child_sections 挂载，
+#   行对象不单独成菜单。
+#
+# 状态机:
+#   draft --release--> released --post--> posted --reverse--> reversed
+#   draft / released --cancel--> cancelled
+#
+# 副作用由 InventoryAdjustmentService 执行（守卫拦截器委托），禁止裸 PUT status。
+
+id: inventory_adjustment
+name: 库存调整单
+table_name: inventory_adjustments
+description: 库存调整单头（数量调整 / 报废 / 状态变更 / 盘点差异）
+display_name_field: adjustment_no
+aspects: [audit_aspect]
+
+authorization:
+  check: true
+  permissions:
+    read: inventory_adjustment:read
+    list: inventory_adjustment:read
+    create: inventory_adjustment:create
+    update: inventory_adjustment:update
+    # 草稿删除复用编辑权限，不新增权限码（Spec FR-011 只列 9 条）
+    delete: inventory_adjustment:update
+    release: inventory_adjustment:release
+    post: inventory_adjustment:post
+    reverse: inventory_adjustment:reverse
+    cancel: inventory_adjustment:cancel
+    opening: inventory_adjustment:opening
+
+import_export:
+  auto_crud: false
+
+actions:
+  - id: inventory_adjustment_read
+    name: 查询库存调整单
+    type: crud
+    method: GET
+    path: "/api/v1/inventory_adjustments/{id}"
+    description: 查询单条库存调整单
+  - id: inventory_adjustment_list
+    name: 查询库存调整单列表
+    type: crud
+    method: GET
+    path: "/api/v1/inventory_adjustments"
+    description: 查询库存调整单列表
+  - id: inventory_adjustment_create
+    name: 创建库存调整单
+    type: crud
+    method: POST
+    path: "/api/v1/inventory_adjustments"
+    description: 创建库存调整单（草稿）
+  - id: inventory_adjustment_update
+    name: 编辑库存调整单
+    type: crud
+    method: PUT
+    path: "/api/v1/inventory_adjustments/{id}"
+    description: 编辑草稿，或推进状态（release / post / reverse / cancel）
+
+semantics:
+  meaning: 库存调整单
+  category: business_document
+  business_key: [adjustment_no]
+  display_name_field: adjustment_no
+  aliases:
+    - 库存调整单
+    - 调整单
+    - 库存调整凭证
+    - Inventory Adjustment
+
+deletion_policy:
+  mode: restrict
+  restrict_on: []
+  cascade_delete:
+    - inventory_adjustment_lines
+
+audit:
+  enabled: true
+  create:
+    enabled: true
+    fields: all
+  update:
+    enabled: true
+    fields: changed_only
+    exclude: [id, created_at, updated_at]
+  delete:
+    enabled: true
+    fields: business_only
+    exclude: [id, created_at, updated_at]
+
+org_scope:
+  mode: direct
+  field: org_id
+  function: inventory
+  write_check: true
+
+fields:
+  - id: id
+    name: ID
+    type: integer
+    db_column: id
+    required: true
+    unique: true
+    description: 技术主键
+    semantics:
+      meaning: 自增主键
+      primary_key: true
+
+  - id: adjustment_no
+    name: 调整单号
+    type: string
+    db_column: adjustment_no
+    required: true
+    unique: true
+    max_length: 50
+    description: 调整单号（ADJ 序列：ADJ-年月-6 位流水），生成后不可改
+    semantics:
+      meaning: 调整单业务编号
+      business_key: true
+      immutable: true
+      data_category: code
+      searchable: true
+    ui:
+      widget: input
+      editable: false
+
+  - id: adjustment_type
+    name: 调整类型
+    type: string
+    db_column: adjustment_type
+    required: true
+    max_length: 30
+    description: 一个单据只允许一种调整类型
+    enum_values:
+      - value: qty_increase
+        label: 数量增加
+        color: success
+      - value: qty_decrease
+        label: 数量减少
+        color: danger
+      - value: scrap
+        label: 报废
+        color: danger
+      - value: status_transfer
+        label: 状态变更
+        color: warning
+      - value: count_difference
+        label: 盘点差异（系统生成）
+        color: info
+      - value: opening
+        label: 期初导入
+        color: info
+    semantics:
+      meaning: 调整类型
+      filterable: true
+      filter_type: enum
+      filter_label: 调整类型
+
+  - id: status
+    name: 状态
+    type: string
+    db_column: status
+    required: true
+    default: draft
+    max_length: 20
+    description: 调整单状态
+    enum_values:
+      - value: draft
+        label: 草稿
+        color: info
+        is_initial: true
+      - value: released
+        label: 已下达
+        color: warning
+      - value: posted
+        label: 已过账
+        color: success
+      - value: reversed
+        label: 已红冲
+        color: muted
+      - value: cancelled
+        label: 已取消
+        color: danger
+    semantics:
+      meaning: 单据状态
+      filterable: true
+      filter_type: enum
+      filter_label: 状态
+
+  - id: org_id
+    name: 库存组织
+    type: integer
+    db_column: org_id
+    required: true
+    description: 库存组织
+    semantics:
+      meaning: 库存组织引用
+      display:
+        type: association
+        target_type: org
+        display_field: name
+      filterable: true
+      filter_type: relation
+      filter_label: 库存组织
+
+  - id: location_id
+    name: 库位
+    type: integer
+    db_column: location_id
+    nullable: true
+    description: 头级库位；为空表示按行指定
+    semantics:
+      meaning: 库位引用
+      display:
+        type: association
+        target_type: location
+        display_field: name
+
+  - id: reason_code
+    name: 调整原因
+    type: string
+    db_column: reason_code
+    max_length: 30
+    nullable: true
+    nullable_by_status:
+      - field: status
+        status: posted
+        nullable: false
+    description: 调整原因（报废必填）
+    enum_values:
+      - value: physical_gain
+        label: 盘盈
+      - value: physical_loss
+        label: 盘亏
+      - value: scrap
+        label: 报废
+      - value: quality_reject
+        label: 质检不合格
+      - value: correction
+        label: 纠错
+      - value: opening
+        label: 期初导入
+      - value: count_difference
+        label: 盘点差异
+    semantics:
+      meaning: 调整原因
+      filterable: true
+      filter_type: enum
+      filter_label: 调整原因
+
+  - id: reason_text
+    name: 原因说明
+    type: string
+    db_column: reason_text
+    nullable: true
+    max_length: 200
+    description: 原因说明
+    semantics:
+      meaning: 原因说明
+      searchable: true
+
+  - id: posting_date
+    name: 过账日期
+    type: date
+    db_column: posting_date
+    required: true
+    description: 业务过账日期；ADJ 编号分月基准
+    semantics:
+      meaning: 过账日期
+      filterable: true
+      filter_type: date
+      filter_label: 过账日期
+    ui:
+      widget: date
+
+  - id: source_count_id
+    name: 来源盘点单
+    type: integer
+    db_column: source_count_id
+    nullable: true
+    description: 盘点差异来源盘点单
+    semantics:
+      meaning: 来源盘点单引用
+      display:
+        type: association
+        target_type: inventory_count
+        display_field: count_no
+
+  - id: reversal_of_adjustment_id
+    name: 红冲原单
+    type: integer
+    db_column: reversal_of_adjustment_id
+    nullable: true
+    description: 红冲单 → 原调整单自引用
+    semantics:
+      meaning: 红冲原单引用
+      display:
+        type: association
+        target_type: inventory_adjustment
+        display_field: adjustment_no
+
+  - id: created_by
+    name: 创建人
+    type: string
+    db_column: created_by
+    nullable: true
+    max_length: 200
+    description: 创建人
+    semantics:
+      meaning: 创建人
+      audit_field: true
+
+  - id: created_at
+    name: 创建时间
+    type: datetime
+    db_column: created_at
+    description: 创建时间
+    semantics:
+      meaning: 记录创建时间
+      audit_field: true
+
+  - id: posted_by
+    name: 过账人
+    type: string
+    db_column: posted_by
+    nullable: true
+    max_length: 200
+    description: 过账人
+    semantics:
+      meaning: 过账人
+      audit_field: true
+
+  - id: posted_at
+    name: 过账时间
+    type: datetime
+    db_column: posted_at
+    nullable: true
+    description: 过账时间
+    semantics:
+      meaning: 过账时间
+      audit_field: true
+
+  - id: updated_at
+    name: 更新时间
+    type: datetime
+    db_column: updated_at
+    description: 更新时间
+    semantics:
+      meaning: 记录更新时间
+      audit_field: true
+
+# [Reversal Platform D2 2026-11-06] 逆向写面声明（规格 §7）
+# 正向写面仅库存事务；序列号随原分录回退。红字镜像单由声明创建器生成，
+# 由 ReversalOrchestrator 统一编排（事务 / 倒序 / 幂等 / 状态推进）。
+doc_effect:
+  faces:
+    - id: inventory
+      primitive: inventory_reverse_by_event
+      args:
+        event_key: "{reversal.doc.event_key}"
+        new_event_key: "{reversal.doc.reversal_event_key}"
+        source_doc_id: "{reversal.doc.id}"
+        source_doc_no: "{reversal.doc.no}"
+        created_by: "{reversal.doc.created_by}"
+        allow_blocked_batch: true
+      on_missing: strict
+    - id: serial
+      primitive: serial_reverse_by_txn
+      args:
+        txn_ids: "{inventory.source_txn_ids}"
+      on_missing: skip
+  reversal:
+    from_states: [posted]
+    to_state: reversed
+    idempotent_states: [reversed]
+    order: declared
+    create_document:
+      primitive: inventory_adjustment_red_letter
+    write_audit_fields:
+      updated_at: "{now}"
+
+rules:
+  - id: release_inventory_adjustment
+    name: 下达调整单
+    type: state_transition
+    state_field: status
+    from_states: [draft]
+    to_state: released
+    action_ref: inventory_adjustment:release
+    triggers: [before_update]
+    ui_hints:
+      label: 下达
+      icon: send
+      confirm_message: "下达后行内容仍锁定为草稿口径，确认下达吗？"
+
+  - id: post_inventory_adjustment
+    name: 过账调整单
+    type: state_transition
+    state_field: status
+    from_states: [draft, released]
+    to_state: posted
+    action_ref: inventory_adjustment:post
+    triggers: [before_update]
+    ui_hints:
+      label: 过账
+      icon: check_circle
+      highlight: true
+      confirm_message: "过账后将写入库存事务且不可修改，只能红冲，确定过账吗？"
+
+  - id: reverse_inventory_adjustment
+    name: 红冲调整单
+    type: state_transition
+    state_field: status
+    from_states: [posted]
+    to_state: reversed
+    action_ref: inventory_adjustment:reverse
+    triggers: [before_update]
+    ui_hints:
+      label: 红冲
+      icon: cancel
+      confirm_message: "红冲将生成一张反向调整单并写反向事务，确定红冲吗？"
+
+  - id: cancel_inventory_adjustment
+    name: 取消调整单
+    type: state_transition
+    state_field: status
+    from_states: [draft, released]
+    to_state: cancelled
+    action_ref: inventory_adjustment:cancel
+    triggers: [before_update]
+    ui_hints:
+      label: 取消
+      icon: close
+      confirm_message: "取消后单据作废,确定取消吗？"
+
+indexes:
+  - fields: [adjustment_no]
+    unique: true
+    name: uq_inv_adj_no
+  - fields: [org_id, status]
+    name: idx_inv_adj_org_status
+  - fields: [source_count_id]
+    name: idx_inv_adj_source_count
+
+relations:
+  - id: inventory_adjustment_to_org
+    name: 库存组织
+    type: reference
+    target: org
+    source_field: org_id
+    target_field: id
+    cardinality: N:1
+  - id: inventory_adjustment_to_location
+    name: 库位
+    type: reference
+    target: location
+    source_field: location_id
+    target_field: id
+    cardinality: N:1
+  - id: inventory_adjustment_to_count
+    name: 来源盘点单
+    type: reference
+    target: inventory_count
+    source_field: source_count_id
+    target_field: id
+    cardinality: N:1
+  - id: inventory_adjustment_to_reversal
+    name: 红冲原单
+    type: reference
+    target: inventory_adjustment
+    source_field: reversal_of_adjustment_id
+    target_field: id
+    cardinality: N:1
+
+ui_view_config:
+  skip_auto_menu: true
+  showChangeHistory: true
+  list:
+    detail_mode: page
+    title: 库存调整单
+    description: 手工数量调整、报废、库存状态变更与盘点差异
+    columns:
+      - field: adjustment_no
+        width: 180
+        sortable: true
+      - field: adjustment_type
+        width: 120
+        filterable: true
+        filter_type: select
+      - field: status
+        width: 100
+        filterable: true
+        filter_type: select
+      - field: org_id
+        width: 170
+        render_as: association
+        target_type: org
+        display_field: name
+      - field: location_id
+        width: 150
+        render_as: association
+        target_type: location
+        display_field: name
+      - field: posting_date
+        width: 120
+        format: date
+        sortable: true
+      - field: reason_code
+        width: 120
+      - field: source_count_id
+        width: 160
+      - field: posted_at
+        width: 160
+    selection:
+      enabled: true
+      mode: multiple
+    searchFields: [adjustment_no, reason_text]
+    actions:
+      - id: create
+        label: 新建调整单
+        icon: plus
+        type: primary
+        permission: inventory_adjustment:create
+      - id: export
+        label: 导出
+        icon: download
+        type: default
+    defaultSort:
+      field: posting_date
+      order: desc
+  form:
+    title: 库存调整单信息
+    layout: vertical
+    sections:
+      - title: 基本信息
+        columns:
+          - fields: [adjustment_no, adjustment_type]
+          - fields: [status, posting_date]
+      - title: 组织
+        columns:
+          - fields: [org_id, location_id]
+      - title: 原因
+        columns:
+          - fields: [reason_code, reason_text]
+      - title: 来源与追溯
+        columns:
+          - fields: [source_count_id, reversal_of_adjustment_id]
+      - title: 过账
+        columns:
+          - fields: [posted_by, posted_at]
+  detail:
+    layout: tabs
+    title: "库存调整单 {record.adjustment_no}"
+    tabs:
+      - id: basic
+        label: 基本信息
+        type: fields
+        fields: [adjustment_no, adjustment_type, status, org_id, location_id,
+                 reason_code, reason_text, posting_date, source_count_id,
+                 reversal_of_adjustment_id, created_by, created_at, posted_by,
+                 posted_at]
+  child_sections:
+    - child_object: inventory_adjustment_line
+      title: 调整行
+      display: tab
+      pageSize: 10
+      useMetaList: true
+      enableDetail: true
+      enableAutoCrud: true

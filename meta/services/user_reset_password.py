@@ -63,17 +63,17 @@ def user_reset_password_handler(params: Dict[str, Any], context: Dict[str, Any])
                 [password_hash, user_id]
             )
 
-        # 写审计 (audit-compliance.md §1.3 禁止直接 INSERT, 改用 AuditLogger)
-        # [FIX 2026-06-20 P2.3] 通过 AuditService 自动获得 transaction_id
+        # 写审计（FR-004：统一走 AuditService.log，自动获得 transaction_id）
         operator_id = context.get('user_id')
         operator_name = context.get('user_name') or 'unknown'
         ip_addr = context.get('ip_address', '')
         try:
-            from meta.core.action_executor import AuditLogger
-            audit_logger = AuditLogger(ds)
-            audit_logger.log_update(
+            from meta.core.datasource import resolve_audit_data_source
+            from meta.services.audit_service import AuditService
+            AuditService(resolve_audit_data_source(ds)).log(
                 object_type='user',
                 object_id=user_id,
+                action='UPDATE',
                 old_data={'password_hash': '***'},
                 new_data={'password_hash': f'reset by {operator_name}'},
                 user_id=operator_id,

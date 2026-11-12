@@ -1,0 +1,99 @@
+# 工作流定义（G7 六表进统一元模型）
+# 定义源：原 meta/core/task_schema.py::_build_workflow_meta()（逐字段平移，DDL 等价）
+# 纪律：平台机制对象 —— 不进通用 BO CRUD / agent 工具 / 自动菜单。
+id: workflow
+name: 工作流定义
+table_name: workflows
+description: 编排定义层（版本化；定义层无状态——节点/边只描述主干与分支块）
+skip_auto_menu: true
+skip_generic_api: true
+
+fields:
+  - id: id
+    name: ID
+    type: string
+    db_column: id
+    required: true
+    unique: true
+    description: Workflow 版本行 ID（uuid4 hex，主键；一个 key 多版本多行）
+  - id: workflow_key
+    name: 工作流业务键
+    type: string
+    db_column: workflow_key
+    required: true
+    description: 业务键（如 wf-invoice-processing），跨版本稳定
+  - id: version
+    name: 版本号
+    type: integer
+    db_column: version
+    required: true
+    description: 版本号（从 1 递增）
+  - id: name
+    name: 名称
+    type: string
+    db_column: name
+    required: true
+    description: 流程名称
+  - id: description
+    name: 描述
+    type: text
+    db_column: description
+    description: 流程描述
+  - id: owner
+    name: 属主
+    type: string
+    db_column: owner
+    description: 属主
+  - id: trigger_kind
+    name: 触发方式
+    type: string
+    db_column: trigger_kind
+    default: manual
+    description: 触发方式 manual/schedule/event/api（C3 事件入的唯一入口）
+  - id: trigger_expr
+    name: 触发表达式
+    type: string
+    db_column: trigger_expr
+    description: 触发表达式（cron 表达式或事件条件）
+  - id: edges
+    name: 边
+    type: json
+    db_column: edges
+    description: 边数组 [{from,to,when,comment}]；when=done/failed/skipped/表达式
+  - id: sla
+    name: SLA
+    type: json
+    db_column: sla
+    description: 流程级 SLA {total_hours, critical_path}
+  - id: meta
+    name: 扩展元数据
+    type: json
+    db_column: meta
+    description: 业务自定义 KV
+  - id: created_by
+    name: 创建人
+    type: string
+    db_column: created_by
+    description: 创建者
+  - id: created_at
+    name: 创建时间
+    type: datetime
+    db_column: created_at
+    description: 创建时间
+  - id: updated_at
+    name: 更新时间
+    type: datetime
+    db_column: updated_at
+    description: 更新时间
+
+indexes:
+  - name: uq_workflow_key_version
+    fields: [workflow_key, version]
+    unique: true
+    description: 同 key 同版本唯一；在途 Run 快照旧版本不受新版本影响
+  - name: idx_workflow_key
+    fields: [workflow_key]
+    description: 按业务键取版本序列
+
+ui_view_config:
+  skip_auto_menu: true

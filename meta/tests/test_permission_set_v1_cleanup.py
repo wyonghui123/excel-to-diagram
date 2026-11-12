@@ -54,7 +54,7 @@ class TestRoleColumnsInDB:
             os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
             'architecture.db'
         ))
-        cursor = ds.execute("PRAGMA table_info(roles)")
+        cursor = ds.execute("PRAGMA table_info(permission_sets)")
         cols = [row[1] if not isinstance(row, dict) else row['name']
                 for row in cursor.fetchall()]
         assert 'is_super_admin' not in cols, \
@@ -67,7 +67,7 @@ class TestRoleColumnsInDB:
             os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
             'architecture.db'
         ))
-        cursor = ds.execute("PRAGMA table_info(roles)")
+        cursor = ds.execute("PRAGMA table_info(permission_sets)")
         cols = [row[1] if not isinstance(row, dict) else row['name']
                 for row in cursor.fetchall()]
         assert 'priority' not in cols, \
@@ -83,10 +83,10 @@ class TestRoleColumnsInDB:
         cursor = ds.execute("""
             SELECT COUNT(DISTINCT u.id) AS c
             FROM users u
-            JOIN user_group_members ugm ON u.id = ugm.user_id
-            JOIN group_roles gr ON ugm.group_id = gr.group_id
-            JOIN role_permissions rp ON gr.permission_set_id = rp.permission_set_id
-            JOIN permissions p ON rp.permission_id = p.id
+            JOIN org_members om ON u.id = om.user_id
+            JOIN org_permission_sets ops ON om.org_id = ops.org_id
+            JOIN permission_set_permissions psp ON ops.permission_set_id = psp.permission_set_id
+            JOIN permissions p ON psp.permission_id = p.id
             WHERE p.code = '*' AND u.username = 'admin'
         """)
         row = cursor.fetchone()

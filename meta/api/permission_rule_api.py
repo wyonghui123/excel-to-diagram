@@ -6,6 +6,8 @@
 """
 
 from flask import Blueprint, request, jsonify, g
+from meta.api._response_contract import error_response, ok
+from meta.core.query_spec import parse_query_spec
 from meta.services.auth_middleware import login_required, require_permission
 from meta.services.condition_permission_service import ConditionPermissionService
 from meta.api._deprecation import v1_deprecated
@@ -22,10 +24,10 @@ def admin_required(f):
     @login_required
     def decorated(*args, **kwargs):
         if not hasattr(g, 'current_user') or not g.current_user:
-            return jsonify({'success': False, 'message': '请先登录后再操作'}), 401
+            return error_response('请先登录后再操作', status=401)
         perms = g.current_user.get('permissions', [])
         if '*' not in perms and 'admin' not in perms:
-            return jsonify({'success': False, 'message': 'Admin required'}), 403
+            return error_response('Admin required', status=403)
         return f(*args, **kwargs)
     return decorated
 
@@ -58,7 +60,7 @@ def list_rules():
 
         return jsonify({'success': True, 'data': rules})
     except Exception as e:
-        return jsonify({'success': False, 'message': str(e)}), 500
+        return error_response(str(e), status=500)
 
 
 @permission_rule_bp.route('/<int:rule_id>', methods=['GET'])
@@ -71,10 +73,10 @@ def get_rule(rule_id):
         service = _get_service()
         rule = service.get_rule(rule_id)
         if rule:
-            return jsonify({'success': True, 'data': rule})
-        return jsonify({'success': False, 'message': 'Rule not found'}), 404
+            return ok(rule)
+        return error_response('Rule not found', status=404)
     except Exception as e:
-        return jsonify({'success': False, 'message': str(e)}), 500
+        return error_response(str(e), status=500)
 
 
 @permission_rule_bp.route('', methods=['POST'])
@@ -90,7 +92,7 @@ def create_rule():
         required = ['role_id', 'resource_type', 'condition']
         for field in required:
             if field not in data:
-                return jsonify({'success': False, 'message': f'{field} is required'}), 400
+                return error_response(f'{field} is required')
 
         data['created_by'] = g.current_user.get('user_id') if hasattr(g, 'current_user') and g.current_user else None
 
@@ -110,10 +112,10 @@ def create_rule():
                 parent_object_type='role',
                 parent_object_id=data.get('role_id'),
             )
-            return jsonify({'success': True, 'data': {'id': rule_id}})
-        return jsonify({'success': False, 'message': 'Failed to create rule'}), 500
+            return ok({'id': rule_id})
+        return error_response('Failed to create rule', status=500)
     except Exception as e:
-        return jsonify({'success': False, 'message': str(e)}), 500
+        return error_response(str(e), status=500)
 
 
 @permission_rule_bp.route('/<int:rule_id>', methods=['PUT'])
@@ -128,9 +130,9 @@ def update_rule(rule_id):
         success = service.update_rule(rule_id, data)
         if success:
             return jsonify({'success': True})
-        return jsonify({'success': False, 'message': 'Failed to update rule'}), 500
+        return error_response('Failed to update rule', status=500)
     except Exception as e:
-        return jsonify({'success': False, 'message': str(e)}), 500
+        return error_response(str(e), status=500)
 
 
 @permission_rule_bp.route('/<int:rule_id>', methods=['DELETE'])
@@ -144,9 +146,9 @@ def delete_rule(rule_id):
         success = service.delete_rule(rule_id)
         if success:
             return jsonify({'success': True})
-        return jsonify({'success': False, 'message': 'Failed to delete rule'}), 500
+        return error_response('Failed to delete rule', status=500)
     except Exception as e:
-        return jsonify({'success': False, 'message': str(e)}), 500
+        return error_response(str(e), status=500)
 
 
 @permission_rule_bp.route('/preview', methods=['POST'])
@@ -161,12 +163,12 @@ def preview_matching():
         resource_type = data.get('resource_type', '')
 
         if not condition or not resource_type:
-            return jsonify({'success': False, 'message': 'condition and resource_type are required'}), 400
+            return error_response('condition and resource_type are required')
 
         result = service.preview_matching_resources(condition, resource_type)
-        return jsonify({'success': True, 'data': result})
+        return ok(result)
     except Exception as e:
-        return jsonify({'success': False, 'message': str(e)}), 500
+        return error_response(str(e), status=500)
 
 
 @permission_rule_bp.route('/check', methods=['POST'])
@@ -181,16 +183,16 @@ def check_permission():
         action = data.get('action', 'read')
 
         if not resource_type or resource_id is None:
-            return jsonify({'success': False, 'message': '资源类型和资源 ID 不能为空'}), 400
+            return error_response('资源类型和资源 ID 不能为空')
 
         user_id = g.current_user.get('user_id') if hasattr(g, 'current_user') and g.current_user else None
         if not user_id:
-            return jsonify({'success': False, 'message': '请先登录后再操作'}), 401
+            return error_response('请先登录后再操作', status=401)
 
         result = service.check_permission(user_id, resource_type, resource_id, action)
-        return jsonify({'success': True, 'data': result})
+        return ok(result)
     except Exception as e:
-        return jsonify({'success': False, 'message': str(e)}), 500
+        return error_response(str(e), status=500)
 
 
 @permission_rule_bp.route('/field-metadata', methods=['GET'])
@@ -203,12 +205,12 @@ def get_field_metadata():
         resource_type = request.args.get('resource_type')
 
         if not resource_type:
-            return jsonify({'success': False, 'message': 'resource_type is required'}), 400
+            return error_response('resource_type is required')
 
         fields = service.get_resource_field_metadata(resource_type)
         return jsonify({'success': True, 'data': fields})
     except Exception as e:
-        return jsonify({'success': False, 'message': str(e)}), 500
+        return error_response(str(e), status=500)
 
 
 @permission_rule_bp.route('/employee-scopes', methods=['GET'])
@@ -221,7 +223,7 @@ def get_employee_scopes():
         scopes = service.get_employee_data_scopes()
         return jsonify({'success': True, 'data': scopes})
     except Exception as e:
-        return jsonify({'success': False, 'message': str(e)}), 500
+        return error_response(str(e), status=500)
 
 
 @permission_rule_bp.route('/reference-check', methods=['POST'])
@@ -236,12 +238,12 @@ def check_resource_references():
         resource_id = data.get('resource_id')
 
         if not resource_type or resource_id is None:
-            return jsonify({'success': False, 'message': '资源类型和资源 ID 不能为空'}), 400
+            return error_response('资源类型和资源 ID 不能为空')
 
         affected = service.check_rule_references_resource(resource_type, resource_id)
-        return jsonify({'success': True, 'data': {'affected_rules': affected, 'count': len(affected)}})
+        return ok({'affected_rules': affected, 'count': len(affected)})
     except Exception as e:
-        return jsonify({'success': False, 'message': str(e)}), 500
+        return error_response(str(e), status=500)
 
 
 # ========== FR-004 / v1.4 对齐：ConditionRuleDialog UI 依赖的兼容端点 ==========
@@ -276,18 +278,13 @@ def list_dimension_values_for_rule(dimension_code):
         )
         engine = _get_engine()
 
-        search = request.args.get('search', '').strip()
-        page = request.args.get('page', 1, type=int)
-        page_size = request.args.get('page_size', 50, type=int)
-        if page < 1:
-            page = 1
-        if page_size < 1 or page_size > 200:
-            page_size = 50
-        offset = (page - 1) * page_size
+        spec = parse_query_spec(request.args, default_page_size=50, max_page_size=200)
+        search = spec.search
+        page, page_size, offset = spec.page, spec.page_size, spec.offset
 
         table_name = RESOURCE_TABLE_MAP.get(dimension_code)
         if not table_name:
-            return jsonify({'success': False, 'message': f'Unknown dimension: {dimension_code}'}), 400
+            return error_response(f'Unknown dimension: {dimension_code}')
 
         display_field = DISPLAY_FIELD_MAP.get(dimension_code, 'name')
         code_field = CODE_FIELD_MAP.get(dimension_code, 'code')
@@ -358,7 +355,7 @@ def list_dimension_values_for_rule(dimension_code):
 
         return jsonify({'success': True, 'data': items})
     except Exception as e:
-        return jsonify({'success': False, 'message': str(e)}), 500
+        return error_response(str(e), status=500)
 
 
 @permission_rule_bp.route('/dimensions', methods=['GET'])
@@ -390,7 +387,7 @@ def list_dimensions_for_rule():
             })
         return jsonify({'success': True, 'data': result})
     except Exception as e:
-        return jsonify({'success': False, 'message': str(e)}), 500
+        return error_response(str(e), status=500)
 
 
 def _guess_cascade_parent(dim_id):

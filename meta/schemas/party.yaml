@@ -48,6 +48,9 @@ actions:
     path: "/api/v1/partys/{id}"
     description: 删除身份主体记录
 
+org_scope:
+  mode: global
+
 fields:
   - id: id
     name: ID

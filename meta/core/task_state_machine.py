@@ -289,3 +289,24 @@ def require_transition(from_state: str, to_state: str,
             f"迁移被拒: {from_state} → {to_state}：{result.reason}"
         )
     return assert_transition(from_state, to_state)
+
+
+def check_meta_object_status_update(meta_obj, old_record, changes) -> None:
+    """[G7 2026-11-02] 通用更新路径的状态迁移守卫。
+
+    对象声明 `requires_state_machine: true` 且本次更新要改 `status` 时，
+    以库中旧状态为 from、请求新状态为 to 走 `require_transition`
+    （结构 + 守卫，守卫 fail-closed）。非法迁移抛 `TaskTransitionError`。
+    未改 status / 拿不到旧状态 / 状态未变化时不做校验。
+    """
+    if not meta_obj.requires_state_machine():
+        return
+    if not isinstance(changes, dict) or "status" not in changes:
+        return
+    new_status = changes.get("status")
+    old_status = (old_record or {}).get("status") if isinstance(old_record, dict) else None
+    if old_status is None or str(old_status) == "":
+        return
+    if str(old_status) == str(new_status):
+        return
+    require_transition(str(old_status), str(new_status))

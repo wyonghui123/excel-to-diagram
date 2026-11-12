@@ -1,6 +1,7 @@
 ---
 alwaysApply: false
 description: "Vitest 调试 + 性能优化 + 完整配置 + 检查清单"
+globs: "src/**/*.test.js,src/**/*.spec.js,vitest.config.*"
 ---
 
 # Vitest 调试 + 性能（v4.0 拆分）

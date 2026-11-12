@@ -12,7 +12,9 @@
 #      SAP TCURR/TCURF/TCURV · Oracle GL_DAILY_RATES · SF DatedConversionRate 三家均为按日切片事实
 #   ② 功能货币 / 账簿货币 / 报告货币三元未建模（SFAS #52 / IAS 21；Remeasurement ≠ Translation）（TBD-8，与 D1 会计处置同一挂起决策）
 #   ③ 币种生效期不建（Oracle Start/End Date · SAP GDATU）（TBD-2）
-#   ④ decimal_places 本期**无执行消费者**（平台无精度引擎，金额为裸 double）—— 不宣称「已实现按币种精度舍入」
+#   ④ decimal_places 已是**金额舍入精度的唯一真源**：sales_order_amount_service /
+#      customer_invoice_service 通过 meta.core.rounding.round_amount(value, decimals) 消费；
+#      SAP TCURX 例外表口径不采纳，仍以主表字段为准。
 #   ⑤ symbol 为**文档级字段**（Oracle 官方：符号不保证显示，Oracle GL 不用）—— 不建 UI 消费点
 #   ⑥ doc_flow.currency 是裸 STRING（meta/core/doc_flow_schema.py，属 meta/core/* 守 S5 不动）⇒ 无引用完整性保证（TBD-5，本期最大缺口）
 #

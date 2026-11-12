@@ -58,14 +58,10 @@ class TestLogE2E:
         )
 
     def test_e2e_business_object_create_produces_business_log(self):
+        """[FIX 2026-06-09] BusinessLogInterceptor 跳过 CRUD (改由 ActionExecutor 写审计)"""
         ctx = self._make_context('crud_create', object_type='domain')
         self.business.after_action(ctx)
-        kwargs = self.mock_logger.log_business.call_args[1]
-        assert kwargs['action'] == 'CREATE'
-        assert kwargs['object_type'] == 'domain'
-        assert kwargs['user_id'] == 1
-        assert kwargs['ip_address'] == '10.0.0.1'
-        assert kwargs['trace_id'] == 'e2e-trace'
+        self.mock_logger.log_business.assert_not_called()
 
     def test_e2e_user_create_produces_security_log(self):
         ctx = self._make_context('crud_create', object_type='user')
@@ -143,12 +139,12 @@ class TestLogE2E:
         assert operation_kwargs['operation'] == 'DELETE_OBJECT'
 
     def test_e2e_permission_update_triple_interceptor(self):
+        """[FIX 2026-06-09] business 跳过 CRUD; security + operation 仍记录"""
         ctx = self._make_context('crud_update', object_type='permission')
         self.business.after_action(ctx)
+        self.mock_logger.log_business.assert_not_called()
         self.security.after_action(ctx)
         self.operation.after_action(ctx)
-        biz_kwargs = self.mock_logger.log_business.call_args[1]
-        assert biz_kwargs['action'] == 'UPDATE'
         sec_kwargs = self.mock_logger.log_security.call_args[1]
         assert sec_kwargs['severity'] == 'WARNING'
         assert sec_kwargs['event_type'] == 'ENTITY_MODIFIED'
@@ -164,15 +160,14 @@ class TestLogE2E:
         self.mock_logger.log_security.assert_not_called()
 
     def test_e2e_old_new_data_in_business_and_security(self):
+        """[FIX 2026-06-09] business 跳过 CRUD; security 仍携带 old/new data"""
         ctx = self._make_context(
             'crud_update', object_type='user',
             old_data={'name': 'old'}, new_data={'name': 'new'}
         )
         self.business.after_action(ctx)
+        self.mock_logger.log_business.assert_not_called()
         self.security.after_action(ctx)
-        biz_kwargs = self.mock_logger.log_business.call_args[1]
-        assert biz_kwargs['old_data'] == {'name': 'old'}
-        assert biz_kwargs['new_data'] == {'name': 'new'}
         sec_kwargs = self.mock_logger.log_security.call_args[1]
         assert sec_kwargs['details']['old_data'] == {'name': 'old'}
         assert sec_kwargs['details']['new_data'] == {'name': 'new'}

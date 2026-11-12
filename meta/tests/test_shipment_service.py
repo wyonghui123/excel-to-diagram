@@ -12,6 +12,7 @@
 
 import os
 import sqlite3
+from contextlib import contextmanager
 
 # 与 test_sales_order_fulfillment_status 同口径：只用内存库，不触碰真实库
 os.environ.setdefault('ALLOW_RAW_SQL', '1')
@@ -59,6 +60,7 @@ CREATE TABLE sales_order_lines (
     line_type_id INTEGER,
     item_id INTEGER,
     uom_id INTEGER,
+    project_task_id INTEGER NOT NULL DEFAULT 0,
     status TEXT,
     fulfillment_status TEXT DEFAULT 'not_started',
     fulfillment_derived_at TEXT,
@@ -114,6 +116,7 @@ CREATE TABLE shipment_lines (
     qty REAL,
     lot_no TEXT,
     serial_no TEXT,
+    project_task_id INTEGER NOT NULL DEFAULT 0,
     status TEXT,
     created_at TEXT,
     updated_at TEXT
@@ -135,6 +138,11 @@ class _MemDS:
     def execute(self, sql, params=None):
         return self.conn.execute(sql, list(params or []))
 
+    @contextmanager
+    def transaction(self):
+        """与 DataSource.transaction 同形（内存库自带事务，这里仅做占位）。"""
+        yield
+
 
 def _db():
     conn = sqlite3.connect(':memory:')
@@ -155,10 +163,11 @@ def _add_order(conn, oid=_ORDER_ID, org_id=1, order_date='2026-10-20',
         [oid, 'SO-0001', org_id, order_date, 'confirmed', party_id, address])
 
 
-def _add_order_line(conn, lid=_ORDER_LINE_ID, oid=_ORDER_ID):
+def _add_order_line(conn, lid=_ORDER_LINE_ID, oid=_ORDER_ID, task_id=0):
     conn.execute(
-        'INSERT INTO sales_order_lines (id, order_id, item_id, uom_id, status) '
-        'VALUES (?, ?, ?, ?, ?)', [lid, oid, 900, 3, 'open'])
+        'INSERT INTO sales_order_lines (id, order_id, item_id, uom_id, '
+        'project_task_id, status) VALUES (?, ?, ?, ?, ?, ?)',
+        [lid, oid, 900, 3, task_id, 'open'])
 
 
 def _add_schedule(conn, sid=_SCHEDULE_ID, oid=_ORDER_ID,
@@ -221,6 +230,21 @@ def test_create_applies_header_defaults_from_order_and_schedule():
     assert header['ship_to_address_text'] == '上海市浦东新区世纪大道 100 号'
     assert header['ship_from_location_id'] == 7
     assert header['planned_ship_date'] == '2026-11-05'
+
+
+def test_create_copies_project_task_dimension():
+    """G15 P2：发运行继承订单行的 project_task_id。"""
+    conn = _db()
+    _add_org(conn, code='SH')
+    _add_order(conn)
+    _add_order_line(conn, task_id=201)
+    _add_schedule(conn, promised_date='2026-11-05')
+    svc, result = _make_shipment(conn)
+
+    line = _MemDS(conn).query(
+        'SELECT project_task_id FROM shipment_lines WHERE delivery_id = ?',
+        [result['id']])[0]
+    assert line['project_task_id'] == 201
 
 
 def test_create_requires_address_snapshot():

@@ -7,6 +7,7 @@ version: v5.0
 based_on: 09-01 worktree 治理 + 09-02 服务治理
 supersedes: service-management-rules.md
 description: "AI 启动/停止/重启本地服务（5000/3004 等端口）、管理 worktree 服务进程、解决端口冲突、调用 service_manager.ps1 或 _wt_service.py 时查阅此规则。"
+globs: "scripts/**"
 ---
 
 # 服务管理规范 v5.1（基于 worktree v4.0 + 服务治理新方案 + 多会话并行）

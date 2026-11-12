@@ -72,9 +72,9 @@ fields:
     db_column: code
     required: true
     unique: true
-    max_length: 10
-    pattern: "^[A-Za-z0-9_]{1,10}$"
-    description: 产品组业务编码（1-10 位字母 / 数字 / 下划线）
+    max_length: 32
+    pattern: "^[A-Za-z0-9_-]{1,32}$"
+    description: 产品组业务编码（1-32 位字母 / 数字 / 下划线 / 连字符）
     semantics:
       meaning: 产品组业务编码；业务键
       business_key: true
@@ -180,7 +180,7 @@ ui_view_config:
         label: 新建产品组
         icon: plus
         type: primary
-        permission: division:division_create
+        permission: division:create
     defaultSort:
       field: code
       order: asc
@@ -208,7 +208,7 @@ ui_view_config:
 
 category_config:
   # 双段式权限码，与 permissions 表实际行一致（v137 落库）
-  create_permission: division:division_create
-  update_permission: division:division_update
-  delete_permission: division:division_delete
+  create_permission: division:create
+  update_permission: division:update
+  delete_permission: division:delete
   owner_auto_permission: false

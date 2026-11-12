@@ -15,7 +15,10 @@ import sqlite3
 from typing import Any, Dict, Optional, Tuple
 
 BASE_HOST = os.environ.get('TEST_HOST', 'localhost')
-BASE_PORT = int(os.environ.get('TEST_PORT', '3010'))
+# 端口优先级: TEST_PORT → AGENT_PORT (agent_bootstrap 设置) → 共享槽 3010
+BASE_PORT = int(os.environ.get('TEST_PORT')
+                or os.environ.get('AGENT_PORT')
+                or '3010')
 # DB 路径: tests/ 在子目录, 需向上 1 级
 _HERE = os.path.dirname(os.path.abspath(__file__))
 _PROJECT_ROOT = os.path.dirname(os.path.dirname(_HERE))
@@ -23,7 +26,16 @@ DB_PATH = os.path.join(_PROJECT_ROOT, 'meta', 'architecture.db')
 
 
 def get_admin_cookie() -> str:
-    """获取 admin 登录 cookie"""
+    """获取 admin 登录 cookie
+
+    优先走 dev-login (无需密码, 不受 live 库密码/history 变化影响);
+    失败再回退到账号密码登录。
+    """
+    cookie = _dev_login_cookie()
+    if cookie:
+        return cookie
+
+    # 回退: 账号密码登录
     # 先解锁 admin (避免 6+ 失败被锁)
     _unlock_admin_if_needed()
 
@@ -40,6 +52,26 @@ def get_admin_cookie() -> str:
     if not set_cookie:
         raise RuntimeError(f'Login failed: {data}')
     return set_cookie.split(';')[0]  # auth_token=xxx
+
+
+def _dev_login_cookie() -> Optional[str]:
+    """GET /api/v1/auth/dev-login 拿 cookie; 不可用时返回 None"""
+    try:
+        conn = http.client.HTTPConnection(BASE_HOST, BASE_PORT, timeout=10)
+        conn.request('GET', '/api/v1/auth/dev-login?username=admin',
+                     headers={'Content-Type': 'application/json'})
+        r = conn.getresponse()
+        r.read()
+        set_cookies = r.headers.get_all('Set-Cookie') or []
+        conn.close()
+        if r.status != 200:
+            return None
+        for sc in set_cookies:
+            if sc.startswith('auth_token='):
+                return sc.split(';')[0]
+        return None
+    except Exception:
+        return None
 
 
 def _unlock_admin_if_needed():

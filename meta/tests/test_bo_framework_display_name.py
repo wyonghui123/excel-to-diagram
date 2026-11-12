@@ -24,7 +24,7 @@ class TestBOFrameworkDisplayNameIntegration:
     
     @pytest.fixture
     def bo_framework(self):
-        if not registry.list_objects():
+        if registry.get('business_object') is None:
             schema_dir = get_yaml_schema_dir()
             register_from_directory(schema_dir)
         registry.invalidate_ui_config_cache()
@@ -97,8 +97,8 @@ class TestBOFrameworkDisplayNameIntegration:
         val = config.get("display_name_field"); assert val is not None and val == "name" or pytest.fail("display_name_field not configured")
     
     def test_user_group_display_name_field_is_name(self, bo_framework):
-        """TC-BF-DN-009: user_group的display_name_field是name"""
-        config = bo_framework.get_ui_config("user_group")
+        """TC-BF-DN-009: org 的 display_name_field 是 name"""
+        config = bo_framework.get_ui_config("org")
         assert config, "config not available"
         
         val = config.get("display_name_field"); assert val is not None and val == "name" or pytest.fail("display_name_field not configured")
@@ -109,7 +109,7 @@ class TestAPIResponseStructure:
     
     @pytest.fixture
     def bo_framework(self):
-        if not registry.list_objects():
+        if registry.get('business_object') is None:
             schema_dir = get_yaml_schema_dir()
             register_from_directory(schema_dir)
         registry.invalidate_ui_config_cache()
@@ -171,7 +171,7 @@ class TestBackwardCompatibility:
     
     @pytest.fixture
     def bo_framework(self):
-        if not registry.list_objects():
+        if registry.get('business_object') is None:
             schema_dir = get_yaml_schema_dir()
             register_from_directory(schema_dir)
         registry.invalidate_ui_config_cache()
@@ -210,7 +210,7 @@ class TestMultipleObjectTypes:
     
     @pytest.fixture
     def bo_framework(self):
-        if not registry.list_objects():
+        if registry.get('business_object') is None:
             schema_dir = get_yaml_schema_dir()
             register_from_directory(schema_dir)
         registry.invalidate_ui_config_cache()
@@ -222,7 +222,7 @@ class TestMultipleObjectTypes:
         ("role", "name"),
         ("product", "name"),
         ("domain", "name"),
-        ("user_group", "name"),
+        ("org", "name"),
     ])
     def test_display_name_field_for_object(self, bo_framework, object_type, expected_field):
         """TC-MOT-001: 各对象类型的display_name_field"""
@@ -237,7 +237,7 @@ class TestPerformance:
     
     @pytest.fixture
     def bo_framework(self):
-        if not registry.list_objects():
+        if registry.get('business_object') is None:
             schema_dir = get_yaml_schema_dir()
             register_from_directory(schema_dir)
         registry.invalidate_ui_config_cache()

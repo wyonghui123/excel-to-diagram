@@ -14,9 +14,11 @@ class TestBugV015BrowserE2E:
     def check_dependencies(self):
         try:
             import urllib.request
-            urllib.request.urlopen('http://localhost:3010/api/v1/health', timeout=1)
+            from meta.tests.shared.fixtures import backend_base_url
+            base = backend_base_url()
+            urllib.request.urlopen(f'{base}/api/v1/health', timeout=1)
         except Exception:
-            pytest.skip("Backend not running at localhost:3010")
+            pytest.skip(f"Backend not running at {backend_base_url()}")
 
         try:
             from playwright.sync_api import sync_playwright

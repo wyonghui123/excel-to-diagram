@@ -15,7 +15,7 @@ name: 履约单
 table_name: fulfillment_orders
 description: 履约业务分组单据（按客户 / 站点 / 交付方式分组；执行由 workflow_run 驱动）
 display_name_field: fulfillment_no
-aspects: [audit_aspect]
+aspects: [audit_aspect, document_type_aspect]
 
 semantics:
   meaning: 履约单
@@ -138,6 +138,50 @@ fields:
       filter_scope: local
     ui:
       widget: number
+      clearable: true
+
+  # 项目锚点：履约分组单按 project_id 归集（可空；空 = 未归集到项目）
+  #   与 work_order / shipment 的挂载列同构：只声明字段 + 索引，不声明 reference 关系
+  - id: project_id
+    name: 项目
+    type: integer
+    db_column: project_id
+    nullable: true
+    description: 所属项目（可空；空 = 未归集到项目）
+    semantics:
+      meaning: 所属项目
+      display:
+        type: association
+        target_type: project
+        display_field: name
+        placeholder: "未归集"
+    value_help:
+      source:
+        type: bo
+        target_bo: project
+        value_field: id
+        display_field: name
+        code_field: project_no
+        apply_target_permissions: true
+      behavior:
+        multiple: false
+        validation: true
+        binding_strength: strict
+        min_search_length: 0
+      presentation:
+        result_type: dropdown
+        display_format: "{project_no} {name}"
+        columns:
+          - field: project_no
+            label: 项目编号
+            width: 140
+          - field: name
+            label: 项目名称
+            width: 200
+    ui:
+      widget: select
+      relation: project
+      multiple: false
       clearable: true
 
   - id: fulfillment_type
@@ -284,8 +328,21 @@ indexes:
     name: idx_fulfillment_order_order
   - fields: [status]
     name: idx_fulfillment_order_status
+  - fields: [document_type_id]
+    name: idx_fulfillment_order_document_type
+  # 项目归集：履约分组单按 project_id 过滤
+  - fields: [project_id]
+    name: idx_fulfillment_order_project
 
 relations:
+  - id: fulfillment_order_to_document_type
+    name: 单据类型
+    type: reference
+    target: type_definition
+    source_field: document_type_id
+    target_field: id
+    cardinality: N:1
+    description: 单据类型引用（type_definitions 的 header 行；真外键）
   - id: fulfillment_order_to_sales_order
     name: 来源订单
     type: reference
@@ -316,6 +373,10 @@ ui_view_config:
         filterable: true
         filter_type: select
       - field: customer_account_id
+        width: 160
+        filterable: true
+        filter_type: select
+      - field: project_id
         width: 160
         filterable: true
         filter_type: select
@@ -352,7 +413,7 @@ ui_view_config:
       - title: 基本信息
         columns:
           - fields: [fulfillment_no, order_id, status]
-          - fields: [customer_account_id, site_id]
+          - fields: [customer_account_id, site_id, project_id]
           - fields: [fulfillment_type, planned_date]
       - title: 编排
         columns:
@@ -372,6 +433,7 @@ ui_view_config:
           - order_id
           - customer_account_id
           - site_id
+          - project_id
           - fulfillment_type
           - status
           - planned_date

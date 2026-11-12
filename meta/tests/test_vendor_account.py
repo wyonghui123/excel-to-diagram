@@ -4,14 +4,15 @@
 依据: docs/superpowers/specs/2026-10-06-customer-account-profile-design.md §12
       （PM 2026-10-06 拍板「供应商先先先先第二步做」）
 
-与 test_customer_account.py **严格对称**，并额外锁定「供应商特有字段不得越界」。
+与 test_customer_account.py **核心字段严格对称、差异点显式锁定**，并额外锁定
+「供应商特有字段不得越界」。
 
 覆盖：
   ① 结构（字段集 / 类型 / 必填 / 唯一 / 命名 / 表名）
   ② relation_id 1:1 唯一约束（含 DB 层真 DDL）
   ③ 5 动作码齐备 + path 正确 + skip_auto_menu
   ④ 删除保护 restrict
-  ⑤ **与 customer_account 的对称性**（本文件核心）
+  ⑤ **与 customer_account 的核心对称性 + 差异点**（本文件核心）
   ⑥ 负向：无 SAP LFM1 / Oracle POZ 采购财务字段
   ⑦ 负向：无 site 级字段（Oracle supplier_site 粒度含 PRC_BU）
   ⑧ 负向：无生效期 / 无 status / 无生命周期 rules
@@ -74,11 +75,16 @@ class TestStructure:
         assert d['display_name_field'] == 'name'
         assert 'name' in _field_ids()
 
-    def test_field_set_exactly_symmetric(self):
-        """字段集 = id / relation_id / name / description / created_at
-        [2026-10-23] vendor_type 已删（对称口径，见 test_vendor_type_removed）。"""
+    def test_field_set_core(self):
+        """字段集 = id / relation_id / name / description / tax_classification_id / created_at
+
+        [2026-10-23] vendor_type 已删（见 test_vendor_type_removed）。
+        [税务分类挂点] 供应商侧补 tax_classification_id（与客户侧同名同义）；
+        客户侧另有 3 个商务默认字段为本期供应商差异点（见 test_field_id_mapping）。
+        """
         assert _field_ids() == {
-            'id', 'relation_id', 'name', 'description', 'created_at',
+            'id', 'relation_id', 'name', 'description',
+            'tax_classification_id', 'created_at',
         }
 
     def test_id_field(self):
@@ -144,8 +150,12 @@ class TestRelationUniqueEnforced:
 
         aspects = parse_aspects_yaml(_SCHEMA_DIR)
         obj = load_yaml_file(_YAML_PATH, aspects_defs=aspects)
+        # [税务分类挂点] tax_classification_id 的 FK 目标表须一并建，否则 DML 报
+        #   sqlite3.OperationalError: no such table: main.tax_classifications
+        tax = load_yaml_file(os.path.join(_SCHEMA_DIR, 'tax_classification.yaml'),
+                             aspects_defs=aspects)
         ds = get_data_source('sqlite', database=str(tmp_path / 'va_uniq.db'))
-        sync_schema_from_meta(ds, [obj])
+        sync_schema_from_meta(ds, [obj, tax])
 
         ds.insert('vendor_accounts', {
             'relation_id': 1, 'name': 'A',
@@ -162,8 +172,10 @@ class TestRelationUniqueEnforced:
 
         aspects = parse_aspects_yaml(_SCHEMA_DIR)
         obj = load_yaml_file(_YAML_PATH, aspects_defs=aspects)
+        tax = load_yaml_file(os.path.join(_SCHEMA_DIR, 'tax_classification.yaml'),
+                             aspects_defs=aspects)
         ds = get_data_source('sqlite', database=str(tmp_path / 'va_multi.db'))
-        sync_schema_from_meta(ds, [obj])
+        sync_schema_from_meta(ds, [obj, tax])
 
         for rid in (1, 2, 3):
             ds.insert('vendor_accounts', {'relation_id': rid, 'name': f'V{rid}'})
@@ -237,19 +249,30 @@ class TestDeletionPolicy:
 # ⑤ 与 customer_account 的对称性（本文件核心）
 # ────────────────────────────────────────
 class TestSymmetryWithCustomerAccount:
-    """供应商侧必须与客户侧严格对称（除字段名 vendor_/customer_ 前缀差异）"""
+    """供应商侧与客户侧「核心字段严格对称 + 差异点显式锁定」
+
+    核心字段（id/relation_id/name/description/tax_classification_id/created_at 及
+    audit_aspect 展开）两侧一致；客户侧独有 3 个商务默认字段
+    （default_payment_term_id / default_incoterm_code / default_rate_table_id），
+    供应商侧本期不做 —— 差异点必须显式断言，防止静默漂移。
+    """
 
     def test_field_id_mapping(self):
-        """字段集按「去掉 vendor/customer 前缀」后应完全一致"""
+        """供应商字段集 ⊂ 客户字段集（去 vendor/customer 前缀后比对）"""
         v = {fid.replace('vendor_', '') for fid in _field_ids()}
         c = {fid.replace('customer_', '')
-             for fid in _raw(_CUSTOMER_YAML_PATH) and
-             {f['id'] for f in (_raw(_CUSTOMER_YAML_PATH).get('fields') or [])}}
-        assert v == c, f'两侧字段集不对称：vendor={v} customer={c}'
+             for fid in {f['id'] for f in (_raw(_CUSTOMER_YAML_PATH).get('fields') or [])}}
+        assert v <= c, f'供应商字段应为客户侧子集：vendor-customer={v - c}'
+        assert c - v == {
+            'default_payment_term_id', 'default_incoterm_code',
+            'default_rate_table_id',
+        }, f'客户侧独有字段意外变化：{c - v}'
 
-    def test_same_field_count(self):
+    def test_field_count_explicit(self):
+        """显式字段数：供应商 6（5 基础 + tax_classification_id）；客户 9（6 + 3 商务默认）"""
         vc = _raw(_CUSTOMER_YAML_PATH)
-        assert len(_raw()['fields']) == len(vc['fields'])
+        assert len(_raw()['fields']) == 6
+        assert len(vc['fields']) == 9
 
     def test_same_index_count_and_uniqueness(self):
         vc = _raw(_CUSTOMER_YAML_PATH)
@@ -259,11 +282,14 @@ class TestSymmetryWithCustomerAccount:
         assert vi[0]['fields'] == ci[0]['fields'] == ['relation_id']
         assert vi[0]['unique'] is True and ci[0]['unique'] is True
 
-    def test_same_deletion_policy_shape(self):
+    def test_deletion_policy_shape(self):
         v = _raw()['deletion_policy']
         c = _raw(_CUSTOMER_YAML_PATH)['deletion_policy']
         assert v['mode'] == c['mode'] == 'restrict'
-        assert v['restrict_on'] == c['restrict_on'] == []
+        # 供应商档案当前零引用方（S19：restrict_on 留空但结构保留）
+        assert v['restrict_on'] == []
+        # 客户侧已有 4 条入向引用（销售订单 3 角色 + 客户区域分配）
+        assert len(c['restrict_on']) == 4
 
     def test_same_action_shape(self):
         va = {a['type'] for a in (_raw().get('actions') or [])}
@@ -277,11 +303,12 @@ class TestSymmetryWithCustomerAccount:
         assert _raw(_CUSTOMER_YAML_PATH)['ui_view_config']['skip_auto_menu'] is True
 
     def test_same_ui_view_config_shape(self):
-        """[分区落点 2026-10-22] 两侧 UI 配置对称（独立菜单下架后仍须有完整配置）"""
+        """[分区落点 2026-10-22] 两侧 UI 核心配置对称；客户侧多 child_sections（组织级差异）"""
         v = _raw()['ui_view_config']
         c = _raw(_CUSTOMER_YAML_PATH)['ui_view_config']
-        assert set(v) == set(c) == {
-            'skip_auto_menu', 'list', 'form', 'detail'}
+        assert set(v) == {'skip_auto_menu', 'list', 'form', 'detail'}
+        assert set(c) == {'skip_auto_menu', 'list', 'form', 'detail',
+                          'child_sections'}
         # 列集合对称：供应侧对客户侧做前缀替换后比对（两侧同为name/description/created_at）
         assert [x['field'].replace('vendor_', 'customer_')
                 for x in v['list']['columns']] == \
@@ -322,14 +349,16 @@ class TestSymmetryWithCustomerAccount:
         for bad in ('vendor_id', 'vendor_relation_id', 'supplier_id'):
             assert bad not in cf
 
-    def test_loaded_field_count_symmetric(self):
-        """目录级加载：两侧都是 5 显式 + 3 aspect 净增 = 8
-        （[2026-10-23] 删 customer_type / vendor_type 后由 9 降为 8）"""
+    def test_loaded_field_count(self):
+        """目录级加载：显式字段 + audit_aspect 展开净增 3
+        供应商 6 + 3 = 9；客户 9 + 3 = 12
+        （[2026-10-23] 删 customer_type / vendor_type 后各减 1）"""
         from meta.core.yaml_loader import load_yaml_file, parse_aspects_yaml
         aspects = parse_aspects_yaml(_SCHEMA_DIR)
         vo = load_yaml_file(_YAML_PATH, aspects_defs=aspects)
         co = load_yaml_file(_CUSTOMER_YAML_PATH, aspects_defs=aspects)
-        assert len(vo.fields) == len(co.fields) == 8
+        assert len(vo.fields) == 9
+        assert len(co.fields) == 12
 
 
 # ────────────────────────────────────────
@@ -416,8 +445,12 @@ class TestNoSiteLevelFields:
         assert 'site_assignments' not in _field_ids()
         assert 'client_bu_id' not in _field_ids()
 
-    def test_no_relations_declared(self):
-        assert (_raw().get('relations') or []) == []
+    def test_only_tax_classification_relation(self):
+        """[税务分类挂点] 供应商仅一条引用关系；不做 site 级/商务默认关联"""
+        rels = _raw().get('relations') or []
+        assert [r['id'] for r in rels] == ['vendor_account_to_tax_classification']
+        assert rels[0]['target'] == 'tax_classification'
+        assert rels[0]['source_field'] == 'tax_classification_id'
 
     def test_no_le_org_id_field(self):
         """法人粒度由 party_relation.le_org_id 承载，不重复落列"""
@@ -494,8 +527,10 @@ class TestPrerequisites:
 
         aspects = parse_aspects_yaml(_SCHEMA_DIR)
         obj = load_yaml_file(_YAML_PATH, aspects_defs=aspects)
+        tax = load_yaml_file(os.path.join(_SCHEMA_DIR, 'tax_classification.yaml'),
+                             aspects_defs=aspects)
         ds = get_data_source('sqlite', database=str(tmp_path / 'va_ins.db'))
-        sync_schema_from_meta(ds, [obj])
+        sync_schema_from_meta(ds, [obj, tax])
 
         raw = ds.get_table_columns('vendor_accounts')
         cols = set(raw.keys()) if isinstance(raw, dict) else {str(c) for c in raw}

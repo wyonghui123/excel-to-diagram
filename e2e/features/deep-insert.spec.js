@@ -9,7 +9,7 @@
  * 实施目标 (基于 feature_gap_v2.md §四):
  * - 业务风险: 🟡 DATA
  * - 代码侧: ObjectChildSection.vue: createChild, updateChild, deleteChild (L252-256)
- * - 现有 spec: 0 测 (v2 report 中 ❌ missing)
+ * - 现有 spec: 0 测 (v2 report 中 missing)
  *
  * 必读: .trae/rules/e2e-simplification.md
  *
@@ -40,6 +40,8 @@ test.describe('S-DI: 深插入 (Deep Insert)', () => {
   test('C01 [create_with_children]: 创建父 + 子 (一次性)', async ({
     page, navigateTo, dataFinder, isolation, waitForApiFn
   }, testInfo) => {
+    // [2026-10-31] 本用例含 2 个 BO 创建 + 关联 + 列表搜索 + 详情打开, 60s 不够
+    test.setTimeout(150000)
     const pv = await dataFinder.productWithVersion()
     // 使用全大写 code，避免违反 ^[A-Z][A-Z0-9_]*$ 格式
     const uniquePrefix = `DI01_${isolation.generateId().toUpperCase().replace(/-/g, '_')}`
@@ -90,23 +92,24 @@ test.describe('S-DI: 深插入 (Deep Insert)', () => {
     })
 
     await withStep(page, testInfo, '搜索并打开父 BO 详情', async () => {
-      // 用 search 找到刚创建的父
-      const search = page.getByPlaceholder(/搜索|search/i).first()
+      // [2026-10-31] 页面左侧有「对象范围」搜索框 (placeholder 搜索业务对象), 必须先限定到表格搜索框,
+      // 否则搜索文本进了左侧范围框, 表格未过滤, 后续找不到行 / drawer 不打开
+      const search = page.locator('input[placeholder*="名称/编码"]').first()
       if (await search.isVisible({ timeout: 3000 }).catch(() => false)) {
         await search.fill(`${codePrefix}_P`)
+        // 只 fill 不会触发查询, 需点"搜索"按钮
+        await page.getByRole('button', { name: '搜索', exact: true }).first().click().catch(() => {})
         await waitForApiFn(page, 'GET /api/v2/bo/business_object').catch(() => {})
-        // 等待搜索结果加载
         await page.waitForTimeout(1000)
       }
-      // 点击行打开 drawer (POM clickRowByText)
-      const found = await archData.findRow(codePrefix, { timeout: 5000 })
+      // 打开父 BO 详情 (精确匹配 _P, 避免点到子 BO)
+      const found = await archData.findRow(`${codePrefix}_P`, { timeout: 8000 })
       if (found) {
         await found.click()
-        try {
-          await drawer.waitForOpen({ timeout: 5000 })
-        } catch (e) {
-          console.log(`[C01] drawer 未打开: ${e.message} (skip)`)
-          test.skip(true, '详情抽屉未打开，可能 ObjectChildSection 未实现')
+        // [2026-10-31] 详情可能以 drawer 或 /detail/business_object/:id 页面呈现, 两种都兼容
+        const drawerVisible = await drawer.waitForOpen({ timeout: 3000 }).then(() => true).catch(() => false)
+        if (!drawerVisible) {
+          await page.waitForURL(/\/detail\/business_object\//, { timeout: 8000 }).catch(() => {})
         }
       } else {
         console.log(`[C01] 未找到父 BO 行: ${uniquePrefix} (skip)`)
@@ -144,6 +147,8 @@ test.describe('S-DI: 深插入 (Deep Insert)', () => {
 
     await withStep(page, testInfo, '切到 businessObject tab + 打开任一 BO', async () => {
       await archData.openTab('businessObject')
+      // [2026-10-31] openTab 只等表格渲染, 业务对象列表数据可能仍在加载
+      await waitForApiFn(page, 'GET /api/v2/bo/business_object').catch(() => {})
       // POM 方式:用 search 然后 clickRowByText,或直接 findRow 第一行
       const rowCount = await archData.getRowCount()
       if (rowCount > 0) {

@@ -1,0 +1,358 @@
+# 批次特性值（Batch Attribute Values）—— 属性字典在批次对象上的落值表
+# 依据: _attribute_value_template.yaml（列口径 / 互斥填值 / 索引模式）
+#       docs/specs/spec-routing-process-manufacturing-benchmark-2026-11-01.md §11.7
+#
+# 定位: 承载批次上的描述性 / 分析性属性值。定义在 attribute_definitions，
+#   范围与必填在 attribute_scopes（scope_ref='batch' 或物料分类），值在这里。
+#
+# 设计边界（重要）:
+#   - 不建 characteristics_json / batch_characteristics / batch_characteristic_values；
+#     本表就是批次特性的唯一值真源。
+#   - 不承载参与计算 / 需索引的特性（效价、批次确定用质量等级）—— 这些走
+#     attribute_promotion 提为 batches 物理列（potency_pct 已落地）。
+#   - 归属列用真外键 batch_id；不与其他对象的值表合并。
+#   - seq 承载多值；单值属性恒为 1。
+#   - 一行只允许一列值非空；「类型 ↔ 列」对应与互斥由 BatchAttributeValueService 强制
+#     （DSL 无 CHECK）。
+#   - 命名强约束：表名必须以 _attribute_values 结尾且含 attribute_id——
+#     AttributeImpactService 靠此自动发现引用表，改名会绕过「被引用定义禁止删除」保护。
+#   - batch_attribute_value 已加入 AttributeGuardInterceptor.GUARDED_OBJECTS，
+#     创建 / 更新走通用值校验（租户边界 / 互斥 / 类型 / seq / active）。
+#
+# [语义扩展] attribute_scopes 中 scope_type='item_group' 的行原语义为「该分类下的物料」；
+#   批次侧 resolve(tenant, 'batch', 物料分类编码) 时扩为「该分类下物料的批次」。
+
+id: batch_attribute_value
+name: 批次特性值
+table_name: batch_attribute_values
+description: 批次特性值——按属性字典定义承载的类型化值（一行一列非空，多值用 seq 区分）
+parent_object: batch
+hierarchy:
+  enabled: true
+  parent_field: batch_id
+
+semantics:
+  meaning: 批次的可扩展特性值
+  category: core_entity
+  business_key: [tenant_id, batch_id, attribute_id, seq]
+  aliases:
+    - 批次特性值
+    - Batch Attribute Value
+
+deletion_policy:
+  # 值行可删（业务行为），按主数据口径仍禁止物理删除以留审计
+  mode: restrict
+  restrict_on: []
+  cascade_delete: []
+
+fields:
+  - id: id
+    name: ID
+    type: integer
+    db_column: id
+    required: true
+    unique: true
+    description: 技术主键
+    semantics:
+      meaning: 自增主键
+      primary_key: true
+
+  - id: tenant_id
+    name: 租户
+    type: integer
+    db_column: tenant_id
+    required: true
+    default: 0
+    description: 数据归属租户；0 = 平台层数据
+    semantics:
+      meaning: 值行归属租户
+      immutable: true
+      data_category: code
+    ui:
+      widget: number
+
+  - id: batch_id
+    name: 批次
+    type: integer
+    db_column: batch_id
+    required: true
+    description: 归属批次
+    semantics:
+      meaning: 所属批次
+      display:
+        type: association
+        target_type: batch
+        display_field: batch_no
+    value_help:
+      source:
+        type: bo
+        target_bo: batch
+        value_field: id
+        display_field: batch_no
+        code_field: batch_no
+        apply_target_permissions: true
+      behavior:
+        multiple: false
+        validation: true
+        binding_strength: strict
+        min_search_length: 0
+      presentation:
+        result_type: dialog
+        display_format: "{batch_no}"
+        columns:
+          - field: batch_no
+            label: 批次号
+            width: 180
+          - field: item_id
+            label: 物料
+            width: 200
+    ui:
+      widget: select
+      relation: batch
+      multiple: false
+      hidden_in_form: true
+
+  - id: attribute_id
+    name: 属性
+    type: integer
+    db_column: attribute_id
+    required: true
+    description: 属性定义引用（决定本行用哪一列承载值）
+    semantics:
+      meaning: 属性定义引用
+      display:
+        type: association
+        target_type: attribute_definition
+        display_field: name
+    value_help:
+      source:
+        type: bo
+        target_bo: attribute_definition
+        value_field: id
+        display_field: name
+        code_field: code
+        apply_target_permissions: true
+      behavior:
+        multiple: false
+        validation: true
+        binding_strength: strict
+      presentation:
+        result_type: dropdown
+        display_format: "{code} {name}"
+        columns:
+          - field: code
+            label: 编码
+            width: 180
+          - field: name
+            label: 名称
+            width: 180
+    ui:
+      widget: select
+      relation: attribute_definition
+      multiple: false
+
+  - id: seq
+    name: 序号
+    type: integer
+    db_column: seq
+    required: true
+    default: 1
+    description: 多值序号；单值属性恒为 1
+    semantics:
+      meaning: 同一属性的值序号
+    ui:
+      widget: number
+
+  - id: value_text
+    name: 特性值（文本）
+    type: text
+    db_column: value_text
+    required: false
+    nullable: true
+    description: 文本类值（data_type = string）
+    semantics:
+      meaning: 文本类特性值
+    ui:
+      widget: input
+
+  - id: value_number
+    name: 特性值（数值）
+    type: float
+    db_column: value_number
+    required: false
+    nullable: true
+    description: 数值类值（data_type ∈ number/integer，REAL 承载）
+    semantics:
+      meaning: 数值类特性值
+    ui:
+      widget: number
+
+  - id: value_boolean
+    name: 特性值（布尔）
+    type: boolean
+    db_column: value_boolean
+    required: false
+    nullable: true
+    description: 布尔类值（data_type = boolean）
+    semantics:
+      meaning: 布尔类特性值
+    ui:
+      widget: switch
+
+  - id: value_date
+    name: 特性值（日期）
+    type: date
+    db_column: value_date
+    required: false
+    nullable: true
+    description: 纯日期值（data_type = date）
+    semantics:
+      meaning: 日期类特性值
+    ui:
+      widget: date
+
+  - id: value_datetime
+    name: 特性值（日期时间）
+    type: datetime
+    db_column: value_datetime
+    required: false
+    nullable: true
+    description: 日期时间值（data_type = datetime）
+    semantics:
+      meaning: 日期时间类特性值
+    ui:
+      widget: datetime
+
+  - id: description
+    name: 备注
+    type: text
+    db_column: description
+    required: false
+    nullable: true
+    description: 值备注
+    semantics:
+      meaning: 特性值备注
+    ui:
+      widget: textarea
+
+  - id: created_at
+    name: 创建时间
+    type: datetime
+    db_column: created_at
+    description: 创建时间
+    semantics:
+      meaning: 记录创建时间
+      audit_field: true
+
+indexes:
+  # 四列均非空 ⇒ 普通唯一索引即可，无需 partial unique
+  - fields: [tenant_id, batch_id, attribute_id, seq]
+    unique: true
+    name: uidx_batch_attr_value
+  # 供影响预览与引用计数；不作为业务范围查询入口
+  - fields: [attribute_id]
+    name: idx_batch_attr_value_attr
+  # 按批次读全量特性值（抽屉 / 详情页）
+  - fields: [tenant_id, batch_id]
+    name: idx_batch_attr_value_batch
+
+relations:
+  - id: batch_attribute_value_to_batch
+    name: 批次
+    type: reference
+    target: batch
+    source_field: batch_id
+    target_field: id
+    cardinality: N:1
+    description: 所属批次引用（真外键）
+  - id: batch_attribute_value_to_attribute_definition
+    name: 属性
+    type: reference
+    target: attribute_definition
+    source_field: attribute_id
+    target_field: id
+    cardinality: N:1
+    description: 属性定义引用（真外键）
+
+ui_view_config:
+  # 从对象：随批次详情维护，不建独立菜单；三态配置仍需补齐
+  skip_auto_menu: true
+  list:
+    detail_mode: drawer
+    title: 批次特性值
+    columns:
+      - field: batch_id
+        width: 190
+        filterable: true
+        filter_type: value_help
+        render_as: association
+        target_type: batch
+        display_field: batch_no
+      - field: attribute_id
+        width: 200
+        render_as: association
+        target_type: attribute_definition
+        display_field: name
+      - field: seq
+        width: 80
+      - field: value_text
+        width: 180
+      - field: value_number
+        width: 120
+      - field: value_boolean
+        width: 100
+      - field: value_date
+        width: 120
+      - field: value_datetime
+        width: 160
+    selection:
+      enabled: true
+      mode: multiple
+    searchFields: [value_text]
+    actions:
+      - id: create
+        label: 新建特性值
+        icon: plus
+        type: primary
+        permission: batch_attribute_value:create
+    defaultSort:
+      field: attribute_id
+      order: asc
+  form:
+    title: 批次特性值
+    layout: vertical
+    sections:
+      - title: 归属
+        columns:
+          - fields: [batch_id, attribute_id]
+          - fields: [seq]
+      - title: 特性值
+        columns:
+          - fields: [value_text]
+          - fields: [value_number]
+          - fields: [value_boolean]
+          - fields: [value_date]
+          - fields: [value_datetime]
+      - title: 其他
+        columns:
+          - fields: [description]
+  detail:
+    layout: tabs
+    title: "批次特性值 详情"
+    tabs:
+      - id: basic
+        label: 基本信息
+        type: fields
+        fields: [batch_id, attribute_id, seq, value_text, value_number,
+                 value_boolean, value_date, value_datetime, description]
+
+category_config:
+  create_permission: batch_attribute_value:create
+  update_permission: batch_attribute_value:update
+  delete_permission: batch_attribute_value:delete
+  owner_auto_permission: false
+
+nested:
+  enabled: true
+  parent: batch
+  children: []

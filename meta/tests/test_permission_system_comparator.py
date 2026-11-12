@@ -41,7 +41,7 @@ def comparison_db():
         -- 新系统: Layer 1 事实表
         CREATE TABLE permission_set_effective_intents (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
-            role_id INTEGER NOT NULL,
+            permission_set_id INTEGER NOT NULL,
             bo_id VARCHAR(100) NOT NULL,
             action_name VARCHAR(100) NOT NULL,
             data_scope TEXT,
@@ -50,7 +50,7 @@ def comparison_db():
             is_stale INTEGER DEFAULT 0,
             created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
             updated_at DATETIME DEFAULT CURRENT_TIMESTAMP,
-            UNIQUE (role_id, bo_id, action_name)
+            UNIQUE (permission_set_id, bo_id, action_name)
         );
 
         -- 业务表
@@ -91,7 +91,7 @@ class TestCompareSingle:
         # 新系统: role 100 对 product read 有 Intent (owner_id=999)
         conn = sqlite3.connect(comparison_db)
         conn.execute(
-            "INSERT INTO permission_set_effective_intents (role_id, bo_id, action_name, data_scope) "
+            "INSERT INTO permission_set_effective_intents (permission_set_id, bo_id, action_name, data_scope) "
             "VALUES (100, 'product', 'read', ?)",
             [json.dumps({
                 'include': [{'field': 'owner_id', 'op': '=', 'value': 999}],
@@ -123,7 +123,7 @@ class TestCompareSingle:
 
         conn = sqlite3.connect(comparison_db)
         conn.execute(
-            "INSERT INTO permission_set_effective_intents (role_id, bo_id, action_name, data_scope) "
+            "INSERT INTO permission_set_effective_intents (permission_set_id, bo_id, action_name, data_scope) "
             "VALUES (100, 'product', 'read', ?)",
             [json.dumps({
                 'include': [{'field': 'owner_id', 'op': '=', 'value': 999}],
@@ -157,7 +157,7 @@ class TestCompareSingle:
         # 新系统: 允许所有 (空 include)
         conn = sqlite3.connect(comparison_db)
         conn.execute(
-            "INSERT INTO permission_set_effective_intents (role_id, bo_id, action_name, data_scope) "
+            "INSERT INTO permission_set_effective_intents (permission_set_id, bo_id, action_name, data_scope) "
             "VALUES (100, 'product', 'read', '{\"include\":[],\"exclude\":[]}')"
         )
         conn.commit()
@@ -189,13 +189,15 @@ class TestCompareSingle:
         comparator = PermissionSystemComparator(comparison_db)
 
         # mock 旧系统: 无 dimension scope (返回空 dict)
+        # 注意: product#1 的 owner 就是 user 999, 新系统 Step 0b owner 检查会直接放行;
+        # 用 product#2 (owner=888) 才能验证 "无配置默认拒绝" 的语义
         with patch(
             'meta.core.permission_system_comparator.DimensionScopeEngine',
             return_value=_mock_old_engine({})
         ):
             result = comparator.compare_single(
                 role_id=100, bo_id='product', action_name='read',
-                record_id=1, user_id=999,
+                record_id=2, user_id=999,
             )
 
         # 新系统无 Intent → 默认拒绝
@@ -217,7 +219,7 @@ class TestCompareBatch:
 
         conn = sqlite3.connect(comparison_db)
         conn.execute(
-            "INSERT INTO permission_set_effective_intents (role_id, bo_id, action_name, data_scope) "
+            "INSERT INTO permission_set_effective_intents (permission_set_id, bo_id, action_name, data_scope) "
             "VALUES (100, 'product', 'read', ?)",
             [json.dumps({
                 'include': [{'field': 'owner_id', 'op': '=', 'value': 999}],
@@ -256,7 +258,7 @@ class TestCompareBatch:
         # 新系统允许所有, 旧系统限制
         conn = sqlite3.connect(comparison_db)
         conn.execute(
-            "INSERT INTO permission_set_effective_intents (role_id, bo_id, action_name, data_scope) "
+            "INSERT INTO permission_set_effective_intents (permission_set_id, bo_id, action_name, data_scope) "
             "VALUES (100, 'product', 'read', '{\"include\":[],\"exclude\":[]}')"
         )
         conn.commit()
@@ -344,7 +346,7 @@ class TestReportGeneration:
         # 新系统允许所有, 旧系统限制
         conn = sqlite3.connect(comparison_db)
         conn.execute(
-            "INSERT INTO permission_set_effective_intents (role_id, bo_id, action_name, data_scope) "
+            "INSERT INTO permission_set_effective_intents (permission_set_id, bo_id, action_name, data_scope) "
             "VALUES (100, 'product', 'read', '{\"include\":[],\"exclude\":[]}')"
         )
         conn.commit()
@@ -380,7 +382,7 @@ class TestCompareRole:
 
         conn = sqlite3.connect(comparison_db)
         conn.execute(
-            "INSERT INTO permission_set_effective_intents (role_id, bo_id, action_name, data_scope) "
+            "INSERT INTO permission_set_effective_intents (permission_set_id, bo_id, action_name, data_scope) "
             "VALUES (100, 'product', 'read', ?)",
             [json.dumps({
                 'include': [{'field': 'owner_id', 'op': '=', 'value': 999}],
@@ -421,10 +423,10 @@ class TestCompareRole:
                 role_id=999, bo_id='product', action_name='read', user_id=999,
             )
 
-        # 新系统无 Intent → 默认拒绝
-        # 旧系统无 scope → 默认允许
+        # 新系统无 Intent → 默认拒绝; 旧系统无 scope → 默认允许
+        # 例外: product#1 owner 就是 user 999, 新系统 owner 检查放行 → 该条 match
         assert report['total'] == 3
-        assert report['mismatched'] == 3
+        assert report['mismatched'] == 2
 
 
 # ============================================================================
@@ -440,7 +442,7 @@ class TestRuntimeVariableReplacement:
         # 新系统: owner_id=${user.id}
         conn = sqlite3.connect(comparison_db)
         conn.execute(
-            "INSERT INTO permission_set_effective_intents (role_id, bo_id, action_name, data_scope) "
+            "INSERT INTO permission_set_effective_intents (permission_set_id, bo_id, action_name, data_scope) "
             "VALUES (100, 'product', 'read', ?)",
             [json.dumps({
                 'include': [{'field': 'owner_id', 'op': '=', 'value': '${user.id}'}],
@@ -474,7 +476,7 @@ class TestRuntimeVariableReplacement:
         # 新系统: owner_id=${user.id}
         conn = sqlite3.connect(comparison_db)
         conn.execute(
-            "INSERT INTO permission_set_effective_intents (role_id, bo_id, action_name, data_scope) "
+            "INSERT INTO permission_set_effective_intents (permission_set_id, bo_id, action_name, data_scope) "
             "VALUES (100, 'product', 'read', ?)",
             [json.dumps({
                 'include': [{'field': 'owner_id', 'op': '=', 'value': '${user.id}'}],

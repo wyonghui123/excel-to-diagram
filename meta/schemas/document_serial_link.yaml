@@ -1,0 +1,223 @@
+# 单据序列号关系（Document Serial Link）—— P6a 序列号对象模型
+# 依据: docs/specs/p6-serial-number-model/spec.md §3.3 / §4.1
+#
+# 口径（已定）:
+#   ① 统一对象清单替代 N 张单据子表（D6，SAP OBJK 口径）：
+#      加单据类型不需要加表，receipt_serial_lines / shipment_serial_lines 不建物理表。
+#   ② 唯一键 (doc_type, line_id, serial_id)，保证同一行同一号不重复登记。
+#   ③ 只读面：由 serial_number_service / 迁移回填写入，不开放写动作。
+#   ④ 反冲不删除本对象行（D13，审计优先）。
+
+id: document_serial_link
+name: 单据序列号关系
+table_name: document_serial_links
+description: 单据与序列号的对象清单——收货 / 发运 / 调拨 / 工单等统一登记
+display_name_field: doc_type
+
+authorization:
+  check: true
+  permissions:
+    read: document_serial_link:read
+    list: document_serial_link:read
+
+# 只读面：存在任意 {object}_read 动作时，ensure_crud_actions 不再补写动作；
+# auto_crud: false 为声明性意图（与 inventory_transaction.yaml 同口径）。
+import_export:
+  auto_crud: false
+
+actions:
+  - id: document_serial_link_read
+    name: 查询单据序列号关系
+    type: crud
+    method: GET
+    path: "/api/v1/document_serial_links/{id}"
+    description: 查询单条单据序列号关系（只读）
+  - id: document_serial_link_list
+    name: 查询单据序列号关系列表
+    type: crud
+    method: GET
+    path: "/api/v1/document_serial_links"
+    description: 查询单据序列号关系列表（只读）
+
+semantics:
+  meaning: 单据序列号关系
+  category: business_document_line
+  aliases:
+    - 单据序列号关系
+    - 对象清单
+    - document serial link
+    - object list
+
+fields:
+  - id: id
+    name: ID
+    type: integer
+    db_column: id
+    required: true
+    unique: true
+    description: 技术主键
+    semantics:
+      meaning: 自增主键
+      primary_key: true
+
+  - id: doc_type
+    name: 单据类型
+    type: string
+    db_column: doc_type
+    required: true
+    max_length: 30
+    description: 单据类型（receipt / shipment / transfer_order / work_order / inventory_count / rma）
+    semantics:
+      meaning: 单据类型
+      filterable: true
+      filter_type: input
+      filter_label: 单据类型
+    ui:
+      widget: input
+      fieldGroup: 基本信息
+      fieldGroupPosition: 10
+
+  - id: doc_id
+    name: 单据
+    type: integer
+    db_column: doc_id
+    required: true
+    description: 单据主键
+    semantics:
+      meaning: 单据引用
+    ui:
+      widget: number
+      fieldGroup: 基本信息
+      fieldGroupPosition: 20
+
+  - id: line_id
+    name: 单据行
+    type: integer
+    db_column: line_id
+    required: true
+    description: 单据行主键
+    semantics:
+      meaning: 单据行引用
+    ui:
+      widget: number
+      fieldGroup: 基本信息
+      fieldGroupPosition: 30
+
+  - id: serial_id
+    name: 序列号
+    type: integer
+    db_column: serial_id
+    required: true
+    description: 序列号主档引用
+    semantics:
+      meaning: 序列号引用
+      display:
+        type: association
+        target_type: serial_number
+        display_field: serial_no
+    ui:
+      widget: select
+      relation: serial_number
+      multiple: false
+      fieldGroup: 基本信息
+      fieldGroupPosition: 40
+
+  - id: direction
+    name: 方向
+    type: string
+    db_column: direction
+    required: true
+    max_length: 10
+    description: 方向（in / out）
+    enum_values:
+      - value: in
+        label: 入
+        color: success
+      - value: out
+        label: 出
+        color: danger
+    semantics:
+      meaning: 单据序列号方向
+      filterable: true
+      filter_type: enum
+      filter_label: 方向
+    ui:
+      widget: select
+      fieldGroup: 基本信息
+      fieldGroupPosition: 50
+
+  - id: created_at
+    name: 创建时间
+    type: datetime
+    db_column: created_at
+    description: 创建时间
+    semantics:
+      meaning: 记录创建时间
+      audit_field: true
+
+indexes:
+  - fields: [doc_type, line_id, serial_id]
+    unique: true
+    name: uq_document_serial_link
+    description: 同一单据行同一序列号唯一
+  - fields: [doc_type, doc_id]
+    name: idx_document_serial_doc
+  - fields: [serial_id]
+    name: idx_document_serial_serial
+
+relations:
+  - id: document_serial_link_to_serial
+    name: 序列号
+    type: reference
+    target: serial_number
+    source_field: serial_id
+    target_field: id
+    cardinality: N:1
+
+ui_view_config:
+  skip_auto_menu: true
+  list:
+    detail_mode: drawer
+    title: 单据序列号关系
+    columns:
+      - field: doc_type
+        width: 130
+        filterable: true
+        filter_type: select
+      - field: doc_id
+        width: 100
+      - field: line_id
+        width: 100
+      - field: serial_id
+        width: 190
+        filterable: true
+        filter_type: value_help
+        render_as: association
+        target_type: serial_number
+        display_field: serial_no
+      - field: direction
+        width: 80
+        filterable: true
+        filter_type: select
+    selection:
+      enabled: false
+    searchFields: []
+    actions: []
+    defaultSort:
+      field: id
+      order: desc
+  form:
+    title: 单据序列号关系
+    layout: vertical
+    sections:
+      - title: 基本信息
+        columns:
+          - fields: [doc_type, doc_id, line_id, serial_id, direction]
+  detail:
+    layout: tabs
+    title: "单据序列号 {record.doc_type}#{record.doc_id}"
+    tabs:
+      - id: basic
+        label: 基本信息
+        type: fields
+        fields: [doc_type, doc_id, line_id, serial_id, direction, created_at]

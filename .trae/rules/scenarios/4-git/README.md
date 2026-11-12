@@ -26,7 +26,7 @@ icon: "4."
 ## 必读文件（按重要性排序）
 
 1. **[worktree-governance.md](./worktree-governance.md)** — Worktree 治理 v4.0 (主仓 + 临时分支)
-1. **[git-commit-message.md](./git-commit-message.md)** — Commit message 格式规范
+1. **[git-commit-message.md](../../git-commit-message.md)** — Commit message 格式规范
 1. **[git-commit-standards.md](../../git-commit-standards.md)** — Commit 标准 (Conventional Commits)
 
 ---
@@ -36,7 +36,7 @@ icon: "4."
 | 文件 | 用途 |
 |------|------|
 | [worktree-governance.md](./worktree-governance.md) | Worktree 治理 v4.0 (主仓 + 临时分支) |
-| [git-commit-message.md](./git-commit-message.md) | Commit message 格式规范 |
+| [git-commit-message.md](../../git-commit-message.md) | Commit message 格式规范 |
 | [git-commit-standards.md](../../git-commit-standards.md) | Commit 标准 (Conventional Commits) |
 
 ---

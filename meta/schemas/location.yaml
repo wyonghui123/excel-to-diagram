@@ -77,6 +77,11 @@ audit:
   dissociate:
     enabled: true
 
+org_scope:
+  mode: direct
+  field: org_id
+  write_check: true
+
 fields:
   - id: id
     name: ID
@@ -148,6 +153,53 @@ fields:
     ui:
       widget: select
       filterable: true
+
+  # TBD-7（v198）：库位所属组织（对应 Oracle Locator 挂 Inventory Org /
+  # SAP Storage Location 挂 Plant 的口径）。空值 = 共享 / 未归属，
+  # 调拨与收货的库位归属校验据此放行（见 transfer_order_guard / receipt_service）。
+  - id: org_id
+    name: 所属组织
+    type: integer
+    db_column: org_id
+    nullable: true
+    description: 库位所属组织（空 = 共享 / 未归属）
+    semantics:
+      meaning: 库位所属组织（空=共享/未归属）
+      display:
+        type: association
+        target_type: org
+        display_field: name
+        placeholder: "空 = 共享 / 未归属"
+    value_help:
+      source:
+        type: bo
+        target_bo: org
+        value_field: id
+        display_field: name
+        code_field: code
+        apply_target_permissions: true
+        value_filter:
+          status: active
+      behavior:
+        multiple: false
+        validation: true
+        binding_strength: strict
+        min_search_length: 0
+      presentation:
+        result_type: dropdown
+        display_format: "{code} - {name}"
+        columns:
+          - field: code
+            label: 组织编码
+            width: 140
+          - field: name
+            label: 组织名称
+            width: 220
+    ui:
+      widget: select
+      relation: org
+      multiple: false
+      clearable: true
 
   - id: parent_id
     name: 上级位置
@@ -444,6 +496,14 @@ ui_view_config:
         width: 100
         filterable: true
         filter_type: select
+      - field: org_id
+        width: 180
+        filterable: true
+        filter_type: value_help
+        render_as: association
+        target_type: org
+        display_field: name
+        placeholder: "空 = 共享 / 未归属"
       - field: parent_id
         width: 180
         filterable: true
@@ -498,7 +558,7 @@ ui_view_config:
         columns:
           - fields: [code, name]
           - fields: [location_type, parent_id]
-          - fields: [status]
+          - fields: [org_id, status]
       - title: 场地信息（site）
         description: 仅 site 类型使用（其余类型留空）——按类型条件显示待平台机制（W12）
         columns:
@@ -518,6 +578,7 @@ ui_view_config:
           - code
           - name
           - location_type
+          - org_id
           - parent_id
           - address_id
           - calendar_id

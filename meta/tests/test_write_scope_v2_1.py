@@ -864,7 +864,7 @@ class TestWriteScopeV2_1_DimScopeLink:
                             # role 100 应被记录为 skipped
                             skipped = [r for r in result['roles_checked']
                                        if r.get('skipped') == 'missing_functional_perm']
-                            assert any(r['role_id'] == 100 for r in skipped)
+                            assert any(r['permission_set_id'] == 100 for r in skipped)
 
     def test_wildcard_perm_object_match(self, app_ctx, set_current_user):
         """object 通配 perm (service_module:*) 允许所有 action"""

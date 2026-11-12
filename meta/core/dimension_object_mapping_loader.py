@@ -19,7 +19,7 @@ fallback: 加载失败时返回空配置, DimensionScopeEngine 会 fallback 到�
 """
 import os
 import time
-import yaml
+from meta.core import yaml_compat as yaml
 import logging
 from threading import Lock
 from typing import Dict, List, Optional, Any

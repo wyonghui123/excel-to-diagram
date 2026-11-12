@@ -18,12 +18,14 @@
 """
 from __future__ import annotations
 
+import ast
 import re
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 
 import yaml
+from meta.core.yaml_compat import safe_load as _yaml_safe_load
 
 # 应用 ID 规范: 小写字母开头, 仅含小写字母/数字/下划线
 # 该 ID 会同时用作: 目录名 / 路由前缀 / DB 文件名 / 权限命名空间前缀
@@ -128,21 +130,26 @@ class DocFlowRuleDecl:
     同事务派生，F5 铁律）——该约束在启动期 `_prepare_doc_flow` 校验。
 
     Phase 2 增补（spec 2026-09-29-doc-flow-phase2-spec.md §4.1/§5）：
-    - `field_map`：字段映射表 `{"源字段": "目标字段"}`；空 = 同名直拷
+    - `field_map`：字段映射表 `{"源字段": "目标字段"}`（改名映射）
     - `split_key`：分单键字段名数组；空 = 每行自成一组（1 源行 = 1 目标单）
     - `target_line_bo`：明细行 BO ID；空 = 单表模式（Phase 1 行为）
     - `head_fk_field`：明细行指向单头的外键字段；空 = 走约定解析
+    - `target_qty_field`：目标行数量字段名；空 = 自动解析 quantity → qty
+    - `copied_fields`：显式声明的同名字段直拷白名单（如 description）；
+      未声明的非引用字段（除 created_at/updated_at）不再隐式拷贝
     """
 
     rule_id: str
     source_bo: str
     target_bo: str
     source_qty_field: str = "quantity"   # Σ 校验读源行数量的字段名
+    target_qty_field: str = ""           # 目标行数量字段；空 = 自动解析
     pool: str = "default"                # 消耗池（§6.5，Phase 1 单池够用）
     check_hook: str = ""                 # Phase 1 留空列位（Phase 2 三段式）
     map_hook: str = ""                   # Phase 1 留空：空 = 默认映射
     create_hook: str = ""                # Phase 1 留空列位
     field_map: Dict[str, str] = field(default_factory=dict)   # 源字段 → 目标字段
+    copied_fields: List[str] = field(default_factory=list)    # 显式直拷白名单
     split_key: List[str] = field(default_factory=list)        # 分单键字段名
     target_line_bo: str = ""             # 明细行 BO；空 = 单表模式
     head_fk_field: str = ""              # 明细行→单头 外键字段（显式声明优先）
@@ -154,11 +161,13 @@ class DocFlowRuleDecl:
             "source_bo": self.source_bo,
             "target_bo": self.target_bo,
             "source_qty_field": self.source_qty_field,
+            "target_qty_field": self.target_qty_field,
             "pool": self.pool,
             "check_hook": self.check_hook,
             "map_hook": self.map_hook,
             "create_hook": self.create_hook,
             "field_map": dict(self.field_map),
+            "copied_fields": list(self.copied_fields),
             "split_key": list(self.split_key),
             "target_line_bo": self.target_line_bo,
             "head_fk_field": self.head_fk_field,
@@ -377,11 +386,14 @@ def _parse_doc_flow(raw: Dict[str, Any], app_id: str) -> tuple:
             source_bo=_require_str(item, "source_bo", ctx),
             target_bo=_require_str(item, "target_bo", ctx),
             source_qty_field=_optional_str(item, "source_qty_field") or "quantity",
+            target_qty_field=_optional_str(item, "target_qty_field"),
             pool=_optional_str(item, "pool") or "default",
             check_hook=_optional_str(item, "check_hook"),
             map_hook=_optional_str(item, "map_hook"),
             create_hook=_optional_str(item, "create_hook"),
             field_map=_parse_field_map(item, ctx),
+            copied_fields=_parse_str_list(
+                item, "copied_fields", ctx, "显式直拷字段名"),
             split_key=_parse_split_key(item, ctx),
             target_line_bo=_optional_str(item, "target_line_bo"),
             head_fk_field=_optional_str(item, "head_fk_field"),
@@ -417,14 +429,18 @@ def _parse_field_map(item: Dict[str, Any], ctx: str) -> Dict[str, str]:
 
 def _parse_split_key(item: Dict[str, Any], ctx: str) -> List[str]:
     """解析 split_key（分单键字段名数组）；缺省 = 空 list（每行自成一组）。"""
-    value = item.get("split_key")
+    return _parse_str_list(item, "split_key", ctx, "分单键字段名")
+
+
+def _parse_str_list(item: Dict[str, Any], key: str, ctx: str,
+                    label: str) -> List[str]:
+    """解析非空字符串数组声明（split_key / copied_fields 共用）。"""
+    value = item.get(key)
     if value is None:
         return []
     if not isinstance(value, list) or not all(
             isinstance(v, str) and v for v in value):
-        raise AppManifestError(
-            f"{ctx} split_key 需为非空字符串数组（分单键字段名）"
-        )
+        raise AppManifestError(f"{ctx} {key} 需为非空字符串数组（{label}）")
     return list(value)
 
 
@@ -461,7 +477,7 @@ def load_manifest(app_dir: Path) -> AppManifest:
         raise AppManifestError(f"未找到描述符: {manifest_path}")
 
     try:
-        raw_all = yaml.safe_load(manifest_path.read_text(encoding="utf-8"))
+        raw_all = _yaml_safe_load(manifest_path.read_text(encoding="utf-8"))
     except yaml.YAMLError as e:
         raise AppManifestError(f"{manifest_path} YAML 解析失败: {e}") from e
 
@@ -600,3 +616,87 @@ def load_apps(app_ids: List[str], apps_root: Optional[Path] = None) -> List[AppM
             f"未找到应用: {missing}; 可用应用: {sorted(available)}"
         )
     return [available[a] for a in app_ids]
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# [FR-011 2026-10-31] 平台模块 import 门禁
+#
+# `allowed_platform_modules` 此前只有声明、没有执行点（ARCHITECTURE_V3 §0.4.7）。
+# 本段在应用加载期做静态 AST 扫描：应用目录下任何 `import meta.*` /
+# `from meta.* import ...` 都必须命中白名单，否则拒绝启用。
+#
+# 已知边界：只覆盖静态 import 语句；`importlib` / `__import__` 动态加载
+# 不在扫描范围内（不引入运行时 import hook，避免污染平台进程与测试）。
+# ─────────────────────────────────────────────────────────────────────────────
+
+#: 平台模块命名空间根：应用只允许引用这里之下的模块（且须在白名单内）。
+PLATFORM_MODULE_ROOT = "meta"
+
+
+def _iter_platform_imports(py_file: Path) -> List[tuple]:
+    """按 import 语句收集该文件对平台模块的引用。
+
+    Returns:
+        [(行号, 候选全名列表), ...]；候选只包含 `meta` / `meta.*`，
+        同一语句的多个候选（如 ``from meta.core import datasource`` →
+        ['meta.core', 'meta.core.datasource']）保留在同一个元组内，
+        调用方按"任一命中白名单即通过"判定。
+    """
+    tree = ast.parse(py_file.read_text(encoding="utf-8"), filename=str(py_file))
+    statements: List[tuple] = []
+    for node in ast.walk(tree):
+        candidates: List[str] = []
+        if isinstance(node, ast.Import):
+            candidates = [alias.name for alias in node.names]
+        elif isinstance(node, ast.ImportFrom) and node.level == 0 and node.module:
+            candidates = [node.module]
+            candidates += [
+                f"{node.module}.{alias.name}"
+                for alias in node.names
+                if alias.name != "*"
+            ]
+        platform = [
+            name for name in candidates
+            if name == PLATFORM_MODULE_ROOT or name.startswith(PLATFORM_MODULE_ROOT + ".")
+        ]
+        if platform:
+            statements.append((getattr(node, "lineno", 0), platform))
+    return statements
+
+
+def is_platform_module_allowed(module: str, allowed_modules: List[str]) -> bool:
+    """白名单匹配：精确命中，或 `<白名单项>.` 前缀（允许其子模块）。"""
+    return any(
+        module == entry or module.startswith(entry + ".")
+        for entry in (allowed_modules or [])
+    )
+
+
+def validate_platform_imports(manifest: AppManifest) -> None:
+    """[FR-011] 应用加载期 import 门禁。
+
+    扫描应用目录下全部 `*.py`，任何未在白名单内的平台模块引用即失败。
+    错误信息包含 app 名、相对文件名、模块名与已声明的白名单。
+
+    Raises:
+        AppManifestError: 越界 import / 应用源码无法解析
+    """
+    whitelist = manifest.allowed_platform_modules or []
+    for py_file in sorted(manifest.app_dir.rglob("*.py")):
+        try:
+            statements = _iter_platform_imports(py_file)
+        except (SyntaxError, UnicodeDecodeError) as e:
+            raise AppManifestError(
+                f"app '{manifest.app_id}': 源码无法解析 {py_file.name}: {e}"
+            ) from e
+        for lineno, candidates in statements:
+            if any(is_platform_module_allowed(m, whitelist) for m in candidates):
+                continue
+            # 报最具体的模块名（最长候选），便于定位真实越界引用
+            offending = max(candidates, key=len)
+            rel = py_file.relative_to(manifest.app_dir).as_posix()
+            raise AppManifestError(
+                f"app '{manifest.app_id}': {rel}:{lineno} 导入了未授权平台模块 "
+                f"'{offending}'（app.yaml 的 allowed_platform_modules 未声明；"
+                f"已声明: {whitelist or '无'}）"
+            )

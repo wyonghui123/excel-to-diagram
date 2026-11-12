@@ -13,9 +13,12 @@ import sys
 import time
 import json
 import requests
+import pytest
 from pathlib import Path
 
-BASE_URL = 'http://localhost:3010'
+from meta.tests.shared.fixtures import backend_base_url
+
+BASE_URL = backend_base_url()
 
 
 def _list_versions_via_api(s: requests.Session, product_id: int) -> list:
@@ -45,7 +48,11 @@ def _delete_via_api(s: requests.Session, object_type: str, record_id: int) -> bo
 def _login() -> requests.Session:
     """模拟前端登录: dev-login 拿 httpOnly cookie"""
     s = requests.Session()
-    r = s.get(f'{BASE_URL}/api/v1/auth/dev-login?username=admin', timeout=10)
+    try:
+        r = s.get(f'{BASE_URL}/api/v1/auth/dev-login?username=admin', timeout=10)
+    except requests.exceptions.RequestException as e:
+        # 真实 HTTP E2E：3010 后端未启动时跳过而非失败
+        pytest.skip(f'后端 {BASE_URL} 不可达，跳过 E2E: {e}')
     assert r.status_code == 200, f"login failed: {r.status_code} {r.text[:200]}"
     assert 'auth_token' in s.cookies, "no auth_token cookie"
     return s

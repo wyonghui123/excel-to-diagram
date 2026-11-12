@@ -19,6 +19,7 @@ from meta.services.auth_middleware import is_admin, get_current_user
 from meta.api._audit_helper import write_permission_config_audit
 from functools import wraps
 from meta.core.db_path import get_meta_db_path
+from meta.api._response_contract import ok, error_response
 
 permission_set_menu_bp = Blueprint('permission_set_menu', __name__, url_prefix='/api/v1/permission-sets')
 
@@ -250,7 +251,7 @@ def admin_required(f):
     def decorated(*args, **kwargs):
         user = get_current_user()
         if not user or not is_admin(user):
-            return jsonify({"success": False, "message": "您没有执行此操作的权限，需要管理员权限"}), 403
+            return error_response("您没有执行此操作的权限，需要管理员权限", status=403)
         return f(*args, **kwargs)
     return decorated
 
@@ -384,7 +385,7 @@ def _build_role_unified_data(permission_set_id):
                 return True
             if perm_code in role_function_perms:
                 return True
-            # [FIX 2026-06-08] 兼容 expanded 格式: scheduled_task:create -> scheduled_task:scheduled_task_create
+            # [FIX 2026-06-08] 兼容 expanded 格式: scheduled_task:create -> scheduled_task:create
             parts = perm_code.split(':')
             if len(parts) == 2:
                 expanded = f"{parts[0]}:{parts[0]}_{parts[1]}"
@@ -548,8 +549,8 @@ def get_role_unified_permissions(permission_set_id):
     """
     data = _build_role_unified_data(permission_set_id)
     if data is None:
-        return jsonify({'success': False, 'message': '获取角色统一权限失败'}), 500
-    return jsonify({'success': True, 'data': data})
+        return error_response('获取角色统一权限失败', status=500)
+    return ok(data)
 
 
 @permission_set_menu_bp.route('/<int:permission_set_id>/permission-audit', methods=['GET'])
@@ -565,11 +566,11 @@ def get_role_permission_audit(permission_set_id):
     try:
         ds = _get_data_source()
         result = run_role_consistency_audit(ds, permission_set_id)
-        return jsonify({'success': True, 'data': result})
+        return ok(result)
     except Exception as e:
         import traceback
         traceback.print_exc()
-        return jsonify({'success': False, 'message': f'权限体检失败: {e}'}), 500
+        return error_response(f'权限体检失败: {e}', status=500)
 
 
 @permission_set_menu_bp.route('/<int:permission_set_id>/permission-audit/cleanup', methods=['POST'])
@@ -591,11 +592,11 @@ def cleanup_role_permission_audit(permission_set_id):
             object_id=permission_set_id,
             data={'cleanup': result},
         )
-        return jsonify({'success': True, 'data': result})
+        return ok(result)
     except Exception as e:
         import traceback
         traceback.print_exc()
-        return jsonify({'success': False, 'message': f'清理失败: {e}'}), 500
+        return error_response(f'清理失败: {e}', status=500)
 
 
 @permission_set_menu_bp.route('/<int:permission_set_id>/menu-permissions', methods=['PUT'])
@@ -731,7 +732,7 @@ def update_permission_set_menu_permissions(permission_set_id):
                             pid = int(row[0])
                         perm_id_map[code] = pid
                 
-                # [FIX 2026-06-08] 补充 expanded 格式映射: scheduled_task:create -> scheduled_task:scheduled_task_create
+                # [FIX 2026-06-08] 补充 expanded 格式映射: scheduled_task:create -> scheduled_task:create
                 expanded_codes = set()
                 for code in auto_perm_codes:
                     if code not in perm_id_map:
@@ -752,7 +753,7 @@ def update_permission_set_menu_permissions(permission_set_id):
                         except (TypeError, IndexError, AttributeError):
                             ec = str(row[1])
                             epid = int(row[0])
-                        # 映射回原始 code: scheduled_task:scheduled_task_create -> scheduled_task:create
+                        # 映射回原始 code: scheduled_task:create -> scheduled_task:create
                         ec_parts = ec.split(':')
                         if len(ec_parts) == 2:
                             ec_action_parts = ec_parts[1].rsplit('_', 1)

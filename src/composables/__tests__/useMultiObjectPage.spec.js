@@ -1,5 +1,7 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
 import { ref, computed, reactive } from 'vue'
+import { createPinia, setActivePinia } from 'pinia'
+import { useAuthStore } from '@/stores/authStore'
 
 const mockScopeSource = reactive({
   source: { id: 'multi-object-scope' },
@@ -204,6 +206,10 @@ function createComposable(objectTypes = DEFAULT_OBJECT_TYPES, config = {}) {
 
 describe('useMultiObjectPage', () => {
   beforeEach(() => {
+    // useMultiObjectPage 在 setup 内调用 useAuthStore()，必须先激活 pinia
+    setActivePinia(createPinia())
+    // canImport / canExport 至少需要一个 objectType 有权限 → 授予通配权限
+    useAuthStore().user = { permissions: ['*'] }
     vi.clearAllMocks()
     mockFilterFlowCombinedFilters.value = { version_id: 1 }
     mockGetParentType.mockImplementation(type => {

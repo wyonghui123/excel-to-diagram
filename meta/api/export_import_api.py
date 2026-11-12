@@ -10,6 +10,7 @@ import uuid
 import threading
 from pathlib import Path
 from flask import Blueprint, request, jsonify, send_file, abort, g, copy_current_request_context
+from meta.api._response_contract import error_response, ok
 from werkzeug.utils import secure_filename
 from urllib.parse import unquote
 
@@ -199,11 +200,11 @@ def export_data():
         # 如果用户对部分object_type无权限，跳过这些，导出用户有权限的
         data = request.get_json()
         if not data:
-            return jsonify({"success": False, "message": "请求内容不能为空"}), 400
+            return error_response("请求内容不能为空")
 
         object_type = data.get('object_type')
         if not object_type:
-            return jsonify({"success": False, "message": "object_type 参数必填"}), 400
+            return error_response("object_type 参数必填")
 
         scope = data.get('scope', 'single')
         selected_types = data.get('selected_types', [])
@@ -323,15 +324,12 @@ def export_data():
         file_name = os.path.basename(result.file_path)
         download_url = "/api/v1/export/download/{0}".format(file_name)
 
-        return jsonify({
-            "success": True,
-            "data": {
-                "file_path": result.file_path,
-                "download_url": download_url,
-                "sheets": result.sheets,
-                "total_rows": result.total_rows,
-                "skipped_types": skipped_types  # [H15.2 SAP风格] 返回被跳过的object_types
-            }
+        return ok({
+            "file_path": result.file_path,
+            "download_url": download_url,
+            "sheets": result.sheets,
+            "total_rows": result.total_rows,
+            "skipped_types": skipped_types  # [H15.2 SAP风格] 返回被跳过的object_types
         })
     
     except Exception as e:
@@ -370,11 +368,11 @@ def export_data_async():
     try:
         data = request.get_json()
         if not data:
-            return jsonify({"success": False, "message": "请求内容不能为空"}), 400
+            return error_response("请求内容不能为空")
 
         object_type = data.get('object_type')
         if not object_type:
-            return jsonify({"success": False, "message": "object_type 参数必填"}), 400
+            return error_response("object_type 参数必填")
 
         scope = data.get('scope', 'single')
         selected_types = data.get('selected_types', [])
@@ -466,10 +464,7 @@ def export_data_async():
 
         threading.Thread(target=_run_export, daemon=True).start()
         
-        return jsonify({
-            "success": True,
-            "data": {"task_id": task_id}
-        })
+        return ok({"task_id": task_id})
         
     except Exception as e:
         import traceback
@@ -486,21 +481,18 @@ def export_status(task_id):
     """查询异步导出任务状态"""
     task = _export_tasks.get(task_id)
     if not task:
-        return jsonify({"success": False, "message": "任务不存在"}), 404
+        return error_response("任务不存在", status=404)
 
-    return jsonify({
-        "success": True,
-        "data": {
-            "status": task['status'],
-            "progress": task['progress'],
-            "current_type": task['current_type'],
-            "current_type_name": task['current_type_name'],
-            "total_types": task['total_types'],
-            "current_index": task['current_index'],
-            "message": task['message'],
-            "result": task.get('result'),
-            "error": task.get('error')
-        }
+    return ok({
+        "status": task['status'],
+        "progress": task['progress'],
+        "current_type": task['current_type'],
+        "current_type_name": task['current_type_name'],
+        "total_types": task['total_types'],
+        "current_index": task['current_index'],
+        "message": task['message'],
+        "result": task.get('result'),
+        "error": task.get('error')
     })
 
 
@@ -512,7 +504,7 @@ def download_export(filename):
         print(f"[DOWNLOAD_DEBUG] Raw filename from Flask: {repr(filename)}")
         
         if not filename or '..' in filename or filename.startswith('/'):
-            return jsonify({"success": False, "message": "无效的文件名"}), 400
+            return error_response("无效的文件名")
         
         export_path = Path(EXPORT_FOLDER).resolve()
         file_path = (export_path / filename).resolve()
@@ -526,7 +518,7 @@ def download_export(filename):
             abort(403)
         
         if not file_path.exists():
-            return jsonify({"success": False, "message": "文件不存在"}), 404
+            return error_response("文件不存在", status=404)
         
         return send_file(
             str(file_path),
@@ -536,7 +528,7 @@ def download_export(filename):
     except Exception as e:
         print(f"[DOWNLOAD_DEBUG] Error: {e}")
         traceback.print_exc()
-        return jsonify({"success": False, "message": "下载失败: {0}".format(str(e))}), 500
+        return error_response("下载失败: {0}".format(str(e)), status=500)
 
 
 @export_import_bp.route('/import', methods=['POST'])
@@ -573,14 +565,14 @@ def import_data():
     """
     try:
         if 'file' not in request.files:
-            return jsonify({"success": False, "message": "未上传文件"}), 400
+            return error_response("未上传文件")
         
         file = request.files['file']
         if file.filename == '':
-            return jsonify({"success": False, "message": "未选择文件"}), 400
+            return error_response("未选择文件")
         
         if not allowed_file(file.filename):
-            return jsonify({"success": False, "message": "只支持 .xlsx 格式的文件"}), 400
+            return error_response("只支持 .xlsx 格式的文件")
         
         os.makedirs(UPLOAD_FOLDER, exist_ok=True)
         filename = secure_filename(file.filename)
@@ -624,13 +616,10 @@ def import_data():
                                         force_override_explicit_mode=force_override_explicit_mode)
         
         if mode == 'preview':
-            return jsonify({
-                "success": True,
-                "data": {
-                    "sheets": result.sheets,
-                    "validation": result.validation,
-                    "import_order": result.import_order
-                }
+            return ok({
+                "sheets": result.sheets,
+                "validation": result.validation,
+                "import_order": result.import_order
             })
         else:
             return jsonify({
@@ -642,10 +631,7 @@ def import_data():
             })
     
     except Exception as e:
-        return jsonify({
-            "success": False,
-            "message": "导入过程中发生错误: {0}".format(str(e))
-        }), 500
+        return error_response("导入过程中发生错误: {0}".format(str(e)), status=500)
 
 
 @export_import_bp.route('/import/async', methods=['POST'])
@@ -668,14 +654,14 @@ def import_data_async():
     """
     try:
         if 'file' not in request.files:
-            return jsonify({"success": False, "message": "未上传文件"}), 400
+            return error_response("未上传文件")
 
         file = request.files['file']
         if file.filename == '':
-            return jsonify({"success": False, "message": "未选择文件"}), 400
+            return error_response("未选择文件")
 
         if not allowed_file(file.filename):
-            return jsonify({"success": False, "message": "只支持 .xlsx 格式的文件"}), 400
+            return error_response("只支持 .xlsx 格式的文件")
 
         os.makedirs(UPLOAD_FOLDER, exist_ok=True)
         filename = secure_filename(file.filename)
@@ -775,16 +761,10 @@ def import_data_async():
 
         threading.Thread(target=_run_import, daemon=True).start()
 
-        return jsonify({
-            "success": True,
-            "data": {"task_id": task_id}
-        })
+        return ok({"task_id": task_id})
 
     except Exception as e:
-        return jsonify({
-            "success": False,
-            "message": "启动异步导入失败: {0}".format(str(e))
-        }), 500
+        return error_response("启动异步导入失败: {0}".format(str(e)), status=500)
 
 
 def _update_task_progress(task_id, info):
@@ -799,21 +779,18 @@ def import_status(task_id):
     """查询异步导入任务状态"""
     task = _import_tasks.get(task_id)
     if not task:
-        return jsonify({"success": False, "message": "任务不存在"}), 404
+        return error_response("任务不存在", status=404)
 
-    return jsonify({
-        "success": True,
-        "data": {
-            "status": task['status'],
-            "progress": task['progress'],
-            "current_type": task['current_type'],
-            "current_type_name": task['current_type_name'],
-            "total_types": task['total_types'],
-            "current_index": task['current_index'],
-            "message": task['message'],
-            "result": task.get('result'),
-            "error": task.get('error')
-        }
+    return ok({
+        "status": task['status'],
+        "progress": task['progress'],
+        "current_type": task['current_type'],
+        "current_type_name": task['current_type_name'],
+        "total_types": task['total_types'],
+        "current_index": task['current_index'],
+        "message": task['message'],
+        "result": task.get('result'),
+        "error": task.get('error')
     })
 
 
@@ -834,7 +811,7 @@ def download_template(object_type):
 
         meta_obj = registry.get(object_type)
         if not meta_obj:
-            return jsonify({"success": False, "message": "对象类型不存在"}), 404
+            return error_response("对象类型不存在", status=404)
 
         # [NEW v3.20 2026-06-19] menu_code query param
         menu_code = request.args.get('menu_code')
@@ -889,42 +866,36 @@ def get_import_export_config(object_type):
         
         meta_obj = registry.get(object_type)
         if not meta_obj:
-            return jsonify({"success": False, "message": "对象类型不存在"}), 404
+            return error_response("对象类型不存在", status=404)
         
         config = meta_obj.import_export
         
-        return jsonify({
-            "success": True,
-            "data": {
-                "object_type": object_type,
-                "object_name": meta_obj.name,
-                "import_enabled": config.import_enabled,
-                "export_enabled": config.export_enabled,
-                "cascade_export": config.cascade_export,
-                "cascade_import": config.cascade_import,
-                "conflict_strategy": config.conflict_strategy,
-                "conflict_key": config.conflict_key,
-                "description_for_agent": config.description_for_agent,
-                "fields": [
-                    {
-                        "id": f.id,
-                        "name": f.name,
-                        "data_category": f.semantics.data_category,
-                        "business_key": getattr(f.semantics, 'business_key', False),
-                        "import_visible": f.semantics.import_visible,
-                        "export_visible": f.semantics.export_visible,
-                        "import_order": f.semantics.import_order
-                    }
-                    for f in sorted(
-                        meta_obj.fields,
-                        key=lambda f: f.semantics.import_order
-                    )
-                ]
-            }
+        return ok({
+            "object_type": object_type,
+            "object_name": meta_obj.name,
+            "import_enabled": config.import_enabled,
+            "export_enabled": config.export_enabled,
+            "cascade_export": config.cascade_export,
+            "cascade_import": config.cascade_import,
+            "conflict_strategy": config.conflict_strategy,
+            "conflict_key": config.conflict_key,
+            "description_for_agent": config.description_for_agent,
+            "fields": [
+                {
+                    "id": f.id,
+                    "name": f.name,
+                    "data_category": f.semantics.data_category,
+                    "business_key": getattr(f.semantics, 'business_key', False),
+                    "import_visible": f.semantics.import_visible,
+                    "export_visible": f.semantics.export_visible,
+                    "import_order": f.semantics.import_order
+                }
+                for f in sorted(
+                    meta_obj.fields,
+                    key=lambda f: f.semantics.import_order
+                )
+            ]
         })
     
     except Exception as e:
-        return jsonify({
-            "success": False,
-            "message": "获取配置失败: {0}".format(str(e))
-        }), 500
+        return error_response("获取配置失败: {0}".format(str(e)), status=500)

@@ -1,0 +1,360 @@
+# 包装容器内容（Handling Unit Item）—— P6a-2 §11.2.2 / §11.13
+# 依据: docs/specs/p6-serial-number-model/spec.md §11.2.2 / §11.6
+#
+# 口径（已定）:
+#   ① 内容行是当前态投影；数量账仍按 (item, org, location, batch) 记（§11.13.1）。
+#   ② content_type='hu' 行只表达嵌套结构，qty 恒为 0；父 HU 库存 = 子树叶子 material 之和。
+#   ③ 一个序列号同一时点只能在一个容器：uq_serial_in_hu 全局部分唯一。
+#   ④ packaging / hu 行不得挂 serial_id / batch_id（ck_hu_item_content）。
+#   ⑤ 嵌套只存 child_hu_id，不复制子容器内容到父容器（§11.13.4）。
+
+id: handling_unit_item
+name: 包装容器内容
+table_name: handling_unit_items
+description: 容器内容投影——装了什么（物料 / 包装物 / 子容器）
+display_name_field: content_type
+
+authorization:
+  check: true
+  permissions:
+    read: handling_unit_item:read
+    list: handling_unit_item:read
+
+# 只读面：内容行只由 handling_unit_service 写入。
+import_export:
+  auto_crud: false
+
+actions:
+  - id: handling_unit_item_read
+    name: 查询容器内容
+    type: crud
+    method: GET
+    path: "/api/v1/handling_unit_items/{id}"
+    description: 查询单条容器内容（只读）
+  - id: handling_unit_item_list
+    name: 查询容器内容列表
+    type: crud
+    method: GET
+    path: "/api/v1/handling_unit_items"
+    description: 查询容器内容列表（只读）
+
+semantics:
+  meaning: 包装容器内容
+  category: business_document_line
+  aliases:
+    - 容器内容
+    - 装箱明细
+    - HU contents
+    - LPN contents
+
+fields:
+  - id: id
+    name: ID
+    type: integer
+    db_column: id
+    required: true
+    unique: true
+    description: 技术主键
+    semantics:
+      meaning: 自增主键
+      primary_key: true
+
+  - id: hu_id
+    name: 容器
+    type: integer
+    db_column: hu_id
+    required: true
+    description: 所属容器
+    semantics:
+      meaning: 容器引用
+      filterable: true
+      filter_type: value_help
+      filter_label: 容器
+    ui:
+      widget: select
+      relation: handling_unit
+      multiple: false
+      fieldGroup: 基本信息
+      fieldGroupPosition: 10
+
+  - id: content_type
+    name: 内容类型
+    type: string
+    db_column: content_type
+    required: true
+    default: material
+    max_length: 20
+    description: 内容类型（物料 / 包装物 / 子容器）
+    enum_values:
+      - value: material
+        label: 物料
+        color: success
+        is_initial: true
+      - value: packaging
+        label: 包装物
+        color: info
+      - value: hu
+        label: 子容器
+        color: primary
+    value_help:
+      source:
+        type: enum
+        enum_type_id: hu_content_type
+        sort_by: sort_order
+      behavior:
+        validation: true
+        binding_strength: strict
+        multiple: false
+      presentation:
+        result_type: dropdown
+    semantics:
+      meaning: 内容行类型
+      filterable: true
+      filter_type: enum
+      filter_label: 内容类型
+      filter_scope: local
+    ui:
+      widget: select
+      fieldGroup: 基本信息
+      fieldGroupPosition: 20
+
+  - id: item_id
+    name: 物料
+    type: integer
+    db_column: item_id
+    nullable: true
+    description: 物料；content_type='hu' 时为空
+    semantics:
+      meaning: 物料引用
+      filterable: true
+      filter_type: value_help
+      filter_label: 物料
+    ui:
+      widget: select
+      relation: item
+      multiple: false
+      clearable: true
+      fieldGroup: 基本信息
+      fieldGroupPosition: 30
+
+  - id: batch_id
+    name: 批次
+    type: integer
+    db_column: batch_id
+    nullable: true
+    description: 批次；packaging / hu 行必须为空
+    semantics:
+      meaning: 批次引用
+    ui:
+      widget: select
+      relation: batch
+      multiple: false
+      clearable: true
+      fieldGroup: 基本信息
+      fieldGroupPosition: 40
+
+  - id: serial_id
+    name: 序列号
+    type: integer
+    db_column: serial_id
+    nullable: true
+    description: 序列号；仅 material 行可填，且 qty 必须为 1
+    semantics:
+      meaning: 序列号引用
+      filterable: true
+      filter_type: value_help
+      filter_label: 序列号
+    ui:
+      widget: select
+      relation: serial_number
+      multiple: false
+      clearable: true
+      fieldGroup: 基本信息
+      fieldGroupPosition: 50
+
+  - id: child_hu_id
+    name: 子容器
+    type: integer
+    db_column: child_hu_id
+    nullable: true
+    description: 嵌套子容器；content_type='hu' 时必填
+    semantics:
+      meaning: 子容器引用
+    ui:
+      widget: select
+      relation: handling_unit
+      multiple: false
+      clearable: true
+      fieldGroup: 基本信息
+      fieldGroupPosition: 60
+
+  - id: qty
+    name: 数量
+    type: number
+    db_column: qty
+    required: true
+    default: 0
+    description: 数量；content_type='hu' 恒为 0
+    semantics:
+      meaning: 内容数量
+    ui:
+      widget: number
+      fieldGroup: 数量
+      fieldGroupPosition: 70
+
+  - id: uom_id
+    name: 单位
+    type: integer
+    db_column: uom_id
+    nullable: true
+    description: 计量单位
+    semantics:
+      meaning: 计量单位引用
+    ui:
+      widget: select
+      relation: uom
+      multiple: false
+      clearable: true
+      fieldGroup: 数量
+      fieldGroupPosition: 80
+
+  - id: created_at
+    name: 创建时间
+    type: datetime
+    db_column: created_at
+    description: 创建时间
+    semantics:
+      meaning: 记录创建时间
+      audit_field: true
+
+indexes:
+  - fields: [hu_id, serial_id]
+    unique: true
+    type: partial
+    name: uq_hu_serial
+    condition: "serial_id IS NOT NULL"
+    description: 同一容器内同一序列号唯一
+  - fields: [serial_id]
+    unique: true
+    type: partial
+    name: uq_serial_in_hu
+    condition: "serial_id IS NOT NULL"
+    description: 一个序列号同一时点只能在一个容器
+  - fields: [hu_id, child_hu_id]
+    unique: true
+    type: partial
+    name: uq_hu_child
+    condition: "child_hu_id IS NOT NULL"
+    description: 同一容器内同一子容器唯一
+  - fields: [serial_id]
+    name: idx_hu_item_serial
+  - fields: [item_id, batch_id]
+    name: idx_hu_item_item
+
+relations:
+  - id: handling_unit_item_to_hu
+    name: 容器
+    type: reference
+    target: handling_unit
+    source_field: hu_id
+    target_field: id
+    cardinality: N:1
+  - id: handling_unit_item_to_item
+    name: 物料
+    type: reference
+    target: item
+    source_field: item_id
+    target_field: id
+    cardinality: N:1
+  - id: handling_unit_item_to_batch
+    name: 批次
+    type: reference
+    target: batch
+    source_field: batch_id
+    target_field: id
+    cardinality: N:1
+  - id: handling_unit_item_to_serial
+    name: 序列号
+    type: reference
+    target: serial_number
+    source_field: serial_id
+    target_field: id
+    cardinality: N:1
+  - id: handling_unit_item_to_child
+    name: 子容器
+    type: reference
+    target: handling_unit
+    source_field: child_hu_id
+    target_field: id
+    cardinality: N:1
+
+ui_view_config:
+  skip_auto_menu: true
+  list:
+    detail_mode: drawer
+    title: 包装容器内容
+    columns:
+      - field: hu_id
+        width: 160
+        filterable: true
+        filter_type: value_help
+        render_as: association
+        target_type: handling_unit
+        display_field: hu_no
+      - field: content_type
+        width: 110
+        filterable: true
+        filter_type: select
+      - field: item_id
+        width: 180
+        filterable: true
+        filter_type: value_help
+        render_as: association
+        target_type: item
+        display_field: name
+      - field: batch_id
+        width: 150
+        render_as: association
+        target_type: batch
+        display_field: batch_no
+      - field: serial_id
+        width: 180
+        render_as: association
+        target_type: serial_number
+        display_field: serial_no
+      - field: child_hu_id
+        width: 160
+        render_as: association
+        target_type: handling_unit
+        display_field: hu_no
+      - field: qty
+        width: 100
+      - field: uom_id
+        width: 100
+    selection:
+      enabled: false
+    searchFields: []
+    actions: []
+    defaultSort:
+      field: id
+      order: asc
+  form:
+    title: 包装容器内容
+    layout: vertical
+    sections:
+      - title: 基本信息
+        columns:
+          - fields: [hu_id, content_type, item_id, batch_id, serial_id,
+                     child_hu_id]
+      - title: 数量
+        columns:
+          - fields: [qty, uom_id]
+  detail:
+    layout: tabs
+    title: "容器内容 #{record.id}"
+    tabs:
+      - id: basic
+        label: 基本信息
+        type: fields
+        fields: [hu_id, content_type, item_id, batch_id, serial_id,
+                 child_hu_id, qty, uom_id, created_at]

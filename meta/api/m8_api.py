@@ -17,6 +17,7 @@ import logging
 from typing import Any, Dict, List, Optional
 
 from flask import Blueprint, request, jsonify
+from meta.core.query_spec import parse_query_spec
 
 logger = logging.getLogger(__name__)
 
@@ -348,10 +349,7 @@ def reverse_expand(entity: str, parent_id: int, assoc: str):
             filters[field] = FilterValue(op=op, value=v)
 
     ordering = request.args.get('order_by', '-id')
-    try:
-        page_size = int(request.args.get('pageSize', 20))
-    except (TypeError, ValueError):
-        page_size = 20
+    page_size = parse_query_spec(request.args).page_size
     expand = request.args.get('expand', '')
 
     try:

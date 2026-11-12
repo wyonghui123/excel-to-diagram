@@ -1,5 +1,6 @@
 ---
 scene: git_message
+alwaysApply: false
 description: "Trae IDE 生成 Git 提交信息时的规则。所有 commit message 都应遵循 Conventional Commits 规范。"
 ---
 

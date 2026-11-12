@@ -21,7 +21,7 @@ view_definition: |
   SELECT id, code, name,
          line_category AS category,
          COALESCE(delivery_relevant, 1) AS delivery_relevant,
-         status, description, created_at
+         status, description, created_at, scope_bo
   FROM type_definitions
   WHERE level = 'line'
 
@@ -122,6 +122,12 @@ fields:
       - value: text
         label: 文本行
         color: info
+      - value: freight
+        label: 运费行
+        color: warning
+      - value: misc
+        label: 杂费行
+        color: default
     semantics:
       meaning: 行类型的性质分类
       filterable: true
@@ -192,6 +198,23 @@ fields:
     semantics:
       meaning: 记录创建时间
       audit_field: true
+
+  # 类型归属域（视图暴露，供 /api/v2/meta 按 scope_bo 过滤）
+  - id: scope_bo
+    name: 归属域
+    type: string
+    db_column: scope_bo
+    nullable: true
+    description: 类型归属的业务对象域（如 sales_order / transfer_order）
+    semantics:
+      meaning: 类型归属的业务对象域
+      filterable: true
+      filter_type: string
+      filter_label: 归属域
+      filter_scope: local
+    ui:
+      widget: input
+      readonly: true
 
 relations: []
 

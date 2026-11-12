@@ -14,6 +14,7 @@ from meta.services.data_permission_service import DataPermissionService
 from meta.services.menu_permission_service import MenuPermissionService
 from meta.api.user_api import login_required
 from meta.services.auth_middleware import is_admin, get_current_user
+from meta.api._response_contract import error_response, ok
 from functools import wraps
 from meta.core.db_path import get_meta_db_path
 
@@ -23,7 +24,7 @@ def admin_required(f):
     def decorated(*args, **kwargs):
         user = get_current_user()
         if not user or not is_admin(user):
-            return jsonify({"success": False, "message": "您没有执行此操作的权限，需要管理员权限"}), 403
+            return error_response("您没有执行此操作的权限，需要管理员权限", status=403)
         return f(*args, **kwargs)
     return decorated
 
@@ -55,10 +56,7 @@ def get_audit_report():
         service = _get_audit_service()
         report = service.generate_audit_report()
 
-        return jsonify({
-            'success': True,
-            'data': report
-        })
+        return ok(report)
     except Exception as e:
         # [FIX BUG-004] 打印 traceback 方便生产诊断
         import traceback
@@ -89,10 +87,7 @@ def get_user_summary(user_id):
         service = _get_audit_service()
         summary = service.get_user_permission_summary(user_id)
         
-        return jsonify({
-            'success': True,
-            'data': summary
-        })
+        return ok(summary)
     except Exception as e:
         return jsonify({
             'success': False,
@@ -109,10 +104,7 @@ def get_usage_stats():
         service = _get_audit_service()
         stats = service.get_permission_usage_stats(days)
         
-        return jsonify({
-            'success': True,
-            'data': stats
-        })
+        return ok(stats)
     except Exception as e:
         return jsonify({
             'success': False,
@@ -128,10 +120,7 @@ def find_orphan_permissions():
         service = _get_audit_service()
         orphans = service.find_orphan_permissions()
         
-        return jsonify({
-            'success': True,
-            'data': orphans
-        })
+        return ok(orphans)
     except Exception as e:
         return jsonify({
             'success': False,
@@ -147,10 +136,7 @@ def find_excessive_permissions():
         service = _get_audit_service()
         excessive = service.find_excessive_permissions()
         
-        return jsonify({
-            'success': True,
-            'data': excessive
-        })
+        return ok(excessive)
     except Exception as e:
         return jsonify({
             'success': False,
@@ -170,10 +156,7 @@ def get_change_history():
         service = _get_audit_service()
         history = service.get_permission_change_history(user_id, resource_type, limit)
         
-        return jsonify({
-            'success': True,
-            'data': history
-        })
+        return ok(history)
     except Exception as e:
         return jsonify({
             'success': False,

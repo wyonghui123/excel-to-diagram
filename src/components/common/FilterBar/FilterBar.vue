@@ -64,6 +64,17 @@
             />
           </div>
 
+          <div v-else-if="field.type === 'date'" class="filter-bar__datetime-wrap">
+            <DateTimePicker
+              :model-value="getModelValue(field.key)"
+              :placeholder="field.placeholder || '请选择' + field.label"
+              :show-time="false"
+              size="md"
+              clearable
+              @update:model-value="updateModel(field.key, $event)"
+            />
+          </div>
+
           <div v-else-if="field.type === 'date-range' || field.type === 'datetime-range'" class="filter-bar__date-range-wrap">
             <DateTimePicker
               :model-value="getDateValue(field.key, 'start')"

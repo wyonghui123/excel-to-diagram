@@ -1,0 +1,384 @@
+# 资源区域分配（Resource Territory Assignment）—— 统一资源模型 P2b / FR-010 前置
+# 依据: docs/specs/spec-unified-resource-model-2026-11-01-v1.0.md
+#       §9.3 数据模型表 / 里程碑 M4
+#
+# 定位: 资源（或资源组）覆盖哪个服务区域（territory）+ 覆盖级别 + 生效区间。
+#   复用既有 territory 主数据，不新建地理对象；允许时间区间重叠（主/备覆盖）。
+#
+# 口径:
+#   ① resource_id 与 resource_group_id 二者必填其一（服务层校验）。
+#   ② (resource_id, resource_group_id, territory_id, effective_from) 唯一。
+#   ③ 覆盖区间允许重叠（多资源可同时覆盖同一区域）。
+#   ④ 本表为叶子表，不被其他对象引用，restrict_on 为空。
+
+id: resource_territory_assignment
+name: 资源区域分配
+table_name: resource_territory_assignments
+description: 资源/资源组的服务区域覆盖（区域 + 覆盖级别 + 生效区间）
+display_name_field: territory_id
+aspects: [audit_aspect]
+
+semantics:
+  meaning: 资源区域分配
+  category: core_entity
+  aliases:
+    - 资源区域分配
+    - 服务覆盖
+    - resource territory assignment
+
+deletion_policy:
+  mode: restrict
+  restrict_on: []
+  cascade_delete: []
+
+audit:
+  enabled: true
+  create:
+    enabled: true
+    fields: all
+  update:
+    enabled: true
+    fields: changed_only
+    exclude: [id, created_at, updated_at]
+  delete:
+    enabled: true
+    fields: business_only
+    exclude: [id, created_at, updated_at]
+  associate:
+    enabled: true
+  dissociate:
+    enabled: true
+
+fields:
+  - id: id
+    name: ID
+    type: integer
+    db_column: id
+    required: true
+    unique: true
+    description: 技术主键
+    semantics:
+      meaning: 自增主键
+      primary_key: true
+
+  - id: resource_id
+    name: 资源
+    type: integer
+    db_column: resource_id
+    nullable: true
+    description: 覆盖区域的资源；与 resource_group_id 二者必填其一
+    semantics:
+      meaning: 资源引用
+      display:
+        type: association
+        target_type: resource
+        display_field: name
+        placeholder: "按组覆盖"
+    value_help:
+      source:
+        type: bo
+        target_bo: resource
+        value_field: id
+        display_field: name
+        code_field: code
+        apply_target_permissions: true
+      behavior:
+        multiple: false
+        validation: true
+        binding_strength: strict
+        min_search_length: 0
+      presentation:
+        result_type: dialog
+        display_format: "{code} - {name}"
+        columns:
+          - field: code
+            label: 资源编码
+            width: 150
+          - field: name
+            label: 资源名称
+            width: 220
+    ui:
+      widget: select
+      relation: resource
+      multiple: false
+      clearable: true
+      fieldGroup: 归属
+      fieldGroupPosition: 10
+
+  - id: resource_group_id
+    name: 资源组
+    type: integer
+    db_column: resource_group_id
+    nullable: true
+    description: 覆盖区域的资源组；与 resource_id 二者必填其一
+    semantics:
+      meaning: 资源组引用
+      display:
+        type: association
+        target_type: resource_group
+        display_field: name
+        placeholder: "按资源覆盖"
+    value_help:
+      source:
+        type: bo
+        target_bo: resource_group
+        value_field: id
+        display_field: name
+        code_field: code
+        apply_target_permissions: true
+      behavior:
+        multiple: false
+        validation: true
+        binding_strength: strict
+        min_search_length: 0
+      presentation:
+        result_type: dialog
+        display_format: "{code} - {name}"
+        columns:
+          - field: code
+            label: 组编码
+            width: 150
+          - field: name
+            label: 组名称
+            width: 220
+    ui:
+      widget: select
+      relation: resource_group
+      multiple: false
+      clearable: true
+      fieldGroup: 归属
+      fieldGroupPosition: 20
+
+  - id: territory_id
+    name: 服务区域
+    type: integer
+    db_column: territory_id
+    required: true
+    description: 覆盖的服务区域
+    semantics:
+      meaning: 区域引用
+      display:
+        type: association
+        target_type: territory
+        display_field: name
+    value_help:
+      source:
+        type: bo
+        target_bo: territory
+        value_field: id
+        display_field: name
+        code_field: code
+        apply_target_permissions: true
+      behavior:
+        multiple: false
+        validation: true
+        binding_strength: strict
+        min_search_length: 0
+      presentation:
+        result_type: dialog
+        display_format: "{code} - {name}"
+        columns:
+          - field: code
+            label: 区域编码
+            width: 150
+          - field: name
+            label: 区域名称
+            width: 220
+    ui:
+      widget: select
+      relation: territory
+      multiple: false
+      fieldGroup: 归属
+      fieldGroupPosition: 30
+
+  - id: coverage_level
+    name: 覆盖级别
+    type: string
+    db_column: coverage_level
+    required: true
+    default: primary
+    description: 覆盖级别（主覆盖 / 备选覆盖）
+    enum_values:
+      - value: primary
+        label: 主覆盖
+        color: primary
+        is_initial: true
+      - value: backup
+        label: 备选覆盖
+        color: info
+    value_help:
+      source:
+        type: enum
+        enum_type_id: coverage_level
+        sort_by: sort_order
+      behavior:
+        validation: true
+        binding_strength: strict
+        multiple: false
+      presentation:
+        result_type: dropdown
+    semantics:
+      meaning: 区域覆盖级别
+      filterable: true
+      filter_type: enum
+      filter_label: 覆盖级别
+      filter_scope: local
+    ui:
+      widget: select
+      fieldGroup: 覆盖
+      fieldGroupPosition: 40
+
+  - id: effective_from
+    name: 生效日
+    type: date
+    db_column: effective_from
+    nullable: true
+    description: 覆盖生效日（含）；空表示立即生效
+    semantics:
+      meaning: 覆盖生效起始日
+    ui:
+      widget: date
+      fieldGroup: 覆盖
+      fieldGroupPosition: 50
+
+  - id: effective_to
+    name: 失效日
+    type: date
+    db_column: effective_to
+    nullable: true
+    description: 覆盖失效日（不含）；空表示长期有效
+    semantics:
+      meaning: 覆盖失效截止日
+    ui:
+      widget: date
+      fieldGroup: 覆盖
+      fieldGroupPosition: 60
+
+  - id: created_at
+    name: 创建时间
+    type: datetime
+    db_column: created_at
+    description: 创建时间
+    semantics:
+      meaning: 记录创建时间
+      audit_field: true
+
+  - id: updated_at
+    name: 更新时间
+    type: datetime
+    db_column: updated_at
+    description: 更新时间
+    semantics:
+      meaning: 记录更新时间
+      audit_field: true
+
+indexes:
+  - fields: [resource_id, resource_group_id, territory_id, effective_from]
+    unique: true
+    name: uq_resource_territory_assignment
+  - fields: [resource_group_id]
+    name: idx_resource_territory_assignment_group
+  - fields: [territory_id]
+    name: idx_resource_territory_assignment_territory
+
+relations:
+  - id: territory_assignment_to_resource
+    name: 资源
+    type: reference
+    target: resource
+    source_field: resource_id
+    target_field: id
+    cardinality: N:1
+    description: 资源引用（可空；真外键）
+  - id: territory_assignment_to_group
+    name: 资源组
+    type: reference
+    target: resource_group
+    source_field: resource_group_id
+    target_field: id
+    cardinality: N:1
+    description: 资源组引用（可空；真外键）
+  - id: territory_assignment_to_territory
+    name: 服务区域
+    type: reference
+    target: territory
+    source_field: territory_id
+    target_field: id
+    cardinality: N:1
+    description: 区域引用（真外键）
+
+ui_view_config:
+  # 菜单由迁移 v176 手工声明（挂 master-data），不让自动生成器产出孤儿行
+  skip_auto_menu: true
+  list:
+    detail_mode: drawer
+    title: 资源区域分配
+    columns:
+      - field: resource_id
+        width: 180
+        filterable: true
+        filter_type: value_help
+        render_as: association
+        target_type: resource
+        display_field: name
+      - field: resource_group_id
+        width: 180
+        filterable: true
+        filter_type: value_help
+        render_as: association
+        target_type: resource_group
+        display_field: name
+      - field: territory_id
+        width: 190
+        filterable: true
+        filter_type: value_help
+        render_as: association
+        target_type: territory
+        display_field: name
+      - field: coverage_level
+        width: 120
+        filterable: true
+        filter_type: select
+      - field: effective_from
+        width: 120
+      - field: effective_to
+        width: 120
+    selection:
+      enabled: true
+      mode: multiple
+    searchFields: [territory_id]
+    actions:
+      - id: create
+        label: 新建区域分配
+        icon: plus
+        type: primary
+        permission: resource_territory_assignment:create
+    defaultSort:
+      field: effective_from
+      order: desc
+  form:
+    title: 资源区域分配
+    layout: vertical
+    sections:
+      - title: 归属
+        columns:
+          - fields: [resource_id, resource_group_id]
+          - fields: [territory_id, coverage_level]
+      - title: 覆盖
+        columns:
+          - fields: [effective_from, effective_to]
+  detail:
+    layout: tabs
+    title: 资源区域分配 详情
+    tabs:
+      - id: basic
+        label: 基本信息
+        type: fields
+        fields: [resource_id, resource_group_id, territory_id, coverage_level,
+                 effective_from, effective_to]
+
+category_config:
+  create_permission: resource_territory_assignment:create
+  update_permission: resource_territory_assignment:update
+  delete_permission: resource_territory_assignment:delete
+  owner_auto_permission: false

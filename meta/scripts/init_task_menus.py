@@ -60,9 +60,30 @@ def init_task_menus(data_source):
             'auto_generated': False,
             'page_config': {},
         },
+        {
+            # [P3 2026-11-10] 后台任务执行记录：元数据驱动只读列表
+            #   （schema: meta/schemas/task_run.yaml，generic_api_mode=read_only）。
+            #   读路径 /api/v2/bo/task_run；状态机写入口仍归专属服务。
+            'menu_code': 'task-runs',
+            'menu_name': '执行记录',
+            'menu_path': '/system/task-runs',
+            'page_type': 'object_list',
+            'primary_object_type': 'task_run',
+            'object_types': ['task_run'],
+            'bo_bindings': [],
+            'required_permissions': ['*'],
+            'parent_menu': 'system',
+            'icon': 'List',
+            'color': 'blue',
+            'description': '后台作业执行账本（只读）',
+            'sort_order': 1,
+            'show_in_sidebar': True,
+            'auto_generated': False,
+            'page_config': {},
+        },
     ]
 
-    PERMISSION_ENTRIES = {'task-management'}
+    PERMISSION_ENTRIES = {'task-management', 'task-runs'}
 
     count = 0
     for menu in menus:

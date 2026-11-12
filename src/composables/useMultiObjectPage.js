@@ -91,6 +91,7 @@ import { useHierarchyTypes } from './useHierarchyTypes'
 import * as hierarchyService from '@/services/hierarchyService'
 import { stripIdPrefix } from '@/services/archDataConverter'
 import { useAuthStore } from '@/stores/authStore'
+import { can } from '@/services/permissionService'
 
 /**
  * 约定：FK 字段命名 = 父对象类型 + '_id'
@@ -572,7 +573,7 @@ export function useMultiObjectPage(objectTypes, config = {}, coordinator = null)
     if (!disableVersionContext && !versionContext.selectedVersionId.value) return false
     if (!objectTypes || objectTypes.length === 0) return false
     // 至少一个object_type有import权限就启用
-    return objectTypes.some(type => authStore.hasPermission(`${type}:import`))
+    return objectTypes.some(type => can('import', { objectType: type, authStore }))
   })
 
   const canExport = computed(() => {
@@ -580,7 +581,7 @@ export function useMultiObjectPage(objectTypes, config = {}, coordinator = null)
     if (!disableVersionContext && !versionContext.selectedVersionId.value) return false
     if (!objectTypes || objectTypes.length === 0) return false
     // 至少一个object_type有export权限就启用
-    return objectTypes.some(type => authStore.hasPermission(`${type}:export`))
+    return objectTypes.some(type => can('export', { objectType: type, authStore }))
   })
   const canShowChart = computed(() => {
     if (actionsConfig.value.chart.enabled === false) return false

@@ -34,20 +34,38 @@ def temp_db():
     fd, db_path = tempfile.mkstemp(suffix=".db")
     os.close(fd)
     yield db_path
-    if os.path.exists(db_path):
-        os.unlink(db_path)
-    for ext in ("-wal", "-shm"):
-        p = db_path + ext
-        if os.path.exists(p):
-            os.unlink(p)
+    _cleanup_db_file(db_path)
+
+
+def _cleanup_db_file(db_path: str) -> None:
+    """断开缓存中的 DataSource 后删除临时库 (Windows 需重试, 句柄未释放时 unlink 会失败)"""
+    from meta.core import datasource
+    datasource._clear_data_source_cache_for_testing()
+    for target in (db_path, db_path + "-wal", db_path + "-shm"):
+        for _ in range(10):
+            if not os.path.exists(target):
+                break
+            try:
+                os.unlink(target)
+                break
+            except PermissionError:
+                time.sleep(0.1)
 
 
 @pytest.fixture(autouse=True)
 def clean_cache():
-    """每个测试前后清空缓存 (autouse=True 强制执行)"""
+    """每个测试前后清空缓存 + 重置命中/未命中计数 (autouse=True 强制执行)"""
+    from meta.core import datasource
+    _reset_cache_stats(datasource)
     _clear_data_source_cache_for_testing()
     yield
     _clear_data_source_cache_for_testing()
+    _reset_cache_stats(datasource)
+
+
+def _reset_cache_stats(datasource_module) -> None:
+    datasource_module._data_source_cache_stats["hits"] = 0
+    datasource_module._data_source_cache_stats["misses"] = 0
 
 
 class TestGetDataSourceCache:
@@ -68,7 +86,7 @@ class TestGetDataSourceCache:
             ds2 = get_data_source("sqlite", database=db_path2)
             assert ds1 is not ds2  # [OK] 不同 instance
         finally:
-            os.unlink(db_path2)
+            _cleanup_db_file(db_path2)
 
     def test_100_calls_create_only_one_instance(self, temp_db):
         """[V007.24] 100 次调用只创建 1 个 instance (性能 + fd 安全)"""

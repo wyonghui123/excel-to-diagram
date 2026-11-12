@@ -120,7 +120,7 @@ class TestEnrichLogLabels:
         _enrich_log_labels(log)
         assert log["object_type_label"] == "角色菜单权限"
         assert log["field_name_label"] == "菜单编码列表"
-        assert log["parent_object_type_label"] == "角色"
+        assert log["parent_object_type_label"] == "权限集"
 
     def test_enrich_batch_injects_to_all_items(self):
         from meta.api.audit_api import _enrich_log_labels_batch
@@ -130,15 +130,14 @@ class TestEnrichLogLabels:
             {"object_type": "unknown_type", "field_name": "unknown_field"},
         ]
         _enrich_log_labels_batch(logs)
-        # [P1-D 2026-07-25] 改造后, role/user_group 走 yaml registry + DisplayNameService:
-        #   - role.name (yaml) = "角色"
-        #   - role.fields[id=name].name (yaml) = "角色名称" (不再是硬编码 "名称")
-        #   - user_group.name (yaml) = "用户组"
-        #   - user_group.fields[id=code].name (yaml) = "组编码" (不再是硬编码 "编码")
-        assert logs[0]["object_type_label"] == "角色"
-        assert logs[0]["field_name_label"] == "角色名称"
+        # [P1-D 2026-07-25] 改造后, role(已改名为权限集)/user_group 走 yaml registry + DisplayNameService:
+        #   - permission_set.name (yaml) = "权限集"
+        #   - permission_set.fields[id=name].name (yaml) = "权限集名称" (不再是硬编码 "名称")
+        #   - user_group 已无独立 yaml, 走 OBJECT_TYPE_LABELS / FIELD_NAME_LABELS fallback
+        assert logs[0]["object_type_label"] == "权限集"
+        assert logs[0]["field_name_label"] == "权限集名称"
         assert logs[1]["object_type_label"] == "用户组"
-        assert logs[1]["field_name_label"] == "组编码"
+        assert logs[1]["field_name_label"] == "编码"
         # 未知类型优雅降级: label == 原值
         assert logs[2]["object_type_label"] == "unknown_type"
         assert logs[2]["field_name_label"] == "unknown_field"
@@ -155,7 +154,7 @@ class TestEnrichLogLabels:
         from meta.api.audit_api import _enrich_log_labels
         log = {"object_type": "role", "field_name": None}
         _enrich_log_labels(log)
-        assert log["object_type_label"] == "角色"
+        assert log["object_type_label"] == "权限集"
         assert "field_name_label" not in log
 
     def test_enrich_does_not_overwrite_existing_label(self):
@@ -168,8 +167,8 @@ class TestEnrichLogLabels:
         }
         _enrich_log_labels(log)
         assert log["object_type_label"] == "我的自定义角色"
-        # [P1-D 2026-07-25] role.fields[id=name].name = "角色名称" (yaml schema 单一事实源)
-        assert log["field_name_label"] == "角色名称"
+        # [P1-D 2026-07-25] permission_set.fields[id=name].name = "权限集名称" (yaml schema 单一事实源)
+        assert log["field_name_label"] == "权限集名称"
 
     def test_enrich_handles_non_dict(self):
         """非 dict 入参 (如 None, str) 不抛异常"""
@@ -247,20 +246,20 @@ class TestP1DDisplayNameServicePriority:
     def test_object_type_label_prefers_yaml_registry(self):
         """object_type 在 registry 中 → 返回 yaml 顶层 name"""
         from meta.api.audit_api import _get_object_type_label
-        # role 在 registry, yaml.name = "角色"
-        assert _get_object_type_label("role") == "角色"
+        # role 已改名为 permission_set, yaml.name = "权限集"
+        assert _get_object_type_label("role") == "权限集"
         # user 在 registry, yaml.name = "用户"
         assert _get_object_type_label("user") == "用户"
-        # product 在 registry, yaml.name = "产品"
-        assert _get_object_type_label("product") == "产品"
+        # product 在 registry, yaml.name = "产品线"
+        assert _get_object_type_label("product") == "产品线"
 
     def test_object_type_label_falls_back_to_hardcoded(self):
         """object_type 不在 registry → 降级到 OBJECT_TYPE_LABELS 硬编码"""
         from meta.api.audit_api import _get_object_type_label
         # role_menu 是衍生类型, 不在 registry, 但在 OBJECT_TYPE_LABELS
         assert _get_object_type_label("role_menu") == "角色菜单权限"
-        # permission_rule 在 OBJECT_TYPE_LABELS
-        assert _get_object_type_label("permission_rule") == "权限规则"
+        # role_permissions 是衍生类型, 不在 registry, 走 OBJECT_TYPE_LABELS
+        assert _get_object_type_label("role_permissions") == "角色功能权限"
 
     def test_object_type_label_falls_back_to_raw(self):
         """object_type 完全未知 → 返回原值"""
@@ -289,8 +288,8 @@ class TestP1DDisplayNameServicePriority:
     def test_field_name_label_prefers_display_name_service(self):
         """object_type + field_name 在 registry 中 → 返回 yaml field.name"""
         from meta.api.audit_api import _get_field_name_label
-        # role.fields[id=name].name = "角色名称"
-        assert _get_field_name_label("role", "name") == "角色名称"
+        # permission_set.fields[id=name].name = "权限集名称"
+        assert _get_field_name_label("role", "name") == "权限集名称"
         # role.fields[id=code].name 应该是某个中文 (取决于 yaml)
         # 验证: 不再返回硬编码 FIELD_NAME_LABELS["code"]="编码"
         result = _get_field_name_label("role", "code")
@@ -337,10 +336,10 @@ class TestP1DDisplayNameServicePriority:
             "action": "UPDATE",
         }
         _enrich_log_labels(log)
-        # yaml schema 单一事实源: role.fields[id=name].name = "角色名称"
-        assert log["field_name_label"] == "角色名称"
+        # yaml schema 单一事实源: permission_set.fields[id=name].name = "权限集名称"
+        assert log["field_name_label"] == "权限集名称"
         # object_type_label 也是 yaml registry.name
-        assert log["object_type_label"] == "角色"
+        assert log["object_type_label"] == "权限集"
 
     def test_enrich_falls_back_for_audit_specific_fields(self):
         """_enrich_log_labels 对 audit 专用字段 (action/old_value/new_value) 走硬编码 fallback
@@ -382,8 +381,8 @@ class TestP1DDisplayNameServicePriority:
         _enrich_log_labels(log)
         # role_menu 不在 registry → fallback to OBJECT_TYPE_LABELS
         assert log["object_type_label"] == "角色菜单权限"
-        # role 在 registry → yaml.name = "角色"
-        assert log["parent_object_type_label"] == "角色"
+        # role 已改名 permission_set, 在 registry → yaml.name = "权限集"
+        assert log["parent_object_type_label"] == "权限集"
 
     def test_enrich_action_label_unchanged(self):
         """[P0-3] action_label 仍从 audit_log.yaml enum_values 加载 (单一事实源)"""
@@ -398,15 +397,15 @@ class TestP1DDisplayNameServicePriority:
     def test_yaml_registry_provides_more_specific_labels(self):
         """验证 yaml schema 提供比硬编码更具体的标签
 
-        场景: role.fields[id=name].name = "角色名称"
+        场景: permission_set.fields[id=name].name = "权限集名称"
               而 FIELD_NAME_LABELS["name"] = "名称" (通用)
 
-        P1-D 改造后应返回更具体的 "角色名称", 而非通用的 "名称".
+        P1-D 改造后应返回更具体的 "权限集名称", 而非通用的 "名称".
         """
         from meta.api.audit_api import _get_field_name_label, FIELD_NAME_LABELS
         # 硬编码 fallback 应该是 "名称"
         assert FIELD_NAME_LABELS["name"] == "名称"
-        # 但通过 DisplayNameService 应返回 role.yaml 中定义的 "角色名称"
-        assert _get_field_name_label("role", "name") == "角色名称"
-        # user_group.yaml 中 fields[id=name].name = "组名"
-        assert _get_field_name_label("user_group", "name") == "组名"
+        # 但通过 DisplayNameService 应返回 permission_set.yaml 中定义的 "权限集名称"
+        assert _get_field_name_label("role", "name") == "权限集名称"
+        # user_group 已无独立 yaml, 字段走 FIELD_NAME_LABELS fallback
+        assert _get_field_name_label("user_group", "name") == "名称"

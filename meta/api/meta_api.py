@@ -10,6 +10,7 @@ from flask import Blueprint, request, jsonify
 from dataclasses import asdict
 from typing import Any
 
+from meta.api._response_contract import ok, ok_message, error_response
 from meta.core.models import registry
 from meta.services.view_config_service import view_config_service
 from meta.services.i18n_service import i18n_service
@@ -37,6 +38,10 @@ def _ensure_fresh_meta():
         if schema_dir:
             registry._schema_dir = schema_dir
             registry.reload(schema_dir)
+            # reload 只用平台目录重建 _objects，必须重放应用 schema，
+            # 否则 /api/v2/bo/<app_bo> 会报 Unknown object type（multi-app 模式）
+            from meta.core.app_registry import reapply_app_schemas
+            reapply_app_schemas()
             _last_version = registry.get_version()
         _last_reload_time = now
     return _last_version
@@ -96,7 +101,8 @@ def list_objects():
 
     for obj_id in registry.list_objects():
         obj = registry.get(obj_id)
-        if obj and obj.persistent:
+        # [G7 2026-11-02] 平台机制对象不对外暴露通用对象元数据入口
+        if obj and obj.persistent and not getattr(obj, 'skip_generic_api', False):
             objects.append({
                 'id': obj.id,
                 'name': obj.name,
@@ -391,12 +397,12 @@ def reload_meta():
         validate_schema_dir_side_effects(schema_dir)
         registry._schema_dir = schema_dir
         count = registry.reload(schema_dir)
+        # 同上：单目录 reload 会丢弃 apps/* 的 BO，需重放应用 schema
+        from meta.core.app_registry import reapply_app_schemas
+        reapply_app_schemas()
         view_config_service.invalidate_cache()
 
-        return jsonify({
-            'success': True,
-            'message': f'Reloaded {count} meta objects',
-        })
+        return ok_message(f'Reloaded {count} meta objects')
     except Exception as e:
         return jsonify({
             'success': False,
@@ -424,13 +430,10 @@ def get_i18n_text(key: str):
 
     text = i18n_service.get_text_with_fallback(key, default, locale)
 
-    return jsonify({
-        'success': True,
-        'data': {
-            'key': key,
-            'text': text,
-            'locale': locale,
-        },
+    return ok({
+        'key': key,
+        'text': text,
+        'locale': locale,
     })
 
 
@@ -457,7 +460,7 @@ def get_enums_batch():
     """
     types_param = request.args.get('types', '')
     if not types_param:
-        return jsonify({'success': False, 'message': 'types parameter required'}), 400
+        return error_response('types parameter required')
 
     enum_types = [t.strip() for t in types_param.split(',') if t.strip()]
 
@@ -468,7 +471,7 @@ def get_enums_batch():
 
     # [FR-006] 批量查询替代逐类型查询, 避免 N+1
     if not enum_types:
-        return jsonify({'success': True, 'data': result})
+        return ok(result)
 
     # 批量存在性检查
     placeholders = ','.join(['?'] * len(enum_types))
@@ -505,10 +508,7 @@ def get_enums_batch():
                 'data': values_by_type.get(enum_type, [])
             }
 
-    return jsonify({
-        'success': True,
-        'data': result
-    })
+    return ok(result)
 
 
 @meta_bp.route('/<object_type>/filter-config', methods=['GET'])
@@ -595,10 +595,7 @@ def get_filter_tree_data(object_type: str, filter_key: str):
 
     view_config = meta_object.ui_view_config
     if not view_config or not hasattr(view_config, 'filter'):
-        return jsonify({
-            'success': True,
-            'data': [],
-        })
+        return ok([])
 
     filter_config = view_config.filter
     target_filter = None
@@ -609,10 +606,7 @@ def get_filter_tree_data(object_type: str, filter_key: str):
                 break
 
     if not target_filter:
-        return jsonify({
-            'success': True,
-            'data': [],
-        })
+        return ok([])
 
     tree_structure = target_filter.tree_structure if hasattr(target_filter, 'tree_structure') else ''
     tree_levels = target_filter.tree_levels if hasattr(target_filter, 'tree_levels') else []

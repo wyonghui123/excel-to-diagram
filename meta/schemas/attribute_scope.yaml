@@ -15,6 +15,9 @@
 #     三家都不把组织做成定义维度。
 #   - scope_ref 为多态引用：scope_type = object 时填对象编码，scope_type = item_group 时填物料分类编码。
 #     DSL 无法表达多态外键，存在性由应用层 lint 校验。
+#   - [语义扩展 2026-11-03] scope_type = item_group 的原语义是「该分类下的物料」；当对象为
+#     batch（scope_ref='batch' 的场景）时，语义扩为「该分类下物料的批次」——即
+#     resolve(tenant, 'batch', 物料分类编码) 命中的是批次所属物料的分类。字段与解析逻辑不变。
 
 id: attribute_scope
 name: 属性适用范围

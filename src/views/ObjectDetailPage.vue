@@ -126,6 +126,7 @@ import { AppButton, AppIcon } from '@/components/common'
 import PermissionConfigPanel from '@/views/SystemManagement/components/PermissionConfigPanel.vue'
 import StateTransitionButtons from '@/components/bo/StateTransitionButtons.vue'
 import metaService from '@/services/metaService'
+import { resolveDetailPath } from '@/router/detailPathResolver'
 import { objectTypeService } from '@/services/objectTypeService'
 
 defineOptions({ name: 'ObjectDetail' })
@@ -336,8 +337,7 @@ function handleDataLoaded(data) {
 function handleSaved(savedData) {
   if (mode.value === 'add' && savedData?.id) {
     const listConfig = entityMeta.value?.ui_view_config?.list
-    const basePath = listConfig?.detail_path || `/detail/${objectType.value}`
-    const newPath = `${basePath}/${savedData.id}`
+    const newPath = resolveDetailPath(objectType.value, savedData.id, { detailPath: listConfig?.detail_path })
     const oldTabId = route.path
     tabStore.replaceTabId(oldTabId, newPath, newPath)
 

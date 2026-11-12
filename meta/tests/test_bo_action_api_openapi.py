@@ -16,6 +16,10 @@ from unittest.mock import patch, MagicMock
 
 pytestmark = pytest.mark.unit
 
+from meta.tests.shared.fixtures import backend_base_url
+
+_BASE_URL = backend_base_url()
+
 
 class TestGenerateActionOpenAPI:
     """_generate_action_openapi 单元测试 (COV-001)"""
@@ -38,7 +42,7 @@ class TestGenerateActionOpenAPI:
         with patch('meta.api.bo_action_api.bo_action_registry') as reg:
             reg.list_all.return_value = []
             from meta.api.bo_action_api import _generate_action_openapi
-            spec = _generate_action_openapi('http://localhost:3010')
+            spec = _generate_action_openapi(_BASE_URL)
         assert spec['openapi'] == '3.0.0'
         assert 'info' in spec
         assert 'paths' in spec
@@ -56,7 +60,7 @@ class TestGenerateActionOpenAPI:
         with patch('meta.api.bo_action_api.bo_action_registry') as reg:
             reg.list_all.return_value = [meta]
             from meta.api.bo_action_api import _generate_action_openapi
-            spec = _generate_action_openapi('http://localhost:3010')
+            spec = _generate_action_openapi(_BASE_URL)
         path = '/api/v2/action/function.lookup'
         assert path in spec['paths']
         assert 'get' in spec['paths'][path]
@@ -72,7 +76,7 @@ class TestGenerateActionOpenAPI:
         with patch('meta.api.bo_action_api.bo_action_registry') as reg:
             reg.list_all.return_value = [meta]
             from meta.api.bo_action_api import _generate_action_openapi
-            spec = _generate_action_openapi('http://localhost:3010')
+            spec = _generate_action_openapi(_BASE_URL)
         path = '/api/v2/action/business.create'
         assert 'post' in spec['paths'][path]
         assert spec['paths'][path]['post']['operationId'] == 'business.create'
@@ -87,7 +91,7 @@ class TestGenerateActionOpenAPI:
         with patch('meta.api.bo_action_api.bo_action_registry') as reg:
             reg.list_all.return_value = [meta]
             from meta.api.bo_action_api import _generate_action_openapi
-            spec = _generate_action_openapi('http://localhost:3010')
+            spec = _generate_action_openapi(_BASE_URL)
         assert 'a_b_c_input' in spec['components']['schemas']
         assert 'a_b_c_output' in spec['components']['schemas']
 
@@ -102,7 +106,7 @@ class TestGenerateActionOpenAPI:
         with patch('meta.api.bo_action_api.bo_action_registry') as reg:
             reg.list_all.return_value = [meta]
             from meta.api.bo_action_api import _generate_action_openapi
-            spec = _generate_action_openapi('http://localhost:3010')
+            spec = _generate_action_openapi(_BASE_URL)
         desc = spec['paths']['/api/v2/action/admin.reset']['post'].get('description', '')
         assert '(admin only)' in desc
 
@@ -116,7 +120,7 @@ class TestGenerateActionOpenAPI:
         with patch('meta.api.bo_action_api.bo_action_registry') as reg:
             reg.list_all.return_value = [meta]
             from meta.api.bo_action_api import _generate_action_openapi
-            spec = _generate_action_openapi('http://localhost:3010')
+            spec = _generate_action_openapi(_BASE_URL)
         schema = spec['components']['schemas']['legacy_action_input']
         assert schema == {'type': 'object', 'additionalProperties': True}
 
@@ -131,7 +135,7 @@ class TestGenerateActionOpenAPI:
         with patch('meta.api.bo_action_api.bo_action_registry') as reg:
             reg.list_all.return_value = [meta]
             from meta.api.bo_action_api import _generate_action_openapi
-            spec = _generate_action_openapi('http://localhost:3010')
+            spec = _generate_action_openapi(_BASE_URL)
         out = spec['components']['schemas']['legacy_q_output']
         assert out['type'] == 'object'
         assert 'success' in out['properties']
@@ -148,7 +152,7 @@ class TestGenerateActionOpenAPI:
         with patch('meta.api.bo_action_api.bo_action_registry') as reg:
             reg.list_all.return_value = [meta]
             from meta.api.bo_action_api import _generate_action_openapi
-            spec = _generate_action_openapi('http://localhost:3010')
+            spec = _generate_action_openapi(_BASE_URL)
         summary = spec['paths']['/api/v2/action/func.lookup']['get']['summary']
         assert summary.startswith('[FUNCTION]')
 
@@ -159,7 +163,7 @@ class TestGenerateActionOpenAPI:
         with patch('meta.api.bo_action_api.bo_action_registry') as reg:
             reg.list_all.return_value = [meta1, meta2]
             from meta.api.bo_action_api import _generate_action_openapi
-            spec = _generate_action_openapi('http://localhost:3010')
+            spec = _generate_action_openapi(_BASE_URL)
         # tags 是 list of dicts [{'name': 'xxx'}, ...] — 取 name 字段
         tag_names = {t.get('name') if isinstance(t, dict) else t for t in spec['tags']}
         assert 'admin/function' in tag_names

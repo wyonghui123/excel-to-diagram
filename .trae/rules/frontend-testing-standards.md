@@ -1,7 +1,7 @@
 ---
 alwaysApply: false
 description: "前端测试标准：Vitest + happy-dom + MSW + Source Map"
-globs: "src/**/*.test.ts,src/**/*.spec.ts,src/**/__tests__/**"
+globs: "src/**/*.test.js,src/**/*.spec.js,src/**/__tests__/**"
 ---
 
 # 前端测试标准规范
@@ -582,3 +582,36 @@ Sources:
 - [Vitest Component Testing](https://vitest.dev/guide/browser/component-testing)
 - [Vue 线上代码调试全攻略](https://juejin.cn/post/7633752260267540495)
 - [Debugging Minified JavaScript](https://www.codeformatter.in/blog-debugging.html)
+
+---
+
+<!-- merged from .trae/rules/scenarios/6-test-debug/frontend-testing-standards.md -->
+
+## 2 个子文件
+
+| 文件 | 行 | 主题 | 何时加载 |
+|---|---|---|---|
+| [vitest-setup.md](scenarios/6-test-debug/vitest-setup.md) | ~140 | 工具选型 + 测试金字塔 + 容易测试 | 写测试前 |
+| [vitest-debugging.md](scenarios/6-test-debug/vitest-debugging.md) | ~190 | 调试 + 性能 + 配置 + 检查清单 | 排查失败 / 性能调优 |
+
+**总计**：原 583 行 → **2 个子文件**（每个 < 200 行）
+
+---
+
+## 何时读哪个？
+
+```
+写测试前？         → vitest-setup.md（工具选型 + 测试金字塔）
+写代码时？         → vitest-setup.md（容易测试的实践 + 数据工厂）
+失败难定位？       → vitest-debugging.md（source map + ui 模式）
+性能差？           → vitest-debugging.md（happy-dom + 缓存）
+CI 集成？          → vitest-debugging.md（完整配置 + 检查清单）
+```
+
+---
+
+## CHANGELOG
+
+| 日期 | 变更 | 内容 |
+|---|---|---|
+| 2026-09-02 | v2.0 | **拆分**（frontend-testing-standards → 2 文件） |

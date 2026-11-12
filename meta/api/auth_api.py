@@ -6,6 +6,7 @@
 """
 
 from flask import Blueprint, request, jsonify, g, make_response, abort
+from meta.api._response_contract import error_response, ok, ok_message
 from meta.services.auth_provider import LocalAuthProvider, _hash_password_pbdkdf2
 from meta.services.token_service import TokenService
 from meta.services.auth_middleware import login_required, get_current_user, is_admin
@@ -76,17 +77,11 @@ def login():
     password = data.get('password', '')
 
     if not username or not password:
-        return jsonify({
-            'success': False,
-            'message': '用户名和密码不能为空',
-        }), 400
+        return error_response('用户名和密码不能为空')
 
     is_locked, lockout_msg = rate_limiter.check_rate_limit(client_ip, username)
     if is_locked:
-        return jsonify({
-            'success': False,
-            'message': lockout_msg,
-        }), 429
+        return error_response(lockout_msg, status=429)
 
     provider = _get_auth_provider()
     user_info = provider.authenticate({'username': username, 'password': password})
@@ -94,14 +89,8 @@ def login():
     if not user_info:
         is_locked, lockout_msg = rate_limiter.record_failed_attempt(client_ip, username)
         if is_locked:
-            return jsonify({
-                'success': False,
-                'message': lockout_msg,
-            }), 429
-        return jsonify({
-            'success': False,
-            'message': f'用户名或密码错误 ({lockout_msg})',
-        }), 401
+            return error_response(lockout_msg, status=429)
+        return error_response(f'用户名或密码错误 ({lockout_msg})', status=401)
 
     rate_limiter.record_successful_attempt(client_ip, username)
 
@@ -165,22 +154,16 @@ def logout():
 def get_current_user_info():
     user = get_current_user()
     if not user:
-        return jsonify({
-            'success': False,
-            'message': '未登录',
-        }), 401
+        return error_response('未登录', status=401)
 
-    return jsonify({
-        'success': True,
-        'data': {
-            'user_id': user.get('user_id'),
-            'username': user.get('username'),
-            'display_name': user.get('display_name'),
-            'email': user.get('email'),
-            'roles': user.get('roles', []),
-            'permissions': user.get('permissions', []),
-            'is_admin': is_admin(user),
-        },
+    return ok({
+        'user_id': user.get('user_id'),
+        'username': user.get('username'),
+        'display_name': user.get('display_name'),
+        'email': user.get('email'),
+        'roles': user.get('roles', []),
+        'permissions': user.get('permissions', []),
+        'is_admin': is_admin(user),
     })
 
 
@@ -195,7 +178,7 @@ def dev_login():
     dev_mode = os.environ.get('FLASK_ENV') in ('development', 'dev', None)
     if not dev_mode:
         # 非开发/生产环境(如显式设置其他 FLASK_ENV),返回 403
-        return jsonify({'success': False, 'message': '仅开发环境可用'}), 403
+        return error_response('仅开发环境可用', status=403)
 
     provider = _get_auth_provider()
     cursor = _data_source.execute(
@@ -203,7 +186,7 @@ def dev_login():
     )
     row = cursor.fetchone()
     if not row:
-        return jsonify({'success': False, 'message': f'用户 {username} 不存在'}), 404
+        return error_response(f'用户 {username} 不存在', status=404)
 
     # [FIX 2026-09-17] 同时纳入直接用户授权 (user_permission_sets),
     # 之前只走 org_permission_sets, admin 的 user_permission_sets=admin → permission_set=admin → '*'
@@ -271,26 +254,17 @@ def change_password():
 
     is_locked, lockout_msg = rate_limiter.check_rate_limit(client_ip, username)
     if is_locked:
-        return jsonify({
-            'success': False,
-            'message': lockout_msg,
-        }), 429
+        return error_response(lockout_msg, status=429)
 
     data = request.get_json(silent=True) or {}
     old_password = data.get('old_password', '')
     new_password = data.get('new_password', '')
 
     if not old_password or not new_password:
-        return jsonify({
-            'success': False,
-            'message': '旧密码和新密码不能为空',
-        }), 400
+        return error_response('旧密码和新密码不能为空')
 
     if len(new_password) < 6:
-        return jsonify({
-            'success': False,
-            'message': '新密码长度不能少于6位',
-        }), 400
+        return error_response('新密码长度不能少于6位')
 
     provider = _get_auth_provider()
     user_info = provider.authenticate({
@@ -322,14 +296,14 @@ def change_password():
     if ',' in client_ip_addr:
         client_ip_addr = client_ip_addr.split(',')[0].strip()
 
-    # [FIX 2026-06-20 P2.3] 改用 AuditLogger (audit-compliance.md §1.3 禁止直接 INSERT)
-    # 通过 AuditService.log() 自动获得 transaction_id (P2 v2)
+    # [FR-004] 审计写入统一走 AuditService.log（自动获得 transaction_id/outcome）
     try:
-        from meta.core.action_executor import AuditLogger
-        audit_logger = AuditLogger(_data_source)
-        audit_logger.log_update(
+        from meta.core.datasource import resolve_audit_data_source
+        from meta.services.audit_service import AuditService
+        AuditService(resolve_audit_data_source(_data_source)).log(
             object_type='user',
             object_id=user_id,
+            action='UPDATE',
             old_data={'password_hash': '***'},
             new_data={'password_hash': '***'},
             user_id=user_id,
@@ -341,7 +315,4 @@ def change_password():
         import logging
         logging.getLogger(__name__).warning(f"[Audit] password change audit failed: {e}")
 
-    return jsonify({
-        'success': True,
-        'message': '密码修改成功',
-    })
+    return ok_message('密码修改成功')

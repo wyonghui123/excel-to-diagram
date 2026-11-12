@@ -77,6 +77,25 @@ fields:
       relation: work_order
       hidden_in_form: true
 
+  # D3：三套里程碑只补 project_id 做归集（P2 挂载，M5 再接 SLA 汇总）；
+  # 值为创建时工单 project_id 的快照，可空（工单未归集项目时为空）
+  - id: project_id
+    name: 项目
+    type: integer
+    db_column: project_id
+    nullable: true
+    description: 所属项目（工单 project_id 快照；可空）
+    semantics:
+      meaning: 所属项目
+      display:
+        type: association
+        target_type: project
+        display_field: name
+    ui:
+      widget: select
+      relation: project
+      hidden_in_form: true
+
   - id: milestone_type
     name: 里程碑类型
     type: string
@@ -248,6 +267,8 @@ fields:
 indexes:
   - fields: [work_order_id]
     name: idx_sla_milestone_work_order
+  - fields: [project_id]
+    name: idx_sla_milestone_project
   - fields: [work_order_id, milestone_type]
     unique: true
     name: uq_sla_milestone

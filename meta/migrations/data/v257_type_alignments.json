@@ -1,0 +1,2655 @@
+{
+  "excluded_tables": [
+    "vendor_invoices",
+    "vendor_invoice_lines"
+  ],
+  "menus_page_type_fix": {
+    "column": "page_type",
+    "from": "",
+    "table": "menus",
+    "to": "object_list"
+  },
+  "source": "meta/schemas/generated_schema.sql",
+  "tables": {
+    "addresses": {
+      "checks": {
+        "status": [
+          "active",
+          "inactive"
+        ]
+      },
+      "types": {}
+    },
+    "adjustments": {
+      "checks": {
+        "adjustment_type": [
+          "subsequent_debit",
+          "subsequent_credit",
+          "retro_price_change",
+          "rebate_settlement",
+          "delta_accrual",
+          "provisional_settlement",
+          "override"
+        ]
+      },
+      "types": {
+        "delta_amount": "REAL"
+      }
+    },
+    "allocation_results": {
+      "checks": {
+        "allocation_basis": [
+          "equal",
+          "value",
+          "quantity",
+          "weight",
+          "volume",
+          "manual"
+        ],
+        "level": [
+          "header",
+          "line"
+        ],
+        "origin": [
+          "planned",
+          "unplanned"
+        ],
+        "rounding": [
+          "none",
+          "round",
+          "ceil",
+          "floor"
+        ],
+        "sign": [
+          "+",
+          "-"
+        ],
+        "status": [
+          "active",
+          "invalid"
+        ],
+        "target": [
+          "cost",
+          "expense"
+        ]
+      },
+      "types": {}
+    },
+    "allocation_rules": {
+      "checks": {
+        "basis": [
+          "equal",
+          "value",
+          "quantity",
+          "weight",
+          "volume",
+          "manual"
+        ],
+        "rounding": [
+          "none",
+          "round",
+          "ceil",
+          "floor"
+        ],
+        "target": [
+          "cost",
+          "expense"
+        ]
+      },
+      "types": {
+        "floor": "REAL",
+        "manual_factor": "REAL"
+      }
+    },
+    "attribute_definitions": {
+      "checks": {
+        "data_type": [
+          "string",
+          "number",
+          "integer",
+          "boolean",
+          "date",
+          "datetime"
+        ],
+        "status": [
+          "active",
+          "inactive",
+          "deprecated"
+        ],
+        "usage_class": [
+          "descriptive",
+          "analytic",
+          "indexed",
+          "computed",
+          "referential",
+          "stateful",
+          "secured"
+        ],
+        "value_domain_type": [
+          "none",
+          "list",
+          "table",
+          "range"
+        ]
+      },
+      "types": {}
+    },
+    "attribute_scopes": {
+      "checks": {
+        "scope_type": [
+          "object",
+          "item_group"
+        ],
+        "status": [
+          "active",
+          "inactive"
+        ]
+      },
+      "types": {}
+    },
+    "audit_logs": {
+      "checks": {},
+      "types": {
+        "created_at": "DATETIME",
+        "user_id": "INTEGER"
+      }
+    },
+    "batch_selection_policies": {
+      "checks": {
+        "scope_type": [
+          "item",
+          "item_group",
+          "org"
+        ],
+        "status": [
+          "active",
+          "inactive"
+        ]
+      },
+      "types": {}
+    },
+    "batches": {
+      "checks": {
+        "quality_status": [
+          "unrestricted",
+          "inspection",
+          "blocked"
+        ],
+        "source": [
+          "production",
+          "purchase",
+          "manual",
+          "adjustment"
+        ],
+        "status": [
+          "planned",
+          "in_process",
+          "closed"
+        ]
+      },
+      "types": {}
+    },
+    "business_objects": {
+      "checks": {},
+      "types": {
+        "created_at": "DATETIME"
+      }
+    },
+    "calc_details": {
+      "checks": {
+        "base_level": [
+          "header",
+          "line"
+        ],
+        "base_source": [
+          "pricing_quantity",
+          "scaled_quantity",
+          "activity_quantity",
+          "value",
+          "weight",
+          "volume",
+          "energy",
+          "hours",
+          "attribute",
+          "formula"
+        ],
+        "skip_reason": [
+          "condition_false"
+        ]
+      },
+      "types": {
+        "base_value": "REAL",
+        "extended_amount": "REAL",
+        "running_net_amount": "REAL",
+        "unit_price": "REAL"
+      }
+    },
+    "calc_procedure_steps": {
+      "checks": {
+        "element_type": [
+          "list_price",
+          "tier",
+          "attribute",
+          "formula",
+          "quality_premium",
+          "manual",
+          "round",
+          "aggregate",
+          "derived",
+          "track"
+        ]
+      },
+      "types": {}
+    },
+    "calc_procedures": {
+      "checks": {
+        "procedure_type": [
+          "pricing",
+          "costing",
+          "emission"
+        ],
+        "result_semantic": [
+          "price",
+          "cost",
+          "emission",
+          "tax",
+          "hours",
+          "quantity"
+        ]
+      },
+      "types": {}
+    },
+    "calc_results": {
+      "checks": {
+        "base_level": [
+          "header",
+          "line"
+        ],
+        "base_source": [
+          "pricing_quantity",
+          "scaled_quantity",
+          "activity_quantity",
+          "value",
+          "weight",
+          "volume",
+          "energy",
+          "hours",
+          "attribute",
+          "formula"
+        ],
+        "freeze_policy": [
+          "recompute",
+          "freeze"
+        ],
+        "level": [
+          "header",
+          "line"
+        ],
+        "origin": [
+          "planned",
+          "unplanned"
+        ],
+        "price_mode": [
+          "carry",
+          "recompute_amount",
+          "repricing"
+        ],
+        "qty_basis": [
+          "order_qty",
+          "delivered_qty",
+          "goods_issued_qty",
+          "billed_to_date_qty",
+          "dry_weight",
+          "net_dry_weight",
+          "assayed_content"
+        ],
+        "rate_source": [
+          "rate_record",
+          "external_quote",
+          "formula"
+        ],
+        "reprice_trigger": [
+          "manual",
+          "on_copy",
+          "on_ship_confirm",
+          "on_invoice",
+          "scheduled",
+          "on_quality_result",
+          "on_pricing_period_end"
+        ],
+        "result_semantic": [
+          "price",
+          "cost",
+          "emission",
+          "tax",
+          "hours",
+          "quantity"
+        ],
+        "sign": [
+          "+",
+          "-"
+        ],
+        "status": [
+          "active",
+          "invalid"
+        ]
+      },
+      "types": {
+        "amount": "REAL",
+        "base": "REAL",
+        "net_amount": "REAL",
+        "pricing_period_id": "INTEGER",
+        "rate": "REAL"
+      }
+    },
+    "calendar_days": {
+      "checks": {
+        "day_type": [
+          "holiday",
+          "workday"
+        ]
+      },
+      "types": {}
+    },
+    "calendars": {
+      "checks": {
+        "status": [
+          "active",
+          "inactive"
+        ]
+      },
+      "types": {}
+    },
+    "change_events": {
+      "checks": {
+        "status": [
+          "pending",
+          "processing",
+          "delivered",
+          "failed"
+        ]
+      },
+      "types": {}
+    },
+    "change_requests": {
+      "checks": {
+        "status": [
+          "draft",
+          "submitted",
+          "approved",
+          "rejected",
+          "applied",
+          "failed",
+          "cancelled"
+        ]
+      },
+      "types": {}
+    },
+    "change_subscriptions": {
+      "checks": {
+        "enabled": [
+          "1",
+          "0"
+        ]
+      },
+      "types": {}
+    },
+    "config_rule_terms": {
+      "checks": {
+        "clause": [
+          "if",
+          "then"
+        ],
+        "operator": [
+          "selected",
+          "not_selected",
+          "equals",
+          "not_equals",
+          "in",
+          "qty_ge",
+          "qty_le",
+          "qty_between",
+          "enabled",
+          "disabled"
+        ],
+        "target_type": [
+          "structure_line",
+          "option_class",
+          "characteristic"
+        ]
+      },
+      "types": {}
+    },
+    "config_rules": {
+      "checks": {
+        "rule_type": [
+          "require",
+          "bind",
+          "exclude",
+          "negate",
+          "default",
+          "condition"
+        ],
+        "severity": [
+          "blocking",
+          "warning"
+        ],
+        "status": [
+          "draft",
+          "active",
+          "inactive"
+        ]
+      },
+      "types": {}
+    },
+    "configuration_components": {
+      "checks": {
+        "selection_source": [
+          "auto",
+          "user",
+          "rule"
+        ]
+      },
+      "types": {}
+    },
+    "configuration_values": {
+      "checks": {
+        "source": [
+          "user",
+          "default",
+          "rule",
+          "derived"
+        ]
+      },
+      "types": {}
+    },
+    "configurations": {
+      "checks": {
+        "match_policy_used": [
+          "no",
+          "one_time_standard",
+          "one_time_user_defined"
+        ],
+        "source_level": [
+          "L0",
+          "L1",
+          "L2",
+          "L3"
+        ],
+        "status": [
+          "draft",
+          "solved",
+          "invalid",
+          "frozen",
+          "superseded"
+        ]
+      },
+      "types": {}
+    },
+    "control_parameter_defs": {
+      "checks": {
+        "domain": [
+          "sales",
+          "procurement",
+          "inventory",
+          "tolerance",
+          "platform",
+          "demand"
+        ],
+        "status": [
+          "active",
+          "inactive"
+        ],
+        "tolerance_basis": [
+          "percent",
+          "absolute"
+        ],
+        "tolerance_direction": [
+          "over",
+          "under",
+          "both"
+        ],
+        "value_type": [
+          "bool",
+          "enum",
+          "int",
+          "decimal",
+          "number",
+          "string",
+          "ref"
+        ]
+      },
+      "types": {}
+    },
+    "control_parameter_values": {
+      "checks": {
+        "status": [
+          "active",
+          "inactive",
+          "draft"
+        ]
+      },
+      "types": {}
+    },
+    "cumulative_usages": {
+      "checks": {},
+      "types": {
+        "used_amount": "REAL",
+        "used_quantity": "REAL"
+      }
+    },
+    "currencies": {
+      "checks": {
+        "status": [
+          "active",
+          "inactive"
+        ]
+      },
+      "types": {}
+    },
+    "currency_rates": {
+      "checks": {
+        "rate_type": [
+          "spot",
+          "corporate",
+          "user",
+          "fixed"
+        ]
+      },
+      "types": {}
+    },
+    "customer_invoice_lines": {
+      "checks": {
+        "billing_basis": [
+          "quantity",
+          "percent",
+          "amount"
+        ],
+        "price_override_reason_code": [
+          "promotion",
+          "contract",
+          "compensation",
+          "freight_adjust",
+          "other"
+        ],
+        "price_source": [
+          "order",
+          "pricing",
+          "manual"
+        ],
+        "source_doc_type": [
+          "shipment",
+          "sales_order",
+          "manual",
+          "billing_schedule",
+          "service_confirmation",
+          "return_shipment"
+        ]
+      },
+      "types": {}
+    },
+    "customer_invoice_schedules": {
+      "checks": {
+        "status": [
+          "open",
+          "partial",
+          "closed",
+          "cancelled"
+        ]
+      },
+      "types": {}
+    },
+    "customer_invoices": {
+      "checks": {
+        "billing_pricing_mode": [
+          "copy_frozen",
+          "copy_scale_update",
+          "copy_reprice_all",
+          "copy_manual_reprice_rest",
+          "copy_frozen_redetermine_tax",
+          "legacy"
+        ],
+        "document_category": [
+          "invoice",
+          "credit_memo",
+          "debit_memo",
+          "cancellation"
+        ],
+        "status": [
+          "draft",
+          "submitted",
+          "posted",
+          "cancelled",
+          "reversed"
+        ]
+      },
+      "types": {}
+    },
+    "customer_sales_orgs": {
+      "checks": {
+        "status": [
+          "active",
+          "inactive"
+        ]
+      },
+      "types": {}
+    },
+    "customer_salesperson_assignments": {
+      "checks": {
+        "status": [
+          "active",
+          "inactive"
+        ]
+      },
+      "types": {}
+    },
+    "data_permissions": {
+      "checks": {},
+      "types": {
+        "inherit_to_children": "INTEGER"
+      }
+    },
+    "demand_allocations": {
+      "checks": {
+        "charge_basis": [
+          "inventory",
+          "project",
+          "expense",
+          "asset"
+        ],
+        "demand_bo": [
+          "requisition",
+          "service_request",
+          "sales_order_schedule",
+          "project_task"
+        ],
+        "status": [
+          "active",
+          "reversed"
+        ],
+        "target_bo": [
+          "purchase_order",
+          "receipt",
+          "transfer_order",
+          "work_order",
+          "sales_order"
+        ]
+      },
+      "types": {}
+    },
+    "demand_trace_links": {
+      "checks": {
+        "demand_object_type": [
+          "sales_order_line",
+          "project_task",
+          "work_order",
+          "service_order",
+          "forecast"
+        ],
+        "peg_type": [
+          "hard",
+          "soft"
+        ],
+        "trace_type": [
+          "reservation",
+          "pegging",
+          "allocation"
+        ]
+      },
+      "types": {}
+    },
+    "divisions": {
+      "checks": {
+        "status": [
+          "active",
+          "inactive"
+        ]
+      },
+      "types": {}
+    },
+    "document_hu_links": {
+      "checks": {
+        "direction": [
+          "in",
+          "out"
+        ],
+        "link_type": [
+          "planned",
+          "packed",
+          "shipped"
+        ]
+      },
+      "types": {}
+    },
+    "document_serial_links": {
+      "checks": {
+        "direction": [
+          "in",
+          "out"
+        ]
+      },
+      "types": {}
+    },
+    "domains": {
+      "checks": {},
+      "types": {
+        "created_at": "DATETIME"
+      }
+    },
+    "employees": {
+      "checks": {
+        "employment_type": [
+          "full_time",
+          "part_time",
+          "contractor",
+          "intern",
+          "dispatched"
+        ],
+        "status": [
+          "active",
+          "inactive",
+          "terminated"
+        ]
+      },
+      "types": {}
+    },
+    "engineering_change_lines": {
+      "checks": {
+        "line_type": [
+          "add",
+          "modify",
+          "remove"
+        ]
+      },
+      "types": {}
+    },
+    "engineering_changes": {
+      "checks": {
+        "change_type": [
+          "new",
+          "revise",
+          "obsolete"
+        ],
+        "status": [
+          "draft",
+          "in_review",
+          "approved",
+          "applied",
+          "rejected",
+          "cancelled"
+        ]
+      },
+      "types": {}
+    },
+    "enum_types": {
+      "checks": {
+        "category": [
+          "system",
+          "business"
+        ],
+        "mutability": [
+          "fullEditable",
+          "extensible",
+          "locked"
+        ]
+      },
+      "types": {}
+    },
+    "enum_values": {
+      "checks": {
+        "is_active": [
+          "1",
+          "0"
+        ],
+        "is_system": [
+          "1",
+          "0"
+        ]
+      },
+      "types": {}
+    },
+    "exclusion_groups": {
+      "checks": {
+        "resolution": [
+          "first_in_sequence",
+          "keep_highest"
+        ]
+      },
+      "types": {}
+    },
+    "external_rate_sources": {
+      "checks": {
+        "source": [
+          "platts",
+          "lme",
+          "ice",
+          "index",
+          "custom"
+        ]
+      },
+      "types": {}
+    },
+    "factor_catalogs": {
+      "checks": {
+        "source_type": [
+          "static",
+          "master",
+          "quality",
+          "measurement",
+          "market"
+        ]
+      },
+      "types": {}
+    },
+    "fulfillment_orders": {
+      "checks": {
+        "fulfillment_type": [
+          "delivery",
+          "pickup",
+          "onsite",
+          "remote"
+        ],
+        "status": [
+          "draft",
+          "planned",
+          "in_progress",
+          "completed",
+          "cancelled"
+        ]
+      },
+      "types": {}
+    },
+    "fulfillment_routing_rules": {
+      "checks": {
+        "delivery_mode": [
+          "delivery",
+          "pickup",
+          "onsite",
+          "remote"
+        ],
+        "item_type": [
+          "goods",
+          "service"
+        ],
+        "procurement_type": [
+          "make",
+          "buy",
+          "stock",
+          "service"
+        ]
+      },
+      "types": {}
+    },
+    "handling_unit_items": {
+      "checks": {
+        "content_type": [
+          "material",
+          "packaging",
+          "hu"
+        ]
+      },
+      "types": {}
+    },
+    "handling_units": {
+      "checks": {
+        "hu_type": [
+          "pallet",
+          "carton",
+          "bin",
+          "container",
+          "other"
+        ],
+        "status": [
+          "planned",
+          "open",
+          "sealed",
+          "in_transit",
+          "shipped",
+          "void"
+        ]
+      },
+      "types": {
+        "gross_weight": "REAL",
+        "net_weight": "REAL",
+        "tare_weight": "REAL",
+        "volume": "REAL"
+      }
+    },
+    "hu_transactions": {
+      "checks": {
+        "txn_type": [
+          "create",
+          "pack",
+          "unpack",
+          "move",
+          "consolidate",
+          "split",
+          "seal",
+          "unseal",
+          "ship",
+          "reverse",
+          "reuse",
+          "void"
+        ]
+      },
+      "types": {}
+    },
+    "incoterms": {
+      "checks": {
+        "edition": [
+          "2020",
+          "2010"
+        ],
+        "export_clearance_by": [
+          "seller",
+          "buyer"
+        ],
+        "import_clearance_by": [
+          "seller",
+          "buyer"
+        ],
+        "insurance_cover": [
+          "none",
+          "icc_c",
+          "icc_a"
+        ],
+        "main_carriage_by": [
+          "seller",
+          "buyer"
+        ],
+        "risk_transfer_point": [
+          "seller_premises",
+          "carrier",
+          "alongside_ship",
+          "on_board",
+          "destination_ready",
+          "destination_unloaded"
+        ],
+        "status": [
+          "active",
+          "inactive"
+        ],
+        "transport_mode": [
+          "any_mode",
+          "sea_and_inland"
+        ],
+        "unloading_by": [
+          "seller",
+          "buyer"
+        ]
+      },
+      "types": {}
+    },
+    "inventory_adjustment_lines": {
+      "checks": {
+        "from_stock_status": [
+          "unrestricted",
+          "inspection",
+          "blocked"
+        ],
+        "to_stock_status": [
+          "unrestricted",
+          "inspection",
+          "blocked"
+        ]
+      },
+      "types": {}
+    },
+    "inventory_adjustments": {
+      "checks": {
+        "adjustment_type": [
+          "qty_increase",
+          "qty_decrease",
+          "scrap",
+          "status_transfer",
+          "count_difference",
+          "opening"
+        ],
+        "reason_code": [
+          "physical_gain",
+          "physical_loss",
+          "scrap",
+          "quality_reject",
+          "correction",
+          "opening",
+          "count_difference"
+        ],
+        "status": [
+          "draft",
+          "released",
+          "posted",
+          "reversed",
+          "cancelled"
+        ]
+      },
+      "types": {}
+    },
+    "inventory_balances": {
+      "checks": {
+        "stock_segment_type": [
+          "owned",
+          "project_task",
+          "sales_order_line",
+          "supplier_consignment",
+          "customer_owned"
+        ],
+        "stock_status": [
+          "unrestricted",
+          "inspection",
+          "blocked"
+        ]
+      },
+      "types": {}
+    },
+    "inventory_count_lines": {
+      "checks": {
+        "stock_status": [
+          "unrestricted",
+          "inspection",
+          "blocked"
+        ]
+      },
+      "types": {}
+    },
+    "inventory_counts": {
+      "checks": {
+        "count_type": [
+          "physical",
+          "cycle"
+        ],
+        "status": [
+          "draft",
+          "counting",
+          "submitted",
+          "approved",
+          "posted",
+          "cancelled"
+        ]
+      },
+      "types": {}
+    },
+    "inventory_reservations": {
+      "checks": {
+        "demand_object_type": [
+          "sales_order_line",
+          "project_task",
+          "work_order",
+          "service_order",
+          "forecast"
+        ],
+        "peg_type": [
+          "hard",
+          "soft"
+        ],
+        "status": [
+          "open",
+          "partially_fulfilled",
+          "fulfilled",
+          "closed",
+          "cancelled",
+          "expired"
+        ],
+        "stock_segment_type": [
+          "owned",
+          "project_task",
+          "sales_order_line",
+          "supplier_consignment",
+          "customer_owned"
+        ]
+      },
+      "types": {}
+    },
+    "inventory_transactions": {
+      "checks": {
+        "direction": [
+          "in",
+          "out"
+        ],
+        "stock_segment_type": [
+          "owned",
+          "project_task",
+          "sales_order_line",
+          "supplier_consignment",
+          "customer_owned"
+        ],
+        "stock_status": [
+          "unrestricted",
+          "inspection",
+          "blocked"
+        ]
+      },
+      "types": {}
+    },
+    "item_groups": {
+      "checks": {
+        "status": [
+          "active",
+          "inactive"
+        ]
+      },
+      "types": {}
+    },
+    "item_structure_attributes": {
+      "checks": {
+        "ui_widget": [
+          "select",
+          "radio",
+          "number",
+          "switch",
+          "date"
+        ]
+      },
+      "types": {}
+    },
+    "item_structures": {
+      "checks": {
+        "status": [
+          "draft",
+          "active",
+          "inactive"
+        ],
+        "usage": [
+          "production",
+          "engineering",
+          "sales",
+          "costing"
+        ]
+      },
+      "types": {}
+    },
+    "item_xrefs": {
+      "checks": {
+        "partner_type": [
+          "customer",
+          "vendor",
+          "manufacturer"
+        ]
+      },
+      "types": {}
+    },
+    "items": {
+      "checks": {
+        "billing_method_default": [
+          "fixed_price",
+          "time_and_material",
+          "milestone"
+        ],
+        "config_match_policy": [
+          "no",
+          "one_time_standard",
+          "one_time_user_defined"
+        ],
+        "config_materialize_policy": [
+          "off",
+          "manual",
+          "auto"
+        ],
+        "duration_type": [
+          "hour",
+          "day",
+          "week"
+        ],
+        "item_type": [
+          "goods",
+          "service"
+        ],
+        "required_resource_type": [
+          "technician",
+          "engineer",
+          "consultant"
+        ],
+        "status": [
+          "draft",
+          "active",
+          "frozen",
+          "inactive"
+        ],
+        "structure_role": [
+          "none",
+          "model",
+          "option_class"
+        ]
+      },
+      "types": {}
+    },
+    "line_type_assignments": {
+      "checks": {
+        "status": [
+          "active",
+          "inactive",
+          "draft"
+        ]
+      },
+      "types": {}
+    },
+    "locations": {
+      "checks": {
+        "location_type": [
+          "site",
+          "warehouse",
+          "zone",
+          "bin"
+        ],
+        "status": [
+          "active",
+          "inactive"
+        ]
+      },
+      "types": {}
+    },
+    "menu_permissions": {
+      "checks": {},
+      "types": {
+        "created_at": "DATETIME",
+        "updated_at": "DATETIME"
+      }
+    },
+    "menus": {
+      "checks": {
+        "page_type": [
+          "object_list",
+          "object_detail",
+          "multi_object_hub",
+          "custom_page",
+          "dashboard",
+          "report",
+          "rule_center"
+        ]
+      },
+      "types": {}
+    },
+    "number_sequences": {
+      "checks": {
+        "on_exhaust": [
+          "error",
+          "extend"
+        ],
+        "status": [
+          "active",
+          "inactive"
+        ]
+      },
+      "types": {}
+    },
+    "operation_resource_requirements": {
+      "checks": {
+        "role": [
+          "machine",
+          "labor",
+          "tool",
+          "vehicle",
+          "external"
+        ]
+      },
+      "types": {}
+    },
+    "orgs": {
+      "checks": {
+        "org_type": [
+          "department",
+          "team",
+          "division",
+          "company"
+        ],
+        "status": [
+          "active",
+          "inactive"
+        ]
+      },
+      "types": {}
+    },
+    "parties": {
+      "checks": {
+        "party_type": [
+          "organization",
+          "person"
+        ],
+        "status": [
+          "active",
+          "inactive"
+        ]
+      },
+      "types": {}
+    },
+    "party_addresses": {
+      "checks": {
+        "role": [
+          "sold_to",
+          "ship_to",
+          "bill_to"
+        ],
+        "status": [
+          "active",
+          "inactive"
+        ]
+      },
+      "types": {}
+    },
+    "party_groups": {
+      "checks": {
+        "role_scope": [
+          "customer",
+          "vendor",
+          "both"
+        ],
+        "status": [
+          "active",
+          "inactive"
+        ]
+      },
+      "types": {}
+    },
+    "party_relations": {
+      "checks": {
+        "internal_mark": [
+          "internal",
+          "external"
+        ],
+        "role": [
+          "customer",
+          "vendor"
+        ],
+        "status": [
+          "active",
+          "inactive"
+        ]
+      },
+      "types": {}
+    },
+    "party_tax_registrations": {
+      "checks": {
+        "status": [
+          "active",
+          "inactive"
+        ],
+        "tax_type": [
+          "vat",
+          "gst",
+          "sales_tax",
+          "excise",
+          "customs_duty",
+          "other"
+        ]
+      },
+      "types": {}
+    },
+    "payment_terms": {
+      "checks": {
+        "basis_date_rule": [
+          "invoice_date",
+          "delivery_date",
+          "order_date",
+          "month_end"
+        ],
+        "status": [
+          "active",
+          "inactive"
+        ]
+      },
+      "types": {}
+    },
+    "permission_bundles": {
+      "checks": {},
+      "types": {
+        "created_at": "DATETIME",
+        "updated_at": "DATETIME"
+      }
+    },
+    "permission_rules": {
+      "checks": {},
+      "types": {
+        "created_at": "DATETIME",
+        "updated_at": "DATETIME"
+      }
+    },
+    "permission_set_data_permissions": {
+      "checks": {},
+      "types": {
+        "created_at": "DATETIME"
+      }
+    },
+    "permission_sets": {
+      "checks": {
+        "is_active": [
+          "1",
+          "0"
+        ],
+        "is_system": [
+          "1",
+          "0"
+        ]
+      },
+      "types": {}
+    },
+    "pricing_determinations": {
+      "checks": {
+        "status": [
+          "draft",
+          "active",
+          "inactive"
+        ]
+      },
+      "types": {}
+    },
+    "pricing_periods": {
+      "checks": {
+        "average_basis": [
+          "close",
+          "average",
+          "first",
+          "last"
+        ],
+        "period_type": [
+          "shipment_date",
+          "receipt_date",
+          "invoice_date",
+          "fixed_range"
+        ],
+        "rounding": [
+          "none",
+          "round",
+          "ceil",
+          "floor"
+        ]
+      },
+      "types": {}
+    },
+    "process_instructions": {
+      "checks": {
+        "data_type": [
+          "numeric",
+          "text",
+          "boolean",
+          "date"
+        ],
+        "direction": [
+          "set",
+          "collect"
+        ],
+        "instruction_kind": [
+          "text",
+          "parameter"
+        ]
+      },
+      "types": {}
+    },
+    "production_versions": {
+      "checks": {
+        "status": [
+          "draft",
+          "active",
+          "obsolete"
+        ]
+      },
+      "types": {}
+    },
+    "products": {
+      "checks": {
+        "is_active": [
+          "1",
+          "0"
+        ],
+        "visibility": [
+          "private",
+          "public"
+        ]
+      },
+      "types": {
+        "created_at": "DATETIME"
+      }
+    },
+    "project_task_dependencies": {
+      "checks": {
+        "dependency_type": [
+          "FS",
+          "SS",
+          "FF",
+          "SF"
+        ]
+      },
+      "types": {}
+    },
+    "project_tasks": {
+      "checks": {
+        "status": [
+          "draft",
+          "planned",
+          "in_progress",
+          "done",
+          "cancelled"
+        ],
+        "task_type": [
+          "phase",
+          "work_package",
+          "activity"
+        ]
+      },
+      "types": {}
+    },
+    "projects": {
+      "checks": {
+        "design_mode": [
+          "standard",
+          "engineered"
+        ],
+        "status": [
+          "draft",
+          "active",
+          "inactive",
+          "closed",
+          "cancelled"
+        ]
+      },
+      "types": {}
+    },
+    "purchase_order_lines": {
+      "checks": {
+        "fulfillment_status": [
+          "open",
+          "partially_received",
+          "received"
+        ],
+        "price_source": [
+          "manual",
+          "agreement",
+          "quotation",
+          "rate_table",
+          "last_po",
+          "standard_cost"
+        ],
+        "pricing_mode": [
+          "standalone",
+          "bundle_price",
+          "component_price",
+          "base_plus_option"
+        ],
+        "status": [
+          "open",
+          "closed",
+          "cancelled"
+        ],
+        "subcontract_fee_basis": [
+          "per_unit",
+          "per_batch"
+        ]
+      },
+      "types": {}
+    },
+    "purchase_order_schedules": {
+      "checks": {
+        "completion_prev_status": [
+          "planned",
+          "confirmed"
+        ],
+        "completion_source": [
+          "receipt",
+          "manual",
+          "short_close"
+        ],
+        "schedule_kind": [
+          "delivery",
+          "service"
+        ],
+        "status": [
+          "planned",
+          "confirmed",
+          "completed",
+          "cancelled"
+        ]
+      },
+      "types": {}
+    },
+    "purchase_orders": {
+      "checks": {
+        "approval_status": [
+          "not_required",
+          "pending",
+          "approved",
+          "rejected"
+        ],
+        "exchange_rate_type": [
+          "spot",
+          "corporate",
+          "user",
+          "fixed"
+        ],
+        "fulfillment_status": [
+          "open",
+          "partially_received",
+          "received",
+          "closed"
+        ],
+        "status": [
+          "draft",
+          "submitted",
+          "confirmed",
+          "closed",
+          "cancelled"
+        ]
+      },
+      "types": {}
+    },
+    "rate_records": {
+      "checks": {
+        "distribution_basis": [
+          "none",
+          "quantity",
+          "net_amount",
+          "weight",
+          "volume",
+          "amount"
+        ],
+        "hit_policy": [
+          "exclusive",
+          "additive"
+        ],
+        "scale_semantic": [
+          "total",
+          "incremental"
+        ],
+        "status": [
+          "active",
+          "inactive"
+        ]
+      },
+      "types": {
+        "allocation_weight": "REAL",
+        "rate": "REAL",
+        "rate_qty": "REAL",
+        "valid_from": "DATETIME",
+        "valid_to": "DATETIME",
+        "value": "REAL"
+      }
+    },
+    "rate_tables": {
+      "checks": {
+        "status": [
+          "draft",
+          "approved",
+          "inactive"
+        ],
+        "type": [
+          "standard",
+          "contract",
+          "promotion"
+        ]
+      },
+      "types": {}
+    },
+    "rate_types": {
+      "checks": {
+        "calc_type": [
+          "percent",
+          "fixed",
+          "quantity",
+          "formula"
+        ],
+        "rate_class": [
+          "price",
+          "discount_surcharge",
+          "tax",
+          "freight",
+          "statistical"
+        ],
+        "rate_source": [
+          "rate_record",
+          "external_quote",
+          "formula"
+        ],
+        "rounding": [
+          "none",
+          "round",
+          "ceil",
+          "floor"
+        ],
+        "sign": [
+          "+",
+          "-"
+        ]
+      },
+      "types": {}
+    },
+    "receipt_lines": {
+      "checks": {
+        "hu_type": [
+          "pallet",
+          "carton",
+          "bin",
+          "container",
+          "other"
+        ],
+        "rejection_disposition": [
+          "return_to_supplier",
+          "concession",
+          "scrap",
+          "rework"
+        ],
+        "status": [
+          "draft",
+          "posted",
+          "reversed",
+          "cancelled"
+        ]
+      },
+      "types": {}
+    },
+    "receipts": {
+      "checks": {
+        "return_to": [
+          "supplier",
+          "receiving"
+        ],
+        "source_doc_type": [
+          "purchase_order",
+          "transfer_order",
+          "work_order",
+          "sales_return",
+          "intercompany"
+        ],
+        "status": [
+          "draft",
+          "posted",
+          "reversed",
+          "cancelled"
+        ]
+      },
+      "types": {}
+    },
+    "regions": {
+      "checks": {
+        "level": [
+          "country",
+          "province",
+          "city",
+          "district"
+        ],
+        "status": [
+          "active",
+          "inactive"
+        ]
+      },
+      "types": {}
+    },
+    "relationships": {
+      "checks": {},
+      "types": {
+        "created_at": "DATETIME"
+      }
+    },
+    "requisition_lines": {
+      "checks": {
+        "line_type": [
+          "goods",
+          "service"
+        ],
+        "status": [
+          "open",
+          "closed",
+          "cancelled"
+        ]
+      },
+      "types": {}
+    },
+    "requisitions": {
+      "checks": {
+        "priority": [
+          "low",
+          "medium",
+          "high",
+          "urgent"
+        ],
+        "status": [
+          "draft",
+          "submitted",
+          "approved",
+          "rejected",
+          "closed",
+          "cancelled"
+        ]
+      },
+      "types": {}
+    },
+    "resource_assignments": {
+      "checks": {
+        "source": [
+          "manual",
+          "auto"
+        ],
+        "status": [
+          "planned",
+          "confirmed",
+          "in_progress",
+          "completed",
+          "canceled"
+        ]
+      },
+      "types": {}
+    },
+    "resource_availabilities": {
+      "checks": {
+        "availability_type": [
+          "available",
+          "unavailable",
+          "overtime"
+        ],
+        "source": [
+          "manual",
+          "hr",
+          "maintenance",
+          "other"
+        ]
+      },
+      "types": {}
+    },
+    "resource_capacities": {
+      "checks": {
+        "capacity_category": [
+          "labor_hours",
+          "machine_hours",
+          "tool_count",
+          "vehicle_weight",
+          "vehicle_volume",
+          "facility_capacity"
+        ]
+      },
+      "types": {}
+    },
+    "resource_groups": {
+      "checks": {
+        "capacity_aggregation": [
+          "sum",
+          "max",
+          "bottleneck"
+        ],
+        "group_kind": [
+          "work_center",
+          "crew",
+          "pool",
+          "fleet",
+          "site_group"
+        ],
+        "membership_mode": [
+          "members",
+          "children"
+        ]
+      },
+      "types": {}
+    },
+    "resource_rates": {
+      "checks": {
+        "rate_basis": [
+          "per_hour",
+          "per_use",
+          "per_unit",
+          "per_km",
+          "per_kg"
+        ],
+        "rate_purpose": [
+          "cost",
+          "billing",
+          "overtime",
+          "setup"
+        ],
+        "rate_source": [
+          "internal",
+          "external_contract",
+          "standard"
+        ]
+      },
+      "types": {}
+    },
+    "resource_territory_assignments": {
+      "checks": {
+        "coverage_level": [
+          "primary",
+          "backup"
+        ]
+      },
+      "types": {}
+    },
+    "resources": {
+      "checks": {
+        "resource_kind": [
+          "person",
+          "machine",
+          "vehicle",
+          "tool",
+          "facility",
+          "site",
+          "external"
+        ]
+      },
+      "types": {}
+    },
+    "sales_order_lines": {
+      "checks": {
+        "billing_method": [
+          "fixed_price",
+          "time_and_material",
+          "milestone"
+        ],
+        "billing_proration": [
+          "none",
+          "daily"
+        ],
+        "billing_relevance": [
+          "delivery",
+          "plan"
+        ],
+        "duration_type": [
+          "hour",
+          "day",
+          "week"
+        ],
+        "fulfillment_status": [
+          "not_applicable",
+          "not_started",
+          "partial",
+          "fulfilled"
+        ],
+        "price_source": [
+          "rate_table",
+          "manual"
+        ],
+        "pricing_mode": [
+          "standalone",
+          "bundle_price",
+          "component_price",
+          "base_plus_option"
+        ],
+        "required_resource_type": [
+          "technician",
+          "engineer",
+          "consultant"
+        ],
+        "status": [
+          "open",
+          "closed",
+          "cancelled"
+        ]
+      },
+      "types": {
+        "fulfillment_derived_at": "DATETIME"
+      }
+    },
+    "sales_order_schedules": {
+      "checks": {
+        "billing_status": [
+          "none",
+          "partial",
+          "full",
+          "cancelled"
+        ],
+        "schedule_kind": [
+          "delivery",
+          "billing",
+          "service"
+        ],
+        "status": [
+          "planned",
+          "confirmed",
+          "completed",
+          "cancelled"
+        ]
+      },
+      "types": {}
+    },
+    "sales_orders": {
+      "checks": {
+        "billing_status": [
+          "none",
+          "partial",
+          "full"
+        ],
+        "exchange_rate_type": [
+          "spot",
+          "corporate",
+          "user",
+          "fixed"
+        ],
+        "fulfillment_status": [
+          "not_applicable",
+          "not_started",
+          "partial",
+          "fulfilled",
+          "voided"
+        ],
+        "pricing_status": [
+          "pending",
+          "determined",
+          "manual",
+          "failed"
+        ],
+        "status": [
+          "draft",
+          "submitted",
+          "confirmed",
+          "closed",
+          "cancelled"
+        ]
+      },
+      "types": {
+        "fulfillment_derived_at": "DATETIME"
+      }
+    },
+    "salespersons": {
+      "checks": {
+        "status": [
+          "active",
+          "inactive"
+        ]
+      },
+      "types": {}
+    },
+    "serial_numbers": {
+      "checks": {
+        "quality_status": [
+          "unrestricted",
+          "inspection",
+          "blocked"
+        ],
+        "relation_type": [
+          "assembly",
+          "packaging"
+        ],
+        "source_type": [
+          "received",
+          "produced",
+          "opening",
+          "issue_created"
+        ],
+        "usage_status": [
+          "defined",
+          "in_stores",
+          "in_transit",
+          "issued",
+          "shipped",
+          "consumed",
+          "returned",
+          "scrapped"
+        ]
+      },
+      "types": {}
+    },
+    "serial_transactions": {
+      "checks": {
+        "txn_type": [
+          "create",
+          "receive",
+          "issue",
+          "transfer_out",
+          "transfer_in",
+          "ship",
+          "return",
+          "adjust",
+          "status_change",
+          "scrap"
+        ]
+      },
+      "types": {}
+    },
+    "service_catalog_items": {
+      "checks": {
+        "default_priority": [
+          "low",
+          "medium",
+          "high",
+          "urgent"
+        ],
+        "status": [
+          "draft",
+          "active",
+          "inactive"
+        ]
+      },
+      "types": {}
+    },
+    "service_events": {
+      "checks": {
+        "event_type": [
+          "create",
+          "accept",
+          "start",
+          "hold",
+          "resume",
+          "resolve",
+          "close",
+          "cancel",
+          "sla_trace"
+        ]
+      },
+      "types": {}
+    },
+    "service_modules": {
+      "checks": {},
+      "types": {
+        "created_at": "DATETIME"
+      }
+    },
+    "service_request_lines": {
+      "checks": {
+        "line_type": [
+          "service",
+          "goods"
+        ],
+        "status": [
+          "open",
+          "closed",
+          "cancelled"
+        ]
+      },
+      "types": {}
+    },
+    "service_requests": {
+      "checks": {
+        "priority": [
+          "low",
+          "medium",
+          "high",
+          "urgent"
+        ],
+        "status": [
+          "draft",
+          "submitted",
+          "approved",
+          "rejected",
+          "completed",
+          "closed",
+          "cancelled"
+        ]
+      },
+      "types": {}
+    },
+    "shifts": {
+      "checks": {
+        "shift_type": [
+          "regular",
+          "overtime",
+          "standby"
+        ]
+      },
+      "types": {}
+    },
+    "shipment_lines": {
+      "checks": {
+        "status": [
+          "draft",
+          "staged",
+          "shipped",
+          "delivered",
+          "reversed",
+          "cancelled"
+        ]
+      },
+      "types": {}
+    },
+    "shipments": {
+      "checks": {
+        "source": [
+          "manual",
+          "auto"
+        ],
+        "status": [
+          "draft",
+          "released",
+          "staged",
+          "shipped",
+          "delivered",
+          "reversed",
+          "closed",
+          "cancelled"
+        ]
+      },
+      "types": {}
+    },
+    "skills": {
+      "checks": {
+        "category": [
+          "trade",
+          "certification",
+          "language",
+          "soft"
+        ],
+        "status": [
+          "active",
+          "inactive"
+        ]
+      },
+      "types": {}
+    },
+    "sla_coverage_rules": {
+      "checks": {
+        "channel": [
+          "phone",
+          "email",
+          "web",
+          "onsite"
+        ],
+        "severity": [
+          "critical",
+          "high",
+          "medium",
+          "low"
+        ]
+      },
+      "types": {}
+    },
+    "sla_milestones": {
+      "checks": {
+        "milestone_type": [
+          "first_response",
+          "resolution"
+        ],
+        "state": [
+          "Pending",
+          "Running",
+          "Paused",
+          "Warned",
+          "Met",
+          "Breached"
+        ]
+      },
+      "types": {}
+    },
+    "sourcing_mode_policies": {
+      "checks": {
+        "mode": [
+          "make",
+          "buy",
+          "transfer"
+        ],
+        "status": [
+          "active",
+          "inactive"
+        ]
+      },
+      "types": {}
+    },
+    "sourcing_rule_assignments": {
+      "checks": {
+        "scope_type": [
+          "global",
+          "item_group",
+          "item"
+        ],
+        "status": [
+          "active",
+          "inactive"
+        ]
+      },
+      "types": {}
+    },
+    "sourcing_rule_lines": {
+      "checks": {
+        "source_type": [
+          "internal_org",
+          "internal_location",
+          "supplier",
+          "production"
+        ]
+      },
+      "types": {}
+    },
+    "sourcing_rules": {
+      "checks": {
+        "rule_usage": [
+          "fulfillment",
+          "purchasing",
+          "all"
+        ],
+        "status": [
+          "draft",
+          "active",
+          "inactive"
+        ]
+      },
+      "types": {}
+    },
+    "sub_domains": {
+      "checks": {},
+      "types": {
+        "created_at": "DATETIME"
+      }
+    },
+    "tax_classifications": {
+      "checks": {
+        "applicable_to": [
+          "customer",
+          "supplier",
+          "item"
+        ],
+        "status": [
+          "active",
+          "inactive"
+        ]
+      },
+      "types": {}
+    },
+    "tax_codes": {
+      "checks": {
+        "direction": [
+          "sales",
+          "purchase",
+          "both"
+        ],
+        "rate_source": [
+          "internal",
+          "external"
+        ],
+        "rounding": [
+          "none",
+          "round",
+          "ceil",
+          "floor"
+        ],
+        "status": [
+          "active",
+          "inactive"
+        ],
+        "tax_treatment": [
+          "standard",
+          "zero_rated",
+          "exempt",
+          "out_of_scope"
+        ],
+        "tax_type": [
+          "vat",
+          "gst",
+          "sales_tax",
+          "excise",
+          "customs_duty",
+          "other",
+          "none"
+        ]
+      },
+      "types": {}
+    },
+    "territories": {
+      "checks": {
+        "status": [
+          "active",
+          "inactive"
+        ],
+        "territory_type": [
+          "geographic",
+          "industry",
+          "account",
+          "channel"
+        ]
+      },
+      "types": {}
+    },
+    "territory_account_assignments": {
+      "checks": {
+        "assignment_source": [
+          "manual",
+          "rule",
+          "import"
+        ]
+      },
+      "types": {}
+    },
+    "time_entries": {
+      "checks": {
+        "entry_type": [
+          "manual",
+          "timer",
+          "import"
+        ]
+      },
+      "types": {}
+    },
+    "transfer_order_lines": {
+      "checks": {
+        "fulfillment_status": [
+          "open",
+          "partially_shipped",
+          "shipped",
+          "partially_received",
+          "received"
+        ],
+        "hu_type": [
+          "pallet",
+          "carton",
+          "bin",
+          "container",
+          "other"
+        ],
+        "status": [
+          "open",
+          "closed",
+          "cancelled"
+        ]
+      },
+      "types": {}
+    },
+    "transfer_orders": {
+      "checks": {
+        "approval_status": [
+          "not_required",
+          "pending",
+          "approved",
+          "rejected"
+        ],
+        "fulfillment_status": [
+          "open",
+          "partially_shipped",
+          "shipped",
+          "partially_received",
+          "received"
+        ],
+        "status": [
+          "draft",
+          "released",
+          "closed",
+          "cancelled",
+          "reversed"
+        ]
+      },
+      "types": {}
+    },
+    "transfer_shipments": {
+      "checks": {
+        "status": [
+          "draft",
+          "posted",
+          "cancelled"
+        ]
+      },
+      "types": {}
+    },
+    "type_definitions": {
+      "checks": {
+        "document_category": [
+          "standard",
+          "rush",
+          "return",
+          "credit_memo",
+          "debit_memo",
+          "consignment",
+          "loan",
+          "invoice",
+          "cancellation"
+        ],
+        "level": [
+          "header",
+          "line"
+        ],
+        "line_category": [
+          "material",
+          "service",
+          "return",
+          "free_of_charge",
+          "text",
+          "freight",
+          "misc",
+          "asset",
+          "expense",
+          "subcontract"
+        ],
+        "status": [
+          "active",
+          "inactive"
+        ]
+      },
+      "types": {
+        "delivery_relevant": "INTEGER"
+      }
+    },
+    "uom_groups": {
+      "checks": {
+        "status": [
+          "active",
+          "inactive"
+        ]
+      },
+      "types": {}
+    },
+    "uoms": {
+      "checks": {
+        "status": [
+          "active",
+          "inactive"
+        ]
+      },
+      "types": {}
+    },
+    "usage_groups": {
+      "checks": {},
+      "types": {
+        "max_amount": "REAL",
+        "max_quantity": "REAL"
+      }
+    },
+    "users": {
+      "checks": {
+        "date_style": [
+          "full",
+          "long",
+          "medium",
+          "short"
+        ],
+        "hour_cycle": [
+          "12",
+          "24"
+        ],
+        "locale": [
+          "zh-CN",
+          "en-US",
+          "en-GB"
+        ],
+        "time_style": [
+          "full",
+          "long",
+          "medium",
+          "short"
+        ]
+      },
+      "types": {}
+    },
+    "versions": {
+      "checks": {
+        "is_current": [
+          "1",
+          "0"
+        ]
+      },
+      "types": {
+        "created_at": "DATETIME"
+      }
+    },
+    "work_definition_operation_outputs": {
+      "checks": {
+        "output_type": [
+          "product",
+          "co_product",
+          "by_product"
+        ]
+      },
+      "types": {}
+    },
+    "work_definition_operations": {
+      "checks": {
+        "status": [
+          "draft",
+          "active",
+          "obsolete"
+        ]
+      },
+      "types": {}
+    },
+    "work_definition_sequences": {
+      "checks": {
+        "seq_type": [
+          "std",
+          "parallel",
+          "alternative"
+        ]
+      },
+      "types": {}
+    },
+    "work_definitions": {
+      "checks": {
+        "definition_kind": [
+          "routing",
+          "recipe",
+          "service_template"
+        ],
+        "status": [
+          "draft",
+          "active",
+          "obsolete"
+        ]
+      },
+      "types": {}
+    },
+    "work_order_operations": {
+      "checks": {
+        "status": [
+          "pending",
+          "running",
+          "completed",
+          "cancelled"
+        ]
+      },
+      "types": {}
+    },
+    "work_orders": {
+      "checks": {
+        "channel": [
+          "phone",
+          "email",
+          "web",
+          "onsite"
+        ],
+        "order_type": [
+          "service",
+          "production",
+          "repair",
+          "install",
+          "maintenance"
+        ],
+        "severity": [
+          "critical",
+          "high",
+          "medium",
+          "low"
+        ],
+        "source_demand_type": [
+          "sales_order_schedule",
+          "sales_order_line",
+          "project_task"
+        ],
+        "status": [
+          "New",
+          "In Progress",
+          "Waiting",
+          "Resolved",
+          "Closed",
+          "Cancelled"
+        ]
+      },
+      "types": {}
+    }
+  }
+}

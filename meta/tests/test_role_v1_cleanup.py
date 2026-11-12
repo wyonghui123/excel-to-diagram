@@ -1,10 +1,11 @@
 # -*- coding: utf-8 -*-
 """
-V1 Cleanup - role.yaml 字段 + API 验证
+V1 Cleanup - permission_set.yaml 字段 + API 验证
 
 依据: spec-auth-object-category-v2-2026-06-10.md FR-V1-001 + FR-V1-002
-- role.yaml 不应再含 is_super_admin / priority 字段
-- role API 不再返回这 2 字段
+- role 已改名 permission_set: schema 文件为 permission_set.yaml
+- permission_set.yaml 不应再含 is_super_admin / priority 字段
+- permission_set API 不再返回这 2 字段
 """
 import pytest
 import yaml
@@ -13,7 +14,7 @@ import os
 
 SCHEMA_PATH = os.path.join(
     os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
-    'schemas', 'role.yaml'
+    'schemas', 'permission_set.yaml'
 )
 
 
@@ -54,7 +55,7 @@ class TestRoleColumnsInDB:
             os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
             'architecture.db'
         ))
-        cursor = ds.execute("PRAGMA table_info(roles)")
+        cursor = ds.execute("PRAGMA table_info(permission_sets)")
         cols = [row[1] if not isinstance(row, dict) else row['name']
                 for row in cursor.fetchall()]
         assert 'is_super_admin' not in cols, \
@@ -67,7 +68,7 @@ class TestRoleColumnsInDB:
             os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
             'architecture.db'
         ))
-        cursor = ds.execute("PRAGMA table_info(roles)")
+        cursor = ds.execute("PRAGMA table_info(permission_sets)")
         cols = [row[1] if not isinstance(row, dict) else row['name']
                 for row in cursor.fetchall()]
         assert 'priority' not in cols, \
@@ -83,10 +84,10 @@ class TestRoleColumnsInDB:
         cursor = ds.execute("""
             SELECT COUNT(DISTINCT u.id) AS c
             FROM users u
-            JOIN user_group_members ugm ON u.id = ugm.user_id
-            JOIN group_roles gr ON ugm.group_id = gr.group_id
-            JOIN role_permissions rp ON gr.role_id = rp.role_id
-            JOIN permissions p ON rp.permission_id = p.id
+            JOIN org_members om ON u.id = om.user_id
+            JOIN org_permission_sets ops ON om.org_id = ops.org_id
+            JOIN permission_set_permissions psp ON ops.permission_set_id = psp.permission_set_id
+            JOIN permissions p ON psp.permission_id = p.id
             WHERE p.code = '*' AND u.username = 'admin'
         """)
         row = cursor.fetchone()
@@ -100,7 +101,7 @@ class TestRoleApiV1:
     def test_list_roles_api_excludes_is_super_admin(self, api_client, admin_token):
         """GET /api/v1/roles 响应不再含 is_super_admin 字段"""
         resp = api_client.get(
-            '/api/v1/roles',
+            '/api/v1/permission-sets',
             headers={'Authorization': f'Bearer {admin_token}'},
         )
         assert resp.status_code == 200, f"Expected 200, got {resp.status_code}: {resp.data[:200]}"
@@ -115,7 +116,7 @@ class TestRoleApiV1:
     def test_list_roles_api_excludes_priority(self, api_client, admin_token):
         """GET /api/v1/roles 响应不再含 priority 字段"""
         resp = api_client.get(
-            '/api/v1/roles',
+            '/api/v1/permission-sets',
             headers={'Authorization': f'Bearer {admin_token}'},
         )
         assert resp.status_code == 200

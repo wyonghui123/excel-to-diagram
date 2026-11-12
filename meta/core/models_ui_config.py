@@ -139,6 +139,16 @@ class UIDetailViewConfig:
     layout: str = "tabs"
     showChangeHistory: bool = True
     showRelations: bool = True
+    # [v1.7 2026-11-07] 规则推导分区声明（原样透传给前端 DetailPage）：
+    #   {enabled, label, permission, scenarios, codes}
+    #   不入库、不参与规则解析，仅决定详情页是否挂载「规则推导」分区。
+    rule_trace: Dict[str, Any] = field(default_factory=dict)
+    # [2026-11-12] 详情页业务动作声明（原样透传给前端 DetailPage）：
+    #   [{id, label, icon, variant, permission, action, params, confirm_message,
+    #     visible_when, input_fields}]；含 action 的项由前端派发 BO Action，
+    #   不含 action 的项沿用声明式按钮语义（edit / delete / print …）。
+    #   此前 dataclass 缺该字段 ⇒ YAML detail.actions 在加载时被静默丢弃。
+    actions: List[Any] = field(default_factory=list)
 
 
 @dataclass
@@ -221,6 +231,69 @@ class ChangeNotificationConfig:
 
 
 @dataclass
+class UIReportFilterConfig:
+    """报表页筛选器声明（参数直接透传数据源接口）"""
+    key: str = ""
+    label: str = ""
+    type: str = "text"  # value_help / date / select / number / text
+    required: bool = False
+    default: Any = None
+    options: List[Dict[str, Any]] = field(default_factory=_M_LIST)
+    target_type: str = ""
+
+
+@dataclass
+class UIReportKpiConfig:
+    """报表页 KPI 卡（取响应顶层字段）"""
+    label: str = ""
+    field: str = ""
+    format: str = "number"
+
+
+@dataclass
+class UIReportChartConfig:
+    """报表页图表（P9 v1 只支持 bar）"""
+    type: str = "bar"
+    title: str = ""
+    data_field: str = "summary"
+    category_field: str = "bucket"
+    value_field: str = "qty"
+
+
+@dataclass
+class UIReportTableConfig:
+    """报表页明细表（列配置与列表页列结构兼容）"""
+    data_field: str = "rows"
+    page_size: int = 20
+    row_key: List[str] = field(default_factory=_M_LIST)
+    columns: List[Dict[str, Any]] = field(default_factory=_M_LIST)
+
+
+@dataclass
+class UIReportDrilldownConfig:
+    """报表页行钻取配置"""
+    endpoint: str = ""
+    title: str = ""
+    # 仅当响应中的 group_by 等于该值时可钻取（聚合行无完整主键）
+    only_when_group_by: str = ""
+    param_map: Dict[str, str] = field(default_factory=dict)
+
+
+@dataclass
+class UIReportConfig:
+    """报表页配置（P9：元数据驱动的只读报表）"""
+    title: str = ""
+    description: str = ""
+    endpoint: str = ""
+    method: str = "GET"
+    filters: List[UIReportFilterConfig] = field(default_factory=_M_LIST)
+    kpis: List[UIReportKpiConfig] = field(default_factory=_M_LIST)
+    chart: Optional[UIReportChartConfig] = None
+    table: UIReportTableConfig = field(default_factory=UIReportTableConfig)
+    drilldown: Optional[UIReportDrilldownConfig] = None
+
+
+@dataclass
 class UIViewConfig:
     """UI 视图配置（包含列表、详情、表单、筛选器）"""
     list: UIListViewConfig = field(default_factory=UIListViewConfig)
@@ -234,3 +307,5 @@ class UIViewConfig:
     #   过滤映射；收敛为通用页面后，这些差异改为本字段声明，由前端 MultiObjectHubPage
     #   解析为 MOMP options（见 src/components/common/MultiObjectHubPage/hubOptions.js）。
     hub: Dict[str, Any] = field(default_factory=dict)
+    # [P9 2026-11-06] 报表页配置；仅显式声明时输出，不参与自动生成。
+    report: Optional[UIReportConfig] = None

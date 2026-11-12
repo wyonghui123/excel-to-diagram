@@ -11,7 +11,7 @@ description: "AI 在 PowerShell 终端执行命令、写 PowerShell 脚本、操
 > **[!] 2026-10-22 补：本文件假设 `RunCommand` 可用。若所有命令一律失败
 > （报错 `Toolhost terminal commands must be routed through the agent runtime`、exit -1、执行前即拒），
 > 那是**终端通道故障**，不是本文描述的沙箱问题，**重启 IDE 无效**。
-> → [terminal-channel-failure.md](./terminal-channel-failure.md)**
+> → [terminal-channel-failure.md](./scenarios/8-meta-trae/terminal-channel-failure.md)**
 
 ---
 

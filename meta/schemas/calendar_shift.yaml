@@ -1,0 +1,433 @@
+# 日历班次（Calendar Shift）—— 统一资源模型 P2b / FR-014
+# 依据: docs/specs/spec-unified-resource-model-2026-11-01-v1.0.md
+#       §FR-014 / §9.3 数据模型表
+#
+# 定位: 把班次（shift）挂到日历（calendar）上，并用 7 位星期掩码 + 产能系数
+#   描述"某日历在某星期的某班次"。
+#
+# 口径:
+#   ① 某日生效班次 = valid_from~valid_to 覆盖该日、且该日星期掩码为 true 的行。
+#   ② calendar_day.day_type=holiday 时全部班次失效；workday（调休）按该日星期掩码生效。
+#   ③ 掩码全 false 的行无意义，保存由服务层拒绝。
+#   ④ seq 用于同日多班排序（早/中/晚班），默认 1。
+
+id: calendar_shift
+name: 日历班次
+table_name: calendar_shifts
+description: 日历 × 星期 × 班次 × 产能系数（班次挂日历，全部资源类型同构）
+display_name_field: shift_id
+aspects: [audit_aspect]
+
+semantics:
+  meaning: 日历班次
+  category: core_entity
+  aliases:
+    - 日历班次
+    - 排班时段
+    - calendar shift
+
+deletion_policy:
+  mode: restrict
+  restrict_on: []
+  cascade_delete: []
+
+audit:
+  enabled: true
+  create:
+    enabled: true
+    fields: all
+  update:
+    enabled: true
+    fields: changed_only
+    exclude: [id, created_at, updated_at]
+  delete:
+    enabled: true
+    fields: business_only
+    exclude: [id, created_at, updated_at]
+  associate:
+    enabled: true
+  dissociate:
+    enabled: true
+
+fields:
+  - id: id
+    name: ID
+    type: integer
+    db_column: id
+    required: true
+    unique: true
+    description: 技术主键
+    semantics:
+      meaning: 自增主键
+      primary_key: true
+
+  - id: calendar_id
+    name: 日历
+    type: integer
+    db_column: calendar_id
+    required: true
+    description: 所属日历
+    semantics:
+      meaning: 日历引用
+      display:
+        type: association
+        target_type: calendar
+        display_field: name
+    value_help:
+      source:
+        type: bo
+        target_bo: calendar
+        value_field: id
+        display_field: name
+        code_field: code
+        apply_target_permissions: true
+      behavior:
+        multiple: false
+        validation: true
+        binding_strength: strict
+        min_search_length: 0
+      presentation:
+        result_type: dialog
+        display_format: "{code} - {name}"
+        columns:
+          - field: code
+            label: 日历编码
+            width: 140
+          - field: name
+            label: 日历名称
+            width: 220
+    ui:
+      widget: select
+      relation: calendar
+      multiple: false
+      fieldGroup: 关联
+      fieldGroupPosition: 10
+
+  - id: shift_id
+    name: 班次
+    type: integer
+    db_column: shift_id
+    required: true
+    description: 引用的班次时段模板
+    semantics:
+      meaning: 班次引用
+      display:
+        type: association
+        target_type: shift
+        display_field: name
+    value_help:
+      source:
+        type: bo
+        target_bo: shift
+        value_field: id
+        display_field: name
+        code_field: code
+        apply_target_permissions: true
+      behavior:
+        multiple: false
+        validation: true
+        binding_strength: strict
+        min_search_length: 0
+      presentation:
+        result_type: dialog
+        display_format: "{code} - {name}"
+        columns:
+          - field: code
+            label: 班次编码
+            width: 140
+          - field: name
+            label: 班次名称
+            width: 220
+    ui:
+      widget: select
+      relation: shift
+      multiple: false
+      fieldGroup: 关联
+      fieldGroupPosition: 20
+
+  - id: day_mask_mon
+    name: 周一
+    type: boolean
+    db_column: day_mask_mon
+    required: true
+    default: true
+    description: 周一是否生效
+    semantics:
+      meaning: 周一掩码
+    ui:
+      widget: switch
+      fieldGroup: 日掩码
+      fieldGroupPosition: 30
+
+  - id: day_mask_tue
+    name: 周二
+    type: boolean
+    db_column: day_mask_tue
+    required: true
+    default: true
+    description: 周二是否生效
+    semantics:
+      meaning: 周二掩码
+    ui:
+      widget: switch
+      fieldGroup: 日掩码
+      fieldGroupPosition: 40
+
+  - id: day_mask_wed
+    name: 周三
+    type: boolean
+    db_column: day_mask_wed
+    required: true
+    default: true
+    description: 周三是否生效
+    semantics:
+      meaning: 周三掩码
+    ui:
+      widget: switch
+      fieldGroup: 日掩码
+      fieldGroupPosition: 50
+
+  - id: day_mask_thu
+    name: 周四
+    type: boolean
+    db_column: day_mask_thu
+    required: true
+    default: true
+    description: 周四是否生效
+    semantics:
+      meaning: 周四掩码
+    ui:
+      widget: switch
+      fieldGroup: 日掩码
+      fieldGroupPosition: 60
+
+  - id: day_mask_fri
+    name: 周五
+    type: boolean
+    db_column: day_mask_fri
+    required: true
+    default: true
+    description: 周五是否生效
+    semantics:
+      meaning: 周五掩码
+    ui:
+      widget: switch
+      fieldGroup: 日掩码
+      fieldGroupPosition: 70
+
+  - id: day_mask_sat
+    name: 周六
+    type: boolean
+    db_column: day_mask_sat
+    required: true
+    default: true
+    description: 周六是否生效
+    semantics:
+      meaning: 周六掩码
+    ui:
+      widget: switch
+      fieldGroup: 日掩码
+      fieldGroupPosition: 80
+
+  - id: day_mask_sun
+    name: 周日
+    type: boolean
+    db_column: day_mask_sun
+    required: true
+    default: true
+    description: 周日是否生效
+    semantics:
+      meaning: 周日掩码
+    ui:
+      widget: switch
+      fieldGroup: 日掩码
+      fieldGroupPosition: 90
+
+  - id: seq
+    name: 同日顺序
+    type: integer
+    db_column: seq
+    required: true
+    default: 1
+    description: 同日多班排序（早/中/晚班）
+    constraints:
+      - type: numeric_range
+        gte: 1
+        decimal_places: 0
+    semantics:
+      meaning: 同日班次顺序
+    ui:
+      widget: number
+      fieldGroup: 排班
+      fieldGroupPosition: 100
+
+  - id: capacity_factor
+    name: 产能系数
+    type: number
+    db_column: capacity_factor
+    required: true
+    default: 1.0
+    description: 产能折算系数（默认 1.00，夜班折算等场景可小于 1）
+    constraints:
+      - type: numeric_range
+        gt: 0
+    semantics:
+      meaning: 班次产能系数
+    ui:
+      widget: number
+      fieldGroup: 排班
+      fieldGroupPosition: 110
+
+  - id: valid_from
+    name: 有效期起
+    type: date
+    db_column: valid_from
+    nullable: true
+    description: 生效起始日（含）；空表示立即生效
+    semantics:
+      meaning: 班次有效期起始日
+    ui:
+      widget: date
+      fieldGroup: 排班
+      fieldGroupPosition: 120
+
+  - id: valid_to
+    name: 有效期止
+    type: date
+    db_column: valid_to
+    nullable: true
+    description: 生效截止日（不含）；空表示长期有效
+    semantics:
+      meaning: 班次有效期截止日
+    ui:
+      widget: date
+      fieldGroup: 排班
+      fieldGroupPosition: 130
+
+  - id: created_at
+    name: 创建时间
+    type: datetime
+    db_column: created_at
+    description: 创建时间
+    semantics:
+      meaning: 记录创建时间
+      audit_field: true
+
+  - id: updated_at
+    name: 更新时间
+    type: datetime
+    db_column: updated_at
+    description: 更新时间
+    semantics:
+      meaning: 记录更新时间
+      audit_field: true
+
+indexes:
+  - fields: [calendar_id]
+    name: idx_calendar_shift_calendar
+  - fields: [shift_id]
+    name: idx_calendar_shift_shift
+  - fields: [valid_from]
+    name: idx_calendar_shift_validity
+
+relations:
+  - id: calendar_shift_to_calendar
+    name: 日历
+    type: reference
+    target: calendar
+    source_field: calendar_id
+    target_field: id
+    cardinality: N:1
+    description: 所属日历引用（真外键）
+  - id: calendar_shift_to_shift
+    name: 班次
+    type: reference
+    target: shift
+    source_field: shift_id
+    target_field: id
+    cardinality: N:1
+    description: 班次引用（真外键，restrict）
+
+ui_view_config:
+  # 菜单由迁移 v176 手工声明（挂 master-data），不让自动生成器产出孤儿行
+  skip_auto_menu: true
+  list:
+    detail_mode: drawer
+    title: 日历班次
+    columns:
+      - field: calendar_id
+        width: 200
+        filterable: true
+        filter_type: value_help
+        render_as: association
+        target_type: calendar
+        display_field: name
+      - field: shift_id
+        width: 200
+        filterable: true
+        filter_type: value_help
+        render_as: association
+        target_type: shift
+        display_field: name
+      - field: day_mask_mon
+        width: 80
+      - field: day_mask_tue
+        width: 80
+      - field: day_mask_wed
+        width: 80
+      - field: day_mask_thu
+        width: 80
+      - field: day_mask_fri
+        width: 80
+      - field: day_mask_sat
+        width: 80
+      - field: day_mask_sun
+        width: 80
+      - field: seq
+        width: 100
+      - field: capacity_factor
+        width: 110
+    selection:
+      enabled: true
+      mode: multiple
+    searchFields: [calendar_id]
+    actions:
+      - id: create
+        label: 新建日历班次
+        icon: plus
+        type: primary
+        permission: calendar_shift:create
+    defaultSort:
+      field: seq
+      order: asc
+  form:
+    title: 日历班次
+    layout: vertical
+    sections:
+      - title: 关联
+        columns:
+          - fields: [calendar_id, shift_id]
+      - title: 日掩码
+        columns:
+          - fields: [day_mask_mon, day_mask_tue, day_mask_wed, day_mask_thu]
+          - fields: [day_mask_fri, day_mask_sat, day_mask_sun]
+      - title: 排班
+        columns:
+          - fields: [seq, capacity_factor]
+          - fields: [valid_from, valid_to]
+  detail:
+    layout: tabs
+    title: 日历班次 详情
+    tabs:
+      - id: basic
+        label: 基本信息
+        type: fields
+        fields: [calendar_id, shift_id, day_mask_mon, day_mask_tue, day_mask_wed,
+                 day_mask_thu, day_mask_fri, day_mask_sat, day_mask_sun, seq,
+                 capacity_factor, valid_from, valid_to]
+
+category_config:
+  create_permission: calendar_shift:create
+  update_permission: calendar_shift:update
+  delete_permission: calendar_shift:delete
+  owner_auto_permission: false

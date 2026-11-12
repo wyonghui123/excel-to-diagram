@@ -57,7 +57,7 @@ class TestRoleMenuAPI:
         assert resp.status_code == 400
         body = resp.get_json()
         assert body.get('success') is False
-        assert '请求体' in body.get('error', '')
+        assert '不能为空' in body.get('error', '')
 
     def test_update_role_menu_permissions_with_codes(self, api_client, admin_headers):
         """PUT /<id>/menu-permissions 传 menu_codes 数组"""
@@ -92,7 +92,7 @@ class TestRoleDimensionScopeAPI:
         assert resp.status_code == 400
         body = resp.get_json()
         assert body.get('success') is False
-        assert '请求体' in body.get('error', '')
+        assert '请求体' in body.get('message', '')
 
     def test_save_dimension_scopes_with_array(self, api_client, admin_headers):
         """POST /<id>/dimension-scopes 传 scopes 数组"""

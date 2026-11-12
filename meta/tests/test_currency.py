@@ -325,10 +325,15 @@ class TestDeletionPolicy:
         """S19: 主数据禁止物理删除"""
         assert _cur_yaml()['deletion_policy']['mode'] == 'restrict'
 
-    def test_restrict_on_empty_but_structure_kept(self):
-        """币种当前零引用方 ⇒ restrict_on 空列表（结构保留供未来补条目）"""
+    def test_restrict_on_declares_all_referencing_fks(self):
+        """币种被汇率(源/目标)与销售订单引用 ⇒ restrict_on 列出全部 FK"""
         policy = _cur_yaml()['deletion_policy']
-        assert policy['restrict_on'] == []
+        pairs = {(r['table'], r['foreign_key']) for r in policy['restrict_on']}
+        assert pairs == {
+            ('currency_rates', 'currency_id'),
+            ('currency_rates', 'to_currency_id'),
+            ('sales_orders', 'currency_id'),
+        }
         assert 'cascade_delete' in policy
 
     def test_cascade_delete_empty(self):
@@ -409,22 +414,26 @@ class TestLifecycleRules:
 # 7. 负向断言：不得越界（AC-9）
 # ────────────────────────────────────────
 class TestNoRateObject:
-    def test_no_currency_rate_schema(self):
-        """本期不建汇率对象（spec §2.2 / TBD-1）"""
-        assert not os.path.exists(os.path.join(_SCHEMA_DIR, 'currency_rate.yaml'))
+    """2026-10-24 汇率域已落地: currency_rate 作为 currency 的附属明细存在"""
+
+    def test_currency_rate_schema_exists(self):
+        """currency_rate.yaml 存在 (复数形式仍不应出现)"""
+        assert os.path.exists(os.path.join(_SCHEMA_DIR, 'currency_rate.yaml'))
         assert not os.path.exists(
             os.path.join(_SCHEMA_DIR, 'currency_rates.yaml'))
 
-    def test_currency_rate_not_in_registry(self):
-        """registry 中不得出现 currency_rate object_type"""
+    def test_currency_rate_is_child_of_currency(self):
+        """currency_rate 挂在 currency 下, 不单独成菜单"""
         from meta.core.yaml_loader import load_yaml_file, parse_aspects_yaml
 
         aspects = parse_aspects_yaml(_SCHEMA_DIR)
-        obj = load_yaml_file(os.path.join(_SCHEMA_DIR, 'currency.yaml'),
+        obj = load_yaml_file(os.path.join(_SCHEMA_DIR, 'currency_rate.yaml'),
                              aspects_defs=aspects)
         assert obj is not None
         obj_id = getattr(obj, 'id', None) or obj.get('id')
-        assert obj_id == 'currency'
+        assert obj_id == 'currency_rate'
+        parent = getattr(obj, 'parent_object', None) or obj.get('parent_object')
+        assert parent == 'currency'
 
 
 class TestNoConsumerClaim:

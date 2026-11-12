@@ -1,0 +1,41 @@
+{
+  "version": 2,
+  "date": "2026-10-31",
+  "counts": {
+    "jsonify_total": 371,
+    "api_commits": 0,
+    "service_commits": 0,
+    "audit_insert_outside": 0,
+    "detail_literal": 0,
+    "direct_permission_calls": 0,
+    "manual_pagination_files": 0,
+    "audit_logger_direct": 1,
+    "bo_api_write_routes_undeclared": 0,
+    "service_adhoc_permission_checks": 0
+  },
+  "allowlists": {
+    "service_commits": {
+      "meta/services/audit_service.py": "审计写入入口，需在业务事务外独立落库（TBD-4）",
+      "meta/services/audit_hash_chain.py": "审计哈希链维护，独立于业务事务",
+      "meta/services/async_audit_writer.py": "后台异步审计写入，无请求事务上下文",
+      "meta/services/audit_retry_worker.py": "审计失败重试 worker，无请求事务上下文",
+      "meta/services/permission_cache.py": "进程级缓存存储，自持长连接",
+      "meta/services/token_blacklist_service.py": "认证令牌黑名单，需即时持久化（安全）",
+      "meta/services/subflow_template_store.py": "全局模板存储，自持连接 + 类级缓存"
+    },
+    "audit_insert": [
+      "meta/core/audit_async_queue.py",
+      "meta/core/interceptors/audit_interceptor.py",
+      "meta/services/audit_interceptor.py",
+      "meta/services/audit_service.py"
+    ],
+    "api_platform_infra": {
+      "meta/api/enum_api.py": "枚举类型/值定义管理（平台元数据）",
+      "meta/api/schema_api.py": "业务对象 schema DDL 管理（平台基础设施）",
+      "meta/api/unified_permission_api.py": "统一权限规则配置（平台基础设施）",
+      "meta/api/data_permission_api.py": "数据权限范围配置（平台基础设施）",
+      "meta/api/intent_api.py": "意图定义配置（平台元数据）",
+      "meta/api/filter_variant_api.py": "列表过滤变体配置（平台元数据）"
+    }
+  }
+}

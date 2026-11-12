@@ -26,9 +26,9 @@ logger = logging.getLogger(__name__)
 def _normalize_user_context(user_context: Optional[dict]) -> dict:
     """规范化 user_context
 
-    处理 AI Agent 调用（X-Agent-Id 头）：
+    处理 AI Agent 调用（MCP 内部上下文）：
     - is_ai_agent=True → roles=['ai-agent']
-    - X-Agent-Id 存在 → 注入 'ai-agent' 角色
+    - agent_id 存在（由 MCP 服务端内部填充，非 HTTP 请求头） → 注入 'ai-agent' 角色
 
     Args:
         user_context: 调用方传入的 user context

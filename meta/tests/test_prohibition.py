@@ -1,3 +1,4 @@
+# ALLOW_RAW_SQL: 本文件含裸 SQL 构造 Prohibition 测试数据/DDL，守卫豁免（2026-11-09 恢复覆盖）
 # -*- coding: utf-8 -*-
 """
 [FILE] test_prohibition.py
@@ -36,7 +37,7 @@ def db_with_prohibition_rules():
     conn.executescript("""
         CREATE TABLE IF NOT EXISTS data_permission_rules (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
-            role_id INTEGER NOT NULL,
+            permission_set_id INTEGER NOT NULL,
             rule_type VARCHAR(50) NOT NULL DEFAULT 'condition',
             resource_type VARCHAR(200),
             dimension_code VARCHAR(200),
@@ -54,11 +55,11 @@ def db_with_prohibition_rules():
         CREATE TABLE IF NOT EXISTS user_permission_sets (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
             user_id INTEGER NOT NULL,
-            role_id INTEGER NOT NULL
+            permission_set_id INTEGER NOT NULL
         );
         CREATE TABLE IF NOT EXISTS permission_set_permissions (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
-            role_id INTEGER NOT NULL,
+            permission_set_id INTEGER NOT NULL,
             permission_id INTEGER,
             permission_code VARCHAR(200),
             created_at DATETIME
@@ -72,11 +73,11 @@ def db_with_prohibition_rules():
     conn.execute("INSERT INTO products (id, name, code, owner_id, status) VALUES (1, 'P1', 'p1', 100, 'active')")
     conn.execute("INSERT INTO products (id, name, code, owner_id, status) VALUES (2, 'P2', 'p2', 200, 'archived')")
     # user_roles: alice (id=100) 拥有 role 1; bob (id=200) 拥有 role 2
-    conn.execute("INSERT INTO user_permission_sets (user_id, role_id) VALUES (100, 1)")
-    conn.execute("INSERT INTO user_permission_sets (user_id, role_id) VALUES (200, 2)")
+    conn.execute("INSERT INTO user_permission_sets (user_id, permission_set_id) VALUES (100, 1)")
+    conn.execute("INSERT INTO user_permission_sets (user_id, permission_set_id) VALUES (200, 2)")
     # role_permissions: role 1 和 role 2 都有 product.read
-    conn.execute("INSERT INTO permission_set_permissions (role_id, permission_code) VALUES (1, 'product.read')")
-    conn.execute("INSERT INTO permission_set_permissions (role_id, permission_code) VALUES (2, 'product.read')")
+    conn.execute("INSERT INTO permission_set_permissions (permission_set_id, permission_code) VALUES (1, 'product.read')")
+    conn.execute("INSERT INTO permission_set_permissions (permission_set_id, permission_code) VALUES (2, 'product.read')")
     conn.commit()
 
     class MockDS:
@@ -108,7 +109,7 @@ class TestP6T1ProhibitionRuleType:
         """可以插入 rule_type='prohibition' + is_denied=1 的行"""
         ds = db_with_prohibition_rules
         ds.execute(
-            "INSERT INTO data_permission_rules (role_id, rule_type, resource_type, "
+            "INSERT INTO data_permission_rules (permission_set_id, rule_type, resource_type, "
             "condition, permission_level, is_denied) "
             "VALUES (1, 'prohibition', 'product', \"status = 'archived'\", 'delete', 1)"
         )
@@ -128,15 +129,15 @@ class TestP6T1ProhibitionRuleType:
         ds = db_with_prohibition_rules
         # 插入多条规则
         ds.execute(
-            "INSERT INTO data_permission_rules (role_id, rule_type, resource_type, "
+            "INSERT INTO data_permission_rules (permission_set_id, rule_type, resource_type, "
             "is_denied) VALUES (1, 'prohibition', 'product', 1)"
         )
         ds.execute(
-            "INSERT INTO data_permission_rules (role_id, rule_type, resource_type, "
+            "INSERT INTO data_permission_rules (permission_set_id, rule_type, resource_type, "
             "is_denied) VALUES (2, 'condition', 'product', 0)"
         )
         ds.execute(
-            "INSERT INTO data_permission_rules (role_id, rule_type, resource_type, "
+            "INSERT INTO data_permission_rules (permission_set_id, rule_type, resource_type, "
             "is_denied) VALUES (1, 'prohibition', 'version', 1)"
         )
         # 查询 prohibition + is_denied=1
@@ -153,7 +154,7 @@ class TestP6T1ProhibitionRuleType:
         """未指定 is_denied 时默认为 0 (Allow)"""
         ds = db_with_prohibition_rules
         ds.execute(
-            "INSERT INTO data_permission_rules (role_id, rule_type, resource_type) "
+            "INSERT INTO data_permission_rules (permission_set_id, rule_type, resource_type) "
             "VALUES (1, 'condition', 'product')"
         )
         row = ds.execute(
@@ -175,7 +176,7 @@ class TestP6T2DenyPriorityShortCircuit:
         ds = db_with_prohibition_rules
         # 插入 prohibition 规则: 禁止删除 archived 状态的 product
         ds.execute(
-            "INSERT INTO data_permission_rules (role_id, rule_type, resource_type, "
+            "INSERT INTO data_permission_rules (permission_set_id, rule_type, resource_type, "
             "condition, permission_level, is_denied) "
             "VALUES (1, 'prohibition', 'product', \"status = 'archived'\", 'delete', 1)"
         )
@@ -210,7 +211,7 @@ class TestP6T2DenyPriorityShortCircuit:
         ds = db_with_prohibition_rules
         # 插入 prohibition 规则: 禁止删除 archived 状态的 product
         ds.execute(
-            "INSERT INTO data_permission_rules (role_id, rule_type, resource_type, "
+            "INSERT INTO data_permission_rules (permission_set_id, rule_type, resource_type, "
             "condition, permission_level, is_denied) "
             "VALUES (1, 'prohibition', 'product', \"status = 'archived'\", 'delete', 1)"
         )
@@ -231,7 +232,7 @@ class TestP6T2DenyPriorityShortCircuit:
         ds = db_with_prohibition_rules
         # 插入 prohibition 规则
         ds.execute(
-            "INSERT INTO data_permission_rules (role_id, rule_type, resource_type, "
+            "INSERT INTO data_permission_rules (permission_set_id, rule_type, resource_type, "
             "condition, permission_level, is_denied) "
             "VALUES (1, 'prohibition', 'product', \"status = 'archived'\", 'delete', 1)"
         )
@@ -260,12 +261,12 @@ class TestP6T4DenyVsAllowConflict:
         ds = db_with_prohibition_rules
         # 插入 Allow 规则 (condition)
         ds.execute(
-            "INSERT INTO data_permission_rules (role_id, rule_type, resource_type, "
+            "INSERT INTO data_permission_rules (permission_set_id, rule_type, resource_type, "
             "is_denied) VALUES (1, 'condition', 'product', 0)"
         )
         # 插入 Deny 规则 (prohibition)
         ds.execute(
-            "INSERT INTO data_permission_rules (role_id, rule_type, resource_type, "
+            "INSERT INTO data_permission_rules (permission_set_id, rule_type, resource_type, "
             "is_denied) VALUES (1, 'prohibition', 'product', 1)"
         )
         from meta.services.permission_resolver import PermissionResolver
@@ -285,7 +286,7 @@ class TestP6T4DenyVsAllowConflict:
         ds = db_with_prohibition_rules
         # 插入 prohibition 规则: 所有 product 操作禁止
         ds.execute(
-            "INSERT INTO data_permission_rules (role_id, rule_type, resource_type, "
+            "INSERT INTO data_permission_rules (permission_set_id, rule_type, resource_type, "
             "is_denied) VALUES (1, 'prohibition', 'product', 1)"
         )
         from meta.services.permission_resolver import PermissionResolver
@@ -305,7 +306,7 @@ class TestP6T4DenyVsAllowConflict:
         ds = db_with_prohibition_rules
         # prohibition: 仅禁止 product
         ds.execute(
-            "INSERT INTO data_permission_rules (role_id, rule_type, resource_type, "
+            "INSERT INTO data_permission_rules (permission_set_id, rule_type, resource_type, "
             "is_denied) VALUES (1, 'prohibition', 'product', 1)"
         )
         from meta.services.permission_resolver import PermissionResolver
@@ -347,7 +348,7 @@ class TestP6T4Acceptance:
         ds = db_with_prohibition_rules
         # prohibition 规则
         ds.execute(
-            "INSERT INTO data_permission_rules (role_id, rule_type, resource_type, "
+            "INSERT INTO data_permission_rules (permission_set_id, rule_type, resource_type, "
             "is_denied) VALUES (1, 'prohibition', 'product', 1)"
         )
         from meta.services.permission_resolver import PermissionResolver
@@ -366,7 +367,7 @@ class TestP6T4Acceptance:
         """[例外] Superuser 跳过所有 Layer, 包括 Prohibition"""
         ds = db_with_prohibition_rules
         ds.execute(
-            "INSERT INTO data_permission_rules (role_id, rule_type, resource_type, "
+            "INSERT INTO data_permission_rules (permission_set_id, rule_type, resource_type, "
             "is_denied) VALUES (1, 'prohibition', 'product', 1)"
         )
         from meta.services.permission_resolver import PermissionResolver

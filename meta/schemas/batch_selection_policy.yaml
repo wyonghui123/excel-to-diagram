@@ -1,0 +1,344 @@
+# 批次选择策略（Batch Selection Policy）—— 流程制造 P5
+# 依据: docs/specs/spec-routing-process-manufacturing-benchmark-2026-11-01.md
+#       §12.5（字段级）/ §12.6（选择算法与留痕）/ §11.9（O1–O7）
+#       docs/specs/p5-routing-branch-parallel-batch-selection/spec.md
+#
+# 定位: 显式声明「某物料 / 物料分类 / 组织」下按什么规则挑批次，
+#   由单一 `select_batches` 执行；不照搬 SAP 条件技术。
+#
+# 口径（已定，勿重复讨论）:
+#   ① scope_ref 存业务编码（items.code / item_groups.code / orgs.code），
+#      保存时校验存在性；与 attribute_scopes 口径一致。
+#   ② rule_json v1 只允许 batches 物理列，禁 EAV 特性字段（usage_class 红线）。
+#   ③ 同 (scope_type, scope_ref) 下 active 策略的 priority 唯一（部分唯一索引兜底）。
+#   ④ 无策略 / 全部策略 0 条 ⇒ NoBatchMatchError，不静默取第一条。
+#   ⑤ 默认可用性谓词先于策略过滤：quality_status='unrestricted' 且 status!='closed'；
+#      allow_blocked=true 放开 blocked + inspection，closed 永远排除。
+#   ⑥ rule_json 不得替代质量判定（放行/冻结逻辑仍在 quality_status）。
+#   ⑦ 选择留痕写 audit_log 的 extra_data，不新建审计表 / 列。
+
+id: batch_selection_policy
+name: 批次选择策略
+table_name: batch_selection_policies
+description: 批次选择策略——按范围与优先级声明批次挑选规则，由 select_batches 执行
+display_name_field: name
+aspects: [audit_aspect]
+
+semantics:
+  meaning: 批次选择策略
+  category: business_config
+  aliases:
+    - 批次选择策略
+    - 挑库策略
+    - batch selection policy
+    - picking rule
+
+deletion_policy:
+  mode: restrict
+  restrict_on: []
+  cascade_delete: []
+
+audit:
+  enabled: true
+  create:
+    enabled: true
+    fields: all
+  update:
+    enabled: true
+    fields: changed_only
+    exclude: [id, created_at, updated_at]
+  delete:
+    enabled: true
+    fields: business_only
+    exclude: [id, created_at, updated_at]
+  associate:
+    enabled: true
+  dissociate:
+    enabled: true
+
+fields:
+  - id: id
+    name: ID
+    type: integer
+    db_column: id
+    required: true
+    unique: true
+    description: 技术主键
+    semantics:
+      meaning: 自增主键
+      primary_key: true
+
+  - id: code
+    name: 策略编码
+    type: string
+    db_column: code
+    required: true
+    unique: true
+    max_length: 40
+    description: 策略编码；全局唯一
+    semantics:
+      meaning: 策略业务标识
+      business_key: true
+      data_category: code
+      searchable: true
+    ui:
+      widget: input
+      fieldGroup: 基本信息
+      fieldGroupPosition: 10
+
+  - id: name
+    name: 策略名称
+    type: string
+    db_column: name
+    required: true
+    max_length: 128
+    description: 策略显示名
+    semantics:
+      meaning: 策略名称
+      display_name: true
+      searchable: true
+    ui:
+      widget: input
+      fieldGroup: 基本信息
+      fieldGroupPosition: 20
+
+  - id: scope_type
+    name: 范围类型
+    type: string
+    db_column: scope_type
+    required: true
+    max_length: 20
+    description: 适用范围层级（物料 / 物料分类 / 组织）；越具体越优先
+    enum_values:
+      - value: item
+        label: 物料
+        color: primary
+        is_initial: true
+      - value: item_group
+        label: 物料分类
+        color: info
+      - value: org
+        label: 组织
+        color: warning
+    value_help:
+      source:
+        type: enum
+        enum_type_id: batch_selection_scope
+        sort_by: sort_order
+      behavior:
+        validation: true
+        binding_strength: strict
+        multiple: false
+      presentation:
+        result_type: dropdown
+    semantics:
+      meaning: 适用范围层级
+      filterable: true
+      filter_type: enum
+      filter_label: 范围类型
+      filter_scope: local
+    ui:
+      widget: select
+      fieldGroup: 基本信息
+      fieldGroupPosition: 30
+
+  - id: scope_ref
+    name: 范围编码
+    type: string
+    db_column: scope_ref
+    required: true
+    max_length: 60
+    description: 范围业务编码：item → items.code；item_group → item_groups.code；org → orgs.code
+    semantics:
+      meaning: 范围业务编码
+      searchable: true
+    ui:
+      widget: input
+      fieldGroup: 基本信息
+      fieldGroupPosition: 40
+
+  - id: rule_json
+    name: 选择规则
+    type: text
+    db_column: rule_json
+    required: true
+    description: JSON DSL v1（version / filters / sort / limit / allow_blocked）；只允许批次物理列
+    semantics:
+      meaning: 选择规则 JSON
+    ui:
+      widget: textarea
+      fieldGroup: 规则
+      fieldGroupPosition: 50
+
+  - id: priority
+    name: 优先级
+    type: integer
+    db_column: priority
+    required: true
+    default: 1
+    description: 同范围下取用顺序（小者优先）；active 策略下唯一
+    constraints:
+      - type: numeric_range
+        gte: 1
+        decimal_places: 0
+    semantics:
+      meaning: 策略优先级
+    ui:
+      widget: number
+      fieldGroup: 规则
+      fieldGroupPosition: 60
+
+  - id: status
+    name: 状态
+    type: string
+    db_column: status
+    required: true
+    default: active
+    max_length: 20
+    description: 策略状态（启用 / 停用）
+    enum_values:
+      - value: active
+        label: 启用
+        color: success
+        is_initial: true
+      - value: inactive
+        label: 停用
+        color: info
+    value_help:
+      source:
+        type: enum
+        enum_type_id: batch_selection_policy_status
+        sort_by: sort_order
+      behavior:
+        validation: true
+        binding_strength: strict
+        multiple: false
+      presentation:
+        result_type: dropdown
+    semantics:
+      meaning: 策略状态
+      filterable: true
+      filter_type: enum
+      filter_label: 状态
+      filter_scope: local
+    ui:
+      widget: select
+      fieldGroup: 规则
+      fieldGroupPosition: 70
+
+  - id: description
+    name: 说明
+    type: string
+    db_column: description
+    nullable: true
+    max_length: 255
+    description: 策略说明
+    semantics:
+      meaning: 策略说明
+      searchable: true
+    ui:
+      widget: textarea
+      fieldGroup: 其他
+      fieldGroupPosition: 80
+
+  - id: created_at
+    name: 创建时间
+    type: datetime
+    db_column: created_at
+    description: 创建时间
+    semantics:
+      meaning: 记录创建时间
+      audit_field: true
+
+  - id: updated_at
+    name: 更新时间
+    type: datetime
+    db_column: updated_at
+    description: 更新时间
+    semantics:
+      meaning: 记录更新时间
+      audit_field: true
+
+indexes:
+  - fields: [code]
+    unique: true
+    name: uq_batch_selection_policy_code
+    description: 策略编码全局唯一
+  - fields: [scope_type, scope_ref, priority]
+    unique: true
+    type: partial
+    name: uq_batch_selection_policy_scope_priority
+    condition: "status = 'active'"
+    description: 同范围 active 策略的优先级唯一
+  - fields: [scope_type, scope_ref]
+    name: idx_batch_selection_policy_scope
+
+ui_view_config:
+  skip_auto_menu: false
+  list:
+    detail_mode: drawer
+    title: 批次选择策略
+    columns:
+      - field: code
+        width: 160
+      - field: name
+        width: 200
+      - field: scope_type
+        width: 110
+        filterable: true
+        filter_type: select
+      - field: scope_ref
+        width: 160
+      - field: priority
+        width: 90
+        sortable: true
+      - field: status
+        width: 100
+        filterable: true
+        filter_type: select
+      - field: description
+        width: 240
+    selection:
+      enabled: true
+      mode: multiple
+    searchFields: [code, name, scope_ref, description]
+    actions:
+      - id: create
+        label: 新建策略
+        icon: plus
+        type: primary
+        permission: batch_selection_policy:create
+    defaultSort:
+      field: priority
+      order: asc
+  form:
+    title: 批次选择策略
+    layout: vertical
+    sections:
+      - title: 基本信息
+        columns:
+          - fields: [code, name, scope_type, scope_ref]
+      - title: 规则
+        columns:
+          - fields: [rule_json, priority, status]
+      - title: 其他
+        columns:
+          - fields: [description]
+  detail:
+    layout: tabs
+    title: "策略 {record.code}"
+    tabs:
+      - id: basic
+        label: 基本信息
+        type: fields
+        fields: [code, name, scope_type, scope_ref, priority, status, description]
+      - id: rule
+        label: 选择规则
+        type: fields
+        fields: [rule_json]
+
+category_config:
+  create_permission: batch_selection_policy:create
+  update_permission: batch_selection_policy:update
+  delete_permission: batch_selection_policy:delete
+  owner_auto_permission: false

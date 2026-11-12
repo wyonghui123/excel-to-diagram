@@ -118,7 +118,7 @@ scripts/debug/
 ## 📚 完整规范文档
 
 - [.trae/rules/debug-infrastructure-v20260621.md](../../debug-infrastructure-v20260621.md) - 完整规范
-- [d:\filework\.trae\rules\debug-infrastructure-v20260621.md](file:///d:/filework/.trae/rules/debug-infrastructure-v20260621.md) - 全局同步版
+- [d:\filework\excel-to-diagram\.trae\rules\debug-infrastructure-v20260621.md](file:///d:/filework/excel-to-diagram/.trae/rules/debug-infrastructure-v20260621.md) - 全局同步版
 - [d:\filework\.trae\rules\SESSION_REMINDER.md](file:///d:/filework/.trae/rules/SESSION_REMINDER.md) - 铁律 4
 
 ---

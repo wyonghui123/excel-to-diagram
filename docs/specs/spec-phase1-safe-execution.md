@@ -23,7 +23,7 @@
 > - [spec-phase1-p0-detailed-design.md](file:///d:/filework/excel-to-diagram/docs/specs/spec-phase1-p0-detailed-design.md) v3.0.0
 > - [SESSION_REMINDER.md](file:///d:/filework/.trae\rules\SESSION_REMINDER.md) — 全局铁律
 > - [service-management-rules.md](file:///d:/filework/excel-to-diagram\.trae\rules\service-management-rules.md) — 服务管理
-> - [multi-agent-coordination.md](file:///d:/filework/excel-to-diagram\.trae\rules\multi-agent-coordination.md) — 多 Agent 协作
+> - [multi-agent-coordination.md](file:///d:/filework/excel-to-diagram/.trae/rules/scenarios/7-ai-collaboration/multi-agent-coordination.md) — 多 Agent 协作
 
 ---
 

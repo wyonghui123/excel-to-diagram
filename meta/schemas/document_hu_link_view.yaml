@@ -1,0 +1,253 @@
+# ============================================
+# 单据 ↔ 容器只读视图（document_hu_link_view）
+# 依据: docs/specs/p6-serial-number-model/spec.md §11.16.2
+#
+# [为什么是视图]
+#   写模型只有 document_hu_links 一处；本视图只做单据头 / 行号投影，
+#   供 hub「关联单据」tab 与「包装容器查询」页共用，避免第二套 join 维护。
+#   不设 write_anchor ⇒ 写请求由 READ_ONLY_VIEW 护栏拒绝。
+#
+# [同库前提]
+#   SQLite 视图只能引用同库表；缺任一基表时由 v220 迁移 [SKIP]。
+#
+# [shipment 行号]
+#   shipment_lines 没有 line_no 字段（display_name_field=id），
+#   故 line_no 回退为 CAST(line_id AS TEXT)。
+# ============================================
+
+id: document_hu_link_view
+name: 单据容器关联
+table_name: document_hu_link_view
+description: 只读：容器与收货单 / 发货单 / 调拨单的关系投影
+display_name_field: doc_no
+object_type: view
+view_definition: |
+  SELECT
+    l.id AS id,
+    l.hu_id AS hu_id,
+    h.hu_no AS hu_no,
+    h.status AS hu_status,
+    h.hu_type AS hu_type,
+    l.doc_type AS doc_type,
+    l.doc_id AS doc_id,
+    COALESCE(r.receipt_no, s.delivery_no, t.transfer_order_no) AS doc_no,
+    COALESCE(r.status, s.status, t.status) AS doc_status,
+    COALESCE(r.receipt_date, s.actual_ship_date, s.planned_ship_date,
+             t.transfer_date) AS doc_date,
+    l.line_id AS line_id,
+    COALESCE(rl.line_no, tl.line_no, CAST(l.line_id AS TEXT)) AS line_no,
+    l.direction AS direction,
+    l.link_type AS link_type,
+    l.tentative AS tentative,
+    l.qty AS qty,
+    l.org_id AS org_id,
+    l.created_at AS created_at
+  FROM document_hu_links l
+  LEFT JOIN handling_units h ON h.id = l.hu_id
+  LEFT JOIN receipts r ON l.doc_type = 'receipt' AND r.id = l.doc_id
+  LEFT JOIN receipt_lines rl ON l.doc_type = 'receipt' AND rl.id = l.line_id
+  LEFT JOIN shipments s ON l.doc_type = 'shipment' AND s.id = l.doc_id
+  LEFT JOIN transfer_orders t ON l.doc_type = 'transfer_order' AND t.id = l.doc_id
+  LEFT JOIN transfer_order_lines tl
+         ON l.doc_type = 'transfer_order' AND tl.id = l.line_id
+
+import_export:
+  auto_crud: false
+
+actions:
+  - id: document_hu_link_view_read
+    name: 查询单据容器关联
+    type: crud
+    method: GET
+    path: "/api/v1/document_hu_link_views/{id}"
+    description: "查询单条关系行"
+  - id: document_hu_link_view_list
+    name: 查询单据容器关联列表
+    type: crud
+    method: GET
+    path: "/api/v1/document_hu_link_views"
+    description: "按容器 / 单据 / 行号过滤"
+
+fields:
+  - id: id
+    name: 关系ID
+    type: integer
+    db_column: id
+    required: true
+    unique: true
+    semantics:
+      meaning: 桥表行主键
+      primary_key: true
+
+  - id: hu_id
+    name: 容器ID
+    type: integer
+    db_column: hu_id
+    required: true
+    description: 包装容器主键
+
+  - id: hu_no
+    name: 容器号
+    type: string
+    db_column: hu_no
+    description: 来自 handling_units.hu_no
+
+  - id: hu_status
+    name: 容器状态
+    type: string
+    db_column: hu_status
+    description: 来自 handling_units.status
+
+  - id: hu_type
+    name: 容器类型
+    type: string
+    db_column: hu_type
+    description: pallet / carton / bin / container / other
+
+  - id: doc_type
+    name: 单据类型
+    type: string
+    db_column: doc_type
+    required: true
+    description: receipt / shipment / transfer_order
+    enum_values:
+      - value: receipt
+        label: 收货单
+        color: primary
+      - value: shipment
+        label: 发货单
+        color: success
+      - value: transfer_order
+        label: 调拨单
+        color: warning
+
+  - id: doc_id
+    name: 单据ID
+    type: integer
+    db_column: doc_id
+    required: true
+    description: 单据主键
+
+  - id: doc_no
+    name: 单据号
+    type: string
+    db_column: doc_no
+    description: receipt_no / delivery_no / transfer_order_no
+
+  - id: doc_status
+    name: 单据状态
+    type: string
+    db_column: doc_status
+    description: 单据头状态
+
+  - id: doc_date
+    name: 单据日期
+    type: date
+    db_column: doc_date
+    description: 收货日期 / 实际发运日期（空则计划日期）/ 调拨日期
+
+  - id: line_id
+    name: 单据行ID
+    type: integer
+    db_column: line_id
+    description: 表头级关系为空
+
+  - id: line_no
+    name: 行号
+    type: string
+    db_column: line_no
+    description: 收货 / 调拨取行号；发运回退为行 ID 字符串
+
+  - id: direction
+    name: 方向
+    type: string
+    db_column: direction
+    required: true
+    description: in=入库 / out=出库
+    enum_values:
+      - value: in
+        label: 入库
+        color: success
+      - value: out
+        label: 出库
+        color: warning
+
+  - id: link_type
+    name: 关系类型
+    type: string
+    db_column: link_type
+    required: true
+    description: planned / packed / shipped
+    enum_values:
+      - value: planned
+        label: 计划
+        color: info
+      - value: packed
+        label: 已装箱
+        color: primary
+      - value: shipped
+        label: 已发运
+        color: success
+
+  - id: tentative
+    name: 暂定
+    type: boolean
+    db_column: tentative
+    description: 1 = 未经作业确认的预分配
+
+  - id: qty
+    name: 数量
+    type: number
+    db_column: qty
+    description: 该行在该容器内的数量；空 = 整行
+
+  - id: org_id
+    name: 组织ID
+    type: integer
+    db_column: org_id
+    description: 关系发生组织
+
+  - id: created_at
+    name: 创建时间
+    type: datetime
+    db_column: created_at
+    description: 桥表写入时间
+
+# 视图上不建 FK；引用口径留在基表侧
+relations: []
+
+ui_view_config:
+  skip_auto_menu: true
+  list:
+    columns:
+      - field: doc_type
+        width: 100
+        filterable: true
+        filter_type: select
+        render_as: tag
+      - field: doc_no
+        width: 180
+        filterable: true
+      - field: doc_date
+        width: 120
+      - field: line_no
+        width: 80
+      - field: direction
+        width: 80
+        filterable: true
+        filter_type: select
+        render_as: tag
+      - field: link_type
+        width: 100
+        filterable: true
+        filter_type: select
+        render_as: tag
+      - field: qty
+        width: 90
+      - field: tentative
+        width: 80
+      - field: hu_no
+        width: 160
+        filterable: true
+      - field: doc_status
+        width: 100

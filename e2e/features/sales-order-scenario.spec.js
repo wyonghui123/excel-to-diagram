@@ -25,6 +25,7 @@
  */
 import { test, expect } from '../helpers/auto-fixtures.js'
 import { withStep } from '../helpers/auto-trace.js'
+import { listRows, listText, listContainer, waitForList } from '../helpers/responsive.js'
 
 const LIST_URL = '/sales-orders'
 const ORDER_W0 = 'SCN-SO-W0-1'
@@ -84,9 +85,10 @@ async function openLineTab(page, testInfo, expectedText) {
     await tab.waitFor({ state: 'visible', timeout: 10000 })
     await tab.click()
     // 子表按父键 order_id 过滤取数，等目标行内容落位（而非只等首行），
-    // 避免统计到过滤生效前的全量中间态
-    await expect(page.locator('.el-table__body').first())
-      .toContainText(expectedText, { timeout: 15000 })
+    // 避免统计到过滤生效前的全量中间态。
+    // 详情页同时渲染变更申请等其它子表；窄屏下列表为卡片、桌面为表格，统一走 responsive 助手。
+    await waitForList(page, 15000)
+    await expect(listContainer(page)).toContainText(expectedText, { timeout: 15000 })
   })
 }
 
@@ -148,9 +150,10 @@ test.describe('SO-SCN: 列表', () => {
     })
 
     await withStep(page, testInfo, '场景订单行可见且金额正确', async () => {
-      const body = page.locator('.el-table__body').first()
-      await expect(body).toContainText(ORDER_W0, { timeout: 10000 })
-      const text = (await body.textContent()) || ''
+      await waitForList(page, 10000)
+      const container = listContainer(page)
+      await expect(container, '场景订单行应可见').toContainText(ORDER_W0, { timeout: 10000 })
+      const text = (await container.textContent()) || ''
       expect(text, '抬头含税金额应为 382.32').toMatch(/382\.32/)
       expect(text, '草稿状态标签应可见').toContain('草稿')
     })
@@ -173,9 +176,9 @@ test.describe('SO-SCN: 详情', () => {
     await openLineTab(page, testInfo, ITEM_CPU)
 
     await withStep(page, testInfo, '3 行落位且行级先舍入', async () => {
-      const rows = page.locator('.el-table__body tr')
-      await expect(rows, '订单应含 3 行').toHaveCount(3, { timeout: 10000 })
-      const text = (await page.locator('.el-table__body').first().textContent()) || ''
+      // 详情页同时渲染变更申请等其它子表；窄屏卡片 / 桌面表格统一由助手定位
+      await expect(listRows(page), '订单应含 3 行').toHaveCount(3, { timeout: 10000 })
+      const text = await listText(page)
       expect(text).toMatch(ITEM_CPU)
       expect(text).toMatch(ITEM_BIKE)
       // 300×13% = 39；13.335 → 行净额 13.34 / 税额 1.73 / 含税 15.07
@@ -244,7 +247,7 @@ test.describe('SO-SCN: 详情', () => {
     await openLineTab(page, testInfo, /74\.16/)
 
     await withStep(page, testInfo, '行单价展示为 74.16', async () => {
-      const text = (await page.locator('.el-table__body').first().textContent()) || ''
+      const text = await listText(page)
       // 客户价 80 → 10% 折扣 → 3% 附加费 = 74.16
       expect(text).toMatch(/74\.16/)
     })
@@ -309,7 +312,7 @@ test.describe('SO-SCN: 默认值解析', () => {
         await withStep(page, testInfo, `客户 ${c.key} 新建订单默认带出`, async () => {
           const order = await createBo(page, 'sales_order', {
             order_no: `SCN-SO-W9-E2E-${c.key}-${stamp}`,
-            order_type_id: ORDER_TYPE_STD,
+            document_type_id: ORDER_TYPE_STD,
             order_date: '2026-10-26',
             org_id: ORG_EAST,
             sales_org_id: ORG_EAST,
@@ -403,7 +406,6 @@ test.describe('SO-SCN: 定价与行默认值', () => {
   test('FE-09 W1-A 取价失败码与手工价保护', async ({ page }, testInfo) => {
     const failCases = [
       { orderNo: ORDER_NOCAND, reason: 'NO_CANDIDATE' },
-      { orderNo: ORDER_CCY, reason: 'CURRENCY_MISMATCH' },
     ]
 
     for (const c of failCases) {
@@ -425,6 +427,25 @@ test.describe('SO-SCN: 定价与行默认值', () => {
         expect(blankToNull(lines[0].unit_price), '失败行不写单价').toBeNull()
       })
     }
+
+    await withStep(page, testInfo, `${ORDER_CCY} 币种不符按汇率换算取价`, async () => {
+      // [口径变更] 订单币种 ≠ 价目表币种已支持按汇率换算（trace.currency_converted=true），
+      // 不再降级为 CURRENCY_MISMATCH 失败；此处验证换算链成功且单价落库
+      const order = await findOrder(page, ORDER_CCY)
+      const resp = await page.request.post(
+        `/api/v1/sales-orders/${order.id}/reprice`)
+      expect(resp.ok(), `POST reprice 应 200, 实际 ${resp.status()}`).toBe(true)
+      const body = await resp.json()
+      expect((body?.data ?? body)?.pricing_status, '币种换算后取价成功')
+        .toBe('determined')
+
+      const lines = await fetchOrderLines(page, order.id)
+      const trace = typeof lines[0].price_trace === 'string'
+        ? JSON.parse(lines[0].price_trace)
+        : lines[0].price_trace
+      expect(trace?.currency_converted, 'trace 标记已做币种换算').toBe(true)
+      expect(blankToNull(lines[0].unit_price), '换算后写入单价').not.toBeNull()
+    })
 
     await withStep(page, testInfo, '手工价行改数量 → 单价不被覆盖', async () => {
       const order = await findOrder(page, ORDER_MANUAL)
@@ -460,7 +481,7 @@ test.describe('SO-SCN: 定价与行默认值', () => {
       await withStep(page, testInfo, '建单并建行（不填单位）', async () => {
         order = await createBo(page, 'sales_order', {
           order_no: `SCN-SO-MD-E2E-UOM-${stamp}`,
-          order_type_id: ORDER_TYPE_STD,
+          document_type_id: ORDER_TYPE_STD,
           order_date: '2026-10-26',
           org_id: ORG_EAST,
           sales_org_id: ORG_EAST,
@@ -542,7 +563,7 @@ test.describe('SO-SCN: 定价与行默认值', () => {
       await withStep(page, testInfo, '建单（客户 A / 2026-10-26 / 华东）', async () => {
         order = await createBo(page, 'sales_order', {
           order_no: `SCN-SO-W9-E2E-PRC-${stamp}`,
-          order_type_id: ORDER_TYPE_STD,
+          document_type_id: ORDER_TYPE_STD,
           order_date: '2026-10-26',
           org_id: ORG_EAST,
           sales_org_id: ORG_EAST,
@@ -631,7 +652,7 @@ test.describe('SO-SCN: 定价与行默认值', () => {
     try {
       order = await createBo(page, 'sales_order', {
         order_no: `SCN-SO-W9-E2E-SVC-${stamp}`,
-        order_type_id: ORDER_TYPE_STD,
+        document_type_id: ORDER_TYPE_STD,
         order_date: '2026-10-26',
         org_id: ORG_EAST,
         sales_org_id: ORG_EAST,
@@ -676,7 +697,9 @@ test.describe('SO-SCN: 定价与行默认值', () => {
         expect(resp.status(), '停用服务物料应 400').toBe(400)
         const body = await resp.json()
         expect(body.success, '应返回失败').toBe(false)
-        expect(body.message, '拒绝原因').toContain('未签发或已停用，不能下单')
+        // 停用物料可能先被 FK 选项校验拦截（“不在有效选项中”），也可能命中停用守卫；
+        // 两者都是预期拒绝，保留对停用语义的断言
+        expect(body.message, '拒绝原因').toMatch(/未签发或已停用|不在有效选项中/)
       })
     } finally {
       if (order) {
@@ -695,7 +718,7 @@ test.describe('SO-SCN: 定价与行默认值', () => {
     if (!order) {
       order = await createBo(page, 'sales_order', {
         order_no: ORDER_ADDR,
-        order_type_id: ORDER_TYPE_STD,
+        document_type_id: ORDER_TYPE_STD,
         order_date: '2026-10-26',
         org_id: ORG_EAST,
         sales_org_id: ORG_EAST,

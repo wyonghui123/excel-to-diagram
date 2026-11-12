@@ -304,6 +304,57 @@ export function getDimensionName(dimensions, resourceType) {
   return dim?.name ?? getResourceLabel(resourceType)
 }
 
+/**
+ * [FR-009] 权限判定唯一入口
+ *
+ * 页面/组件一律通过本函数判断按钮与操作显隐，不得各自调用 authStore.hasPermission
+ * 或硬编码权限码。
+ *
+ * 权限码来源（优先级）：
+ *  1. context.permission（string | string[]）— 显式权限码
+ *  2. context.objectType + action — 派生 `${objectType}:${action}`
+ *     （action 原样使用，不做别名归一，避免 `product:read` 被改成 `product:view`）
+ *
+ * 默认值（不改变既有行为）：
+ *  - 无任何权限码 → 放行，并记录 debug 日志
+ *  - 未提供可用的 authStore → 放行，并记录 debug 日志（兼容单测/非 setup 上下文）
+ *
+ * @param {string|null} action - 动作码（create/read/update/delete/export/import...）
+ * @param {Object} [context]
+ * @param {string|string[]} [context.permission] - 显式权限码
+ * @param {'any'|'all'} [context.mode='any'] - 数组判定方式
+ * @param {string} [context.objectType] - 对象类型，用于派生权限码
+ * @param {Object|null} [context.authStore] - 权限来源（传 null 表示无 store）
+ * @returns {boolean}
+ */
+export function can(action, context = {}) {
+  const { permission, mode = 'any', objectType, authStore } = context || {}
+
+  let codes = []
+  if (Array.isArray(permission)) {
+    codes = permission.filter(p => typeof p === 'string' && p)
+  } else if (typeof permission === 'string' && permission) {
+    codes = [permission]
+  }
+
+  if (codes.length === 0) {
+    if (objectType && action) {
+      codes = [`${objectType}:${action}`]
+    } else {
+      logger?.debug?.(`[permissionService.can] 缺少权限码 (action=${action})，默认放行`)
+      return true
+    }
+  }
+
+  if (!authStore) {
+    logger?.debug?.(`[permissionService.can] 无 authStore (codes=${codes.join('|')})，默认放行`)
+    return true
+  }
+
+  const check = code => authStore.hasPermission(code)
+  return mode === 'all' ? codes.every(check) : codes.some(check)
+}
+
 // ==================== API 函数 ====================
 
 /**
@@ -436,10 +487,11 @@ export async function hydrateIdExpressionDisplay(resourceType, expr) {
  * @returns {Promise<object>}
  */
 export async function loadPermissionRules(roleId, params = {}) {
-  const r = await apiV2.get('/bo/permission_rule', { params: { permission_set_id: roleId, ...params } })
-  // v2 返回分页格式，适配为 v1 格式 {data: {permission_set_id, rules: [...]}}
-  if (r.success && r.data?.items) {
-    return { success: true, data: { permission_set_id: roleId, rules: r.data.items } }
+  // [MIGRATION 2026-10-31] 全切 v2 /api/v2/permission-rules（读 data_permission_rules 统一表）
+  const r = await apiV2.get('/permission-rules', { params: { permission_set_id: roleId, ...params } })
+  if (r.success) {
+    const rules = Array.isArray(r.data) ? r.data : (r.data?.items || [])
+    return { success: true, data: { permission_set_id: roleId, rules } }
   }
   return r
 }
@@ -452,13 +504,24 @@ export async function loadPermissionRules(roleId, params = {}) {
  * @returns {Promise<object>}
  */
 export async function savePermissionRules(roleId, rule, mode = 'create') {
+  // [MIGRATION 2026-10-31] 全切 v2：POST 新建 / PUT 更新（写统一表 data_permission_rules）。
+  // 后端无 batch 端点，批量按 id 逐条 PUT / 无 id 逐条 POST。
   if (mode === 'batch') {
-    return await apiV1.post(`/permission-sets/${roleId}/permission-rules/batch`, rule)
+    const rules = Array.isArray(rule?.rules) ? rule.rules : []
+    const results = []
+    for (const item of rules) {
+      results.push(
+        item?.id
+          ? await apiV2.put(`/permission-rules/${item.id}`, { ...item, permission_set_id: roleId })
+          : await apiV2.post('/permission-rules', { ...item, permission_set_id: roleId })
+      )
+    }
+    return { success: true, data: results }
   }
-  if (mode === 'update' && rule.id) {
-    return await apiV1.put(`/permission-sets/${roleId}/permission-rules/${rule.id}`, rule)
+  if (mode === 'update' && rule?.id) {
+    return await apiV2.put(`/permission-rules/${rule.id}`, { ...rule, permission_set_id: roleId })
   }
-  return await apiV1.post(`/permission-sets/${roleId}/permission-rules`, rule)
+  return await apiV2.post('/permission-rules', { ...rule, permission_set_id: roleId })
 }
 
 /**
@@ -468,18 +531,9 @@ export async function savePermissionRules(roleId, rule, mode = 'create') {
  * @returns {Promise<object>}
  */
 export async function deletePermissionRule(roleId, ruleId) {
-  return await apiV1.delete(`/permission-sets/${roleId}/permission-rules/${ruleId}`)
-}
-
-/**
- * 切换规则启用/禁用
- * @param {number} roleId
- * @param {number} ruleId
- * @param {object} patchData - { is_enabled: boolean }
- * @returns {Promise<object>}
- */
-export async function patchPermissionRule(roleId, ruleId, patchData) {
-  return await apiV1.patch(`/permission-sets/${roleId}/permission-rules/${ruleId}`, patchData)
+  // 后端无 /permission-sets|roles/<id>/permission-rules/<ruleId> 的 DELETE 路由；
+  // 规则删除改走 v2 /api/v2/permission-rules/<ruleId>（与 deleteConditionRule 同一端点）
+  return await apiV2.delete(`/permission-rules/${ruleId}`)
 }
 
 /**
@@ -489,7 +543,8 @@ export async function patchPermissionRule(roleId, ruleId, patchData) {
  * @returns {Promise<object>}
  */
 export async function calculateImpact(roleId, rule) {
-  return await apiV1.post(`/permission-sets/${roleId}/calculate-impact`, rule)
+  // 后端仅注册 /api/v1/roles/<id>/calculate-impact（permission_dimension_api）
+  return await apiV1.post(`/roles/${roleId}/calculate-impact`, rule)
 }
 
 /**
@@ -720,6 +775,8 @@ export default {
   getResourceLabel,
   getActionLabel,
   getDimensionName,
+  // 权限判定统一入口（FR-009）
+  can,
   // 元数据缓存（P1-Base-03）
   loadPermissionMeta,
   invalidatePermissionMetaCache,
@@ -736,7 +793,6 @@ export default {
   loadPermissionRules,
   savePermissionRules,
   deletePermissionRule,
-  patchPermissionRule,
   calculateImpact,
   loadFieldMetadata,
   previewCondition,

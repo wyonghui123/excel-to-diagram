@@ -165,12 +165,16 @@ export async function createProductWithVersion(page) {
   if (!product.id) {
     throw new Error(`Failed to create product: ${JSON.stringify(productResp)}`)
   }
+  // [2026-10-31] POST 响应可能只回 id/code, 补 name 供用例按名称搜索
+  if (!product.name) product.name = `测试产品_${testId}`
+  if (!product.code) product.code = testId.toUpperCase()
 
   // 2. 创建版本
   const versionResp = await apiPost(page, '/api/v2/bo/version', {
     product_id: product.id,
     code: 'V1',
-    name: '版本 1.0',
+    // [2026-10-31] 后端版本名正则 ^[A-Za-z0-9][A-Za-z0-9_.\-]*$ 不接受空格/中文
+    name: 'V1.0',
     description: 'Auto-created by E2E data-finder',
     is_active: true
   })

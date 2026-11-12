@@ -209,10 +209,10 @@ ui_view_config:
 ## 视图配置与菜单生命周期（2026-10-23 补充）
 
 > **完整规范在全局规则**（不在本文件展开，避免双份漂移）：
-> - [meta-ui-view-config.md](file:///d:/filework/.trae/rules/scenarios/5-development/meta-ui-view-config.md)
+> - [meta-ui-view-config.md](file:///d:/filework/excel-to-diagram/.trae/rules/scenarios/5-development/meta-ui-view-config.md)
 >   —— ui_view_config 三态必填、兜底推导导致裸 ID 列与编辑态空白的根因、
 >   customFetcher 判据、动作权限码双段式。
-> - [meta-menu-retirement.md](file:///d:/filework/.trae/rules/scenarios/5-development/meta-menu-retirement.md)
+> - [meta-menu-retirement.md](file:///d:/filework/excel-to-diagram/.trae/rules/scenarios/5-development/meta-menu-retirement.md)
 >   —— 独立菜单是否合适的判据、init 脚本清理假成功、migration 退役存量菜单行。
 
 ### 硬规则速记

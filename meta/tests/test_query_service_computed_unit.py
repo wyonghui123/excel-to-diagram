@@ -14,6 +14,7 @@ from unittest.mock import MagicMock, patch
 import pytest
 
 from meta.services.query_service import QueryService
+from meta.core.computed_field_query import ComputationNotSupportedError
 from meta.services.query.filter_utils import (
     build_computed_where_clause,
     parse_filter_value,
@@ -171,21 +172,21 @@ class TestApplyCountRelationsFilter:
         assert "JOIN service_modules sm" in where_sql
         assert "= 0" in where_sql
 
-    def test_unsupported_scope_returns_false(self, query_service, mock_builder):
-        """不支持的 scope → 返回 False, 不调 where_raw"""
+    def test_unsupported_scope_raises(self, query_service, mock_builder):
+        """不支持的 scope → 抛 ComputationNotSupportedError, 不调 where_raw"""
         # domain + self 不支持
-        result = query_service._apply_count_relations_filter(
-            mock_builder, "domains", "domain", "self", ">=", 1
-        )
-        assert result is False
+        with pytest.raises(ComputationNotSupportedError):
+            query_service._apply_count_relations_filter(
+                mock_builder, "domains", "domain", "self", ">=", 1
+            )
         mock_builder.where_raw.assert_not_called()
 
-    def test_unsupported_object_type_returns_false(self, query_service, mock_builder):
-        """未知 object_type → False"""
-        result = query_service._apply_count_relations_filter(
-            mock_builder, "any_table", "unknown_type", "self", ">=", 1
-        )
-        assert result is False
+    def test_unsupported_object_type_raises(self, query_service, mock_builder):
+        """未知 object_type → 抛 ComputationNotSupportedError"""
+        with pytest.raises(ComputationNotSupportedError):
+            query_service._apply_count_relations_filter(
+                mock_builder, "any_table", "unknown_type", "self", ">=", 1
+            )
         mock_builder.where_raw.assert_not_called()
 
     def test_db_error_returns_false(self, query_service, mock_builder):
@@ -236,12 +237,12 @@ class TestApplyCountChildrenFilter:
         assert "FROM service_modules" in where_sql
         assert "= 0" in where_sql
 
-    def test_unsupported_object_type_returns_false(self, query_service, mock_builder):
-        """未在 _COUNT_CHILDREN_MAP 里的 object_type → False"""
-        result = query_service._apply_count_children_filter(
-            mock_builder, "any_table", "unknown_type", ">=", 1
-        )
-        assert result is False
+    def test_unsupported_object_type_raises(self, query_service, mock_builder):
+        """未在 _COUNT_CHILDREN_MAP 里的 object_type → 抛 ComputationNotSupportedError"""
+        with pytest.raises(ComputationNotSupportedError):
+            query_service._apply_count_children_filter(
+                mock_builder, "any_table", "unknown_type", ">=", 1
+            )
         mock_builder.where_raw.assert_not_called()
 
     def test_db_error_returns_false(self, query_service, mock_builder):

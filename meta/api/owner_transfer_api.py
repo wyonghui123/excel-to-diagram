@@ -20,6 +20,7 @@ from meta.services.owner_transfer_service import OwnerTransferService
 from meta.services.auth_middleware import is_admin
 from functools import wraps
 from meta.core.db_path import get_meta_db_path
+from meta.api._response_contract import ok, error_response
 
 
 def admin_required(f):
@@ -28,7 +29,7 @@ def admin_required(f):
         from meta.api.user_api import get_current_user
         user = get_current_user()
         if not user or not is_admin(user):
-            return jsonify({"success": False, "message": "您没有执行此操作的权限，需要管理员权限"}), 403
+            return error_response("您没有执行此操作的权限，需要管理员权限", status=403)
         return f(*args, **kwargs)
     return decorated
 
@@ -88,7 +89,7 @@ def validate_transfer():
         required = ['resource_type', 'resource_id', 'from_user_id', 'to_user_id']
         missing = [f for f in required if f not in data]
         if missing:
-            return jsonify({'success': False, 'message': f'缺少参数: {", ".join(missing)}'}), 400
+            return error_response(f'缺少参数: {", ".join(missing)}')
 
         svc = _get_service()
         result = svc.validate_transfer(
@@ -98,12 +99,12 @@ def validate_transfer():
             int(data['to_user_id'])
         )
 
-        return jsonify({'success': True, 'data': result})
+        return ok(result)
 
     except Exception as e:
         import traceback
         traceback.print_exc()
-        return jsonify({'success': False, 'message': str(e)}), 500
+        return error_response(str(e), status=500)
 
 
 @owner_transfer_bp.route('/transfer', methods=['POST'])
@@ -136,7 +137,7 @@ def transfer_ownership():
         required = ['resource_type', 'resource_id', 'from_user_id', 'to_user_id']
         missing = [f for f in required if f not in data]
         if missing:
-            return jsonify({'success': False, 'message': f'缺少参数: {", ".join(missing)}'}), 400
+            return error_response(f'缺少参数: {", ".join(missing)}')
 
         svc = _get_service()
         admin_user_id = _get_admin_user_id()
@@ -153,16 +154,12 @@ def transfer_ownership():
         if not result.get('success'):
             return jsonify({'success': False, 'message': result.get('error'), 'data': result}), 400
 
-        return jsonify({
-            'success': True,
-            'data': result,
-            'message': result.get('message', '转移成功')
-        })
+        return ok(result, message=result.get('message', '转移成功'))
 
     except Exception as e:
         import traceback
         traceback.print_exc()
-        return jsonify({'success': False, 'message': str(e)}), 500
+        return error_response(str(e), status=500)
 
 
 @owner_transfer_bp.route('/bulk-transfer', methods=['POST'])
@@ -193,7 +190,7 @@ def bulk_transfer_ownership():
         required = ['resource_type', 'from_user_id', 'to_user_id']
         missing = [f for f in required if f not in data]
         if missing:
-            return jsonify({'success': False, 'message': f'缺少参数: {", ".join(missing)}'}), 400
+            return error_response(f'缺少参数: {", ".join(missing)}')
 
         svc = _get_service()
         admin_user_id = _get_admin_user_id()
@@ -205,16 +202,12 @@ def bulk_transfer_ownership():
             admin_user_id=admin_user_id
         )
 
-        return jsonify({
-            'success': True,
-            'data': result,
-            'message': f"批量转移完成: {result.get('transferred', 0)}/{result.get('total', 0)}"
-        })
+        return ok(result, message=f"批量转移完成: {result.get('transferred', 0)}/{result.get('total', 0)}")
 
     except Exception as e:
         import traceback
         traceback.print_exc()
-        return jsonify({'success': False, 'message': str(e)}), 500
+        return error_response(str(e), status=500)
 
 
 @owner_transfer_bp.route('/transfer-history', methods=['GET'])
@@ -238,15 +231,12 @@ def get_transfer_history():
             limit=int(request.args.get('limit', 50))
         )
 
-        return jsonify({
-            'success': True,
-            'data': {
-                'transfers': result,
-                'count': len(result)
-            }
+        return ok({
+            'transfers': result,
+            'count': len(result)
         })
 
     except Exception as e:
         import traceback
         traceback.print_exc()
-        return jsonify({'success': False, 'message': str(e)}), 500
+        return error_response(str(e), status=500)

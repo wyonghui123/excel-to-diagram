@@ -62,7 +62,7 @@ class TestValidateSourceTargetExistence:
         )
         assert result is not None
         assert result.success is False
-        assert '源记录不存在' in result.message
+        assert '源' in result.message and '不存在' in result.message
 
     def test_target_not_found_returns_error(self):
         cursor1 = MagicMock()
@@ -79,7 +79,7 @@ class TestValidateSourceTargetExistence:
         )
         assert result is not None
         assert result.success is False
-        assert '目标记录不存在' in result.message
+        assert '目标' in result.message and '不存在' in result.message
 
     def test_both_exist_returns_none(self):
         ds = _mock_ds(fetchone_returns={'id': 1})

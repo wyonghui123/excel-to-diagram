@@ -1,7 +1,7 @@
 ---
 alwaysApply: false
 description: "组件治理规范：组件拆分、命名、复用、依赖管理"
-globs: "src/**/*.vue,src/**/*.ts,src/**/*.tsx"
+globs: "src/components/common/**"
 ---
 
 # 组件治理规范 (Component Governance)
@@ -644,3 +644,37 @@ EnumService.clearCache()
 
 **最后更新**: 2026-05-08
 **下次审查**: 2026-06-08
+
+---
+
+<!-- merged from .trae/rules/scenarios/5-development/component-governance.md -->
+
+## 4 个子文件
+
+| 文件 | 行 | 主题 | 何时加载 |
+|---|---|---|---|
+| [component-lifecycle.md](scenarios/5-development/component-lifecycle.md) | ~150 | 分类 + FilterBar + 弃用流程 | 创建/弃用组件 |
+| [component-rules.md](scenarios/5-development/component-rules.md) | ~140 | 治理规则 + 使用统计 + 迁移 | 修改/迁移组件 |
+| [component-config.md](scenarios/5-development/component-config.md) | ~120 | 元模型 + API + 枚举 + 验证 | 配置变更 |
+
+**总计**：原 646 行 → **3 个子文件**（每个 < 150 行）
+
+---
+
+## 何时读哪个？
+
+```
+创建新组件？       → component-lifecycle.md（分类 + FilterBar）
+弃用旧组件？       → component-lifecycle.md（§弃用流程）
+修改现有组件？     → component-rules.md（治理规则 + 迁移）
+配置变更？         → component-config.md（元模型 + 验证）
+枚举选项为空？     → component-config.md（§问题排查）
+```
+
+---
+
+## CHANGELOG
+
+| 日期 | 变更 | 内容 |
+|---|---|---|
+| 2026-09-02 | v2.0 | **拆分**（component-governance → 3 文件） |

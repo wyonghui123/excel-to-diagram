@@ -1,0 +1,312 @@
+# 资源能力（Resource Capability）—— 统一资源模型 P2a / FR-003
+# 依据: docs/specs/spec-unified-resource-model-2026-11-01-v1.0.md
+#       §FR-003 / §9.3 数据模型表
+#
+# 定位: resource 的附属明细（child_sections），不单独成菜单。
+#   能力代表"持有"（资源具备某技能及等级），工序/服务项代表"要求"，
+#   两侧对齐才可匹配。
+#
+# 约束:
+#   ① level ∈ 1..5。
+#   ② (resource_id, skill_id, valid_from) 唯一，防止同一起始日重复登记。
+#   ③ skill_id 外键 restrict：引用未登记技能保存失败。
+#   ④ 过期能力（valid_to < 作业日期）不参与匹配（服务层校验）。
+
+id: resource_capability
+name: 资源能力
+table_name: resource_capabilities
+description: 资源持有技能的能力记录（等级 / 有效期 / 认证 / 核实信息）
+parent_object: resource
+display_name_field: skill_id
+aspects: [audit_aspect]
+
+semantics:
+  meaning: 资源能力
+  category: core_entity
+  aliases:
+    - 资源能力
+    - 技能持有
+    - resource capability
+    - qualification
+
+deletion_policy:
+  mode: restrict
+  restrict_on: []
+  cascade_delete: []
+
+audit:
+  enabled: true
+  create:
+    enabled: true
+    fields: all
+  update:
+    enabled: true
+    fields: changed_only
+    exclude: [id, created_at, updated_at]
+  delete:
+    enabled: true
+    fields: business_only
+    exclude: [id, created_at, updated_at]
+  associate:
+    enabled: true
+  dissociate:
+    enabled: true
+
+fields:
+  - id: id
+    name: ID
+    type: integer
+    db_column: id
+    required: true
+    unique: true
+    description: 技术主键
+    semantics:
+      meaning: 自增主键
+      primary_key: true
+
+  - id: resource_id
+    name: 资源
+    type: integer
+    db_column: resource_id
+    required: true
+    description: 所属资源（父字段）
+    semantics:
+      meaning: 所属资源引用
+      display:
+        type: association
+        target_type: resource
+        display_field: name
+    value_help:
+      source:
+        type: bo
+        target_bo: resource
+        value_field: id
+        display_field: name
+        code_field: code
+        apply_target_permissions: true
+      behavior:
+        multiple: false
+        validation: true
+        binding_strength: strict
+        min_search_length: 0
+      presentation:
+        result_type: dialog
+        display_format: "{code} - {name}"
+        columns:
+          - field: code
+            label: 资源编码
+            width: 150
+          - field: name
+            label: 资源名称
+            width: 220
+    ui:
+      widget: select
+      relation: resource
+      multiple: false
+      hidden_in_form: true
+
+  - id: skill_id
+    name: 技能
+    type: integer
+    db_column: skill_id
+    required: true
+    description: 持有的技能
+    semantics:
+      meaning: 技能引用
+      display:
+        type: association
+        target_type: skill
+        display_field: name
+    value_help:
+      source:
+        type: bo
+        target_bo: skill
+        value_field: id
+        display_field: name
+        code_field: code
+        apply_target_permissions: true
+        value_filter:
+          status: active
+      behavior:
+        multiple: false
+        validation: true
+        binding_strength: strict
+        min_search_length: 0
+      presentation:
+        result_type: dialog
+        display_format: "{code} - {name}"
+        columns:
+          - field: code
+            label: 技能编码
+            width: 160
+          - field: name
+            label: 技能名称
+            width: 220
+    ui:
+      widget: select
+      relation: skill
+      multiple: false
+
+  - id: level
+    name: 能力等级
+    type: integer
+    db_column: level
+    required: true
+    default: 1
+    description: 能力等级（1–5）
+    constraints:
+      - type: numeric_range
+        gte: 1
+        lte: 5
+        decimal_places: 0
+    semantics:
+      meaning: 能力等级
+      filterable: true
+      filter_type: number
+      filter_label: 能力等级
+      filter_scope: local
+    ui:
+      widget: number
+
+  - id: valid_from
+    name: 生效日
+    type: date
+    db_column: valid_from
+    required: true
+    description: 能力生效起始日（含）
+    semantics:
+      meaning: 能力生效起始日
+    ui:
+      widget: date
+
+  - id: valid_to
+    name: 失效日
+    type: date
+    db_column: valid_to
+    nullable: true
+    description: 能力失效日（不含）；空表示长期有效
+    semantics:
+      meaning: 能力失效日
+    ui:
+      widget: date
+
+  - id: certification_ref
+    name: 认证编号
+    type: string
+    db_column: certification_ref
+    nullable: true
+    max_length: 100
+    description: 认证证书编号 / 外部资质引用
+    semantics:
+      meaning: 认证凭证编号
+      data_category: code
+    ui:
+      widget: input
+
+  - id: verified_by
+    name: 核实人
+    type: string
+    db_column: verified_by
+    nullable: true
+    max_length: 100
+    description: 能力核实人
+    semantics:
+      meaning: 能力核实人
+      data_category: text
+    ui:
+      widget: input
+
+  - id: verified_at
+    name: 核实时间
+    type: datetime
+    db_column: verified_at
+    nullable: true
+    description: 能力核实时间
+    semantics:
+      meaning: 能力核实时间
+    ui:
+      widget: datetime
+
+  - id: created_at
+    name: 创建时间
+    type: datetime
+    db_column: created_at
+    description: 创建时间
+    semantics:
+      meaning: 记录创建时间
+      audit_field: true
+
+  - id: updated_at
+    name: 更新时间
+    type: datetime
+    db_column: updated_at
+    description: 更新时间
+    semantics:
+      meaning: 记录更新时间
+      audit_field: true
+
+indexes:
+  - fields: [resource_id, skill_id, valid_from]
+    unique: true
+    name: uq_resource_capability
+  - fields: [resource_id]
+    name: idx_resource_capability_resource
+  - fields: [skill_id]
+    name: idx_resource_capability_skill
+
+relations:
+  - id: resource_capability_to_resource
+    name: 资源
+    type: reference
+    target: resource
+    source_field: resource_id
+    target_field: id
+    cardinality: N:1
+    description: 所属资源引用（真外键）
+  - id: resource_capability_to_skill
+    name: 技能
+    type: reference
+    target: skill
+    source_field: skill_id
+    target_field: id
+    cardinality: N:1
+    description: 技能引用（真外键，restrict）
+
+ui_view_config:
+  # 作为资源详情页的子表，不单独成菜单
+  skip_auto_menu: true
+  list:
+    detail_mode: drawer
+    title: 资源能力
+    columns:
+      - field: skill_id
+        width: 220
+        render_as: association
+        target_type: skill
+        display_field: name
+      - field: level
+        width: 100
+      - field: valid_from
+        width: 120
+      - field: valid_to
+        width: 120
+      - field: certification_ref
+        width: 160
+      - field: verified_by
+        width: 120
+      - field: verified_at
+        width: 160
+    defaultSort:
+      field: valid_from
+      order: desc
+  form:
+    title: 资源能力
+    layout: vertical
+    sections:
+      - title: 基本信息
+        columns:
+          - fields: [skill_id, level]
+          - fields: [valid_from, valid_to]
+      - title: 认证与核实
+        columns:
+          - fields: [certification_ref, verified_by, verified_at]

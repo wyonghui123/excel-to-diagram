@@ -43,7 +43,7 @@ def db_for_loader():
     conn.executescript("""
         CREATE TABLE IF NOT EXISTS data_permission_rules (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
-            role_id INTEGER NOT NULL,
+            permission_set_id INTEGER NOT NULL,
             rule_type VARCHAR(50) NOT NULL DEFAULT 'condition',
             resource_type VARCHAR(200),
             dimension_code VARCHAR(200),
@@ -180,7 +180,7 @@ fields:
         assert loaded >= 1
         rows = db_for_loader.execute(
             "SELECT rule_type, dimension_code, scope_mode, permission_level "
-            "FROM data_permission_rules WHERE role_id=1"
+            "FROM data_permission_rules WHERE permission_set_id=1"
         ).fetchall()
         assert len(rows) == 1
         assert rows[0][0] == 'dimension'
@@ -221,7 +221,7 @@ fields:
 
         # 总行数应为 2 (r1 + r2)，不因第二次加载而翻倍
         rows = db_for_loader.execute(
-            "SELECT rule_type FROM data_permission_rules WHERE role_id=1"
+            "SELECT rule_type FROM data_permission_rules WHERE permission_set_id=1"
         ).fetchall()
         assert len(rows) == 2
         # 返回的"新插入数"第二次应为 0
@@ -273,7 +273,7 @@ fields:
         assert n2 == 1
         rows = db_for_loader.execute(
             "SELECT rule_type, resource_type, dimension_code "
-            "FROM data_permission_rules WHERE role_id=1 ORDER BY id"
+            "FROM data_permission_rules WHERE permission_set_id=1 ORDER BY id"
         ).fetchall()
         assert len(rows) == 2
 
@@ -529,7 +529,7 @@ fields:
 
         # 验证表内规则数 = 3
         rows = db_for_loader.execute(
-            "SELECT rule_type FROM data_permission_rules WHERE role_id=1"
+            "SELECT rule_type FROM data_permission_rules WHERE permission_set_id=1"
         ).fetchall()
         assert len(rows) == 3
         rule_types = {r[0] for r in rows}

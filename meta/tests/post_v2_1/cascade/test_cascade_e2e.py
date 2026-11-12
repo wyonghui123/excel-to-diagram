@@ -14,10 +14,12 @@ class TestCascadeBrowserE2E:
     @pytest.fixture(autouse=True)
     def skip_if_no_backend(self):
         import urllib.request
+        from meta.tests.shared.fixtures import backend_base_url
+        base = backend_base_url()
         try:
-            urllib.request.urlopen('http://localhost:3010/api/v1/health', timeout=1)
+            urllib.request.urlopen(f'{base}/api/v1/health', timeout=1)
         except Exception:
-            pytest.skip("Backend not running at localhost:3010")
+            pytest.skip(f"Backend not running at {base}")
 
     def test_test333_batch_delete_with_versions(self):
         pass

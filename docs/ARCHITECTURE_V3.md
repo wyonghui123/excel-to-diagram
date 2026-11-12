@@ -152,7 +152,7 @@
 | 1 | 类型视图只读 | 扫描 `object_type: view` 的对象，断言无 create/update/delete 路由与写拦截器；断言 `document_type` / `line_type` 在 API 层无写端点 | 已确认：两者 `object_type: view` + `auto_crud: false`，未见写端点 | 类型被复制成表 → 双写、单据类型改不动 |
 | 2 | 数量只走边 | 静态扫描对下游单据行 `qty` 的 `UPDATE`；集成测试：建单 → 派生 → 断言 `doc_flow_edges` 与未结量视图一致 | 扫描：**未见**对 `qty` 的原生 UPDATE（仅 seed/测试）；存在 5 处受控直连 SQL（`sales_order_{pricing,amount,header_discount,expand,guard}_service`），只写派生金额、价格追溯、`configuration_id` 与地址快照，属允许写入 | 绕过数量账 → 未结量失真、冲销无法追溯 |
 | 3 | 状态与履约分离 | 断言 `fulfillment_status` 的写点只出现在派生/回写模块；断言写入语句不含 `status` 列 | 已确认：`sales_order_fulfillment_service` 自述 INV-1 为唯一写入口，含 `check_drift`；刷新 `fulfillment_derived_at` 不改 `updated_at` | 派生覆盖人工状态 → 审计断链 |
-| 4 | draft 不可引用 / inactive 可结算 | 集成测试：引用 draft 物料应失败；引用 inactive 物料建单应成功、老单据结算应成功 | **已核（2026-10-30）**：`test_master_data_lifecycle_consumption.py` 5 passed（台账缺口 0 / draft 引用被拒 / inactive 老单据结算成功） | 生命周期承诺落空 → 主数据治理失效 |
+| 4 | draft 不可引用 / inactive 可结算 | 集成测试：引用 draft 物料应失败；引用 inactive 物料建单应成功、老单据结算应成功 | **已核（2026-10-30）**：`test_master_data_contracts.py` 5 passed（台账缺口 0 / draft 引用被拒 / inactive 老单据结算成功） | 生命周期承诺落空 → 主数据治理失效 |
 | 5 | 默认形态禁止同名 `table_name` | **启动期**对所有已注册 BO（含应用 BO）做 `table_name` 冲突检测并 fail fast；应用内表名重复单独拦截 | **已实现**：`app_registry._assert_app_registration_safe` 在注册后、建表前抛 `AppRegistrationError`（同归属放行）；应用内表名重复在 `_register_app_schemas` 抛错。**G2 校验层已落地**：`app_loader` 解析 `table_prefix`（缺省 `app.id`）并校验格式/长度、`discover_apps` 校验跨应用前缀唯一；物理表名改写仍未启用 | 静默合列/丢列（P0） |
 | 6 | 归属与命名空间不可绕过 | 启动期断言 BO id 全局唯一 + `permission_namespace == app.id`；运行期断言 CRUD 走 `_bo_to_app` 反查 | **已补**：BO id 跨归属重复同样 fail fast；`permission_namespace` 已在 `app_loader` 强制 | 归属错判、应用间越权 |
 | 7 | 仲裁必须显式 | 静态断言控制参数 / `rate_record` / `sourcing_rule_*` 的查询均带 `specificity_rank` / `priority` / `seq` 排序，且不存在「无排序取第一条」 | 服务已消费（`control_parameter_service` 等 4 处）；缺统一文档（§2.4、§5.4） | 同层「最后写入赢」→ 结果不可复现 |
@@ -475,7 +475,7 @@ meta/schemas/*.yaml (140)
 | `line_type.yaml` | `object_type: view`，「type_definitions 的 line 切片，只读」 | `code`、`name`、`category`、`delivery_relevant` |
 | `line_type_assignment.yaml` | 实体表 `line_type_assignments` | `document_type_id` + `item_group_id` + `specificity_rank` → `line_type_id` |
 
-`[事实]` 行类型不是销售订单专属字段，而是全局类型定义的两个切片；订单只引用 `order_type_id` / `line_type_id`。
+`[事实]` 行类型不是销售订单专属字段，而是全局类型定义的两个切片；订单只引用 `document_type_id` / `line_type_id`。
 
 `[事实]` 行类型确定规则 = 「单据类型 + 物料组 → 行类型」，同维度多条时按 `specificity_rank` 取最具体的一条。
 
@@ -506,7 +506,7 @@ meta/schemas/*.yaml (140)
 
 | 族 | 字段 |
 |---|---|
-| 标识/状态 | `order_no`、`order_type_id`、`order_date`、`status`、`description` |
+| 标识/状态 | `order_no`、`document_type_id`、`order_date`、`status`、`description` |
 | 伙伴四方（单值） | `customer_account_id`（售达）、`bill_to_account_id`（收票）、`payer_account_id`（付款）、`ship_to_party_id`（送达） |
 | 地址 | `ship_to_address_id` / `bill_to_address_id` + 快照文本 `*_address_text` |
 | 联系人 | `contact_party_id`、`contact_name_text`、`contact_phone_text` |
@@ -700,7 +700,7 @@ meta/schemas/*.yaml (140)
 
 `[计划]` [2026-10-28-master-data-lifecycle-state-machine-spec](file:///d:/filework/docs/superpowers/specs/2026-10-28-master-data-lifecycle-state-machine-spec.md) 已定稿，结论是**不新增元模型机制**：D1 修消费通路（零新增机制）/ D2 结构化前置检查（复用 `deletion_policy.restrict_on`）/ D3 文档口径统一。一句话结论 —— 三条 P0 都落在「声明已写对、消费端读错/没读」这一层，修完后 `status` 四值的 description 才第一次有代码承载。
 
-`[事实]` D1 消费端已核对（2026-10-30）：单据/明细对象的主数据引用字段全部声明 `value_filter.status: active` 且写校验开启，台账缺口 0；「draft 引用被拒 / inactive 老单据可结算」由 `test_master_data_lifecycle_consumption.py`（5 passed）覆盖。D2/D3 仍为 `[计划]`。
+`[事实]` D1 消费端已核对（2026-10-30）：单据/明细对象的主数据引用字段全部声明 `value_filter.status: active` 且写校验开启，台账缺口 0；「draft 引用被拒 / inactive 老单据可结算」由 `test_master_data_contracts.py`（5 passed）覆盖。D2/D3 仍为 `[计划]`。
 
 `[事实]` `deletion_policy.restrict_on` 已有通用消费：`reference_restrict_checker.py`（按「谁引用我」拦截）+ `action_executor._check_deletion_policy_restrict`（物理删除），即 D2 的**基础设施已存在**。
 `[计划]` 三条 P0 中 D2/D3 尚未逐条接入取证；D1（状态引用校验）消费端已核对（2026-10-30，台账缺口 0），D2 基础设施已存在，引用时按「方案已定稿」而非「已实现」表述。
@@ -889,7 +889,7 @@ meta/schemas/*.yaml (140)
 | P2 | 跨 instance 派生仅 schema 预留 | §2.8 | Phase 1 范围 |
 | P1 | 删除组织不清理职能行 → 幽灵主体（F-01） | §3.6 | 仅测试调用点 |
 | P1 | `party2_id` 三口径不完整（F-02） | §3.6 | 缺 `detail_target_bo` |
-| 已核 | 主数据生命周期 D1 消费端 | §4.2 | **2026-10-30**：台账缺口 0，`test_master_data_lifecycle_consumption.py` 5 passed；D2 基础设施（`restrict_on` 检查器）已存在，D3 待统一文档口径 |
+| 已核 | 主数据生命周期 D1 消费端 | §4.2 | **2026-10-30**：台账缺口 0，`test_master_data_contracts.py` 5 passed；D2 基础设施（`restrict_on` 检查器）已存在，D3 待统一文档口径 |
 | P2 | `product` / `version` 与 `items` 无关联列 | §4.3 | 映射无 schema 承载 |
 | P2 | 仓储域对象跨包无统一索引 | §4.6 | 应用包内 |
 | P2 | 配置与结构 spec 仍为草案 | §5.6 | 范围/骨架待拍板 |
@@ -900,7 +900,7 @@ meta/schemas/*.yaml (140)
 
 | 能力 | 定性 | 证据 | 后续 |
 |---|---|---|---|
-| 主数据生命周期消费（draft 不可引用 / inactive 可结算） | **已实现** | `value_help_accessor.validate_value_helps` 按字段 `value_filter` 生效；`sales_order_line` 7 处引用字段已声明；`test_master_data_lifecycle_consumption.py` 5 passed（台账缺口 0） | 无；D2/D3 仍为 `[计划]` |
+| 主数据生命周期消费（draft 不可引用 / inactive 可结算） | **已实现** | `value_help_accessor.validate_value_helps` 按字段 `value_filter` 生效；`sales_order_line` 7 处引用字段已声明；`test_master_data_contracts.py` 5 passed（台账缺口 0） | 无；D2/D3 仍为 `[计划]` |
 | `calc_result` 行级结果 `level` 推导 | **已实现** | `pricing_service.determine` 按 `document_line_id` 推导，显式不一致抛 `PricingError`；`test_sales_order_pricing_e2e.py` 4 passed | 无 |
 | 价格在真实单据上端到端落库 | **已实现** | `SalesOrderPricingService.price_line` → `determine_line(persist=True)` → `calc_results`；行级 `level='line'`、重算作废旧结果 | 无 |
 | 税务在真实单据上端到端 | **已实现（金额快照，非 calc_result）** | `SalesOrderAmountService.recompute_line` 按 `tax_rates` 生效区间写 net/tax_base/tax_rate_percent/tax_amount/gross；确认后快照不可变 | `pricing_period` 仍无计算路径（§5.7） |

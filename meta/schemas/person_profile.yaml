@@ -89,6 +89,15 @@ audit:
       - mobile
       - email
 
+# [P3 2026-11-01] 雇佣关系（employee）引用自然人档案 ⇒ 删除被引用的档案被拒（FR-015）
+deletion_policy:
+  mode: restrict
+  restrict_on:
+    - table: employees
+      foreign_key: person_profile_id
+      message: 该个人档案仍被员工主数据引用，请先处理员工记录后再删除
+  cascade_delete: []
+
 fields:
   - id: id
     name: ID

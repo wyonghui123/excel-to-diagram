@@ -17,6 +17,7 @@ from meta.api.user_api import login_required
 from meta.services.auth_middleware import is_admin
 from functools import wraps
 from meta.core.db_path import get_meta_db_path
+from meta.api._response_contract import ok, ok_message, error_response
 
 def admin_required(f):
     @wraps(f)
@@ -25,7 +26,7 @@ def admin_required(f):
         from meta.api.user_api import get_current_user
         user = get_current_user()
         if not user or not is_admin(user):
-            return jsonify({"success": False, "message": "您没有执行此操作的权限，需要管理员权限"}), 403
+            return error_response("您没有执行此操作的权限，需要管理员权限", status=403)
         return f(*args, **kwargs)
     return decorated
 
@@ -86,10 +87,7 @@ def get_accessible_menus():
         service = _get_menu_service()
         menus = service.get_user_accessible_menus(user_id)
         
-        return jsonify({
-            'success': True,
-            'data': menus
-        })
+        return ok(menus)
     except Exception as e:
         return jsonify({
             'success': False,
@@ -105,10 +103,7 @@ def get_all_menus():
         service = _get_menu_service()
         menus = service.get_all_menu_permissions()
         
-        return jsonify({
-            'success': True,
-            'data': menus
-        })
+        return ok(menus)
     except Exception as e:
         return jsonify({
             'success': False,
@@ -125,10 +120,7 @@ def check_menu_visibility(menu_code):
         service = _get_menu_service()
         result = service.check_menu_visibility(user_id, menu_code)
         
-        return jsonify({
-            'success': True,
-            'data': result
-        })
+        return ok(result)
     except Exception as e:
         return jsonify({
             'success': False,
@@ -145,10 +137,7 @@ def check_menu_consistency(menu_code):
         service = _get_menu_service()
         result = service.check_menu_consistency(user_id, menu_code)
         
-        return jsonify({
-            'success': True,
-            'data': result
-        })
+        return ok(result)
     except Exception as e:
         return jsonify({
             'success': False,
@@ -165,10 +154,7 @@ def get_permission_report():
         service = _get_menu_service()
         report = service.get_user_permission_report(user_id)
         
-        return jsonify({
-            'success': True,
-            'data': report
-        })
+        return ok(report)
     except Exception as e:
         return jsonify({
             'success': False,
@@ -200,10 +186,7 @@ def create_menu_permission():
         menu_id = service.add_menu_permission(data)
         
         if menu_id:
-            return jsonify({
-                'success': True,
-                'data': {'id': menu_id}
-            })
+            return ok({'id': menu_id})
         else:
             return jsonify({
                 'success': False,
@@ -232,10 +215,7 @@ def update_menu_permission(menu_code):
         success = service.update_menu_permission(menu_code, data)
         
         if success:
-            return jsonify({
-                'success': True,
-                'message': '更新成功'
-            })
+            return ok_message('更新成功')
         else:
             return jsonify({
                 'success': False,
@@ -257,10 +237,7 @@ def delete_menu_permission(menu_code):
         success = service.delete_menu_permission(menu_code)
         
         if success:
-            return jsonify({
-                'success': True,
-                'message': '删除成功'
-            })
+            return ok_message('删除成功')
         else:
             return jsonify({
                 'success': False,
@@ -536,4 +513,4 @@ def get_visible_menu_tree():
             'object_type_route_map': object_type_route_map,
         })
     except Exception as e:
-        return jsonify({'success': False, 'message': str(e)}), 500
+        return error_response(str(e), status=500)

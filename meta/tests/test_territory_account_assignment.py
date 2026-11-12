@@ -43,10 +43,11 @@ from meta.tests.factories._pricing_w1_helpers import clone_schema  # noqa: E402
 SCHEMA_DIR = os.path.join(ROOT, "meta", "schemas")
 REAL_DB = Path(__file__).resolve().parents[1] / "architecture.db"
 
-# customer_account 的两条真外键（tax_classification / payment_term）在开 FK 的
-# 用例里必须先有目标表，否则插客户行时会报 "no such table"。
+# customer_account 的真外键（tax_classification / payment_term / rate_table）在开
+# FK 的用例里必须先有目标表，否则插客户行时会报 "no such table"。
 TABLES = ["party", "user", "org", "tax_classification", "payment_term",
-          "customer_account", "territory", "territory_account_assignment"]
+          "rate_table", "customer_account", "territory",
+          "territory_account_assignment"]
 
 ASSIGNMENT_FKS = [
     ("customer_account_id", "customer_accounts", "id"),

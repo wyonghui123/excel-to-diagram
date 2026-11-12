@@ -1,0 +1,637 @@
+# 资源费率（Resource Rate）—— 统一资源模型 P2a / FR-004
+# 依据: docs/specs/spec-unified-resource-model-2026-11-01-v1.0.md
+#       §FR-004 / §9.3 数据模型表
+#
+# 定位: 资源费率的唯一真源（禁止在资源主表保留 cost_rate 列）。
+#   按 resource_id（或 resource_group_id）分层，带用途、基准、有效期与优先级。
+#
+# 取值顺序（唯一真源，服务层实现）:
+#   具体资源 → 组成员（资源缺失时按成员归属）→ 组兜底 → 组织默认
+#   同层多条：valid_from 晚者优先 → priority 大者优先 → valid_to 早者优先
+#
+# 约束:
+#   ① 同层同 purpose 的生效区间不得重叠（服务层校验）。
+#   ② billing 必须命中具体资源（组费率只允许 cost；服务层校验）。
+#   ③ per_use 的 rate 是固定金额，与工时无关。
+
+id: resource_rate
+name: 资源费率
+table_name: resource_rates
+description: 资源/资源组的费率（用途、基准、有效期、组织/地点/币种/单位）
+parent_object: resource
+display_name_field: rate
+aspects: [audit_aspect]
+
+semantics:
+  meaning: 资源费率
+  category: core_entity
+  aliases:
+    - 资源费率
+    - 费率
+    - 资源成本
+    - resource rate
+
+deletion_policy:
+  mode: restrict
+  restrict_on: []
+  cascade_delete: []
+
+audit:
+  enabled: true
+  create:
+    enabled: true
+    fields: all
+  update:
+    enabled: true
+    fields: changed_only
+    exclude: [id, created_at, updated_at]
+  delete:
+    enabled: true
+    fields: business_only
+    exclude: [id, created_at, updated_at]
+  associate:
+    enabled: true
+  dissociate:
+    enabled: true
+
+org_scope:
+  mode: direct
+  field: org_id
+  write_check: true
+
+fields:
+  - id: id
+    name: ID
+    type: integer
+    db_column: id
+    required: true
+    unique: true
+    description: 技术主键
+    semantics:
+      meaning: 自增主键
+      primary_key: true
+
+  - id: resource_id
+    name: 资源
+    type: integer
+    db_column: resource_id
+    nullable: true
+    description: 具体资源（与 resource_group_id 至少填一个）
+    semantics:
+      meaning: 资源引用
+      display:
+        type: association
+        target_type: resource
+        display_field: name
+        placeholder: "组级费率"
+    value_help:
+      source:
+        type: bo
+        target_bo: resource
+        value_field: id
+        display_field: name
+        code_field: code
+        apply_target_permissions: true
+      behavior:
+        multiple: false
+        validation: true
+        binding_strength: strict
+        min_search_length: 0
+      presentation:
+        result_type: dialog
+        display_format: "{code} - {name}"
+        columns:
+          - field: code
+            label: 资源编码
+            width: 150
+          - field: name
+            label: 资源名称
+            width: 220
+    ui:
+      widget: select
+      relation: resource
+      multiple: false
+      clearable: true
+      hidden_in_form: true
+
+  - id: resource_group_id
+    name: 资源组
+    type: integer
+    db_column: resource_group_id
+    nullable: true
+    description: 组级兜底费率（与 resource_id 至少填一个；billing 不允许组级）
+    semantics:
+      meaning: 资源组引用
+      display:
+        type: association
+        target_type: resource_group
+        display_field: name
+        placeholder: "资源级费率"
+    value_help:
+      source:
+        type: bo
+        target_bo: resource_group
+        value_field: id
+        display_field: name
+        code_field: code
+        apply_target_permissions: true
+      behavior:
+        multiple: false
+        validation: true
+        binding_strength: strict
+        min_search_length: 0
+      presentation:
+        result_type: dialog
+        display_format: "{code} - {name}"
+        columns:
+          - field: code
+            label: 组编码
+            width: 150
+          - field: name
+            label: 组名称
+            width: 220
+    ui:
+      widget: select
+      relation: resource_group
+      multiple: false
+      clearable: true
+
+  - id: rate_purpose
+    name: 费率用途
+    type: string
+    db_column: rate_purpose
+    required: true
+    default: cost
+    description: 费率用途（成本/计费/加班/准备）
+    enum_values:
+      - value: cost
+        label: 成本
+        color: primary
+        is_initial: true
+      - value: billing
+        label: 计费
+        color: success
+      - value: overtime
+        label: 加班
+        color: warning
+      - value: setup
+        label: 准备
+        color: info
+    value_help:
+      source:
+        type: enum
+        enum_type_id: rate_purpose
+        sort_by: sort_order
+      behavior:
+        validation: true
+        binding_strength: strict
+        multiple: false
+      presentation:
+        result_type: dropdown
+    semantics:
+      meaning: 费率用途
+      filterable: true
+      filter_type: enum
+      filter_label: 费率用途
+      filter_scope: local
+    ui:
+      widget: select
+
+  - id: rate_basis
+    name: 费率基准
+    type: string
+    db_column: rate_basis
+    required: true
+    default: per_hour
+    description: 费率基准（按小时/按次/按单位/按里程/按重量）
+    enum_values:
+      - value: per_hour
+        label: 按小时
+        color: primary
+        is_initial: true
+      - value: per_use
+        label: 按次
+        color: success
+      - value: per_unit
+        label: 按单位
+        color: info
+      - value: per_km
+        label: 按里程
+        color: warning
+      - value: per_kg
+        label: 按重量
+        color: purple
+    value_help:
+      source:
+        type: enum
+        enum_type_id: rate_basis
+        sort_by: sort_order
+      behavior:
+        validation: true
+        binding_strength: strict
+        multiple: false
+      presentation:
+        result_type: dropdown
+    semantics:
+      meaning: 费率基准
+      filterable: true
+      filter_type: enum
+      filter_label: 费率基准
+      filter_scope: local
+    ui:
+      widget: select
+
+  - id: org_id
+    name: 归属组织
+    type: integer
+    db_column: org_id
+    nullable: true
+    description: 费率适用组织；空表示不限定
+    semantics:
+      meaning: 费率归属组织引用
+      display:
+        type: association
+        target_type: org
+        display_field: name
+        placeholder: "不限组织"
+    value_help:
+      source:
+        type: bo
+        target_bo: org
+        value_field: id
+        display_field: name
+        code_field: code
+        apply_target_permissions: true
+      behavior:
+        multiple: false
+        validation: true
+        binding_strength: strict
+        min_search_length: 0
+      presentation:
+        result_type: dialog
+        display_format: "{code} - {name}"
+        columns:
+          - field: code
+            label: 组织编码
+            width: 140
+          - field: name
+            label: 组织名称
+            width: 220
+    ui:
+      widget: select
+      relation: org
+      multiple: false
+      clearable: true
+
+  - id: location_id
+    name: 适用地点
+    type: integer
+    db_column: location_id
+    nullable: true
+    description: 费率适用地点；空表示不限定
+    semantics:
+      meaning: 费率适用地点引用
+      display:
+        type: association
+        target_type: location
+        display_field: name
+        placeholder: "不限地点"
+    value_help:
+      source:
+        type: bo
+        target_bo: location
+        value_field: id
+        display_field: name
+        code_field: code
+        apply_target_permissions: true
+      behavior:
+        multiple: false
+        validation: true
+        binding_strength: strict
+        min_search_length: 0
+      presentation:
+        result_type: dialog
+        display_format: "{code} - {name}"
+        columns:
+          - field: code
+            label: 地点编码
+            width: 140
+          - field: name
+            label: 地点名称
+            width: 220
+    ui:
+      widget: select
+      relation: location
+      multiple: false
+      clearable: true
+
+  - id: currency_id
+    name: 币种
+    type: integer
+    db_column: currency_id
+    nullable: true
+    description: 费率币种；空表示组织默认币种
+    semantics:
+      meaning: 币种引用
+      display:
+        type: association
+        target_type: currency
+        display_field: name
+        placeholder: "组织默认币种"
+    value_help:
+      source:
+        type: bo
+        target_bo: currency
+        value_field: id
+        display_field: name
+        code_field: code
+        apply_target_permissions: true
+      behavior:
+        multiple: false
+        validation: true
+        binding_strength: strict
+        min_search_length: 0
+      presentation:
+        result_type: dropdown
+        display_format: "{code} - {name}"
+        columns:
+          - field: code
+            label: 币种编码
+            width: 120
+          - field: name
+            label: 币种名称
+            width: 160
+    ui:
+      widget: select
+      relation: currency
+      multiple: false
+      clearable: true
+
+  - id: rate
+    name: 费率
+    type: number
+    db_column: rate
+    required: true
+    description: 费率金额（per_use 时为固定金额，与工时无关）
+    semantics:
+      meaning: 费率金额
+      data_category: amount
+    ui:
+      widget: number
+
+  - id: rate_uom_id
+    name: 费率单位
+    type: integer
+    db_column: rate_uom_id
+    nullable: true
+    description: 费率计量单位（per_unit / per_km / per_kg 时使用）
+    semantics:
+      meaning: 费率计量单位引用
+      display:
+        type: association
+        target_type: uom
+        display_field: name
+    value_help:
+      source:
+        type: bo
+        target_bo: uom
+        value_field: id
+        display_field: name
+        code_field: code
+        apply_target_permissions: true
+      behavior:
+        multiple: false
+        validation: true
+        binding_strength: strict
+        min_search_length: 0
+      presentation:
+        result_type: dropdown
+        display_format: "{code} - {name}"
+        columns:
+          - field: code
+            label: 单位编码
+            width: 140
+          - field: name
+            label: 单位名称
+            width: 180
+    ui:
+      widget: select
+      relation: uom
+      multiple: false
+      clearable: true
+
+  - id: valid_from
+    name: 生效日
+    type: date
+    db_column: valid_from
+    required: true
+    description: 费率生效起始日（含）
+    semantics:
+      meaning: 费率生效起始日
+    ui:
+      widget: date
+
+  - id: valid_to
+    name: 失效日
+    type: date
+    db_column: valid_to
+    nullable: true
+    description: 费率失效日（不含）；空表示长期有效
+    semantics:
+      meaning: 费率失效日
+    ui:
+      widget: date
+
+  - id: priority
+    name: 优先级
+    type: integer
+    db_column: priority
+    required: true
+    default: 0
+    description: 同层同用途多条时数值大者优先
+    constraints:
+      - type: numeric_range
+        decimal_places: 0
+    semantics:
+      meaning: 费率优先级
+    ui:
+      widget: number
+
+  - id: rate_source
+    name: 费率来源
+    type: string
+    db_column: rate_source
+    required: true
+    default: internal
+    description: 费率来源（内部/外协合同/标准）
+    enum_values:
+      - value: internal
+        label: 内部
+        color: primary
+        is_initial: true
+      - value: external_contract
+        label: 外协合同
+        color: warning
+      - value: standard
+        label: 标准
+        color: info
+    value_help:
+      source:
+        type: enum
+        enum_type_id: resource_rate_source
+        sort_by: sort_order
+      behavior:
+        validation: true
+        binding_strength: strict
+        multiple: false
+      presentation:
+        result_type: dropdown
+    semantics:
+      meaning: 费率来源
+      filterable: true
+      filter_type: enum
+      filter_label: 费率来源
+      filter_scope: local
+    ui:
+      widget: select
+
+  - id: created_at
+    name: 创建时间
+    type: datetime
+    db_column: created_at
+    description: 创建时间
+    semantics:
+      meaning: 记录创建时间
+      audit_field: true
+
+  - id: updated_at
+    name: 更新时间
+    type: datetime
+    db_column: updated_at
+    description: 更新时间
+    semantics:
+      meaning: 记录更新时间
+      audit_field: true
+
+indexes:
+  - fields: [resource_id, rate_purpose, valid_from]
+    unique: true
+    name: uq_resource_rate_resource
+  - fields: [resource_group_id, rate_purpose, valid_from]
+    unique: true
+    name: uq_resource_rate_group
+  - fields: [rate_purpose]
+    name: idx_resource_rate_purpose
+  - fields: [org_id]
+    name: idx_resource_rate_org
+  - fields: [valid_from, valid_to]
+    name: idx_resource_rate_validity
+
+relations:
+  - id: resource_rate_to_resource
+    name: 资源
+    type: reference
+    target: resource
+    source_field: resource_id
+    target_field: id
+    cardinality: N:1
+    description: 资源引用（可空；真外键）
+  - id: resource_rate_to_group
+    name: 资源组
+    type: reference
+    target: resource_group
+    source_field: resource_group_id
+    target_field: id
+    cardinality: N:1
+    description: 资源组引用（可空；真外键）
+  - id: resource_rate_to_org
+    name: 归属组织
+    type: reference
+    target: org
+    source_field: org_id
+    target_field: id
+    cardinality: N:1
+    description: 归属组织引用（可空；真外键）
+  - id: resource_rate_to_location
+    name: 适用地点
+    type: reference
+    target: location
+    source_field: location_id
+    target_field: id
+    cardinality: N:1
+    description: 适用地点引用（可空；真外键）
+  - id: resource_rate_to_currency
+    name: 币种
+    type: reference
+    target: currency
+    source_field: currency_id
+    target_field: id
+    cardinality: N:1
+    description: 币种引用（可空；真外键）
+  - id: resource_rate_to_uom
+    name: 费率单位
+    type: reference
+    target: uom
+    source_field: rate_uom_id
+    target_field: id
+    cardinality: N:1
+    description: 费率单位引用（可空；真外键）
+
+ui_view_config:
+  # 作为资源详情页的子表，不单独成菜单
+  skip_auto_menu: true
+  list:
+    detail_mode: drawer
+    title: 资源费率
+    columns:
+      - field: resource_id
+        width: 180
+        render_as: association
+        target_type: resource
+        display_field: name
+        placeholder: "组级费率"
+      - field: resource_group_id
+        width: 180
+        render_as: association
+        target_type: resource_group
+        display_field: name
+      - field: rate_purpose
+        width: 100
+        filterable: true
+        filter_type: select
+      - field: rate_basis
+        width: 100
+      - field: rate
+        width: 120
+      - field: currency_id
+        width: 120
+        render_as: association
+        target_type: currency
+        display_field: name
+      - field: valid_from
+        width: 120
+      - field: valid_to
+        width: 120
+      - field: priority
+        width: 90
+      - field: rate_source
+        width: 120
+    defaultSort:
+      field: valid_from
+      order: desc
+  form:
+    title: 资源费率
+    layout: vertical
+    sections:
+      - title: 归属
+        columns:
+          - fields: [resource_id, resource_group_id]
+          - fields: [org_id, location_id]
+      - title: 费率
+        columns:
+          - fields: [rate_purpose, rate_basis]
+          - fields: [rate, currency_id, rate_uom_id]
+          - fields: [priority, rate_source]
+      - title: 有效期
+        columns:
+          - fields: [valid_from, valid_to]

@@ -58,8 +58,8 @@ deletion_policy:
       foreign_key: default_type_id
       message: 该类型仍被其他类型用作默认行类型，请先调整引用
     - table: sales_orders
-      foreign_key: order_type_id
-      message: 该类型仍被销售订单引用，请先调整订单类型后再删除
+      foreign_key: document_type_id
+      message: 该类型仍被销售订单引用，请先调整单据类型后再删除
     - table: sales_order_lines
       foreign_key: line_type_id
       message: 该类型仍被销售订单行引用，请先调整行类型后再删除
@@ -101,7 +101,7 @@ fields:
     type: string
     db_column: code
     required: true
-    max_length: 10
+    max_length: 32
     pattern: "^[A-Z][A-Z0-9_]*$"
     description: 类型唯一编码（同一 scope_bo + level 内唯一，如 TA / RE / STD）
     semantics:
@@ -202,6 +202,12 @@ fields:
       - value: loan
         label: 借出
         color: success
+      - value: invoice
+        label: 发票
+        color: info
+      - value: cancellation
+        label: 取消单
+        color: danger
     semantics:
       meaning: 单据类型的方向与流程分类（仅 header）
       filterable: true
@@ -210,6 +216,98 @@ fields:
       filter_scope: local
     ui:
       widget: select
+
+  # [S8 Wave D FR-1] 平台级单据身份元数据（全 scope_bo 通用，由迁移 v243 回填）
+  - id: document_role
+    name: 单据角色
+    type: string
+    db_column: document_role
+    nullable: true
+    max_length: 32
+    description: 凭证角色（invoice / credit_memo / debit_memo / return / cancellation ...），红冲类型映射与行来源策略的键
+    semantics:
+      meaning: 单据在业务流程中的角色（与 document_category 共同构成 L1 身份）
+      filterable: true
+      filter_type: enum
+      filter_label: 单据角色
+      filter_scope: local
+    ui:
+      widget: input
+      editable: false
+
+  - id: direction
+    name: 单据方向
+    type: integer
+    db_column: direction
+    required: true
+    default: 1
+    description: 1 正向 / -1 逆向；由单据角色回填，驱动红字与冲减口径
+    semantics:
+      meaning: 单据方向的类型级默认值
+      filterable: true
+      filter_type: enum
+      filter_label: 单据方向
+      filter_scope: local
+    ui:
+      widget: select
+      editable: false
+
+  - id: reversal_type_id
+    name: 红冲单据类型
+    type: integer
+    db_column: reversal_type_id
+    nullable: true
+    description: 该类型被红冲时使用的目标类型（必须同 scope_bo 且声明 doc_effect.reversal）
+    semantics:
+      meaning: L1 层红冲类型映射（与 L2 doc_effect.reversal 声明双向一致）
+      display:
+        type: association
+        target_type: type_definition
+        display_field: name
+      filterable: true
+      filter_type: relation
+      filter_label: 红冲单据类型
+      filter_scope: local
+    value_help:
+      source:
+        type: bo
+        target_bo: type_definition
+        value_field: id
+        display_field: name
+        code_field: code
+        apply_target_permissions: true
+        value_filter:
+          status: active
+      behavior:
+        multiple: false
+        validation: true
+        binding_strength: strict
+        min_search_length: 0
+      presentation:
+        result_type: dropdown
+        display_format: "{code} {name}"
+    ui:
+      widget: select
+      relation: type_definition
+      multiple: false
+      editable: false
+
+  - id: is_default
+    name: 默认类型
+    type: boolean
+    db_column: is_default
+    required: true
+    default: false
+    description: 同 scope_bo + level + document_role 下的默认类型（唯一索引 uq_type_default_role）
+    semantics:
+      meaning: 业务创建未指定类型时的兜底（按角色唯一）
+      filterable: true
+      filter_type: enum
+      filter_label: 默认类型
+      filter_scope: local
+    ui:
+      widget: switch
+      editable: false
 
   # 仅 header 使用；目标必须同 scope_bo 且 level=line（服务层校验）
   - id: default_type_id
@@ -308,6 +406,21 @@ fields:
       - value: text
         label: 文本行
         color: info
+      - value: freight
+        label: 运费行
+        color: warning
+      - value: misc
+        label: 杂费行
+        color: default
+      - value: asset
+        label: 资产行
+        color: info
+      - value: expense
+        label: 费用行
+        color: warning
+      - value: subcontract
+        label: 委外行
+        color: default
     semantics:
       meaning: 行类型的性质分类（仅 line）
       filterable: true

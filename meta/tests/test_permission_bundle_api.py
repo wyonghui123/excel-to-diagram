@@ -20,14 +20,9 @@ class TestPermissionBundleAPI:
     """permission_bundle_api 端到端测试 (GAP-001)"""
 
     def test_list_bundles_returns_data(self, api_client, admin_headers):
-        """GET / 返回所有权限包"""
+        """GET / 权限包 API 已下线 (permission_set 取代) → 410 Gone"""
         resp = api_client.get(BUNDLE_URL, headers=admin_headers)
-        assert resp.status_code == 200
-        body = resp.get_json()
-        assert body.get('success') is True
-        assert 'data' in body
-        # data 是 list (PermissionBundleService.get_all_bundles)
-        assert isinstance(body['data'], list)
+        assert resp.status_code == 410
 
     def test_list_bundles_requires_auth(self):
         """未登录访问被拒绝"""
@@ -36,7 +31,8 @@ class TestPermissionBundleAPI:
         if hasattr(fresh_client, '_cookies'):
             fresh_client._cookies.clear()
         resp = fresh_client.get(BUNDLE_URL)
-        assert resp.status_code in (401, 302, 403)
+        # API 已下线, 鉴权前直接 410
+        assert resp.status_code == 410
 
     def test_get_bundle_by_code_404(self, api_client, admin_headers):
         """GET /<unknown> 返回 404"""
@@ -114,28 +110,25 @@ class TestPermissionBundleAPI:
         assert isinstance(body.get('data'), list)
 
     def test_create_bundle_requires_admin(self, api_client, regular_user_headers):
-        """POST / 创建权限包非 admin → 403"""
+        """POST / 权限包 API 已下线 → 410"""
         resp = api_client.post(
             BUNDLE_URL,
             json={'bundle_code': 'test', 'bundle_name': 'Test'},
             headers=regular_user_headers,
         )
-        assert resp.status_code == 403
+        assert resp.status_code == 410
 
     def test_create_bundle_missing_field_400(self, api_client, admin_headers):
-        """POST / 缺必填字段 → 400"""
+        """POST / 权限包 API 已下线 → 410 (不再校验必填字段)"""
         resp = api_client.post(
             BUNDLE_URL,
             json={'bundle_code': 'test_no_name'},
             headers=admin_headers,
         )
-        assert resp.status_code == 400
-        body = resp.get_json()
-        assert body.get('success') is False
-        assert 'bundle_name' in body.get('error', '')
+        assert resp.status_code == 410
 
     def test_create_then_get_bundle(self, api_client, admin_headers):
-        """创建权限包 + 按 code 读取 (端到端)"""
+        """创建权限包端到端：API 已下线 → 410"""
         code = f'test_bundle_{int(__import__("time").time())}'
         resp = api_client.post(
             BUNDLE_URL,
@@ -146,17 +139,7 @@ class TestPermissionBundleAPI:
             },
             headers=admin_headers,
         )
-        assert resp.status_code == 200
-        body = resp.get_json()
-        assert body.get('success') is True
-        assert 'data' in body
-        # 立即读取
-        resp2 = api_client.get(f'{BUNDLE_URL}/{code}', headers=admin_headers)
-        assert resp2.status_code == 200
-        assert resp2.get_json()['data']['bundle_code'] == code
-        # 清理: 删除
-        resp3 = api_client.delete(f'{BUNDLE_URL}/{code}', headers=admin_headers)
-        assert resp3.status_code in (200, 404)
+        assert resp.status_code == 410
 
     def test_update_bundle_404_for_unknown(self, api_client, admin_headers):
         """PUT /<unknown> 不可达 → 404"""

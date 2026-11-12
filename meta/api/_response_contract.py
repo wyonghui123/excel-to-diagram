@@ -49,9 +49,35 @@ API 响应格式统一契约
     def not_found(e):
         return error_response('资源不存在', code='NOT_FOUND', status=404)
 """
+import logging
 from typing import Any, List, Optional
 
 from flask import jsonify, request
+
+from meta.core.platform_flags import OFF, STRICT, contract_mode
+
+logger = logging.getLogger(__name__)
+
+
+class ResponseContractViolation(ValueError):
+    """严格模式（PLATFORM_STRICT_CONTRACT=strict）下的响应契约违规。"""
+
+
+def _contract_guard(violated: bool, message: str) -> None:
+    """统一响应的契约守卫（NFR-005）。
+
+    - strict：抛 `ResponseContractViolation`（强制）
+    - shadow：仅记 debug 日志，行为不变（默认）
+    - off：不动作
+    """
+    if not violated:
+        return
+    mode = contract_mode()
+    if mode == STRICT:
+        raise ResponseContractViolation(message)
+    if mode == OFF:
+        return
+    logger.debug("[response-contract] %s", message)
 
 
 def ok(data: Any, message: Optional[str] = None):
@@ -60,6 +86,10 @@ def ok(data: Any, message: Optional[str] = None):
 
     格式：{success: true, data: {...}, message?: str}
     """
+    _contract_guard(
+        isinstance(data, (list, tuple)),
+        f"ok() 只能返回单条对象，列表请用 ok_list()（实际: {type(data).__name__}）",
+    )
     response = {'success': True, 'data': data}
     if message:
         response['message'] = message
@@ -118,18 +148,49 @@ def error_response(
     code: Optional[str] = None,
     status: int = 400,
     details: Optional[Any] = None,
+    error_code: Optional[str] = None,
+    errors: Optional[Any] = None,
 ):
     """
     错误响应
 
-    格式：{success: false, message: str, code?: str, details?: any}
+    格式：{success: false, message: str, code?: str, error_code?: str, details?: any, errors?: any}
+
+    `code` 为历史字段；`error_code` 为统一契约字段。两者同时输出，
+    保证已使用 `code` 的调用方不受影响，同时满足新契约。
+
+    `errors` 为历史字段（部分端点返回错误项数组），传入即原样输出，
+    用于在迁移中保持既有响应结构不变。
     """
     response = {'success': False, 'message': message}
-    if code:
-        response['code'] = code
+    final_code = error_code or code
+    if final_code:
+        response['code'] = final_code
+        response['error_code'] = final_code
     if details:
         response['details'] = details
+    if errors is not None:
+        response['errors'] = errors
     return jsonify(response), status
+
+
+def json_response(payload: Any, status: int = 200):
+    """
+    兼容既有非标准 payload 的唯一出口（FR-001）。
+
+    仅用于无法无损映射到 ok / ok_list / ok_message / error_response 的
+    历史响应结构（如扁平列表、额外字段、`error` 键等）。payload 原样输出，
+    不做任何字段增删，保证迁移前后响应体完全一致。
+
+    新增代码不得使用本函数；应收敛到标准助手函数。
+
+    NFR-005：`PLATFORM_STRICT_CONTRACT=strict` 时本函数直接失败（逃生口关闭）。
+    """
+    _contract_guard(
+        True,
+        "json_response 是非标准 payload 出口（FR-001），新增代码不得使用",
+    )
+    return jsonify(payload), status
 
 
 def normalize_list_response(items: List[Any], total: Optional[int] = None):

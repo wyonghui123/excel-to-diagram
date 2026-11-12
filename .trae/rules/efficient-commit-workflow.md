@@ -1,6 +1,5 @@
 ---
 description: "提交代码、清理 worktree、合并分支等操作时的高效工作流参考。适用于 AI Coding Agent 执行 git 操作时。"
-globs: "**/*.git/**,**/git*"
 alwaysApply: false
 ---
 

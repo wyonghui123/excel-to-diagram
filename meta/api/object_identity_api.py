@@ -5,7 +5,8 @@
 提供对象标识查询的 RESTful API 接口
 """
 
-from flask import Blueprint, request, jsonify
+from flask import Blueprint, request
+from meta.api._response_contract import error_response, ok, ok_message
 import logging
 import os
 
@@ -74,35 +75,23 @@ def get_single_identity():
         include_technical = request.args.get('include_technical', 'false').lower() == 'true'
         
         if not object_type or not object_id:
-            return jsonify({
-                'success': False,
-                'message': '缺少必需参数：object_type 和 object_id'
-            }), 400
+            return error_response('缺少必需参数：object_type 和 object_id')
         
         try:
             object_id = int(object_id)
         except ValueError:
-            return jsonify({
-                'success': False,
-                'message': 'object_id 必须是整数'
-            }), 400
+            return error_response('object_id 必须是整数')
         
         service = get_identity_service()
         result = service.get_identity(object_type, object_id, format, include_technical)
         
-        return jsonify({
-            'success': True,
-            'data': result
-        })
+        return ok(result)
         
     except Exception as e:
         logger.error(f"Failed to get identity: {e}")
         import traceback
         traceback.print_exc()
-        return jsonify({
-            'success': False,
-            'message': str(e)
-        }), 500
+        return error_response(str(e), status=500)
 
 
 @identity_bp.route('/batch', methods=['POST'])
@@ -133,20 +122,14 @@ def get_batch_identities():
         data = request.get_json()
         
         if not data or 'requests' not in data:
-            return jsonify({
-                'success': False,
-                'message': '缺少必需参数：requests'
-            }), 400
+            return error_response('缺少必需参数：requests')
         
         requests = data.get('requests', [])
         format = data.get('format', 'full')
         include_technical = data.get('include_technical', False)
         
         if not isinstance(requests, list):
-            return jsonify({
-                'success': False,
-                'message': 'requests 必须是数组'
-            }), 400
+            return error_response('requests 必须是数组')
         
         request_tuples = []
         for req in requests:
@@ -166,10 +149,7 @@ def get_batch_identities():
                 continue
         
         if not request_tuples:
-            return jsonify({
-                'success': False,
-                'message': '没有有效的请求项'
-            }), 400
+            return error_response('没有有效的请求项')
         
         service = get_identity_service()
         results = service.batch_get_identities(request_tuples, format, include_technical)
@@ -179,19 +159,13 @@ def get_batch_identities():
             str_key = f"({key[0]}, {key[1]})"
             serializable_results[str_key] = value
         
-        return jsonify({
-            'success': True,
-            'data': serializable_results
-        })
+        return ok(serializable_results)
         
     except Exception as e:
         logger.error(f"Failed to get batch identities: {e}")
         import traceback
         traceback.print_exc()
-        return jsonify({
-            'success': False,
-            'message': str(e)
-        }), 500
+        return error_response(str(e), status=500)
 
 
 @identity_bp.route('/formatted', methods=['GET'])
@@ -218,37 +192,25 @@ def get_formatted_identity():
         format = request.args.get('format', 'short')
         
         if not object_type or not object_id:
-            return jsonify({
-                'success': False,
-                'message': '缺少必需参数：object_type 和 object_id'
-            }), 400
+            return error_response('缺少必需参数：object_type 和 object_id')
         
         try:
             object_id = int(object_id)
         except ValueError:
-            return jsonify({
-                'success': False,
-                'message': 'object_id 必须是整数'
-            }), 400
+            return error_response('object_id 必须是整数')
         
         service = get_identity_service()
         formatted = service.get_formatted_identity(object_type, object_id, format)
         
-        return jsonify({
-            'success': True,
-            'data': {
-                'formatted': formatted
-            }
+        return ok({
+            'formatted': formatted
         })
         
     except Exception as e:
         logger.error(f"Failed to get formatted identity: {e}")
         import traceback
         traceback.print_exc()
-        return jsonify({
-            'success': False,
-            'message': str(e)
-        }), 500
+        return error_response(str(e), status=500)
 
 
 @identity_bp.route('/cache/clear', methods=['POST'])
@@ -266,14 +228,8 @@ def clear_cache():
         service = get_identity_service()
         service.clear_cache()
         
-        return jsonify({
-            'success': True,
-            'message': '缓存已清空'
-        })
+        return ok_message('缓存已清空')
         
     except Exception as e:
         logger.error(f"Failed to clear cache: {e}")
-        return jsonify({
-            'success': False,
-            'message': str(e)
-        }), 500
+        return error_response(str(e), status=500)

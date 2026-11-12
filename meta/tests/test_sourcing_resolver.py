@@ -40,7 +40,8 @@ DDL = [
     "CREATE TABLE org_functions (id INTEGER PRIMARY KEY AUTOINCREMENT,"
     " org_id INTEGER, function_type TEXT, is_primary INTEGER DEFAULT 0,"
     " effective_from TEXT, effective_to TEXT)",
-    "CREATE TABLE locations (id INTEGER PRIMARY KEY AUTOINCREMENT)",
+    "CREATE TABLE locations (id INTEGER PRIMARY KEY AUTOINCREMENT,"
+    " org_id INTEGER)",
     "CREATE TABLE party_relations (id INTEGER PRIMARY KEY AUTOINCREMENT,"
     " party1_id INTEGER, party2_id INTEGER, role TEXT, status TEXT)",
     "CREATE TABLE sourcing_rules (id INTEGER PRIMARY KEY AUTOINCREMENT,"

@@ -54,8 +54,8 @@ class TestBOFrameworkDisplayNameAPI:
             ('version', 'name'),
             ('domain', 'name'),
             ('user', 'username'),
-            ('role', 'name'),
-            ('user_group', 'name'),
+            ('permission_set', 'name'),
+            ('org', 'name'),
         ]:
             config = bo_framework.get_ui_config(object_type)
             assert config.get('display_name_field') == expected_field, \
@@ -92,8 +92,8 @@ class TestBOFrameworkDisplayNameMultipleObjects:
             'version',
             'domain',
             'user',
-            'role',
-            'user_group',
+            'permission_set',
+            'org',
             'enum_type',
             'enum_value',
         ]
@@ -113,7 +113,7 @@ class TestBOFrameworkDisplayNameMultipleObjects:
             'version',
             'domain',
             'user',
-            'role',
+            'permission_set',
         ]
 
         for obj_type in core_objects:

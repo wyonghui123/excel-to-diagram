@@ -62,7 +62,7 @@
             </el-dropdown>
           </template>
 
-          <template v-if="batchActions.length > 0 && totalSelectedCount > 0 && !hideToolbar">
+          <template v-if="visibleBatchActions.length > 0 && totalSelectedCount > 0 && !hideToolbar">
             <el-divider direction="vertical" />
             <div class="selection-info-wrapper">
               <span class="selection-info">
@@ -78,7 +78,7 @@
               </el-button>
             </div>
             <el-button
-              v-for="action in batchActions"
+              v-for="action in visibleBatchActions"
               :key="action.key"
               :type="action.variant || 'default'"
               size="small"
@@ -627,7 +627,6 @@
       :filters="exportFilters"
       :sort-info="sortInfo"
       :default-sort="defaultSort"
-      :export-options="exportOptions"
       @success="handleExportSuccess"
       @close="showExportDialog = false"
     />
@@ -742,6 +741,8 @@ function getActionIcon(action) {
 }
 import { boService } from '@/services/boService'
 import { metaService } from '@/services/metaService'
+import EnumService from '@/services/enumService'
+import { resolveDetailBasePath, resolveDetailPath } from '@/router/detailPathResolver'
 import { objectTypeService } from '@/services/objectTypeService'
 import { useListActionStore } from '@/stores/listActionStore'
 // [P1-B 2026-07-25] 接入 ActionPolicy, 替代 canDelete 硬编码状态判断
@@ -762,10 +763,6 @@ const props = defineProps({
   initialFilters: {
     type: Object,
     default: () => ({})
-  },
-  exportOptions: {
-    type: Object,
-    default: () => ({ includeFilters: true })
   },
   importOptions: {
     type: Object,
@@ -844,6 +841,10 @@ const props = defineProps({
   batchActionsOverride: {
     type: Array,
     default: null
+  },
+  extraBatchActions: {
+    type: Array,
+    default: () => []
   },
   hideAssociationNavigation: {
     type: Boolean,
@@ -973,6 +974,12 @@ const {
   inlineEdit: props.options.inlineEdit,
   initialFilters: props.initialFilters
 })
+
+// 内置批量动作 + 父组件注入的外部动作（如单据流派生）
+const visibleBatchActions = computed(() => [
+  ...(batchActions.value || []),
+  ...(props.extraBatchActions || []),
+])
 
 // [DECORATIVE] [NEW] v1.3 / FR-6.4: 读取 display_value（优先后端注入）
 // getCellValue 已处理 display_values，此处薄封装供模板用
@@ -1524,7 +1531,7 @@ function handleFkNavigate({ objectType, id, displayValue }) {
   }
 
   // 不同对象类型：导航到独立页面（跨对象类型 drawer 需要额外支持）
-  router.push({ path: `/detail/${objectType}/${id}` }).catch(() => {})
+  router.push({ path: resolveDetailPath(objectType, id) }).catch(() => {})
 }
 
 function getFkDisplayValue(row, column) {
@@ -1539,9 +1546,33 @@ function isBusinessKeyColumn(column) {
   return column?.businessKey === true
 }
 
+// [FR-008] 枚举统一接入：单元格展示与筛选共用 enumService 缓存（TTL 5 分钟 / LRU 100）
+const columnEnumOptions = ref({})
+
+function getColumnEnumValues(column) {
+  const key = column?.prop
+  const loaded = key ? columnEnumOptions.value[key] : null
+  return loaded?.length ? loaded : (column?.enum_values || [])
+}
+
+async function loadColumnEnums() {
+  const pending = columns.value.filter(
+    col => col?.enum_type && col?.prop && !columnEnumOptions.value[col.prop]
+  )
+  if (pending.length === 0) return
+  const loaded = {}
+  await Promise.all(pending.map(async (col) => {
+    const values = await EnumService.loadOptions(col.enum_type, { cache: true, throwError: false })
+    if (values?.length) loaded[col.prop] = values
+  }))
+  if (Object.keys(loaded).length > 0) {
+    columnEnumOptions.value = { ...columnEnumOptions.value, ...loaded }
+  }
+}
+
 function isBadgeColumn(column) {
-  return column?.widget === 'badge' || 
-    (column?.enum_values && column.enum_values.length > 0) ||
+  return column?.widget === 'badge' ||
+    getColumnEnumValues(column).length > 0 ||
     (column?.options && column.options.length > 0 && column.widget === 'tag')
 }
 
@@ -1570,10 +1601,11 @@ function getBadgeTagType(row, column) {
     }
   }
   
-  if (column.enum_values) {
-    let matched = column.enum_values.find(e => e.value === rawValue)
+  const enumValues = getColumnEnumValues(column)
+  if (enumValues.length > 0) {
+    let matched = enumValues.find(e => e.value === rawValue)
     if (!matched && column.type === 'boolean') {
-      matched = column.enum_values.find(e =>
+      matched = enumValues.find(e =>
         e.value === rawValue ||
         e.value === Boolean(rawValue) ||
         (typeof e.value === 'boolean' && Number(e.value) === rawValue)
@@ -1587,12 +1619,12 @@ function getBadgeTagType(row, column) {
 
 function getBadgeDisplayValue(row, column) {
   const rawValue = row[column.prop]
+  const enumValues = getColumnEnumValues(column)
   if (rawValue === '') return '-'
 
   if (rawValue == null) {
-    if (column.enum_values) {
-      const nullVal = column.type === 'boolean' ? 0 : null
-      const fallback = column.enum_values.find(e =>
+    if (enumValues.length > 0) {
+      const fallback = enumValues.find(e =>
         e.value === 0 || e.value === false || String(e.value) === '0'
       )
       if (fallback) return fallback.label
@@ -1623,28 +1655,24 @@ function getBadgeDisplayValue(row, column) {
   }
   
   if (typeof rawValue === 'boolean') {
-    if (column.enum_values) {
-      const matched = column.enum_values.find(e => e.value === rawValue || e.value === Number(rawValue))
-      if (matched) return matched.label
-    }
+    const matched = enumValues.find(e => e.value === rawValue || e.value === Number(rawValue))
+    if (matched) return matched.label
     return rawValue ? '是' : '否'
   }
-  
+
   if ((rawValue === 1 || rawValue === 0 || rawValue === '1' || rawValue === '0') && column.type === 'boolean') {
-    if (column.enum_values) {
-      const matched = column.enum_values.find(e => {
-        const ev = e.value
-        return String(ev) === String(rawValue) || ev === rawValue || ev === Boolean(rawValue)
-      })
-      if (matched) return matched.label
-    }
+    const matched = enumValues.find(e => {
+      const ev = e.value
+      return String(ev) === String(rawValue) || ev === rawValue || ev === Boolean(rawValue)
+    })
+    if (matched) return matched.label
     return rawValue === 1 || rawValue === '1' ? '是' : '否'
   }
-  
-  if (column.enum_values) {
-    let matched = column.enum_values.find(e => e.value === rawValue)
+
+  if (enumValues.length > 0) {
+    let matched = enumValues.find(e => e.value === rawValue)
     if (!matched) {
-      matched = column.enum_values.find(e =>
+      matched = enumValues.find(e =>
         e.value === rawValue ||
         String(e.value) === String(rawValue) ||
         (column.type === 'boolean' && (e.value === Boolean(rawValue) || Number(e.value) === Number(rawValue)))
@@ -1771,7 +1799,17 @@ function onToolbarAction(action) {
 
 function onBatchAction(action) {
   console.log('[MetaListPage] onBatchAction 被调用, action.key:', action.key, 'selectedIds:', selectedIds.value)
-  
+
+  // 外部批量动作（如单据流派生）：emit 后由父组件负责弹窗，不进入内置处理
+  if (action.key === 'doc_flow_derive') {
+    emit('batch-action', {
+      action,
+      selectedIds: selectedIds.value,
+      selectedRows: selectedRows.value
+    })
+    return
+  }
+
   // emit batch-action 事件，让父组件处理
   // 对于 batch_unassign 等自定义批量操作，由父组件完全处理
   emit('batch-action', {
@@ -1851,13 +1889,13 @@ function hasDetailPageRoute() {
 
 function navigateToDetailPage(row) {
   const listConfig = metaConfig.value?.list
-  const basePath = listConfig?.detail_path || `/detail/${props.objectType}`
+  const basePath = resolveDetailBasePath(props.objectType, { detailPath: listConfig?.detail_path })
   router.push({ path: `${basePath}/${row.id}` }).catch(() => {})
 }
 
 function navigateToDetailPageForCreate() {
   const listConfig = metaConfig.value?.list
-  const basePath = listConfig?.detail_path || `/detail/${props.objectType}`
+  const basePath = resolveDetailBasePath(props.objectType, { detailPath: listConfig?.detail_path })
   router.push({ path: basePath, query: { mode: 'add' } }).catch(() => {})
 }
 
@@ -2092,6 +2130,11 @@ watch([data, columns], () => {
   })
 }, { flush: 'post' })
 
+// [FR-008] 列枚举加载：columns 变化（含首次加载）后按 enum_type 拉取统一枚举
+watch(() => columns.value.map(c => `${c.prop}:${c.enum_type || ''}`).join('|'), () => {
+  loadColumnEnums()
+})
+
 watch(selectedIds, (newIds) => {
   nextTick(() => {
     if (!tableRef.value) return
@@ -2117,6 +2160,7 @@ let unsubscribeAction = null
 
 onMounted(() => {
   unsubscribeAction = useListActionStore().registerHandler(props.objectType, handleMetaListAction)
+  loadColumnEnums()
   loadPermissions()
 
   if (coordinator) {
@@ -2223,6 +2267,8 @@ defineExpose({
   tableRef,
   // [FIX 2026-06-29] 暴露 onRowAction 让 MOMP/GenericObjectList 等父组件可在 dblclick 时触发 action
   onRowAction,
+  // [单据流 2026-11-08] 派生完成后父组件刷新列表
+  refresh,
   metaConfig,
   data,
   loading,

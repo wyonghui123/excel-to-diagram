@@ -323,7 +323,7 @@ ui_view_config:
         label: 新建税务分类
         icon: plus
         type: primary
-        permission: tax_classification:tax_classification_create
+        permission: tax_classification:create
     defaultSort:
       field: code
       order: asc
@@ -352,7 +352,7 @@ ui_view_config:
 
 category_config:
   # 双段式权限码，与 permissions 表实际行一致（v110 落库）
-  create_permission: tax_classification:tax_classification_create
-  update_permission: tax_classification:tax_classification_update
-  delete_permission: tax_classification:tax_classification_delete
+  create_permission: tax_classification:create
+  update_permission: tax_classification:update
+  delete_permission: tax_classification:delete
   owner_auto_permission: false

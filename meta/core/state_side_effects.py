@@ -174,7 +174,7 @@ def validate_schema_dir_side_effects(schema_dir: str, include_plain_text: bool =
         if not include_plain_text and "side_effects" not in text:
             continue
         try:
-            import yaml
+            from meta.core import yaml_compat as yaml
             doc = yaml.safe_load(text) or {}
         except Exception as exc:  # YAML 语法错误交由 loader 报，不在此吞掉
             raise SideEffectDeclarationError(f"{path.name}: YAML 解析失败: {exc}")

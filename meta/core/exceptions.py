@@ -22,3 +22,13 @@ class ValidationFailedError(Exception):
     def __init__(self, message: str = "", details: list = None):
         super().__init__(message)
         self.details = details or []
+
+
+class StateMachineViolationError(Exception):
+    """状态机违规 — 目标状态在当前状态没有声明过的迁移边。"""
+
+    code = 'STATE_MACHINE_VIOLATION'
+
+    def __init__(self, message: str = "", details: list = None):
+        super().__init__(message)
+        self.details = details or []

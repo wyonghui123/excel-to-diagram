@@ -61,6 +61,10 @@ fields:
       description: 自定义页面，dynamicRoutes.js 不自动注册路由；必须在 router/index.js 中注册静态路由，否则页面空白
     - value: dashboard
       description: 仪表盘页面，暂未实现（dynamicRoutes.js 未注册专用组件，当前 fallback 至 object_list）
+    - value: report
+      description: 元数据驱动报表页，需设置 primary_object_type（其 ui_view_config.report 提供页面配置）；由 dynamicRoutes.js 注册 MetaReportPage
+    - value: rule_center
+      description: 规则中心页，页签/列/筛选由 meta/schemas/rule_center_view.yaml 驱动；由 dynamicRoutes.js 注册 RuleCenterPage
 
   - id: object_types
     name: 关联业务对象

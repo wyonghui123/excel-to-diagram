@@ -26,7 +26,10 @@ from __future__ import annotations
 
 import logging
 
-from flask import Blueprint, jsonify, request
+from flask import Blueprint, request
+
+from meta.api._response_contract import error_response, json_response, ok
+from meta.core.query_spec import parse_query_spec
 
 from meta.core.datasource import get_data_source
 from meta.core.db_path import get_meta_db_path
@@ -73,11 +76,11 @@ def task_inbox_list():
         result = inbox_query(_platform_ds(), actor=actor, app_id=app_id,
                              bucket=bucket, limit=limit)
     except ValueError as e:
-        return jsonify({'success': False, 'message': str(e)}), 400
+        return error_response(str(e), status=400)
     except Exception as e:
         logger.error("[A8] 收件箱查询失败: %s", e)
-        return jsonify({'success': False, 'message': str(e)}), 500
-    return jsonify({'success': True, 'data': result})
+        return error_response(str(e), status=500)
+    return ok(result)
 
 
 @task_inbox_bp.route('/api/v1/task-inbox/counts', methods=['GET'])
@@ -90,8 +93,8 @@ def task_inbox_count():
         counts = inbox_counts(_platform_ds(), actor=actor, app_id=app_id)
     except Exception as e:
         logger.error("[A8] 收件箱角标失败: %s", e)
-        return jsonify({'success': False, 'message': str(e)}), 500
-    return jsonify({'success': True, 'data': counts})
+        return error_response(str(e), status=500)
+    return ok(counts)
 
 
 @task_inbox_bp.route('/api/v1/platform/tick', methods=['POST'])
@@ -100,7 +103,7 @@ def platform_tick_route():
     """平台心跳：派工 / 回收 / 告警 / 决策-生效对账（cron 或管理员手动触发）。"""
     user = get_current_user()
     if not is_admin(user):
-        return jsonify({'success': False, 'message': '需要管理员权限'}), 403
+        return error_response('需要管理员权限', status=403)
 
     body = request.get_json(silent=True) or {}
     try:
@@ -113,8 +116,8 @@ def platform_tick_route():
         )
     except Exception as e:
         logger.error("[A5] 平台心跳失败: %s", e)
-        return jsonify({'success': False, 'message': str(e)}), 500
-    return jsonify({'success': True, 'data': result})
+        return error_response(str(e), status=500)
+    return ok(result)
 
 
 def start_task_service(task_id: str, *, user, registry=None):
@@ -142,7 +145,7 @@ def start_task_service(task_id: str, *, user, registry=None):
 def task_start_route(task_id: str):
     """启动任务：executor 适配层统一入口（run-as 由服务端裁决，不接受客户端身份）。"""
     payload, code = start_task_service(task_id, user=get_current_user())
-    return jsonify(payload), code
+    return json_response(payload, code)
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -219,23 +222,24 @@ def task_monitor_service(*, user, status=None, type=None, app_id=None,
 @task_inbox_bp.route('/api/v1/tasks', methods=['GET'])
 @login_required
 def task_monitor_route():
+    spec = parse_query_spec(request.args, default_page_size=50)
     payload, code = task_monitor_service(
         user=get_current_user(),
         status=request.args.get('status') or None,
         type=request.args.get('type') or None,
         app_id=request.args.get('app_id') or None,
         executor_type=request.args.get('executor_type') or None,
-        page=request.args.get('page', default=1, type=int),
-        page_size=request.args.get('page_size', default=50, type=int),
+        page=spec.page,
+        page_size=spec.page_size,
     )
-    return jsonify(payload), code
+    return json_response(payload, code)
 
 
 @task_inbox_bp.route('/api/v1/tasks/<task_id>', methods=['GET'])
 @login_required
 def task_detail_route(task_id: str):
     payload, code = task_detail_service(task_id, user=get_current_user())
-    return jsonify(payload), code
+    return json_response(payload, code)
 
 
 @task_inbox_bp.route('/api/v1/tasks/<task_id>/events', methods=['GET'])
@@ -244,11 +248,11 @@ def task_events_route(task_id: str):
     payload, code = task_events_service(
         task_id, user=get_current_user(),
         limit=request.args.get('limit', default=200, type=int))
-    return jsonify(payload), code
+    return json_response(payload, code)
 
 
 @task_inbox_bp.route('/api/v1/tasks/<task_id>/claim', methods=['POST'])
 @login_required
 def task_claim_route(task_id: str):
     payload, code = task_claim_service(task_id, user=get_current_user())
-    return jsonify(payload), code
+    return json_response(payload, code)

@@ -17,7 +17,7 @@
  * matchMedia mock 复用 src/test/setup.js 的全局 mock（matches 恒 false = PC），
  * 通过 helper 覆写为窄屏，不改动全局 setup。
  */
-import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
+import { describe, it, expect, vi, beforeEach, afterEach, beforeAll } from 'vitest'
 import { mount } from '@vue/test-utils'
 import { nextTick, ref } from 'vue'
 import { setupPinia } from '@/test/setup'
@@ -127,6 +127,14 @@ function setViewport(width) {
 
 /** 覆盖 import/setup.js 里的原始 mock，便于测试后复原 */
 let originalMatchMedia
+
+// [2026-10-31 FR-008] 预热组件模块：`mountList` 里用 `await import`，
+// 首次编译整条依赖图约 5-10s，会占满第一个用例的 5s 预算而超时。
+// 放到带独立超时的 beforeAll 后，该成本不再计入用例预算，用例只测行为。
+beforeAll(async () => {
+  await import('../MetaListPage.vue')
+}, 60000)
+
 beforeEach(() => {
   originalMatchMedia = window.matchMedia
   // MetaListPage 的 setup 链路里 useMenuPermissions 会调 useMenuPermissions store，

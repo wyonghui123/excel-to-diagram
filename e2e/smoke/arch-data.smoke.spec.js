@@ -17,8 +17,10 @@ import {
   setAdminPermissions,
   attachAndVerifyScreenshot,
   ensureProductWithVersion,
+  setupCompleteArchData,
   runCleanup
 } from '../helpers/auth.js'
+import { listRows } from '../helpers/responsive.js'
 
 test.describe('S02: 架构数据 - 页面导航与对象列表', () => {
   // 每个测试后自动清理
@@ -55,7 +57,7 @@ test.describe('S02: 架构数据 - 页面导航与对象列表', () => {
     const actionsArea = page.locator('.gt-actions')
     if (await actionsArea.isVisible().catch(() => false)) console.log('[OK] 操作按钮区可见')
 
-    const tabs = page.locator('.el-tabs__item, .momp-tabs .el-tabs__item')
+    const tabs = page.locator('.momp-tab-btn')
     const tabCount = await tabs.count()
     if (tabCount > 0) {
       console.log(`[OK] Tab 区域有 ${tabCount} 个 Tab`)
@@ -71,16 +73,37 @@ test.describe('S02: 架构数据 - 页面导航与对象列表', () => {
     await navigateAndWaitForPage(page, '/system/archdata', { expectedPath: 'archdata', waitForTable: false })
     await page.waitForTimeout(500)
 
-    // [NEW v3.19] 使用 ensureProductWithVersion 确保测试数据存在
-    // 不再依赖 findProductWithVersion 可能返回 null
-    const pv = await ensureProductWithVersion(page)
+    // [补测试数据] 仅选到空版本时 5 个 Tab 全为 0 行，用例无法验证“列表可查看”。
+    // setupCompleteArchData 会在所选版本内确保 领域/子领域/服务模块/业务对象 各有数据
+    const seeded = await setupCompleteArchData(page)
+    const pv = { product: seeded.product, version: seeded.version }
     console.log(`[OK] 测试数据: product=${pv.product.id}, version=${pv.version.id}`)
 
     // 直接通过 URL 参数选择产品和版本
     await page.goto(`/system/archdata?productId=${pv.product.id}&versionId=${pv.version.id}`, {
       waitUntil: 'domcontentloaded'
     })
-    await page.waitForTimeout(2000)
+
+    // Tab 依赖 versionContext.selectedVersionId；URL 恢复受版本列表加载速度影响，不能只靠固定等待
+    const navTabs = page.locator('.momp-tab-btn')
+    const tabsReady = await navTabs.first().waitFor({ state: 'visible', timeout: 6000 }).then(() => true).catch(() => false)
+    if (!tabsReady) {
+      // 兜底：通过全局工具栏手动选产品/版本（避免版本列表加载慢导致 URL 参数未生效）
+      console.log('[warn] URL 参数未生效，改用工具栏选择产品/版本')
+      const productSelect = page.locator('.gt-selector').first().locator('.el-select').first()
+      await productSelect.click()
+      const productOption = page.locator('.el-select-dropdown:visible .el-select-dropdown__item').filter({ hasText: pv.product.name }).first()
+      await productOption.waitFor({ state: 'visible', timeout: 5000 })
+      await productOption.click()
+
+      const versionSelect = page.locator('.gt-selector').nth(1).locator('.el-select').first()
+      await versionSelect.click()
+      const versionOption = page.locator('.el-select-dropdown:visible .el-select-dropdown__item').filter({ hasText: pv.version.name }).first()
+      await versionOption.waitFor({ state: 'visible', timeout: 5000 })
+      await versionOption.click()
+
+      await navTabs.first().waitFor({ state: 'visible', timeout: 8000 })
+    }
 
     await attachAndVerifyScreenshot(page, testInfo, '02-archdata-with-version', { expectedPath: 'archdata' })
 
@@ -88,13 +111,14 @@ test.describe('S02: 架构数据 - 页面导航与对象列表', () => {
     const tabResults = []
 
     for (let i = 0; i < tabNames.length; i++) {
-      const tab = page.locator(`.el-tabs__item:has-text("${tabNames[i]}")`).first()
+      const tab = page.locator(`.momp-tab-btn:has-text("${tabNames[i]}")`).first()
       if (await tab.isVisible().catch(() => false)) {
         await tab.click()
-        await page.waitForTimeout(1000)
+        // 列表由 MetaListPage 异步加载：桌面为 el-table，窄屏为 meta-card-list
+        await page.locator('.el-table, .meta-card-list').first().waitFor({ state: 'visible', timeout: 5000 }).catch(() => {})
+        await page.waitForTimeout(500)
 
-        const tableRows = page.locator('.el-table__body tr')
-        const rowCount = await tableRows.count()
+        const rowCount = await listRows(page).count()
         tabResults.push({ name: tabNames[i], rows: rowCount })
 
         if (i === 0) {
@@ -140,7 +164,7 @@ test.describe('S02: 架构数据 - 页面导航与对象列表', () => {
     await attachAndVerifyScreenshot(page, testInfo, '04-data-driven-test', { expectedPath: 'archdata' })
 
     // 验证 Tab 显示（产品版本已选择）
-    const tabs = page.locator('.el-tabs__item')
+    const tabs = page.locator('.momp-tab-btn')
     const tabCount = await tabs.count()
     expect(tabCount).toBeGreaterThan(0)
     console.log(`[OK] 验证通过: ${tabCount} 个 Tab 可见`)

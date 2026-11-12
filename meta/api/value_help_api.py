@@ -1,9 +1,11 @@
 from flask import Blueprint, request, jsonify, g
+from meta.core.query_spec import parse_query_spec
 import json
 from meta.core.value_help_providers import get_provider
 from meta.core.models import ValueHelpSource
 from meta.services.auth_middleware import login_required
 from meta.services.bo_pick_service import BoPickService
+from meta.api._response_contract import ok
 
 value_help_bp = Blueprint("value_help", __name__)
 
@@ -73,8 +75,8 @@ def search_value_help(source_type, source_id):
 
     search = request.args.get("search", "")
     search_fields = [f.strip() for f in request.args.get("search_fields", "").split(",") if f.strip()]
-    page = int(request.args.get("page", 1))
-    page_size = int(request.args.get("pageSize", request.args.get("page_size", 15)))
+    spec = parse_query_spec(request.args, default_page_size=15)
+    page, page_size = spec.page, spec.page_size
     sort = _parse_sort(request.args.get("sort", ""))
 
     filters = {}
@@ -98,7 +100,7 @@ def search_value_help(source_type, source_id):
             sort=sort,
             user_context=user_context,
         )
-        return jsonify({"success": True, "data": result})
+        return ok(result)
     except Exception as e:
         return jsonify({"success": False, "error": str(e)}), 500
 
@@ -141,8 +143,8 @@ def resolve_value_help(source_type, source_id):
     try:
         result = provider.resolve(value, user_context)
         if result is None:
-            return jsonify({"success": True, "data": {"value": value, "display": str(value), "code": str(value)}})
-        return jsonify({"success": True, "data": result})
+            return ok({"value": value, "display": str(value), "code": str(value)})
+        return ok(result)
     except Exception as e:
         return jsonify({"success": False, "error": str(e)}), 500
 
@@ -211,7 +213,7 @@ def pick_bo_by_code():
             "message": f"BO 编码 {code} 在 product {product_id} 下不存在",
         }), 404
 
-    return jsonify({"success": True, "data": bo})
+    return ok(bo)
 
 
 @value_help_bp.route("/api/v2/bo/business_object/<int:bo_id>", methods=["GET"])
@@ -267,7 +269,7 @@ def pick_bo_by_id(bo_id: int):
                 "message": f"BO ID {bo_id} 不存在",
             }), 404
         _attach_change_history(result.data, 'business_object', bo_id)
-        return jsonify({"success": True, "data": result.data})
+        return ok(result.data)
 
     # ValueHelp 跨域场景: 走 BoPickService (无 read scope, 只查最小白名单字段)
     bo = BoPickService.pick_by_id(bo_id=bo_id)
@@ -278,4 +280,4 @@ def pick_bo_by_id(bo_id: int):
             "message": f"BO ID {bo_id} 不存在",
         }), 404
 
-    return jsonify({"success": True, "data": bo})
+    return ok(bo)

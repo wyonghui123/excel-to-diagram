@@ -28,7 +28,7 @@ class TestExportVisibleDefault:
         """测试 user_group 字段 export_visible 默认值为 True"""
         from meta.core.models import registry
         
-        meta = registry.get('user_group')
+        meta = registry.get('org')
         assert meta is not None, "meta not found in registry"
         assert meta, "user_group 元对象应该存在" is not None
         
@@ -84,7 +84,7 @@ class TestFieldPermissionSemantics:
         """测试业务键语义标识"""
         from meta.core.models import registry
         
-        meta = registry.get('user_group')
+        meta = registry.get('org')
         assert meta is not None, "meta not found in registry"
         code_field = meta.get_field('code')
         
@@ -95,7 +95,7 @@ class TestFieldPermissionSemantics:
         """测试系统字段语义标识"""
         from meta.core.models import registry
         
-        meta = registry.get('user_group')
+        meta = registry.get('org')
         assert meta is not None, "meta not found in registry"
         
         # 检查 created_at 是否有 audit_field
@@ -120,7 +120,7 @@ class TestUIConfigDerivation:
             ds = get_data_source('sqlite', database='meta/architecture.db')
             bo = BOFramework(ds)
             
-            ui_config = bo.get_ui_config('user_group')
+            ui_config = bo.get_ui_config('org')
             
             fields = {f['id']: f for f in ui_config['fields']}
             
@@ -142,23 +142,23 @@ class TestAssociationConfiguration:
         try:
             from meta.core.models import registry
             
-            meta = registry.get('user_group')
-            assert meta is not None, "user_group meta object not found in registry"
+            meta = registry.get('org')
+            assert meta is not None, "org meta object not found in registry"
             
             associations = getattr(meta, 'associations', {})
             if not associations or 'members' not in associations:
-                pytest.fail("user_group associations not configured")
+                pytest.fail("org associations not configured")
             
             assert 'members' in associations, "应该有 members 关联"
-            assert 'roles' in associations, "应该有 roles 关联"
+            assert 'permission_sets' in associations, "应该有 permission_sets 关联"
             
             members = associations['members']
             assert members.target_entity == 'user', "members 应该关联到 user"
-            print("[PASS] user_group.members 关联正确")
+            print("[PASS] org.members 关联正确")
             
-            roles = associations['roles']
-            assert roles.target_entity == 'role', "roles 应该关联到 role"
-            print("[PASS] user_group.roles 关联正确")
+            permission_sets = associations['permission_sets']
+            assert permission_sets.target_entity == 'permission_set', "permission_sets 应该关联到 permission_set"
+            print("[PASS] org.permission_sets 关联正确")
         except (KeyError, AttributeError) as e:
             pytest.fail(f"Association config error: {e}")
 
@@ -180,7 +180,7 @@ class TestAssociationConfiguration:
 
             permissions = associations['permissions']
             assert permissions.type == 'many_to_many', "permissions 应该是 many_to_many 类型"
-            assert permissions.through == 'role_permissions', "permissions 应该通过 role_permissions 表"
+            assert permissions.through == 'permission_set_permissions', "permissions 应该通过 permission_set_permissions 表"
             print("[PASS] role.permissions 关联正确")
 
             if 'assigned_groups' in associations:
@@ -197,7 +197,7 @@ class TestDetailTabsConfiguration:
         """测试 user_group 的 detail.tabs 配置"""
         from meta.core.models import registry
         
-        meta = registry.get('user_group')
+        meta = registry.get('org')
         ui_view_config = getattr(meta, 'ui_view_config', None)
         assert ui_view_config, "应该有 ui_view_config" is not None
         
@@ -221,13 +221,13 @@ class TestDetailTabsConfiguration:
             assert members_tab.association == 'members', "members tab 应该关联到 members"
         print("[PASS] user_group detail.members tab 配置正确")
         
-        # 检查 roles tab
-        roles_tab = next((t for t in tabs if t.id == 'roles'), None)
-        assert roles_tab, "应该有 roles tab" is not None
-        assert roles_tab.type in ['association', 'custom'], "roles tab 应该是 association 或 custom 类型"
-        if hasattr(roles_tab, 'association'):
-            assert roles_tab.association == 'roles', "roles tab 应该关联到 roles"
-        print("[PASS] user_group detail.roles tab 配置正确")
+        # 检查 permission_sets tab
+        permission_sets_tab = next((t for t in tabs if t.id == 'permission_sets'), None)
+        assert permission_sets_tab, "应该有 permission_sets tab" is not None
+        assert permission_sets_tab.type in ['association', 'custom'], "permission_sets tab 应该是 association 或 custom 类型"
+        if hasattr(permission_sets_tab, 'association'):
+            assert permission_sets_tab.association == 'permission_sets', "permission_sets tab 应该关联到 permission_sets"
+        print("[PASS] org detail.permission_sets tab 配置正确")
         
         # 检查 history tab
         history_tab = next((t for t in tabs if t.id == 'history'), None)
@@ -274,7 +274,7 @@ class TestYAMLMinimalConfiguration:
         """测试 user_group YAML 配置中没有冗余的 visible: true"""
         from meta.core.models import registry
         
-        meta = registry.get('user_group')
+        meta = registry.get('org')
         assert meta is not None, "meta not found in registry"
         
         redundant_count = 0
@@ -299,7 +299,7 @@ class TestYAMLMinimalConfiguration:
         """测试 user_group YAML 配置中没有冗余的 editable: true"""
         from meta.core.models import registry
         
-        meta = registry.get('user_group')
+        meta = registry.get('org')
         assert meta is not None, "meta not found in registry"
         
         redundant_count = 0
@@ -324,7 +324,7 @@ class TestYAMLMinimalConfiguration:
         """测试 user_group YAML 配置中没有冗余的 export_visible: true"""
         from meta.core.models import registry
         
-        meta = registry.get('user_group')
+        meta = registry.get('org')
         assert meta is not None, "meta not found in registry"
         
         redundant_count = 0

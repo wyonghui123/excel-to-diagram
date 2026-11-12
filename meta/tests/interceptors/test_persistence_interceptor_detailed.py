@@ -1,3 +1,5 @@
+import sqlite3
+
 import pytest
 
 pytestmark = pytest.mark.unit
@@ -290,14 +292,16 @@ class TestPersistenceInterceptorDoRead:
         assert result.success is False
 
     def test_enriches_virtual_redundancy_fields(self):
-        """[FIX 2026-06-14] BUG-V008 详情页修复: _do_read 必须先 enrich_one
-        填充虚拟冗余字段 (e.g. domain_id 从 service_module_id 推导),
-        再 enrich_fk_display_names 注入 {field}_display。
+        """详情页读路径：_do_read 必须调用 enrich_fk_display_names
+
+        [2026-06-28 起] business_object.domain_id/sub_domain_id 已改为 STORED
+        (DB 冗余列), 不再需要 enrich_one 推导虚拟冗余字段; 详情页只需
+        由 FK 值注入 {field}_display 展示名。
         """
         from meta.core.interceptors.persistence_interceptor import PersistenceInterceptor
         interceptor = PersistenceInterceptor()
 
-        # 模拟 business_object 单条记录: DB 只有 service_module_id, 没有 domain_id/sub_domain_id
+        # 模拟 business_object 单条记录
         mock_registry = Mock()
         mock_registry.read.return_value = ActionResult(
             success=True,
@@ -310,17 +314,10 @@ class TestPersistenceInterceptorDoRead:
             'meta.core.interceptors.persistence_interceptor.EnrichmentEngine.for_data_source'
         ) as mock_engine_factory:
             stub_engine = Mock()
-            # enrich_one 必须把 domain_id 从 None 推导为 1
-            stub_engine.enrich_one.return_value = {
-                'id': 1, 'code': 'BO_REQ', 'name': '采购申请',
-                'service_module_id': 2, 'domain_id': 1, 'sub_domain_id': 1,
-                'domain_name': '采购管理', 'sub_domain_name': '采购需求',
-            }
             # enrich_fk_display_names 必须基于已有 FK 值注入 display 字段
             stub_engine.enrich_fk_display_names.return_value = {
                 'id': 1, 'code': 'BO_REQ', 'name': '采购申请',
                 'service_module_id': 2, 'domain_id': 1, 'sub_domain_id': 1,
-                'domain_name': '采购管理', 'sub_domain_name': '采购需求',
                 'domain_id_display': '采购管理', 'sub_domain_id_display': '采购需求',
                 'service_module_id_display': '供应商管理',
             }
@@ -332,16 +329,9 @@ class TestPersistenceInterceptorDoRead:
             result = interceptor._do_read(ctx, mock_registry)
 
         assert result.success is True
-        # 验证 enrich_one 被调用
-        stub_engine.enrich_one.assert_called_once()
         # 验证 enrich_fk_display_names 被调用
         stub_engine.enrich_fk_display_names.assert_called_once()
-        # 验证 call 顺序: enrich_one 必须先于 enrich_fk_display_names
-        call_order = [c[0] for c in stub_engine.method_calls]
-        assert call_order.index('enrich_one') < call_order.index('enrich_fk_display_names'), \
-            f"enrich_one should be called before enrich_fk_display_names, got order: {call_order}"
-        # 验证最终数据中包含 domain_id
-        assert result.data.get('domain_id') == 1
+        # 验证最终数据中包含 display 字段
         assert result.data.get('domain_id_display') == '采购管理'
 
 
@@ -583,3 +573,71 @@ class TestPersistenceInterceptorDoList:
         result = interceptor._do_list(ctx, mock_registry)
 
         assert result.success is True
+
+
+class TestPersistenceInterceptorAuditViewFallback:
+    """审计视图不可用时的降级（v007_50 漏跑场景）。"""
+
+    @staticmethod
+    def _cursor():
+        cursor = Mock()
+        cursor.description = [('id', None)]
+        cursor.fetchall.return_value = [(1,)]
+        return cursor
+
+    @staticmethod
+    def _registry_with(ds):
+        registry = Mock()
+        registry.ds = ds
+        return registry
+
+    def test_fallback_to_audit_logs_when_view_missing(self):
+        from meta.core.interceptors.persistence_interceptor import PersistenceInterceptor
+        interceptor = PersistenceInterceptor()
+        ds = Mock()
+        ds.execute.side_effect = [
+            sqlite3.OperationalError("no such table: v_audit_all"),
+            self._cursor(),
+        ]
+        sql = (
+            "SELECT * FROM users LEFT JOIN ("
+            "SELECT object_id FROM v_audit_all GROUP BY object_id"
+            ") s ON s.object_id = users.id"
+        )
+
+        rows, columns = interceptor._execute_for_list(
+            self._registry_with(ds), sql, [], False
+        )
+
+        assert rows == [(1,)]
+        assert columns == ['id']
+        assert 'v_audit_all' not in ds.execute.call_args_list[1].args[0]
+        assert 'audit_logs' in ds.execute.call_args_list[1].args[0]
+
+    def test_fallback_when_archive_table_missing(self):
+        from meta.core.interceptors.persistence_interceptor import PersistenceInterceptor
+        interceptor = PersistenceInterceptor()
+        ds = Mock()
+        ds.execute.side_effect = [
+            sqlite3.OperationalError("no such table: audit_logs_archive"),
+            self._cursor(),
+        ]
+
+        rows, _ = interceptor._execute_for_list(
+            self._registry_with(ds), "SELECT * FROM v_audit_all", [], False
+        )
+
+        assert rows == [(1,)]
+        assert 'v_audit_all' not in ds.execute.call_args_list[1].args[0]
+
+    def test_unrelated_error_propagates(self):
+        from meta.core.interceptors.persistence_interceptor import PersistenceInterceptor
+        interceptor = PersistenceInterceptor()
+        ds = Mock()
+        ds.execute.side_effect = sqlite3.OperationalError("no such table: orders")
+
+        with pytest.raises(sqlite3.OperationalError):
+            interceptor._execute_for_list(
+                self._registry_with(ds), "SELECT 1 FROM orders", [], False
+            )
+        assert ds.execute.call_count == 1

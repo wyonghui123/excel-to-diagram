@@ -135,14 +135,21 @@ class TestRequestAttribution:
 
         `register_from_directory` 有目录级缓存，重复注册不产生新增 BO；
         若按"新增"建映射，重复注册会得到空映射 → 应用请求静默读写平台库。
+
+        [FIX 2026-11-08] 不能再清空 `_bo_to_app` 模拟预热：该索引同时是
+        "平台自有 BO"快照的排除依据（app_registry.platform_bo_ids），清空后
+        greeting 会被当成平台对象，触发启动期跨归属冲突不变量。真实场景
+        （同进程第二次 create_app）映射本就保留，直接重复注册即可验证。
         """
         from meta.core.app_registry import _register_app_schemas
 
-        _register_app_schemas([hello_manifest])
+        first = _register_app_schemas([hello_manifest])
         assert get_app_id_for_bo("greeting") == _HELLO
 
-        _bo_to_app.clear()  # 模拟"registry 已预热"：第二次注册无新增 BO
-        _register_app_schemas([hello_manifest])
+        # 目录缓存命中：第二次注册不产生新增 BO，但声明清单须照常返回（补建表幂等重放）
+        second = _register_app_schemas([hello_manifest])
+        assert second == first
+        assert "greeting" in second[_HELLO]
         assert get_app_id_for_bo("greeting") == _HELLO
 
 

@@ -235,7 +235,7 @@ class TestFactoryRegistry:
     def test_registry_has_all_factories(self):
         from meta.tests.factories import FACTORY_REGISTRY
         expected = {
-            'user', 'role', 'user_group',
+            'user', 'permission_set', 'org',
             'business_object', 'version', 'domain', 'subscription',
         }
         registered = set(FACTORY_REGISTRY.keys())

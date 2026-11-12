@@ -1,0 +1,562 @@
+# 工序资源要求（Operation Resource Requirement）—— 统一资源模型 P2b
+# 依据: docs/specs/spec-unified-resource-model-2026-11-01-v1.0.md
+#       §FR-003 / §9.3 数据模型表 / 关联结构
+#
+# 定位: 工序需要"什么资源（组或具体资源）+ 什么角色 + 多少量 + 什么技能等级"。
+#   能力（resource_capability）代表"持有"，本表代表"要求"，两侧对齐才可匹配。
+#
+# 口径:
+#   ① resource_group_id 与 resource_id 二者必填其一（服务层校验）。
+#   ② min_level ∈ 1..5，空表示不限等级。
+#   ③ 同工序内 is_primary 同 role 至多一条（服务层校验）。
+
+id: operation_resource_requirement
+name: 工序资源要求
+table_name: operation_resource_requirements
+description: 工序的资源要求（组/资源 + 角色 + 数量 + 技能等级 + 提前期）
+display_name_field: resource_id
+aspects: [audit_aspect]
+
+semantics:
+  meaning: 工序资源要求
+  category: business_document_line
+  aliases:
+    - 工序资源要求
+    - 资源需求
+    - operation resource requirement
+
+deletion_policy:
+  mode: restrict
+  restrict_on: []
+  cascade_delete: []
+
+audit:
+  enabled: true
+  create:
+    enabled: true
+    fields: all
+  update:
+    enabled: true
+    fields: changed_only
+    exclude: [id, created_at, updated_at]
+  delete:
+    enabled: true
+    fields: business_only
+    exclude: [id, created_at, updated_at]
+  associate:
+    enabled: true
+  dissociate:
+    enabled: true
+
+fields:
+  - id: id
+    name: ID
+    type: integer
+    db_column: id
+    required: true
+    unique: true
+    description: 技术主键
+    semantics:
+      meaning: 自增主键
+      primary_key: true
+
+  - id: operation_id
+    name: 工序
+    type: integer
+    db_column: operation_id
+    required: true
+    description: 所属作业定义工序
+    semantics:
+      meaning: 工序引用
+      display:
+        type: association
+        target_type: work_definition_operation
+        display_field: operation_name
+    value_help:
+      source:
+        type: bo
+        target_bo: work_definition_operation
+        value_field: id
+        display_field: operation_name
+        apply_target_permissions: true
+      behavior:
+        multiple: false
+        validation: true
+        binding_strength: strict
+        min_search_length: 0
+      presentation:
+        result_type: dialog
+        display_format: "{id} - {operation_name}"
+        columns:
+          - field: id
+            label: 工序ID
+            width: 120
+          - field: operation_name
+            label: 工序名称
+            width: 200
+    ui:
+      widget: select
+      relation: work_definition_operation
+      multiple: false
+      hidden_in_form: true
+      fieldGroup: 关联
+      fieldGroupPosition: 10
+
+  - id: resource_group_id
+    name: 资源组
+    type: integer
+    db_column: resource_group_id
+    nullable: true
+    description: 要求的资源组；与 resource_id 二者必填其一
+    semantics:
+      meaning: 资源组引用
+      display:
+        type: association
+        target_type: resource_group
+        display_field: name
+        placeholder: "按组要求"
+    value_help:
+      source:
+        type: bo
+        target_bo: resource_group
+        value_field: id
+        display_field: name
+        code_field: code
+        apply_target_permissions: true
+      behavior:
+        multiple: false
+        validation: true
+        binding_strength: strict
+        min_search_length: 0
+      presentation:
+        result_type: dialog
+        display_format: "{code} - {name}"
+        columns:
+          - field: code
+            label: 组编码
+            width: 150
+          - field: name
+            label: 组名称
+            width: 220
+    ui:
+      widget: select
+      relation: resource_group
+      multiple: false
+      clearable: true
+      fieldGroup: 关联
+      fieldGroupPosition: 20
+
+  - id: resource_id
+    name: 资源
+    type: integer
+    db_column: resource_id
+    nullable: true
+    description: 要求的具体资源；与 resource_group_id 二者必填其一
+    semantics:
+      meaning: 资源引用
+      display:
+        type: association
+        target_type: resource
+        display_field: name
+        placeholder: "按组要求"
+    value_help:
+      source:
+        type: bo
+        target_bo: resource
+        value_field: id
+        display_field: name
+        code_field: code
+        apply_target_permissions: true
+      behavior:
+        multiple: false
+        validation: true
+        binding_strength: strict
+        min_search_length: 0
+      presentation:
+        result_type: dialog
+        display_format: "{code} - {name}"
+        columns:
+          - field: code
+            label: 资源编码
+            width: 150
+          - field: name
+            label: 资源名称
+            width: 220
+    ui:
+      widget: select
+      relation: resource
+      multiple: false
+      clearable: true
+      fieldGroup: 关联
+      fieldGroupPosition: 30
+
+  - id: role
+    name: 资源角色
+    type: string
+    db_column: role
+    required: true
+    default: labor
+    description: 资源在工序中的角色（设备 / 人工 / 工装 / 车辆 / 外协）
+    enum_values:
+      - value: machine
+        label: 设备
+        color: primary
+      - value: labor
+        label: 人工
+        color: success
+        is_initial: true
+      - value: tool
+        label: 工装
+        color: warning
+      - value: vehicle
+        label: 车辆
+        color: info
+      - value: external
+        label: 外协
+        color: danger
+    value_help:
+      source:
+        type: enum
+        enum_type_id: requirement_role
+        sort_by: sort_order
+      behavior:
+        validation: true
+        binding_strength: strict
+        multiple: false
+      presentation:
+        result_type: dropdown
+    semantics:
+      meaning: 资源要求角色
+      filterable: true
+      filter_type: enum
+      filter_label: 资源角色
+      filter_scope: local
+    ui:
+      widget: select
+      fieldGroup: 认定
+      fieldGroupPosition: 40
+
+  - id: qty
+    name: 需求量
+    type: number
+    db_column: qty
+    required: true
+    default: 1
+    description: 该角色需要的数量（默认 1）
+    constraints:
+      - type: numeric_range
+        gt: 0
+    semantics:
+      meaning: 资源需求量
+    ui:
+      widget: number
+      fieldGroup: 认定
+      fieldGroupPosition: 50
+
+  - id: required_skill_id
+    name: 要求技能
+    type: integer
+    db_column: required_skill_id
+    nullable: true
+    description: 要求的技能；空表示不限技能
+    semantics:
+      meaning: 技能引用
+      display:
+        type: association
+        target_type: skill
+        display_field: name
+        placeholder: "不限技能"
+    value_help:
+      source:
+        type: bo
+        target_bo: skill
+        value_field: id
+        display_field: name
+        code_field: code
+        apply_target_permissions: true
+        value_filter:
+          status: active
+      behavior:
+        multiple: false
+        validation: true
+        binding_strength: strict
+        min_search_length: 0
+      presentation:
+        result_type: dialog
+        display_format: "{code} - {name}"
+        columns:
+          - field: code
+            label: 技能编码
+            width: 160
+          - field: name
+            label: 技能名称
+            width: 220
+    ui:
+      widget: select
+      relation: skill
+      multiple: false
+      clearable: true
+      fieldGroup: 认定
+      fieldGroupPosition: 60
+
+  - id: min_level
+    name: 最低等级
+    type: integer
+    db_column: min_level
+    nullable: true
+    description: 技能最低等级（1–5）；空表示不限等级
+    constraints:
+      - type: numeric_range
+        gte: 1
+        lte: 5
+        decimal_places: 0
+    semantics:
+      meaning: 最低能力等级
+    ui:
+      widget: number
+      fieldGroup: 认定
+      fieldGroupPosition: 70
+
+  - id: is_primary
+    name: 主资源
+    type: boolean
+    db_column: is_primary
+    required: true
+    default: true
+    description: 是否为主资源要求（同工序同角色至多一条主要求）
+    semantics:
+      meaning: 是否主资源
+      filterable: true
+      filter_type: enum
+      filter_label: 主资源
+      filter_scope: local
+    ui:
+      widget: switch
+      fieldGroup: 认定
+      fieldGroupPosition: 80
+
+  - id: priority
+    name: 优先级
+    type: integer
+    db_column: priority
+    required: true
+    default: 1
+    description: 候选匹配优先级（数字越小越优先）
+    constraints:
+      - type: numeric_range
+        gte: 0
+        decimal_places: 0
+    semantics:
+      meaning: 匹配优先级
+    ui:
+      widget: number
+      fieldGroup: 认定
+      fieldGroupPosition: 90
+
+  - id: lead_time_days
+    name: 提前期（天）
+    type: integer
+    db_column: lead_time_days
+    nullable: true
+    description: 需要提前天数（外协/车辆等预约场景）；空表示无提前期
+    constraints:
+      - type: numeric_range
+        gte: 0
+        decimal_places: 0
+    semantics:
+      meaning: 资源提前期天数
+    ui:
+      widget: number
+      fieldGroup: 认定
+      fieldGroupPosition: 100
+
+  - id: substitute_group
+    name: 替代组
+    type: string
+    db_column: substitute_group
+    nullable: true
+    max_length: 40
+    description: 替代组；同工序同组内的资源要求互为候选
+    semantics:
+      meaning: 资源替代组
+      searchable: true
+    ui:
+      widget: input
+      fieldGroup: 替代
+      fieldGroupPosition: 110
+
+  - id: replacement_group
+    name: 替换包
+    type: string
+    db_column: replacement_group
+    nullable: true
+    max_length: 40
+    description: 替换包；同 (替代组, 替换包) 的多行必须整组一起可用；非空时替代组必填
+    semantics:
+      meaning: 替换包分组
+      searchable: true
+    ui:
+      widget: input
+      fieldGroup: 替代
+      fieldGroupPosition: 120
+
+  - id: created_at
+    name: 创建时间
+    type: datetime
+    db_column: created_at
+    description: 创建时间
+    semantics:
+      meaning: 记录创建时间
+      audit_field: true
+
+  - id: updated_at
+    name: 更新时间
+    type: datetime
+    db_column: updated_at
+    description: 更新时间
+    semantics:
+      meaning: 记录更新时间
+      audit_field: true
+
+indexes:
+  - fields: [operation_id]
+    name: idx_operation_resource_requirement_operation
+  - fields: [resource_group_id]
+    name: idx_operation_resource_requirement_group
+  - fields: [resource_id]
+    name: idx_operation_resource_requirement_resource
+  - fields: [required_skill_id]
+    name: idx_operation_resource_requirement_skill
+  - fields: [operation_id, substitute_group]
+    name: idx_operation_resource_requirement_substitute
+
+relations:
+  - id: requirement_to_operation
+    name: 工序
+    type: reference
+    target: work_definition_operation
+    source_field: operation_id
+    target_field: id
+    cardinality: N:1
+    description: 工序引用（真外键）
+  - id: requirement_to_group
+    name: 资源组
+    type: reference
+    target: resource_group
+    source_field: resource_group_id
+    target_field: id
+    cardinality: N:1
+    description: 资源组引用（可空；真外键）
+  - id: requirement_to_resource
+    name: 资源
+    type: reference
+    target: resource
+    source_field: resource_id
+    target_field: id
+    cardinality: N:1
+    description: 资源引用（可空；真外键）
+  - id: requirement_to_skill
+    name: 要求技能
+    type: reference
+    target: skill
+    source_field: required_skill_id
+    target_field: id
+    cardinality: N:1
+    description: 技能引用（可空；真外键）
+
+ui_view_config:
+  # 菜单由迁移 v176 手工声明（挂 master-data），不让自动生成器产出孤儿行
+  skip_auto_menu: true
+  list:
+    detail_mode: drawer
+    title: 工序资源要求
+    columns:
+      - field: operation_id
+        width: 210
+        filterable: true
+        filter_type: value_help
+        render_as: association
+        target_type: work_definition_operation
+        display_field: operation_name
+      - field: role
+        width: 110
+        filterable: true
+        filter_type: select
+      - field: resource_group_id
+        width: 180
+        filterable: true
+        filter_type: value_help
+        render_as: association
+        target_type: resource_group
+        display_field: name
+      - field: resource_id
+        width: 180
+        filterable: true
+        filter_type: value_help
+        render_as: association
+        target_type: resource
+        display_field: name
+      - field: qty
+        width: 100
+      - field: required_skill_id
+        width: 180
+        filterable: true
+        filter_type: value_help
+        render_as: association
+        target_type: skill
+        display_field: name
+      - field: min_level
+        width: 100
+      - field: substitute_group
+        width: 140
+      - field: replacement_group
+        width: 140
+      - field: is_primary
+        width: 100
+      - field: priority
+        width: 100
+    selection:
+      enabled: true
+      mode: multiple
+    searchFields: [role]
+    actions:
+      - id: create
+        label: 新建资源要求
+        icon: plus
+        type: primary
+        permission: operation_resource_requirement:create
+    defaultSort:
+      field: priority
+      order: asc
+  form:
+    title: 工序资源要求
+    layout: vertical
+    sections:
+      - title: 关联
+        columns:
+          - fields: [operation_id, role]
+          - fields: [resource_group_id, resource_id]
+      - title: 认定
+        columns:
+          - fields: [qty, is_primary, priority]
+          - fields: [required_skill_id, min_level]
+          - fields: [lead_time_days]
+      - title: 替代
+        columns:
+          - fields: [substitute_group, replacement_group]
+  detail:
+    layout: tabs
+    title: 工序资源要求 详情
+    tabs:
+      - id: basic
+        label: 基本信息
+        type: fields
+        fields: [operation_id, resource_group_id, resource_id, role, qty,
+                 required_skill_id, min_level, is_primary, priority, lead_time_days,
+                 substitute_group, replacement_group]
+
+category_config:
+  create_permission: operation_resource_requirement:create
+  update_permission: operation_resource_requirement:update
+  delete_permission: operation_resource_requirement:delete
+  owner_auto_permission: false

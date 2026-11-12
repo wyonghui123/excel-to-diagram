@@ -1,7 +1,6 @@
 ---
 alwaysApply: false
 description: "Excel 文件测试规范：三层架构 + openpyxl 回读 + 样式常量"
-globs: "meta/tests/**/*,tests/**/*"
 ---
 
 # Excel 文件测试规范

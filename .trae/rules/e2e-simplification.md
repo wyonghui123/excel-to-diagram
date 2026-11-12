@@ -1,6 +1,7 @@
 ---
 alwaysApply: false
 description: "E2E 测试简化策略：减少测试步骤、提升执行效率"
+globs: "tests/e2e/**/*,meta/tests/e2e/**/*,e2e/**/*"
 ---
 
 # 前端 E2E 测试简化方案 - 强制规范 [NEW 2026-06-05]
@@ -244,7 +245,7 @@ playwright.config.js
 | `.trae/rules/frontend-test-auth.md` | 认证细节（dev-login cookie） |
 | `.trae/rules/frontend-test-data-rules.md` | **测试数据管理规范**（v3.19 新增） |
 | `.trae/rules/page-health-rules.md` | 页面健康检查 |
-| `.trae/rules/multi-agent-coordination.md` | 多 Agent 端口/资源隔离 |
+| `.trae/rules/scenarios/7-ai-collaboration/multi-agent-coordination.md` | 多 Agent 端口/资源隔离 |
 
 **优先级**：`e2e-simplification.md` > `e2e-testing.md`（新方案优先）
 

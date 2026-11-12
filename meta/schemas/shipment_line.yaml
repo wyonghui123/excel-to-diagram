@@ -56,6 +56,13 @@ audit:
       - created_at
       - updated_at
 
+org_scope:
+  mode: chain
+  via: delivery_id
+  host: shipment
+  function: inventory
+  write_check: true
+
 fields:
   - id: id
     name: ID
@@ -170,6 +177,24 @@ fields:
       relation: item
       hidden_in_form: true
 
+  # INV-2：项目任务段来源；发运继承 SO 行/项目任务归属
+  - id: project_task_id
+    name: 项目任务
+    type: integer
+    db_column: project_task_id
+    nullable: true
+    description: 项目任务段归属（由来源单据继承；为空 = 无任务段）
+    semantics:
+      meaning: 项目任务引用
+      display:
+        type: association
+        target_type: project_task
+        display_field: task_name
+    ui:
+      widget: select
+      relation: project_task
+      hidden_in_form: true
+
   - id: uom_id
     name: 计量单位
     type: integer
@@ -219,10 +244,22 @@ fields:
     type: string
     db_column: serial_no
     nullable: true
-    max_length: 64
-    description: 序列号
+    max_length: 200
+    description: 快捷录入：qty=1 时可直接录号；qty>1 必须走序列号子表
     semantics:
       meaning: 序列号
+      data_category: code
+
+  # 可选整箱发运：发运确认后按容器号置 shipped 并级联成员号（§11.5）
+  - id: hu_no
+    name: 容器号
+    type: string
+    db_column: hu_no
+    nullable: true
+    max_length: 40
+    description: 可选容器号；发运确认后整箱发运（容器须已 sealed）
+    semantics:
+      meaning: 包装容器业务标识
       data_category: code
 
   - id: status
@@ -250,6 +287,10 @@ fields:
         label: 已签收
         color: success
         category: active
+      - value: reversed
+        label: 已冲销
+        color: danger
+        category: inactive
       - value: cancelled
         label: 已取消
         color: danger

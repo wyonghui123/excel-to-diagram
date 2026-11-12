@@ -1,3 +1,4 @@
+# ALLOW_RAW_SQL: 本文件含裸 SQL 构造级联拦截器测试数据/DDL，守卫豁免（2026-11-09 恢复覆盖）
 import pytest
 
 pytestmark = pytest.mark.unit
@@ -306,9 +307,12 @@ class TestCascadeInterceptorDeleteChildren:
 class TestCascadeInterceptorDeleteCompositionChildren:
 
     def test_deletes_by_foreign_key(self):
+        from unittest.mock import MagicMock
         from meta.core.interceptors.cascade_interceptor import CascadeInterceptor
         interceptor = CascadeInterceptor()
-        ds = Mock()
+        ds = MagicMock()
+        # BUG-V012: 先按 FK 查子对象 ids, 再按 FK 删除 (需要返回至少 1 条 id)
+        ds.execute.return_value.fetchall.return_value = [(1,)]
         from meta.core.models import registry
         if 'child' not in registry._objects:
             registry._objects['child'] = Mock(table_name='children')
@@ -322,7 +326,11 @@ class TestCascadeInterceptorDeleteCompositionChildren:
             'target_type': 'child',
             'foreign_key': 'parent_id',
         })
-        ds.execute.assert_called_once_with(
+        ds.execute.assert_any_call(
+            "SELECT id FROM children WHERE parent_id = ?",
+            [10]
+        )
+        ds.execute.assert_any_call(
             "DELETE FROM children WHERE parent_id = ?",
             [10]
         )
@@ -411,14 +419,14 @@ class TestCascadeInterceptorInferFk:
         MetadataResolver._cache = {}
         from meta.core.interceptors.cascade_interceptor import CascadeInterceptor
         interceptor = CascadeInterceptor()
-        assert interceptor._infer_fk_column('user_group_members', 'user_group') == ('user_group_members', 'group_id')
-        assert interceptor._infer_fk_column('group_roles', 'group') == ('group_roles', 'group_id')
-        assert interceptor._infer_fk_column('user_roles', 'user') == ('user_roles', 'user_id')
-        assert interceptor._infer_fk_column('role_permissions', 'role') == ('role_permissions', 'role_id')
+        assert interceptor._infer_fk_column('org_members', 'org') == ('org_members', 'org_id')
+        assert interceptor._infer_fk_column('org_permission_sets', 'org') == ('org_permission_sets', 'org_id')
+        assert interceptor._infer_fk_column('user_permission_sets', 'user') == ('user_permission_sets', 'user_id')
+        assert interceptor._infer_fk_column('permission_set_permissions', 'permission_set') == ('permission_set_permissions', 'permission_set_id')
         assert interceptor._infer_fk_column('data_permissions', 'user') == ('data_permissions', 'user_id')
         assert interceptor._infer_fk_column('change_subscriptions', 'user') == ('change_subscriptions', 'user_id')
         assert interceptor._infer_fk_column('filter_variants', 'user') == ('filter_variants', 'user_id')
-        assert interceptor._infer_fk_column('group_data_permissions', 'group') == ('group_data_permissions', 'group_id')
+        assert interceptor._infer_fk_column('org_data_permissions', 'org') == ('org_data_permissions', 'org_id')
 
     def test_unknown_table_returns_none(self):
         from meta.core.interceptors.cascade_interceptor import CascadeInterceptor

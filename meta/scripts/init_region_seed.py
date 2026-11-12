@@ -352,36 +352,59 @@ def _iter_rows():
 
 
 def init_region_seed_data(data_source):
-    """幂等写入行政区划种子。返回 (inserted, updated) 计数。"""
+    """幂等写入行政区划种子。返回 (inserted, updated) 计数。
+
+    [2026-11-09 P0-4] 原实现每行 2 次 SELECT（查父级 + 查是否存在），
+    282 行共约 560 次查询。改为一次性批量读入内存索引，查询次数降到
+    1 + 层级边界刷新（≤4 次），语义与写入顺序（父先于子）保持不变。
+    """
+    existing = {row['code']: row for row in data_source.query(
+        "SELECT code, id, name, parent_id, level FROM regions")}
+    ids = {code: row['id'] for code, row in existing.items()}
+
     inserted = 0
     updated = 0
-    for code, name, parent_code, level in _iter_rows():
-        parent_id = None
-        if parent_code is not None:
-            rows = data_source.query(
-                "SELECT id FROM regions WHERE code = ?", (parent_code,))
-            if not rows:
-                logger.error(
-                    "Region seed: 父级 %s 未写入, 跳过 %s", parent_code, code)
-                continue
-            parent_id = rows[0]['id']
+    current_level = None
+    # [2026-11-09 P0-4] 282 行逐条自动提交（每条一次 fsync）约 2.7s；
+    # 在独立事务内批量写入后一次提交，实测降到 ~0.1s。
+    own_tx = not data_source.in_transaction
+    if own_tx:
+        data_source.begin_transaction()
+    try:
+        for code, name, parent_code, level in _iter_rows():
+            # 进入新层级前刷新 id 索引：上一层级刚插入的父节点此时才可见
+            if level != current_level:
+                if current_level is not None:
+                    ids.update({row['code']: row['id'] for row in data_source.query(
+                        "SELECT code, id FROM regions")})
+                current_level = level
 
-        existing = data_source.query(
-            "SELECT id FROM regions WHERE code = ?", (code,))
-        if existing:
-            # 只刷新稳定属性; 不重置 status（停用≠删除, 重跑不复活）
-            data_source.execute(
-                "UPDATE regions SET name = ?, parent_id = ?, level = ? "
-                "WHERE code = ?",
-                [name, parent_id, level, code])
-            updated += 1
-        else:
-            data_source.execute(
-                "INSERT INTO regions "
-                "(code, name, parent_id, level, status, created_at) "
-                "VALUES (?, ?, ?, ?, 'active', datetime('now'))",
-                [code, name, parent_id, level])
-            inserted += 1
+            parent_id = None
+            if parent_code is not None:
+                parent_id = ids.get(parent_code)
+                if parent_id is None:
+                    logger.error(
+                        "Region seed: 父级 %s 未写入, 跳过 %s", parent_code, code)
+                    continue
+
+            if code in existing:
+                # 只刷新稳定属性; 不重置 status（停用≠删除, 重跑不复活）
+                data_source.execute(
+                    "UPDATE regions SET name = ?, parent_id = ?, level = ? "
+                    "WHERE code = ?",
+                    [name, parent_id, level, code])
+                updated += 1
+            else:
+                data_source.execute(
+                    "INSERT INTO regions "
+                    "(code, name, parent_id, level, status, created_at) "
+                    "VALUES (?, ?, ?, ?, 'active', datetime('now'))",
+                    [code, name, parent_id, level])
+                inserted += 1
+    except Exception:
+        if own_tx:
+            data_source.rollback()
+        raise
 
     data_source.commit()
     logger.info("Region seeded: %d inserted, %d updated", inserted, updated)

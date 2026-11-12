@@ -1,0 +1,647 @@
+# 需求分配行 (Demand Allocation)
+# 依据: docs/specs/spec-purchase-order-object-model-2026-11-01.md §9 / §9.2.1
+#
+# 定位: 「需求行 ↔ 执行行」的通用 N:M 数量分配事实（pegging / distribution / allocation）。
+#   结构骨架取 Oracle PO_DISTRIBUTIONS_ALL（一行同时挂执行行 + 执行计划行），
+#   语义取 Oracle / PeopleSoft pegging，可写性取 Coupa allocation。
+#
+# 本波口径:
+#   ① 多态表，不声明 parent_object（target_id 可指向任意载体），
+#      不进任何对象的 child_sections；由服务 / API 维护。
+#   ② 成本归属（cost_center_id / expense_account_code / asset_category_code /
+#      charge_basis）长在分配行，不放 PO 行 —— 同一 PO 行可能同时服务
+#      「研发项目」与「生产费用」，行级单值成本中心必然错账（§9.2.1）。
+#   ③ M3 只建列 + 继承 + 守卫校验，不做凭证与科目映射；
+#      费用化 / 资本化的记账闭环随财务波次。
+#   ④ 平台暂无 cost_center / project_task 主数据（resource.yaml TBD-8），
+#      这两个字段暂为纯整数引用，不做 value_help。
+#
+# 守卫不变量（§9.4，由 purchase_order_guard_service 强制）:
+#   · qty > 0；active 分配合计不得超过执行行 / 计划行数量
+#   · 同一需求行的 active 分配合计不得超过需求行 qty（跨载体合计）
+#   · 执行行 / 计划行 cancelled 时，其分配置 reversed 并写 reversed_at
+#   · project_task_id 非空时，project_id 必须与任务所属项目一致
+#   · demand_bo / demand_line_id / target_bo / target_line_id 不可改（只能作废重开）
+#   · charge_basis 联动：project → project_id 必填；expense → expense_account_code 必填；
+#     asset → asset_category_code 必填；inventory → 三者可空
+#   · cost_center_id 必须与需求行一致；分配环节不允许改写成本归属
+#
+# allocated_amount 口径:
+#   spec 写「只读派生 qty × 执行行单价」。多态 target 无法用 YAML 公式跨表派生，
+#   故实现为 nullable 只读缓存列，由服务层计算后回写；界面上不可编辑。
+
+id: demand_allocation
+name: 需求分配
+table_name: demand_allocations
+description: 需求分配行（需求行与执行行之间的数量分配与成本归属）
+display_name_field: demand_line_no
+aspects: [audit_aspect]
+
+semantics:
+  meaning: 需求分配
+  category: business_document
+  aliases:
+    - 需求分配
+    - pegging
+    - distribution
+    - allocation
+
+deletion_policy:
+  # 分配事实：不允许删除，只能置 reversed（追溯链不删）
+  mode: restrict
+  restrict_on: []
+  cascade_delete: []
+
+audit:
+  enabled: true
+  create:
+    enabled: true
+    fields: all
+  update:
+    enabled: true
+    fields: changed_only
+    exclude:
+      - id
+      - created_at
+      - updated_at
+      - allocated_amount
+  delete:
+    enabled: true
+    fields: business_only
+    exclude:
+      - id
+      - created_at
+      - updated_at
+  associate:
+    enabled: true
+  dissociate:
+    enabled: true
+
+fields:
+  - id: id
+    name: ID
+    type: integer
+    db_column: id
+    required: true
+    unique: true
+    description: 技术主键
+    semantics:
+      meaning: 自增主键
+      primary_key: true
+
+  # ---- 需求侧 ----
+  - id: demand_bo
+    name: 需求对象
+    type: string
+    db_column: demand_bo
+    required: true
+    max_length: 40
+    description: 需求侧对象标识
+    enum_values:
+      - value: requisition
+        label: 采购申请
+        color: primary
+      - value: service_request
+        label: 服务请求
+        color: info
+      - value: sales_order_schedule
+        label: 销售交货计划
+        color: success
+      - value: project_task
+        label: 项目任务
+        color: warning
+    semantics:
+      meaning: 需求来源对象
+      filterable: true
+      filter_type: enum
+      filter_label: 需求对象
+      filter_scope: local
+      data_category: code
+    ui:
+      widget: select
+
+  - id: demand_id
+    name: 需求单
+    type: integer
+    db_column: demand_id
+    required: true
+    description: 需求头 id（多态，按 demand_bo 解释）
+    semantics:
+      meaning: 需求头 id
+      filterable: true
+      filter_type: number
+      filter_label: 需求单
+      filter_scope: local
+    ui:
+      widget: number
+
+  - id: demand_line_id
+    name: 需求行
+    type: integer
+    db_column: demand_line_id
+    required: true
+    description: 需求行 id（多态，按 demand_bo 解释；追溯链锚点，不可改）
+    semantics:
+      meaning: 需求行 id
+      filterable: true
+      filter_type: number
+      filter_label: 需求行
+      filter_scope: local
+    ui:
+      widget: number
+
+  - id: demand_line_no
+    name: 需求行号
+    type: string
+    db_column: demand_line_no
+    nullable: true
+    max_length: 10
+    description: 需求行号（只读缓存，便于列表展示）
+    semantics:
+      meaning: 需求行号缓存
+      data_category: code
+      readonly: true
+      searchable: true
+    ui:
+      widget: input
+      editable: false
+
+  - id: demand_need_date
+    name: 需求日期
+    type: date
+    db_column: demand_need_date
+    nullable: true
+    description: 需求日期（只读缓存，来自需求行；用于排序 / 齐套检查）
+    semantics:
+      meaning: 需求日期缓存
+      readonly: true
+      filterable: true
+      filter_type: date
+      filter_label: 需求日期
+      filter_scope: local
+    ui:
+      widget: date
+      editable: false
+
+  # ---- 归属 ----
+  - id: project_id
+    name: 项目
+    type: integer
+    db_column: project_id
+    nullable: true
+    description: 需求归属项目；合并采购时逐分配行落项目
+    semantics:
+      meaning: 分配行归属项目
+      display:
+        type: association
+        target_type: project
+        display_field: name
+        placeholder: "未归集"
+    value_help:
+      source:
+        type: bo
+        target_bo: project
+        value_field: id
+        display_field: name
+        code_field: project_no
+        apply_target_permissions: true
+      behavior:
+        multiple: false
+        validation: true
+        binding_strength: strict
+        min_search_length: 0
+      presentation:
+        result_type: dropdown
+        display_format: "{project_no} {name}"
+        columns:
+          - field: project_no
+            label: 项目编号
+            width: 140
+          - field: name
+            label: 项目名称
+            width: 200
+    ui:
+      widget: select
+      relation: project
+      multiple: false
+      clearable: true
+
+  # 平台暂无 project_task 主数据：纯整数引用（TBD-8），一致性由守卫校验
+  - id: project_task_id
+    name: 项目任务
+    type: integer
+    db_column: project_task_id
+    nullable: true
+    description: 需求归属任务；只允许落在分配行，不允许落在 PO 行（T-D3）
+    semantics:
+      meaning: 分配行归属项目任务
+      filterable: false
+    ui:
+      widget: number
+
+  # ---- 执行侧 ----
+  - id: target_bo
+    name: 执行对象
+    type: string
+    db_column: target_bo
+    required: true
+    max_length: 40
+    description: 执行侧对象标识
+    enum_values:
+      - value: purchase_order
+        label: 采购订单
+        color: primary
+      - value: receipt
+        label: 收货单
+        color: success
+      - value: transfer_order
+        label: 调拨单
+        color: info
+      - value: work_order
+        label: 工单
+        color: warning
+      - value: sales_order
+        label: 销售订单
+        color: default
+    semantics:
+      meaning: 执行载体对象
+      filterable: true
+      filter_type: enum
+      filter_label: 执行对象
+      filter_scope: local
+      data_category: code
+    ui:
+      widget: select
+
+  - id: target_id
+    name: 执行单
+    type: integer
+    db_column: target_id
+    required: true
+    description: 执行头 id（多态，按 target_bo 解释）
+    semantics:
+      meaning: 执行头 id
+      filterable: true
+      filter_type: number
+      filter_label: 执行单
+      filter_scope: local
+    ui:
+      widget: number
+
+  - id: target_line_id
+    name: 执行行
+    type: integer
+    db_column: target_line_id
+    required: true
+    description: 执行行 id（多态，按 target_bo 解释；追溯链锚点，不可改）
+    semantics:
+      meaning: 执行行 id
+      filterable: true
+      filter_type: number
+      filter_label: 执行行
+      filter_scope: local
+    ui:
+      widget: number
+
+  - id: target_schedule_id
+    name: 执行计划行
+    type: integer
+    db_column: target_schedule_id
+    nullable: true
+    description: 执行计划行 id（PO 场景 = purchase_order_schedules.id；无计划层载体为空）
+    semantics:
+      meaning: 执行计划行 id
+      filterable: true
+      filter_type: number
+      filter_label: 执行计划行
+      filter_scope: local
+    ui:
+      widget: number
+
+  # ---- 数量与金额 ----
+  - id: qty
+    name: 分配数量
+    type: number
+    db_column: qty
+    required: true
+    description: 分配数量（必须大于 0）
+    constraints:
+      - type: numeric_range
+        gt: 0
+        decimal_places: 4
+    semantics:
+      meaning: 分配数量
+      filterable: false
+    ui:
+      widget: number
+
+  - id: uom_id
+    name: 单位
+    type: integer
+    db_column: uom_id
+    nullable: true
+    description: 分配单位（空 = 取需求行单位）
+    semantics:
+      meaning: 分配数量单位
+      display:
+        type: association
+        target_type: uom
+        display_field: name
+        placeholder: "取需求行单位"
+    value_help:
+      source:
+        type: bo
+        target_bo: uom
+        value_field: id
+        display_field: name
+        code_field: code
+        apply_target_permissions: true
+      behavior:
+        multiple: false
+        validation: true
+        binding_strength: strict
+        min_search_length: 0
+      presentation:
+        result_type: dropdown
+        display_format: "{code} - {name}"
+    ui:
+      widget: select
+      relation: uom
+      multiple: false
+      clearable: true
+
+  - id: allocated_amount
+    name: 分配金额
+    type: number
+    db_column: allocated_amount
+    nullable: true
+    description: 分配金额（只读缓存：qty × 执行行单价，币种取执行单；服务层回写）
+    constraints:
+      - type: numeric_range
+        decimal_places: 4
+    semantics:
+      meaning: 分配金额缓存
+      readonly: true
+    ui:
+      widget: number
+      editable: false
+
+  # ---- 成本归属（§9.2.1）----
+  - id: cost_center_id
+    name: 成本中心
+    type: integer
+    db_column: cost_center_id
+    nullable: true
+    description: 成本中心（从 requisition_line.cost_center_id 带过；分配环节不允许改写）
+    semantics:
+      meaning: 分配行成本中心
+      display:
+        type: association
+        target_type: cost_center
+        display_field: name
+        placeholder: "未指定"
+    ui:
+      widget: number
+      editable: false
+
+  - id: expense_account_code
+    name: 费用科目
+    type: string
+    db_column: expense_account_code
+    nullable: true
+    max_length: 32
+    description: 费用科目代码（费用 / 服务 / 资产类采购使用）
+    semantics:
+      meaning: 分配行费用科目
+      data_category: code
+    ui:
+      widget: input
+
+  - id: asset_category_code
+    name: 资产类别
+    type: string
+    db_column: asset_category_code
+    nullable: true
+    max_length: 20
+    description: 资产类别代码（资产采购时与行字段对齐，收货后转固依据）
+    semantics:
+      meaning: 分配行资产类别
+      data_category: code
+    ui:
+      widget: input
+
+  - id: charge_basis
+    name: 记账口径
+    type: string
+    db_column: charge_basis
+    required: true
+    default: inventory
+    max_length: 20
+    description: 记账口径（决定下游记账走向，默认库存）
+    enum_values:
+      - value: inventory
+        label: 存货
+        color: primary
+        category: active
+        is_initial: true
+      - value: project
+        label: 项目成本
+        color: info
+        category: active
+      - value: expense
+        label: 费用化
+        color: warning
+        category: active
+      - value: asset
+        label: 资本化
+        color: success
+        category: active
+    semantics:
+      meaning: 支出的记账口径
+      filterable: true
+      filter_type: enum
+      filter_label: 记账口径
+      filter_scope: local
+    ui:
+      widget: select
+
+  # ---- 状态 ----
+  - id: status
+    name: 分配状态
+    type: string
+    db_column: status
+    required: true
+    default: active
+    max_length: 20
+    description: 分配状态（有效 / 已冲销）
+    enum_values:
+      - value: active
+        label: 有效
+        color: success
+        category: active
+        is_initial: true
+      - value: reversed
+        label: 已冲销
+        color: danger
+        category: inactive
+    semantics:
+      meaning: 分配行状态
+      filterable: true
+      filter_type: enum
+      filter_label: 分配状态
+      filter_scope: local
+    ui:
+      widget: select
+
+  - id: reversed_at
+    name: 冲销时间
+    type: datetime
+    db_column: reversed_at
+    nullable: true
+    description: 冲销时间（红冲 / 执行行取消时写，只读）
+    semantics:
+      meaning: 分配冲销时间
+      readonly: true
+    ui:
+      readonly: true
+
+  - id: created_at
+    name: 创建时间
+    type: datetime
+    db_column: created_at
+    description: 创建时间
+    semantics:
+      meaning: 记录创建时间
+      audit_field: true
+
+  - id: updated_at
+    name: 更新时间
+    type: datetime
+    db_column: updated_at
+    description: 更新时间
+    semantics:
+      meaning: 记录更新时间
+      audit_field: true
+
+rules:
+  - id: reverse_demand_allocation
+    name: 冲销分配
+    type: state_transition
+    state_field: status
+    from_states: [active]
+    to_state: reversed
+    triggers: [before_update]
+    ui_hints:
+      label: 冲销
+      icon: undo
+      confirm_message: "冲销后不可恢复（追溯链保留），确定要冲销吗？"
+
+indexes:
+  # 同需求行对同一执行行（无计划层）只有一条分配；SQLite 唯一索引对 NULL 不去重，
+  # 故按 target_schedule_id 是否为空拆成两条 partial 唯一索引（等价「按 0」口径）。
+  - fields: [demand_bo, demand_line_id, target_bo, target_line_id]
+    type: partial
+    unique: true
+    condition: "target_schedule_id IS NULL"
+    name: uidx_demand_alloc_target
+  - fields: [demand_bo, demand_line_id, target_bo, target_line_id, target_schedule_id]
+    type: partial
+    unique: true
+    condition: "target_schedule_id IS NOT NULL"
+    name: uidx_demand_alloc_target_schedule
+  - fields: [target_bo, target_line_id]
+    name: idx_demand_alloc_target_line
+  - fields: [target_bo, target_schedule_id]
+    name: idx_demand_alloc_target_schedule
+  - fields: [demand_bo, demand_id]
+    name: idx_demand_alloc_demand
+  - fields: [project_id, project_task_id]
+    name: idx_demand_alloc_project
+  - fields: [cost_center_id, expense_account_code]
+    name: idx_demand_alloc_cost
+
+relations:
+  - id: demand_allocation_to_project
+    name: 项目
+    type: reference
+    target: project
+    source_field: project_id
+    target_field: id
+    cardinality: N:1
+    description: 分配行归属项目引用（可空）
+  - id: demand_allocation_to_uom
+    name: 单位
+    type: reference
+    target: uom
+    source_field: uom_id
+    target_field: id
+    cardinality: N:1
+    description: 分配数量单位引用（可空，空 = 取需求行单位）
+
+ui_view_config:
+  # 多态分配表：不进任何对象的 child_sections，通过服务 / API 维护
+  skip_auto_menu: true
+  list:
+    detail_mode: drawer
+    title: 需求分配
+    description: 需求行与执行行之间的数量分配与成本归属
+    columns:
+      - field: demand_bo
+        width: 140
+        filterable: true
+        filter_type: select
+      - field: demand_line_id
+        width: 110
+      - field: demand_line_no
+        width: 100
+      - field: demand_need_date
+        width: 130
+      - field: target_bo
+        width: 140
+        filterable: true
+        filter_type: select
+      - field: target_line_id
+        width: 110
+      - field: target_schedule_id
+        width: 110
+      - field: project_id
+        width: 160
+      - field: qty
+        width: 100
+      - field: charge_basis
+        width: 110
+        filterable: true
+        filter_type: select
+      - field: status
+        width: 100
+        filterable: true
+        filter_type: select
+    selection:
+      enabled: true
+      mode: multiple
+    defaultSort:
+      field: demand_need_date
+      order: asc
+  form:
+    title: 需求分配信息
+    layout: vertical
+    sections:
+      - title: 需求侧
+        columns:
+          - fields: [demand_bo, demand_id]
+          - fields: [demand_line_id, demand_line_no]
+          - fields: [demand_need_date, project_id]
+          - fields: [project_task_id, uom_id]
+      - title: 执行侧
+        columns:
+          - fields: [target_bo, target_id]
+          - fields: [target_line_id, target_schedule_id]
+          - fields: [qty, allocated_amount]
+      - title: 成本归属
+        columns:
+          - fields: [charge_basis]
+          - fields: [cost_center_id, expense_account_code]
+          - fields: [asset_category_code]
+      - title: 状态
+        columns:
+          - fields: [status, reversed_at]

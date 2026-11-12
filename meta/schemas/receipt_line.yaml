@@ -1,0 +1,671 @@
+# 收货行 (Receipt Line) — M3 第二阶段
+# 依据: docs/specs/spec-receipt-object-model-2026-11-01.md §2 / §4 / §5.2 / §6 / §7 / §12
+#
+# 定位: 收货单行，唯一挂载点是计划行（purchase_order_schedules）。
+#       order_id / order_line_id / item_id / uom_id 为冗余列（由 schedule_id 反查），
+#       写入时由 receipt_service / receipt_guard_service 校验一致性（R-RC-2）。
+#
+# 双锚点（spec §8.2）:
+#   schedule_id     —— PO 来源的强类型挂载点（真外键，PO 来源必填）
+#   source_line_id  —— 非 PO 来源（转移单 / 工单 / 销售退货 / ISO）的多态占位
+#   二者均 nullable，服务层按 source_doc_type 做互斥校验（不用 NOT NULL）。
+#
+# 父子关系: parent_object=receipt，父字段 receipt_id；子表通过 receipt.yaml 的
+#   child_sections 挂载，本对象不单独成菜单（skip_auto_menu）。
+#
+# 服务层不变量（由 receipt_service / receipt_guard_service 强制）:
+#   R-RC-1  PO 来源 schedule_id 必填，计划行 schedule_kind ∈ {delivery, service}、
+#           状态 ∈ {planned, confirmed}
+#   R-RC-2  order_id / order_line_id / item_id / uom_id 必须与计划行反查一致
+#   R-RC-3  qty_received > 0；0 <= qty_rejected <= qty_received
+#   R-RC-4  qty_rejected > 0 时 rejection_reason_code + rejection_disposition 必填
+#   R-RC-6  posted 后数量 / 计划行 / 行号 / 批次序列禁止修改（RC_POSTED_IMMUTABLE）
+#   R-RC-13 posted / reversed 行禁止删除
+#   R-RC-15 putaway_location_id 有值时必须 location.status='active'
+
+id: receipt_line
+name: 收货行
+table_name: receipt_lines
+description: 收货单行（挂载到货计划行）
+display_name_field: line_no
+parent_object: receipt
+
+hierarchy:
+  parent_field: receipt_id
+
+semantics:
+  meaning: 收货单行
+  category: business_document_line
+  business_key: []
+  aliases:
+    - 收货行
+    - 入库行
+    - Receipt Line
+
+deletion_policy:
+  mode: cascade
+
+audit:
+  enabled: true
+  create:
+    enabled: true
+    fields: all
+  update:
+    enabled: true
+    fields: changed_only
+    exclude:
+      - id
+      - created_at
+      - updated_at
+  delete:
+    enabled: true
+    fields: business_only
+    exclude:
+      - id
+      - created_at
+      - updated_at
+
+org_scope:
+  mode: chain
+  via: receipt_id
+  host: receipt
+  field: inventory_org_id
+  function: inventory
+  write_check: true
+
+fields:
+  - id: id
+    name: ID
+    type: integer
+    db_column: id
+    required: true
+    unique: true
+    description: 技术主键
+    semantics:
+      meaning: 自增主键
+      primary_key: true
+
+  - id: receipt_id
+    name: 收货单
+    type: integer
+    db_column: receipt_id
+    required: true
+    description: 所属收货单（父字段）
+    semantics:
+      meaning: 所属收货单
+      display:
+        type: association
+        target_type: receipt
+        display_field: receipt_no
+    ui:
+      widget: select
+      relation: receipt
+      hidden_in_form: true
+
+  - id: line_no
+    name: 行号
+    type: string
+    db_column: line_no
+    required: true
+    max_length: 6
+    pattern: "^[0-9]{1,6}$"
+    description: 行号（单内唯一）
+    semantics:
+      meaning: 收货行行号
+      data_category: code
+      searchable: true
+    ui:
+      widget: input
+
+  # PO 来源的唯一挂载点（真外键）；同一计划行可分多次收货（不唯一，与 R-DN-5 同口径）
+  - id: schedule_id
+    name: 计划行
+    type: integer
+    db_column: schedule_id
+    nullable: true
+    description: 到货计划行引用（PO 来源必填；schedule_kind ∈ {delivery, service}，
+      状态 ∈ {planned, confirmed}）
+    semantics:
+      meaning: 到货计划行（收货唯一挂载点）
+      display:
+        type: association
+        target_type: purchase_order_schedule
+        display_field: schedule_no
+      filterable: true
+      filter_type: relation
+      filter_label: 计划行
+      filter_scope: local
+    value_help:
+      source:
+        type: bo
+        target_bo: purchase_order_schedule
+        value_field: id
+        display_field: schedule_no
+        code_field: schedule_no
+        apply_target_permissions: true
+        value_filter:
+          status: planned,confirmed
+      behavior:
+        multiple: false
+        validation: true
+        binding_strength: strict
+        min_search_length: 0
+      presentation:
+        result_type: dialog
+        display_format: "{schedule_no}"
+        columns:
+          - field: schedule_no
+            label: 计划行号
+            width: 110
+          - field: promised_date
+            label: 承诺到货日
+            width: 130
+          - field: promised_qty
+            label: 承诺数量
+            width: 110
+          - field: received_qty
+            label: 已收数量
+            width: 110
+    ui:
+      widget: value_help
+      relation: purchase_order_schedule
+      multiple: false
+
+  # 非 PO 来源的多态行锚点（本波只留字段与守卫分支，不实现来源）
+  - id: source_line_id
+    name: 来源行
+    type: integer
+    db_column: source_line_id
+    nullable: true
+    description: 来源单据行 id（非 PO 来源的挂载点；与 schedule_id 至少一个必填）
+    semantics:
+      meaning: 来源单据行引用（多态）
+      filterable: true
+      filter_type: number
+      filter_label: 来源行
+      filter_scope: local
+
+  - id: order_id
+    name: 采购订单
+    type: integer
+    db_column: order_id
+    nullable: true
+    description: 冗余：由 schedule_id 反查（PO 来源必填，不一致拒绝）
+    semantics:
+      meaning: 所属采购订单
+      display:
+        type: association
+        target_type: purchase_order
+        display_field: order_no
+    ui:
+      widget: select
+      relation: purchase_order
+      hidden_in_form: true
+
+  - id: order_line_id
+    name: 订单行
+    type: integer
+    db_column: order_line_id
+    nullable: true
+    description: 冗余：由 schedule_id 反查的计划行所属订单行（不一致拒绝）
+    semantics:
+      meaning: 所属采购订单行
+      display:
+        type: association
+        target_type: purchase_order_line
+        display_field: line_no
+    ui:
+      widget: select
+      relation: purchase_order_line
+      hidden_in_form: true
+
+  - id: item_id
+    name: 物料
+    type: integer
+    db_column: item_id
+    required: true
+    description: 冗余：由计划行 → 订单行带出（不一致拒绝）
+    semantics:
+      meaning: 物料 / 服务
+      display:
+        type: association
+        target_type: item
+        display_field: name
+    ui:
+      widget: select
+      relation: item
+      hidden_in_form: true
+
+  # INV-2：项目任务段来源；收货继承 PO 行/项目任务归属
+  - id: project_task_id
+    name: 项目任务
+    type: integer
+    db_column: project_task_id
+    nullable: true
+    description: 项目任务段归属（由来源单据继承；为空 = 无任务段）
+    semantics:
+      meaning: 项目任务引用
+      display:
+        type: association
+        target_type: project_task
+        display_field: task_name
+    ui:
+      widget: select
+      relation: project_task
+      hidden_in_form: true
+
+  - id: uom_id
+    name: 计量单位
+    type: integer
+    db_column: uom_id
+    required: true
+    description: 冗余：由计划行 → 订单行带出；本波不允许收货换算（Q6）
+    semantics:
+      meaning: 计量单位
+      display:
+        type: association
+        target_type: uom
+        display_field: name
+    ui:
+      widget: select
+      relation: uom
+      hidden_in_form: true
+
+  - id: qty_received
+    name: 收货数量
+    type: number
+    db_column: qty_received
+    required: true
+    description: 本行收货量（> 0；单位 = 计划行 uom_id）
+    constraints:
+      - type: numeric_range
+        gt: 0
+        decimal_places: 6
+    semantics:
+      meaning: 本行收货数量
+      filterable: false
+    ui:
+      widget: number
+
+  # 拒收量独立缓存（R-RC-18）；与净收量（qty_received - qty_rejected）分开记账
+  - id: qty_rejected
+    name: 拒收数量
+    type: number
+    db_column: qty_rejected
+    nullable: true
+    default: 0
+    description: 拒收数量（>= 0 且 <= qty_received；默认 0）
+    constraints:
+      - type: numeric_range
+        gte: 0
+        decimal_places: 6
+    semantics:
+      meaning: 本行拒收数量
+      filterable: false
+    ui:
+      widget: number
+
+  - id: rejection_reason_code
+    name: 拒收原因
+    type: string
+    db_column: rejection_reason_code
+    nullable: true
+    max_length: 30
+    description: 拒收原因代码（qty_rejected > 0 时必填）
+    semantics:
+      meaning: 拒收原因代码
+      data_category: code
+    ui:
+      widget: input
+
+  - id: rejection_disposition
+    name: 拒收处置
+    type: string
+    db_column: rejection_disposition
+    nullable: true
+    max_length: 20
+    description: 拒收处置（qty_rejected > 0 时必填）
+    enum_values:
+      - value: return_to_supplier
+        label: 退回供应商
+        color: danger
+        category: active
+      - value: concession
+        label: 让步接收
+        color: warning
+        category: active
+      - value: scrap
+        label: 报废
+        color: info
+        category: active
+      - value: rework
+        label: 返工
+        color: primary
+        category: active
+    semantics:
+      meaning: 拒收处置方式
+      filterable: true
+      filter_type: enum
+      filter_label: 拒收处置
+      filter_scope: local
+    ui:
+      widget: select
+
+  - id: lot_no
+    name: 批次号
+    type: string
+    db_column: lot_no
+    nullable: true
+    max_length: 64
+    description: 批次号（文本；物料主数据当前未声明批次管理，Q5）
+    semantics:
+      meaning: 批次号
+      data_category: code
+    ui:
+      widget: input
+
+  - id: serial_no
+    name: 序列号
+    type: string
+    db_column: serial_no
+    nullable: true
+    max_length: 200
+    description: 快捷录入：qty=1 时可直接录号；qty>1 必须走序列号子表
+    semantics:
+      meaning: 序列号
+      data_category: code
+    ui:
+      widget: input
+
+  # 可选装箱：过账后按容器号建箱 / 装箱（§11.5）；空 = 不装箱
+  - id: hu_no
+    name: 容器号
+    type: string
+    db_column: hu_no
+    nullable: true
+    max_length: 40
+    description: 可选容器号；过账后建箱并把本行装入该容器
+    semantics:
+      meaning: 包装容器业务标识
+      data_category: code
+    ui:
+      widget: input
+
+  - id: hu_type
+    name: 容器类型
+    type: string
+    db_column: hu_type
+    nullable: true
+    max_length: 20
+    description: 容器类型（仅建新容器时使用；空 = carton）
+    enum_values:
+      - value: pallet
+        label: 托盘
+        color: primary
+      - value: carton
+        label: 纸箱
+        color: info
+      - value: bin
+        label: 料箱
+        color: success
+      - value: container
+        label: 集装箱
+        color: warning
+      - value: other
+        label: 其他
+        color: default
+    semantics:
+      meaning: 包装容器类型
+    ui:
+      widget: select
+
+  # 入库库位 ≠ 收货地点（D-RC-10）；只作过账契约锚点，本波不写库存
+  - id: putaway_location_id
+    name: 入库库位
+    type: integer
+    db_column: putaway_location_id
+    nullable: true
+    description: 入库库位（空 = 取头 deliver_to_location_id；有值须 status='active'）
+    semantics:
+      meaning: 实际上架库位
+      display:
+        type: association
+        target_type: location
+        display_field: name
+        placeholder: "同收货地点"
+    value_help:
+      source:
+        type: bo
+        target_bo: location
+        value_field: id
+        display_field: name
+        code_field: code
+        apply_target_permissions: true
+        value_filter:
+          status: active
+      behavior:
+        multiple: false
+        validation: true
+        binding_strength: strict
+        min_search_length: 0
+      presentation:
+        result_type: dropdown
+        display_format: "{code} {name}"
+        columns:
+          - field: code
+            label: 库位编码
+            width: 140
+          - field: name
+            label: 库位名称
+            width: 200
+    ui:
+      widget: select
+      relation: location
+      multiple: false
+      clearable: true
+
+  - id: status
+    name: 行状态
+    type: string
+    db_column: status
+    required: true
+    default: draft
+    max_length: 20
+    description: 收货行状态（随头状态联动）
+    enum_values:
+      - value: draft
+        label: 草稿
+        color: info
+        category: draft
+        is_initial: true
+      - value: posted
+        label: 已过账
+        color: success
+        category: active
+      - value: reversed
+        label: 已冲销
+        color: danger
+        category: inactive
+      - value: cancelled
+        label: 已取消
+        color: info
+        category: inactive
+    semantics:
+      meaning: 收货行状态
+      filterable: true
+      filter_type: enum
+      filter_label: 行状态
+      filter_scope: local
+    ui:
+      widget: select
+
+  # 红字行必填：指向原单行（数量 = 原行净量）
+  - id: reversal_of_line_id
+    name: 被冲销行
+    type: integer
+    db_column: reversal_of_line_id
+    nullable: true
+    description: 红字行指向的原收货行（整单红冲时必填）
+    semantics:
+      meaning: 被冲销的原收货行
+      display:
+        type: association
+        target_type: receipt_line
+        display_field: line_no
+    ui:
+      widget: select
+      relation: receipt_line
+      hidden_in_form: true
+
+  - id: created_at
+    name: 创建时间
+    type: datetime
+    db_column: created_at
+    description: 创建时间
+    semantics:
+      meaning: 记录创建时间
+      audit_field: true
+
+  - id: updated_at
+    name: 更新时间
+    type: datetime
+    db_column: updated_at
+    description: 更新时间
+    semantics:
+      meaning: 记录更新时间
+      audit_field: true
+
+indexes:
+  - fields: [receipt_id, line_no]
+    unique: true
+    name: uq_receipt_line_no
+  # 同一计划行可分多次收货，故 schedule_id 不唯一
+  - fields: [schedule_id]
+    name: idx_receipt_line_schedule
+  - fields: [order_line_id]
+    name: idx_receipt_line_order_line
+  - fields: [item_id]
+    name: idx_receipt_line_item
+  - fields: [lot_no]
+    name: idx_receipt_line_lot
+
+relations:
+  - id: receipt_line_to_receipt
+    name: 所属收货单
+    type: reference
+    target: receipt
+    source_field: receipt_id
+    target_field: id
+    cardinality: N:1
+    description: 所属收货单引用（真外键）
+  - id: receipt_line_to_schedule
+    name: 计划行
+    type: reference
+    target: purchase_order_schedule
+    source_field: schedule_id
+    target_field: id
+    cardinality: N:1
+    description: 到货计划行引用（PO 来源唯一挂载点，可空）
+  - id: receipt_line_to_order
+    name: 采购订单
+    type: reference
+    target: purchase_order
+    source_field: order_id
+    target_field: id
+    cardinality: N:1
+    description: 冗余采购订单引用
+  - id: receipt_line_to_order_line
+    name: 订单行
+    type: reference
+    target: purchase_order_line
+    source_field: order_line_id
+    target_field: id
+    cardinality: N:1
+    description: 冗余订单行引用
+  - id: receipt_line_to_item
+    name: 物料
+    type: reference
+    target: item
+    source_field: item_id
+    target_field: id
+    cardinality: N:1
+    description: 物料引用
+  - id: receipt_line_to_uom
+    name: 计量单位
+    type: reference
+    target: uom
+    source_field: uom_id
+    target_field: id
+    cardinality: N:1
+    description: 计量单位引用
+  - id: receipt_line_to_putaway
+    name: 入库库位
+    type: reference
+    target: location
+    source_field: putaway_location_id
+    target_field: id
+    cardinality: N:1
+    description: 入库库位引用（可空）
+  - id: receipt_line_to_reversal
+    name: 被冲销行
+    type: reference
+    target: receipt_line
+    source_field: reversal_of_line_id
+    target_field: id
+    cardinality: N:1
+    description: 红字行 → 原行自引用（可空）
+
+ui_view_config:
+  # 作为收货单详情页的子表，不单独成菜单
+  skip_auto_menu: true
+  list:
+    detail_mode: drawer
+    title: 收货行
+    columns:
+      - field: line_no
+        width: 80
+      - field: schedule_id
+        width: 140
+      - field: order_line_id
+        width: 120
+      - field: item_id
+        width: 160
+      - field: qty_received
+        width: 110
+      - field: qty_rejected
+        width: 110
+      - field: uom_id
+        width: 100
+      - field: lot_no
+        width: 120
+      - field: serial_no
+        width: 120
+      - field: putaway_location_id
+        width: 140
+      - field: status
+        width: 100
+        filterable: true
+        filter_type: select
+    selection:
+      enabled: true
+      mode: multiple
+    defaultSort:
+      field: line_no
+      order: asc
+  form:
+    title: 收货行信息
+    layout: vertical
+    sections:
+      - title: 挂载
+        columns:
+          - fields: [schedule_id]
+          - fields: [line_no, status]
+          - fields: [order_line_id, item_id, uom_id]
+      - title: 数量
+        columns:
+          - fields: [qty_received, qty_rejected]
+          - fields: [rejection_reason_code, rejection_disposition]
+      - title: 批次与库位
+        columns:
+          - fields: [lot_no, serial_no]
+          - fields: [putaway_location_id]

@@ -28,8 +28,8 @@ icon: "8."
 1. **[powershell-execution-guide.md](../../powershell-execution-guide.md)** — PowerShell 执行指南 (沙箱 + 别名)
 1. **[terminal-channel-failure.md](./terminal-channel-failure.md)** — 终端通道故障诊断 (命令全失败 / 重启无效) ⭐ 新
 1. **[terminal-job-hang.md](./terminal-job-hang.md)** — 终端调用被长驻服务拖死 (挂几十分钟到数十小时) ⭐ 新
-1. **[powershell-curl-alias.md](./powershell-curl-alias.md)** — PowerShell curl 别名
-1. **[trae-tips-from-forum.md](./trae-tips-from-forum.md)** — Trae 论坛技巧 (官方推荐)
+1. **[powershell-curl-alias.md](../../powershell-curl-alias.md)** — PowerShell curl 别名
+1. **[trae-tips-from-forum.md](../../trae-tips-from-forum.md)** — Trae 论坛技巧 (官方推荐)
 1. **[trae-ide-best-practices.md](./trae-ide-best-practices.md)** — Trae IDE 应用实践 (v5.1 新增)
 
 ---
@@ -41,8 +41,8 @@ icon: "8."
 | [powershell-execution-guide.md](../../powershell-execution-guide.md) | PowerShell 执行指南 (沙箱 + 别名) |
 | [terminal-channel-failure.md](./terminal-channel-failure.md) | 终端通道故障诊断 (RunCommand 已退役 / 换 Shell 工具) |
 | [terminal-job-hang.md](./terminal-job-hang.md) | 终端调用被长驻服务拖死 (job object / launch_detached.ps1) |
-| [powershell-curl-alias.md](./powershell-curl-alias.md) | PowerShell curl 别名 |
-| [trae-tips-from-forum.md](./trae-tips-from-forum.md) | Trae 论坛技巧 (官方推荐) |
+| [powershell-curl-alias.md](../../powershell-curl-alias.md) | PowerShell curl 别名 |
+| [trae-tips-from-forum.md](../../trae-tips-from-forum.md) | Trae 论坛技巧 (官方推荐) |
 | [trae-ide-best-practices.md](./trae-ide-best-practices.md) | Trae IDE 应用实践 (官方文档深度学习) |
 
 ---

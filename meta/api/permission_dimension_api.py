@@ -14,6 +14,8 @@ from typing import Any, Dict, List, Optional, Set
 import yaml
 
 from flask import Blueprint, g, jsonify, request
+from meta.api._response_contract import error_response, ok
+from meta.core.query_spec import parse_query_spec
 
 from meta.core.datasource import get_data_source
 from meta.core.yaml_loader import get_biz_hierarchy
@@ -27,19 +29,17 @@ from meta.services.permission_dimension_engine import (
     ConditionEvaluator,
 )
 from meta.services.dimension_scope_engine import DimensionScopeEngine
+from meta.core.hierarchy_loader import (
+    get_dimension_levels,
+    get_parent_info_map,
+    get_scope_chain,
+)
 from meta.core.db_path import get_meta_db_path
 # [FIX 2026-09-25 缺陷④] permission_set_permissions 写入统一走 schema 自适应助手
 from meta.core.permission_set_permissions import ensure_granted as ensure_psp_granted
 
-_PARENT_INFO_MAP = {
-    'version': ('product', 'products', 'product_id', 'name'),
-    'domain': ('version', 'versions', 'version_id', 'name'),
-    # [FIX 2026-06-15] parent_display 字段名纠正: 实际 schema 中所有子表都用 'name' 而非 'parent_name'
-    # 之前用 domain_name / sub_domain_name / module_name 在 SQL JOIN 时报 "no such column"
-    'sub_domain': ('domain', 'domains', 'domain_id', 'name'),
-    'service_module': ('sub_domain', 'sub_domains', 'sub_domain_id', 'name'),
-    'business_object': ('service_module', 'service_modules', 'service_module_id', 'name'),
-}
+# [Rule Convergence M1 2026-11-07] 父级映射统一读 hierarchies.yaml（SSOT）。
+_PARENT_INFO_MAP = get_parent_info_map()
 
 logger = logging.getLogger(__name__)
 
@@ -307,10 +307,10 @@ def admin_required(f):
     @_login_required
     def decorated(*args, **kwargs):
         if not hasattr(g, "current_user") or not g.current_user:
-            return jsonify({"success": False, "message": "请先登录后再操作"}), 401
+            return error_response("请先登录后再操作", status=401)
         perms = g.current_user.get("permissions", [])
         if "*" not in perms and "admin" not in perms:
-            return jsonify({"success": False, "message": "Admin required"}), 403
+            return error_response("Admin required", status=403)
         return f(*args, **kwargs)
 
     return decorated
@@ -446,7 +446,8 @@ def _build_dimension_tree(dim: str, version_id: Optional[int] = None,
             }
         else:
             # YAML 里有 hierarchies 但不包含此 dim, 退回 CHAIN fallback
-            relevant_chain = ['product', 'version', 'domain', 'sub_domain']
+            # [Rule Convergence M3 2026-11-07] 授权链由 hierarchies.yaml 派生（FR-002）
+            relevant_chain = get_scope_chain()
             try:
                 relevant_chain = relevant_chain[:relevant_chain.index(dim) + 1]
             except ValueError:
@@ -455,7 +456,7 @@ def _build_dimension_tree(dim: str, version_id: Optional[int] = None,
             hierarchy_meta = _empty_hierarchy_meta()
     else:
         # YAML 加载失败, 退回旧硬编码 CHAIN (向后兼容)
-        CHAIN_FALLBACK = ['product', 'version', 'domain', 'sub_domain']
+        CHAIN_FALLBACK = get_scope_chain()
         try:
             relevant_chain = CHAIN_FALLBACK[:CHAIN_FALLBACK.index(dim) + 1]
         except ValueError:
@@ -746,7 +747,10 @@ def list_dimension_tree(dim: str):
     Query: search=<str>, version_id=<int>
     """
     # [R21 2026-07-24] 加 service_module/business_object: 详情页字段用 Tree Search Help
-    VALID_DIMS = {"product", "version", "domain", "sub_domain", "service_module", "business_object"}
+    # [Rule Convergence M3 2026-11-07] 合法维度由 hierarchies.yaml 派生（FR-002）
+    VALID_DIMS = {
+        lv.object for lv in get_dimension_levels() if lv.level_type == 'entity'
+    }
     if dim not in VALID_DIMS:
         return jsonify({"error": f"invalid dim: {dim}"}), 400
 
@@ -789,12 +793,10 @@ def get_dimensions():
                 }
             )
 
-        return jsonify(
-            {"success": True, "data": {"dimensions": result_dimensions}}
-        )
+        return ok({"dimensions": result_dimensions})
     except Exception as e:
         logger.error(f"获取管理维度列表失败: {e}")
-        return jsonify({"success": False, "message": str(e)}), 500
+        return error_response(str(e), status=500)
 
 
 # ============================================================================
@@ -1810,8 +1812,7 @@ def get_permission_meta():
                 menu_matrix = unified_data.get("menus")
             role_matrix = _build_role_matrices(permission_set_id, columns=matrix_columns)
 
-        return jsonify({
-            "success": True,
+        return ok({
             "data": {
                 "dimension_priority": dimension_priority,
                 "combination_policy": combination_policy,
@@ -1840,7 +1841,7 @@ def get_permission_meta():
         }), 200
     except Exception as e:
         logger.error(f"获取权限配置元数据失败: {e}")
-        return jsonify({"success": False, "message": str(e)}), 500
+        return error_response(str(e), status=500)
 
 
 @permission_dimension_bp.route(
@@ -1858,24 +1859,15 @@ def get_dimension_instances(dimension_id: str):
     try:
         engine = _get_engine()
 
-        search = request.args.get("search", "").strip()
-        page = request.args.get("page", 1, type=int)
-        page_size = request.args.get("page_size", 20, type=int)
-
-        if page < 1:
-            page = 1
-        if page_size < 1 or page_size > 100:
-            page_size = 20
-
-        offset = (page - 1) * page_size
+        spec = parse_query_spec(request.args, max_page_size=100)
+        search = spec.search
+        page, page_size, offset = spec.page, spec.page_size, spec.offset
 
         # [P4-Org-02] 三级合并映射 (engine 实例): org 等 generic 维度 → orgs
         #   静态 RESOURCE_TABLE_MAP 无 org, 必须走 engine 合并表; 未知维度仍 400
         table_name = engine.get_resource_table(dimension_id)
         if not table_name:
-            return jsonify(
-                {"success": False, "message": f"Unknown dimension: {dimension_id}"}
-            ), 400
+            return error_response(f"Unknown dimension: {dimension_id}")
 
         display_field = DISPLAY_FIELD_MAP.get(dimension_id, "name")
         code_field = CODE_FIELD_MAP.get(dimension_id, "code")
@@ -2008,23 +2000,20 @@ def get_dimension_instances(dimension_id: str):
                 inst["ancestor_path"] = ""
                 instances.append(inst)
 
-        return jsonify(
+        return ok(
             {
-                "success": True,
-                "data": {
-                    "instances": instances,
-                    "pagination": {
-                        "page": page,
-                        "page_size": page_size,
-                        "total_count": total_count,
-                        "total_pages": (total_count + page_size - 1) // page_size,
-                    },
+                "instances": instances,
+                "pagination": {
+                    "page": page,
+                    "page_size": page_size,
+                    "total_count": total_count,
+                    "total_pages": (total_count + page_size - 1) // page_size,
                 },
             }
         )
     except Exception as e:
         logger.error(f"获取维度实例列表失败 [dimension_id={dimension_id}]: {e}")
-        return jsonify({"success": False, "message": str(e)}), 500
+        return error_response(str(e), status=500)
 
 
 def _query_dimension_codes(ds, dimension_id: str, search: str, page: int, page_size: int,
@@ -2143,18 +2132,14 @@ def get_dimension_codes(dimension_id: str):
     try:
         engine = _get_engine()  # 确保 _data_source 已初始化
         if not DimensionScopeEngine._bizkey_enabled():
-            return jsonify({"success": True, "data": {
+            return ok({
                 "enabled": False, "codes": [],
                 "pagination": {"page": 1, "page_size": 20, "total_count": 0, "total_pages": 0},
-            }})
+            })
 
-        search = request.args.get("search", "").strip()
-        page = request.args.get("page", 1, type=int)
-        page_size = request.args.get("page_size", 20, type=int)
-        if page < 1:
-            page = 1
-        if page_size < 1 or page_size > 100:
-            page_size = 20
+        spec = parse_query_spec(request.args, max_page_size=100)
+        search = spec.search
+        page, page_size = spec.page, spec.page_size
 
         # 用户 dim scope 过滤 (与 instances 端点同语义, 命中数按可见实例计)
         scoped_ids: Optional[Set[int]] = None
@@ -2171,13 +2156,11 @@ def get_dimension_codes(dimension_id: str):
             #   (区别于 400 请求参数错), 让前端明确知道是配置缺失。
             # [P4-Org-02] 已知维度未注册业务键 (如 org) 已在 helper 内优雅降级
             #   (200 + enabled=False), 不落入此分支。
-            return jsonify(
-                {"success": False, "message": f"Unknown dimension: {dimension_id}"}
-            ), 422
-        return jsonify({"success": True, "data": data})
+            return error_response(f"Unknown dimension: {dimension_id}", status=422)
+        return ok(data)
     except Exception as e:
         logger.error(f"获取维度业务键列表失败 [dimension_id={dimension_id}]: {e}")
-        return jsonify({"success": False, "message": str(e)}), 500
+        return error_response(str(e), status=500)
 
 
 @permission_dimension_bp.route(
@@ -2195,10 +2178,10 @@ def get_role_permission_rules(permission_set_id: int):
         engine = _get_engine()
         rules = engine._get_role_permission_rules(permission_set_id)
 
-        return jsonify({"success": True, "data": {"rules": rules, "permission_set_id": permission_set_id}})
+        return ok({"rules": rules, "permission_set_id": permission_set_id})
     except Exception as e:
         logger.error(f"获取角色权限规则失败 [permission_set_id={permission_set_id}]: {e}")
-        return jsonify({"success": False, "message": str(e)}), 500
+        return error_response(str(e), status=500)
 
 
 roles_bp = Blueprint("permission_dimension_roles", __name__, url_prefix="/api/v1/roles")
@@ -2223,10 +2206,10 @@ def get_role_permission_rules_v2(permission_set_id: int):
         engine = _get_engine()
         rules = engine._get_role_permission_rules(permission_set_id)
 
-        return jsonify({"success": True, "data": {"rules": rules, "permission_set_id": permission_set_id}})
+        return ok({"rules": rules, "permission_set_id": permission_set_id})
     except Exception as e:
         logger.error(f"获取角色权限规则失败 [permission_set_id={permission_set_id}]: {e}")
-        return jsonify({"success": False, "message": str(e)}), 500
+        return error_response(str(e), status=500)
 
 
 @roles_bp.route("/<int:permission_set_id>/permission-rules", methods=["POST"])
@@ -2246,11 +2229,11 @@ def save_permission_rule(permission_set_id: int):
             data = None
         
         if not data:
-            return jsonify({"success": False, "message": "Request body is required"}), 400
+            return error_response("Request body is required")
 
         error = _validate_required_fields(data, ["resource_type", "condition"])
         if error:
-            return jsonify({"success": False, "message": error}), 400
+            return error_response(error)
 
         engine = _get_engine()
 
@@ -2288,7 +2271,7 @@ def save_permission_rule(permission_set_id: int):
 
         rule_id = cursor.lastrowid
 
-        engine.invalidate_cache(permission_set_id=permission_set_id)
+        engine.invalidate_cache(permission_set_id)
 
         logger.info(f"保存权限规则成功 [permission_set_id={permission_set_id}, rule_id={rule_id}]")
 
@@ -2307,16 +2290,13 @@ def save_permission_rule(permission_set_id: int):
             parent_object_id=permission_set_id,
         )
 
-        return jsonify(
-            {
-                "success": True,
-                "data": {"rule_id": rule_id, "permission_set_id": permission_set_id},
-                "message": "Permission rule saved successfully",
-            }
+        return ok(
+            {"rule_id": rule_id, "permission_set_id": permission_set_id},
+            message="Permission rule saved successfully",
         )
     except Exception as e:
         logger.error(f"保存权限规则失败 [permission_set_id={permission_set_id}]: {e}")
-        return jsonify({"success": False, "message": str(e)}), 500
+        return error_response(str(e), status=500)
 
 
 @ps_matrix_bp.route("/<int:permission_set_id>/resource-action-matrix", methods=["PUT"])
@@ -2351,17 +2331,11 @@ def save_resource_action_matrix(permission_set_id: int):
             data = None
 
         if not data or not isinstance(data.get("cells"), list):
-            return jsonify({
-                "success": False,
-                "message": "Request body 需包含 cells 数组",
-            }), 400
+            return error_response("Request body 需包含 cells 数组")
 
         cells = data["cells"]
         if not all(isinstance(c, dict) and c.get("resource_type") and c.get("action") for c in cells):
-            return jsonify({
-                "success": False,
-                "message": "每个 cell 必须包含 resource_type 与 action",
-            }), 400
+            return error_response("每个 cell 必须包含 resource_type 与 action")
 
         ds = _data_source
         if ds is None:
@@ -2369,10 +2343,7 @@ def save_resource_action_matrix(permission_set_id: int):
             _get_engine()
             ds = _data_source
         if ds is None:
-            return jsonify({
-                "success": False,
-                "message": "DataSource 未初始化，无法保存",
-            }), 500
+            return error_response("DataSource 未初始化，无法保存", status=500)
 
         granted_count = 0
         revoked_count = 0
@@ -2438,7 +2409,7 @@ def save_resource_action_matrix(permission_set_id: int):
         # 缓存失效（与 POST /permission-rules 同样的 invalidate 模式）
         try:
             engine = _get_engine()
-            engine.invalidate_cache(permission_set_id=permission_set_id)
+            engine.invalidate_cache(permission_set_id)
         except Exception as cache_err:
             logger.warning(f"[resource-action-matrix] 缓存失效失败（非阻断）: {cache_err}")
 
@@ -2447,19 +2418,18 @@ def save_resource_action_matrix(permission_set_id: int):
             f"granted={granted_count} revoked={revoked_count}"
         )
 
-        return jsonify({
-            "success": True,
-            "data": {
+        return ok(
+            {
                 "permission_set_id": permission_set_id,
                 "granted": granted_count,
                 "revoked": revoked_count,
                 "total": len(cells),
             },
-            "message": "Resource action matrix saved",
-        })
+            message="Resource action matrix saved",
+        )
     except Exception as e:
         logger.error(f"保存资源×动作矩阵失败 [permission_set_id={permission_set_id}]: {e}")
-        return jsonify({"success": False, "message": str(e)}), 500
+        return error_response(str(e), status=500)
 
 
 @ps_matrix_bp.route("/<int:permission_set_id>/resource-action-matrix", methods=["GET"])
@@ -2481,8 +2451,7 @@ def get_resource_action_matrix(permission_set_id: int):
         if not _data_source:
             _get_engine()
         matrix = _build_role_matrices(permission_set_id, columns=_matrix_action_columns())
-        return jsonify({
-            "success": True,
+        return ok({
             "data": {
                 "permission_set_id": permission_set_id,
                 "role_resource_action_matrix": matrix,
@@ -2490,7 +2459,7 @@ def get_resource_action_matrix(permission_set_id: int):
         })
     except Exception as e:
         logger.error(f"获取资源×动作矩阵失败 [permission_set_id={permission_set_id}]: {e}")
-        return jsonify({"success": False, "message": str(e)}), 500
+        return error_response(str(e), status=500)
 
 
 @roles_bp.route("/<int:permission_set_id>/calculate-impact", methods=["POST"])
@@ -2506,10 +2475,10 @@ def calculate_impact(permission_set_id: int):
         engine = _get_engine()
         result = engine.calculate_impact(permission_set_id)
 
-        return jsonify({"success": True, "data": result})
+        return ok(result)
     except Exception as e:
         logger.error(f"计算影响范围失败 [permission_set_id={permission_set_id}]: {e}")
-        return jsonify({"success": False, "message": str(e)}), 500
+        return error_response(str(e), status=500)
 
 
 meta_bp = Blueprint("permission_dimension_meta", __name__, url_prefix="/api/v1/meta")
@@ -2527,10 +2496,10 @@ def get_cache_stats():
         engine = _get_engine()
         stats = engine.get_cache_stats()
 
-        return jsonify({"success": True, "data": stats})
+        return ok(stats)
     except Exception as e:
         logger.error(f"获取缓存统计失败: {e}")
-        return jsonify({"success": False, "message": str(e)}), 500
+        return error_response(str(e), status=500)
 
 
 def _get_rule_count_for_dimension(dimension_id: Optional[str]) -> int:

@@ -49,11 +49,13 @@ SCHEDULE_OBJECT = 'sales_order_schedule'
 _WRITE_ACTIONS = ('crud_create', 'crud_update', 'crud_delete')
 _ORDER_ID_KEY = 'so_parent_order_id'
 # 抬头变更触发重取价的维度（§3.7 触发时点 3）
-_PRICE_HEADER_FIELDS = ('price_date', 'currency_id', 'sales_org_id', 'order_type_id')
+_PRICE_HEADER_FIELDS = ('price_date', 'currency_id', 'sales_org_id', 'document_type_id')
 # 行变更触发重取价的维度（§3.7 触发时点 2）
 _PRICE_LINE_FIELDS = ('item_id', 'qty', 'uom_id')
 # FR-014：抬头取消 → 订单行 / delivery 计划行级联
 _ORDER_STATUS_CANCELLED = 'cancelled'
+# Wave C T38：抬头确认 → 自动生成 billing 开票计划期次
+_ORDER_STATUS_CONFIRMED = 'confirmed'
 
 
 class SalesOrderGuardInterceptor(Interceptor):
@@ -160,6 +162,7 @@ class SalesOrderGuardInterceptor(Interceptor):
         if object_id == ORDER_OBJECT:
             self._after_order_write(context)
             self._after_order_cancel(context)
+            self._after_order_confirm(context)
             return
         if object_id != LINE_OBJECT:
             return
@@ -195,6 +198,32 @@ class SalesOrderGuardInterceptor(Interceptor):
         except SalesOrderAmountError as e:
             self._raise_validation(e)
 
+        self._after_line_reservation(context)
+
+    # ---------------- 预留接线（INV-2） ----------------
+
+    def _after_line_reservation(self, context: 'ActionContext') -> None:
+        """订单行落库后同步库存预留；删除行按来源释放。"""
+        from meta.services.inventory_reservation_service import (
+            InventoryReservationService,
+        )
+
+        service = InventoryReservationService(context.data_source)
+        try:
+            if context.action == 'crud_delete':
+                order_id = context.extra.get(_ORDER_ID_KEY) \
+                    or (context.old_data or {}).get('order_id')
+                service.release_by_source(
+                    'sales_order', order_id, line_id=context.object_id,
+                    reason='销售订单行删除')
+                return
+            if context.object_id in (None, ''):
+                return
+            service.sync_sales_order_line(context.object_id)
+        except Exception as e:  # 预留是附加能力，不阻断订单主流程
+            logger.warning('[inv2] SO 行 %s 预留同步跳过: %s',
+                           context.object_id, e)
+
     # ---------------- 履约状态接线 ----------------
 
     def _after_schedule_write(self, context: 'ActionContext') -> None:
@@ -225,6 +254,34 @@ class SalesOrderGuardInterceptor(Interceptor):
         if result and context.result and context.result.data is not None:
             context.result.data['fulfillment_status'] = \
                 result.get('fulfillment_status')
+
+    def _after_order_confirm(self, context: 'ActionContext') -> None:
+        """Wave C T38：draft → confirmed 同事务生成 billing 开票计划期次。
+
+        生成失败抛 ValidationFailedError，整个确认动作回滚（spec §6.2）。
+        """
+        if context.action != 'crud_update':
+            return
+        params = dict(context.params or {})
+        if str(params.get('status') or '') != _ORDER_STATUS_CONFIRMED:
+            return
+        old_status = (context.old_data or {}).get('status')
+        if str(old_status or '') == _ORDER_STATUS_CONFIRMED:
+            return
+
+        from meta.services.billing_plan_service import (
+            BillingPlanError,
+            BillingPlanService,
+        )
+        try:
+            created = BillingPlanService(
+                context.data_source).generate_for_order(
+                    context.object_id, triggered_by='confirm')
+        except BillingPlanError as e:
+            self._raise_validation(e)
+            return
+        if created and context.result and context.result.data is not None:
+            context.result.data['billing_plan_created'] = created
 
     @staticmethod
     def _schedule_scope(context: 'ActionContext') -> tuple:

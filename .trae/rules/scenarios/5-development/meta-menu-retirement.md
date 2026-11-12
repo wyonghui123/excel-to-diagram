@@ -141,14 +141,24 @@ migration 必须**可重复执行**：第二次跑应打印 `[SKIP]` 而不是�
 
 ## 四、动作权限码（菜单/列表动作通用）
 
-`permissions` 表实有形态是**双段式** `{bo}:{bo}_{action}`：
+`permissions` 表在 v249 之后统一为**单段式** `{bo}:{action}`：
 
 ```
-customer_account:customer_account_create   ✅ 命中
-customer_account:create                    ❌ 命中数 0 ⇒ 非 admin 看不到按钮
+customer_account:create   ✅ 命中
+customer_account:customer_account_create   ❌ 旧双段码，v249 已收敛 ⇒ 命中数 0
 ```
 
-单段式不会报错，只会**静默不显示按钮**。写之前先查 `permissions` 表实际值。
+规范要点：
+
+- 动作 id 可保留对象前缀（`ensure_crud_actions` 仍产 `{bo}_create`），派生权限码时由
+  `meta/core/models.py::MetaAction.get_permission_code` 剥掉 `{bo}_` 前缀；
+- `list` / `query` / `view` 与 `read` 同义，派生与字面量均归一为 `read`；
+- 跨 BO 动作（如 `project:project_task_*`）归到真实主体 `project_task:*`；
+  例外：`project:time_entry_*` 按 v182 规定 `resource_type=project`，保留双段前缀；
+- 存量库由 `meta/migrations/v249__normalize_permission_codes.py` 收敛（合并授予关系、
+  清脏码、幂等）；写菜单/按钮权限前先查 `permissions` 表确认实际值。
+
+单段码不报错，只会**静默不显示按钮**——所以必须查表确认，而不是凭 YAML 推断。
 
 ---
 
@@ -162,7 +172,7 @@ customer_account:create                    ❌ 命中数 0 ⇒ 非 admin 看不�
 □ 存量环境靠 migration 下架吗？（UPSERT 不删行 + 清理假成功）
 □ migration 幂等吗？连跑两次 DB 终态一致吗？
 □ menu_permissions / permission_set_menu_permissions 有孤儿行吗？
-□ 权限码是双段式吗？已查 permissions 表确认？
+□ 权限码是单段式 `{bo}:{action}` 吗？已查 permissions 表确认？
 ```
 
 ---
@@ -181,3 +191,4 @@ customer_account:create                    ❌ 命中数 0 ⇒ 非 admin 看不�
 | 日期 | 变更人 | 变更内容 |
 |------|--------|---------|
 | 2026-10-23 | AI Assistant | 初版：独立菜单是否合适的三层判据、下架 ≠ 无 UI 配置、init 脚本 UPSERT 不删行 + 步骤 7.5/7.6 清理假成功（commit 位置根因）、migration 退役菜单行标准做法与三条必断言、自检清单 |
+| 2026-11-11 | AI Assistant | §四 权限码口径由双段改为单段 `{bo}:{action}`：派生剥前缀 + list/query/view→read 归一 + v249 迁移收敛；自检清单同步 |

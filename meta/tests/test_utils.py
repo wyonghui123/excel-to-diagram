@@ -64,6 +64,51 @@ def get_test_db_path():
     return get_meta_db_path()
 
 
+# AuditService 当前会写入 audit_logs 的列。
+# 多个测试文件手写 audit_logs DDL，容易与生产 schema 漂移；
+# 在 CREATE TABLE 之后调用 ensure_audit_log_columns() 即可幂等补齐。
+_AUDIT_LOG_REQUIRED_COLUMNS = (
+    ('user_agent', 'TEXT'),
+    ('change_set_id', 'TEXT'),
+    ('reason_code', 'TEXT'),
+    ('agent_id', 'TEXT'),
+    ('agent_session_id', 'TEXT'),
+    ('tool_call_id', 'TEXT'),
+    ('agent_reasoning', 'TEXT'),
+    ('log_category', "TEXT DEFAULT 'business'"),
+    ('log_level', "TEXT DEFAULT 'INFO'"),
+    ('outcome', "TEXT DEFAULT 'success'"),
+    ('retention_until', 'TEXT'),
+    ('cascade_root_id', 'TEXT'),
+    ('cascade_root_action', 'TEXT'),
+    ('parent_object_type', 'TEXT'),
+    ('parent_object_id', 'TEXT'),
+    ('error_message', 'TEXT'),
+    ('retry_count', 'INTEGER DEFAULT 0'),
+    ('extra_data', 'TEXT'),
+    ('status', "TEXT DEFAULT 'written'"),
+)
+
+
+def ensure_audit_log_columns(conn):
+    """为测试自建的 audit_logs 表补齐 AuditService 会写入的列（幂等）。
+
+    Args:
+        conn: sqlite3.Connection 或 SQLiteAdapter（需具备 execute）
+    """
+    cursor = conn.execute("PRAGMA table_info(audit_logs)")
+    existing = {row[1] for row in cursor.fetchall()}
+    if not existing:
+        return
+    for column, ddl in _AUDIT_LOG_REQUIRED_COLUMNS:
+        if column not in existing:
+            conn.execute(f"ALTER TABLE audit_logs ADD COLUMN {column} {ddl}")
+    try:
+        conn.commit()
+    except Exception:
+        pass
+
+
 def get_data_source_for_test():
     """
     获取测试用数据源（使用统一路径）
@@ -124,7 +169,10 @@ def create_test_workbook(child_type='annotation', data=None):
     wb = Workbook()
     wb.remove(wb.active)
     sheets_info = []
-    ie_service._write_child_sheet(wb, child_type, child_meta, data, sheets_info)
+    # 显式要求追加 3 行新增空行（导出默认在有数据时不追加）
+    ie_service._write_child_sheet(
+        wb, child_type, child_meta, data, sheets_info,
+        options={'empty_rows_for_new': 3})
     return wb, child_meta
 
 

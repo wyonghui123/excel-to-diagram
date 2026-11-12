@@ -20,10 +20,39 @@ from meta.core.sqlite_tx_state import get_tx_state, TxState
 from meta.core.db_config_detector import get_runtime_config
 from meta.core.observability import metrics_inc, OBS_COUNTERS, log_tx_event
 from meta.core.db_path import get_meta_db_path
+from meta.core.platform_flags import OFF, STRICT, tx_guard_mode
 
 logger = logging.getLogger(__name__)
 
 BO_INTERCEPTOR_MODE = os.environ.get('BO_INTERCEPTOR_MODE', 'sync')
+
+
+class TransactionBoundaryError(RuntimeError):
+    """写动作未在事务上下文执行（PLATFORM_TX_GUARD=strict）。"""
+
+
+def _check_write_tx_scope(object_type: str, action: str, data_source) -> None:
+    """[FR-002 / NFR-005] 写动作事务边界守卫。
+
+    调用点只在 `bo_framework` 没有自动包裹事务时（如
+    `DISABLE_AUTO_TRANSACTION=1` 或数据源无 `in_transaction`）：
+    - 调用方已开事务 → 通过（事务归属由外层负责）
+    - strict → 抛 `TransactionBoundaryError`
+    - shadow（默认）→ 记 warning，不改变行为
+    - off → 不动作
+    """
+    mode = tx_guard_mode()
+    if mode == OFF:
+        return
+    if getattr(data_source, 'in_transaction', False):
+        return
+    message = (
+        f"[TX-GUARD] 写动作 {object_type}:{action} 未在事务中执行"
+        "（应经 bo_framework.transaction() 或 DataSource.transaction() 包裹）"
+    )
+    if mode == STRICT:
+        raise TransactionBoundaryError(message)
+    logger.warning(message)
 
 
 class BOFramework:
@@ -154,6 +183,25 @@ class BOFramework:
             if action in (CRUD_UPDATE, CRUD_DELETE):
                 self._load_old_data(context)
 
+            # [G7 2026-11-02] 通用更新路径 status 迁移守卫
+            # 对象声明 requires_state_machine 时，改 status 必须走平台状态机。
+            if (action == CRUD_UPDATE and isinstance(params, dict) and 'status' in params
+                    and meta_object.requires_state_machine()):
+                from meta.core.task_state_machine import (
+                    TaskTransitionError,
+                    check_meta_object_status_update,
+                )
+                try:
+                    check_meta_object_status_update(
+                        meta_object, context.old_data, params)
+                except TaskTransitionError as e:
+                    return ActionResult(
+                        success=False,
+                        message=str(e),
+                        error='STATE_MACHINE_VIOLATION',
+                        status_code=400,
+                    )
+
             # [Constraint 双轨消除 2026-06-07]
             # 约束校验统一由 ConstraintValidationInterceptor(P42) 在拦截器链中执行，
             # 不再在 bo_framework.execute() 中重复调用 _constraint_engine。
@@ -176,6 +224,10 @@ class BOFramework:
                 and not ds.in_transaction
             )
 
+            # [FR-002 / NFR-005] 写动作未被自动包裹 → 事务边界守卫（默认 shadow 仅告警）
+            if not _should_wrap and action in _AUTO_TXN_ACTIONS:
+                _check_write_tx_scope(meta_object.id, action, ds)
+
             if _should_wrap:
                 # 复用现有 bo_framework.transaction() context（生成 transaction_id）
                 with self.transaction() as txn_ctx:
@@ -194,7 +246,16 @@ class BOFramework:
                 return context.result or ActionResult(success=True, message="Operation completed")
 
         except Exception as e:
-            from meta.core.exceptions import FieldPolicyViolationError, ValidationFailedError
+            from meta.core.exceptions import (
+                FieldPolicyViolationError,
+                StateMachineViolationError,
+                ValidationFailedError,
+            )
+            if isinstance(e, StateMachineViolationError):
+                logger.info(f"[BOFramework] State machine violation: {e}")
+                return ActionResult(success=False, message=str(e),
+                                    errors=e.details, status_code=400,
+                                    code=StateMachineViolationError.code)
             if isinstance(e, FieldPolicyViolationError):
                 logger.info(f"[BOFramework] FieldPolicy validation FAILED: {e}")
                 return ActionResult(success=False, message=str(e))

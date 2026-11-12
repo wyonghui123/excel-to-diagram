@@ -92,14 +92,33 @@ def _make_fk_message(target_meta, field_id, field_value):
     )
 
 
-def _make_required_message(meta, field_id=None):
+def _resolve_field_display_name(meta, field_id):
+    """把 DB 列名翻译成字段的业务中文名 (semantics.meaning), 兜底字段 id/name"""
+    if meta and field_id:
+        try:
+            field = meta.get_field(field_id)
+            if field is not None:
+                meaning = getattr(getattr(field, 'semantics', None), 'meaning', None)
+                return meaning or getattr(field, 'name', None) or field_id
+        except Exception:
+            pass
+    return field_id
+
+
+def _make_required_message(meta, field_id=None, field_value=None):
     """生成 NOT NULL 错误消息"""
-    return ValidationMessageRegistry.get("validation.field.required", field_name=field_id or "字段")
+    return ValidationMessageRegistry.get(
+        "validation.field.required",
+        field_name=_resolve_field_display_name(meta, field_id) or "字段",
+    )
 
 
-def _make_unique_message(meta, field_id=None):
+def _make_unique_message(meta, field_id=None, field_value=None):
     """生成 UNIQUE 错误消息"""
-    return ValidationMessageRegistry.get("validation.field.unique", field_name=field_id or "值")
+    return ValidationMessageRegistry.get(
+        "validation.field.unique",
+        field_name=_resolve_field_display_name(meta, field_id) or "值",
+    )
 
 
 ERROR_MESSAGE_MAP = {
@@ -318,7 +337,7 @@ class AuditLogger:
                    user_id: Any = None, user_name: str = None,
                    ip_address: str = None, user_agent: str = None,
                    change_set_id: str = None, reason_code: str = None) -> bool:
-        self.log(
+        result = self.log(
             object_type=object_type,
             object_id=object_id,
             action="CREATE",
@@ -339,7 +358,7 @@ class AuditLogger:
                        "updated_date", "created_date", "version", "password_hash",
                        "token", "secret", "tenant_id", "is_system"):
                 continue
-            self.log(
+            result = self.log(
                 object_type=object_type,
                 object_id=object_id,
                 action="CREATE",
@@ -355,8 +374,8 @@ class AuditLogger:
                 user_agent=user_agent,
                 change_set_id=change_set_id,
                 reason_code=reason_code,
-            )
-        return True
+            ) and result
+        return result
 
     def log_update(self, object_type: str, object_id: Any,
                    old_data: Dict[str, Any], new_data: Dict[str, Any],
@@ -2690,15 +2709,24 @@ class ActionExecutor:
                         # 不能 silently 吞错 → 之前 bug：函数继续走 AFTER_DELETE + 审计 +
                         # 返回 ActionResult.ok，前端看到"成功"但记录未删（"没有成功，也没有报错"）
                         logger.warning(f"[_do_delete] DELETE execution error: {e}")
+                        # [FIX 2026-10-31] 之前直接把原始 SQLite 报错透出给用户
+                        # ("删除失败（数据库约束）: FOREIGN KEY constraint failed")。
+                        # 注意: 不能复用 translate_error_message —— 它面向"引用字段不存在"
+                        # (写入场景), 删除场景下语义错误。这里给出删除语义的友好提示,
+                        # 保留"数据库约束"关键词供既有断言/日志检索使用。
+                        obj_label = meta_object.name or meta_object.id
+                        friendly_message = (
+                            f"删除失败（数据库约束）: {obj_label} 仍被其他对象引用，无法删除"
+                        )
                         self._write_delete_blocked_audit(
                             meta_object, id_value, original_data,
                             action_label="DELETE_FAILED",
                             error_code="DELETE_FAILED",
-                            message=f"删除失败（数据库约束）: {e}",
+                            message=friendly_message,
                         )
                         return ActionResult.fail(
                             error="DELETE_FAILED",
-                            message=f"删除失败（数据库约束）: {e}",
+                            message=friendly_message,
                         )
 
                     if not skip_rules and original_data:

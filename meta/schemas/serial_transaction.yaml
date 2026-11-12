@@ -1,0 +1,572 @@
+# 序列号事件账（Serial Transaction）—— P6a 序列号对象模型
+# 依据: docs/specs/p6-serial-number-model/spec.md §3.2 / §4.1
+#
+# 口径（已定）:
+#   ① 事件账是真相，serial_numbers 当前态是投影（D4）。
+#   ② 与数量账桥接放 inventory_transaction_id（可空）；数量账不加 serial_id（D5）。
+#   ③ 纯状态变更不产生数量分录，故 inventory_transaction_id 为空。
+#   ④ 只读面：本对象只由 serial_number_service 写入，不开放写动作。
+
+id: serial_transaction
+name: 序列号事件
+table_name: serial_transactions
+description: 序列号事件账——建档 / 收货 / 发运 / 状态变更的唯一真相
+display_name_field: txn_type
+
+authorization:
+  check: true
+  permissions:
+    read: serial_transaction:read
+    list: serial_transaction:read
+
+# 只读面：存在任意 {object}_read 动作时，ensure_crud_actions 不再补写动作；
+# auto_crud: false 为声明性意图（与 inventory_transaction.yaml 同口径）。
+import_export:
+  auto_crud: false
+
+actions:
+  - id: serial_transaction_read
+    name: 查询序列号事件
+    type: crud
+    method: GET
+    path: "/api/v1/serial_transactions/{id}"
+    description: 查询单条序列号事件（只读）
+  - id: serial_transaction_list
+    name: 查询序列号事件列表
+    type: crud
+    method: GET
+    path: "/api/v1/serial_transactions"
+    description: 查询序列号事件列表（只读）
+
+semantics:
+  meaning: 序列号事件
+  category: business_document_line
+  aliases:
+    - 序列号事件
+    - 序列号事务
+    - serial transaction
+
+fields:
+  - id: id
+    name: ID
+    type: integer
+    db_column: id
+    required: true
+    unique: true
+    description: 技术主键
+    semantics:
+      meaning: 自增主键
+      primary_key: true
+
+  - id: serial_id
+    name: 序列号
+    type: integer
+    db_column: serial_id
+    required: true
+    description: 序列号主档引用
+    semantics:
+      meaning: 序列号引用
+      display:
+        type: association
+        target_type: serial_number
+        display_field: serial_no
+    ui:
+      widget: select
+      relation: serial_number
+      multiple: false
+      fieldGroup: 基本信息
+      fieldGroupPosition: 10
+
+  - id: inventory_transaction_id
+    name: 库存事务
+    type: integer
+    db_column: inventory_transaction_id
+    nullable: true
+    description: 桥接数量账；纯状态变更时为空
+    semantics:
+      meaning: 库存事务引用
+      display:
+        type: association
+        target_type: inventory_transaction
+        display_field: transaction_no
+        placeholder: "无数量分录"
+    ui:
+      widget: number
+      fieldGroup: 基本信息
+      fieldGroupPosition: 20
+
+  - id: txn_type
+    name: 事件类型
+    type: string
+    db_column: txn_type
+    required: true
+    max_length: 20
+    description: 事件类型（建档 / 收货 / 领用 / 调出 / 调入 / 发运 / 退回 / 调整 / 状态变更 / 报废）
+    enum_values:
+      - value: create
+        label: 建档
+        color: info
+        is_initial: true
+      - value: receive
+        label: 收货
+        color: success
+      - value: issue
+        label: 领用
+        color: warning
+      - value: transfer_out
+        label: 调出
+        color: primary
+      - value: transfer_in
+        label: 调入
+        color: primary
+      - value: ship
+        label: 发运
+        color: success
+      - value: return
+        label: 退回
+        color: warning
+      - value: adjust
+        label: 调整
+        color: default
+      - value: status_change
+        label: 状态变更
+        color: info
+      - value: scrap
+        label: 报废
+        color: danger
+    value_help:
+      source:
+        type: enum
+        enum_type_id: serial_txn_type
+        sort_by: sort_order
+      behavior:
+        validation: true
+        binding_strength: strict
+        multiple: false
+      presentation:
+        result_type: dropdown
+    semantics:
+      meaning: 序列号事件类型
+      filterable: true
+      filter_type: enum
+      filter_label: 事件类型
+      filter_scope: local
+    ui:
+      widget: select
+      fieldGroup: 基本信息
+      fieldGroupPosition: 30
+
+  - id: txn_date
+    name: 事件时间
+    type: datetime
+    db_column: txn_date
+    required: true
+    description: 事件发生时间
+    semantics:
+      meaning: 序列号事件时间
+      filterable: true
+      filter_type: date_range
+      filter_label: 事件时间
+    ui:
+      widget: datetime
+      fieldGroup: 基本信息
+      fieldGroupPosition: 40
+
+  - id: org_from_id
+    name: 迁出组织
+    type: integer
+    db_column: org_from_id
+    nullable: true
+    description: 组织迁移前归属
+    semantics:
+      meaning: 迁出组织引用
+      display:
+        type: association
+        target_type: org
+        display_field: name
+    ui:
+      widget: select
+      relation: org
+      multiple: false
+      fieldGroup: 迁移
+      fieldGroupPosition: 50
+
+  - id: org_to_id
+    name: 迁入组织
+    type: integer
+    db_column: org_to_id
+    nullable: true
+    description: 组织迁移后归属
+    semantics:
+      meaning: 迁入组织引用
+      display:
+        type: association
+        target_type: org
+        display_field: name
+    ui:
+      widget: select
+      relation: org
+      multiple: false
+      fieldGroup: 迁移
+      fieldGroupPosition: 55
+
+  - id: location_from_id
+    name: 迁出库位
+    type: integer
+    db_column: location_from_id
+    nullable: true
+    description: 库位迁移前位置
+    semantics:
+      meaning: 迁出库位引用
+      display:
+        type: association
+        target_type: location
+        display_field: name
+    ui:
+      widget: select
+      relation: location
+      multiple: false
+      fieldGroup: 迁移
+      fieldGroupPosition: 60
+
+  - id: location_to_id
+    name: 迁入库位
+    type: integer
+    db_column: location_to_id
+    nullable: true
+    description: 库位迁移后位置
+    semantics:
+      meaning: 迁入库位引用
+      display:
+        type: association
+        target_type: location
+        display_field: name
+    ui:
+      widget: select
+      relation: location
+      multiple: false
+      fieldGroup: 迁移
+      fieldGroupPosition: 65
+
+  - id: batch_from_id
+    name: 迁出批次
+    type: integer
+    db_column: batch_from_id
+    nullable: true
+    description: 批次迁移前归属
+    semantics:
+      meaning: 迁出批次引用
+      display:
+        type: association
+        target_type: batch
+        display_field: batch_no
+    ui:
+      widget: select
+      relation: batch
+      multiple: false
+      fieldGroup: 迁移
+      fieldGroupPosition: 70
+
+  - id: batch_to_id
+    name: 迁入批次
+    type: integer
+    db_column: batch_to_id
+    nullable: true
+    description: 批次迁移后归属
+    semantics:
+      meaning: 迁入批次引用
+      display:
+        type: association
+        target_type: batch
+        display_field: batch_no
+    ui:
+      widget: select
+      relation: batch
+      multiple: false
+      fieldGroup: 迁移
+      fieldGroupPosition: 75
+
+  - id: usage_from
+    name: 原用途状态
+    type: string
+    db_column: usage_from
+    nullable: true
+    max_length: 20
+    description: 变更前用途状态（与主档枚举同值域）
+    semantics:
+      meaning: 变更前用途状态
+    ui:
+      widget: input
+      fieldGroup: 状态
+      fieldGroupPosition: 80
+
+  - id: usage_to
+    name: 新用途状态
+    type: string
+    db_column: usage_to
+    nullable: true
+    max_length: 20
+    description: 变更后用途状态（与主档枚举同值域）
+    semantics:
+      meaning: 变更后用途状态
+    ui:
+      widget: input
+      fieldGroup: 状态
+      fieldGroupPosition: 85
+
+  - id: quality_from
+    name: 原质量状态
+    type: string
+    db_column: quality_from
+    nullable: true
+    max_length: 20
+    description: 变更前质量状态
+    semantics:
+      meaning: 变更前质量状态
+    ui:
+      widget: input
+      fieldGroup: 状态
+      fieldGroupPosition: 90
+
+  - id: quality_to
+    name: 新质量状态
+    type: string
+    db_column: quality_to
+    nullable: true
+    max_length: 20
+    description: 变更后质量状态
+    semantics:
+      meaning: 变更后质量状态
+    ui:
+      widget: input
+      fieldGroup: 状态
+      fieldGroupPosition: 95
+
+  - id: doc_type
+    name: 来源单据类型
+    type: string
+    db_column: doc_type
+    nullable: true
+    max_length: 30
+    description: 来源单据类型（receipt / shipment / transfer_order / ...）
+    semantics:
+      meaning: 来源单据类型
+      filterable: true
+      filter_type: input
+      filter_label: 来源单据类型
+    ui:
+      widget: input
+      fieldGroup: 来源
+      fieldGroupPosition: 100
+
+  - id: doc_id
+    name: 来源单据
+    type: integer
+    db_column: doc_id
+    nullable: true
+    description: 来源单据主键
+    semantics:
+      meaning: 来源单据引用
+    ui:
+      widget: number
+      fieldGroup: 来源
+      fieldGroupPosition: 105
+
+  - id: line_id
+    name: 来源行
+    type: integer
+    db_column: line_id
+    nullable: true
+    description: 来源单据行主键
+    semantics:
+      meaning: 来源行引用
+    ui:
+      widget: number
+      fieldGroup: 来源
+      fieldGroupPosition: 110
+
+  - id: remark
+    name: 备注
+    type: string
+    db_column: remark
+    nullable: true
+    max_length: 255
+    description: 备注
+    semantics:
+      meaning: 备注
+      searchable: true
+    ui:
+      widget: textarea
+      fieldGroup: 来源
+      fieldGroupPosition: 115
+
+  - id: created_by
+    name: 创建人
+    type: string
+    db_column: created_by
+    nullable: true
+    max_length: 200
+    description: 创建人
+    semantics:
+      meaning: 创建人
+      audit_field: true
+
+  - id: created_at
+    name: 创建时间
+    type: datetime
+    db_column: created_at
+    description: 创建时间
+    semantics:
+      meaning: 记录创建时间
+      audit_field: true
+
+indexes:
+  - fields: [serial_id, txn_date]
+    name: idx_serial_tx_serial_date
+  - fields: [inventory_transaction_id]
+    name: idx_serial_tx_inv_tx
+  - fields: [doc_type, doc_id]
+    name: idx_serial_tx_doc
+
+relations:
+  - id: serial_transaction_to_serial
+    name: 序列号
+    type: reference
+    target: serial_number
+    source_field: serial_id
+    target_field: id
+    cardinality: N:1
+  - id: serial_transaction_to_inventory_transaction
+    name: 库存事务
+    type: reference
+    target: inventory_transaction
+    source_field: inventory_transaction_id
+    target_field: id
+    cardinality: N:1
+  - id: serial_transaction_to_org_from
+    name: 迁出组织
+    type: reference
+    target: org
+    source_field: org_from_id
+    target_field: id
+    cardinality: N:1
+  - id: serial_transaction_to_org_to
+    name: 迁入组织
+    type: reference
+    target: org
+    source_field: org_to_id
+    target_field: id
+    cardinality: N:1
+  - id: serial_transaction_to_location_from
+    name: 迁出库位
+    type: reference
+    target: location
+    source_field: location_from_id
+    target_field: id
+    cardinality: N:1
+  - id: serial_transaction_to_location_to
+    name: 迁入库位
+    type: reference
+    target: location
+    source_field: location_to_id
+    target_field: id
+    cardinality: N:1
+  - id: serial_transaction_to_batch_from
+    name: 迁出批次
+    type: reference
+    target: batch
+    source_field: batch_from_id
+    target_field: id
+    cardinality: N:1
+  - id: serial_transaction_to_batch_to
+    name: 迁入批次
+    type: reference
+    target: batch
+    source_field: batch_to_id
+    target_field: id
+    cardinality: N:1
+
+ui_view_config:
+  skip_auto_menu: true
+  list:
+    detail_mode: drawer
+    title: 序列号事件
+    columns:
+      - field: serial_id
+        width: 180
+        filterable: true
+        filter_type: value_help
+        render_as: association
+        target_type: serial_number
+        display_field: serial_no
+      - field: txn_type
+        width: 110
+        filterable: true
+        filter_type: select
+      - field: txn_date
+        width: 160
+        sortable: true
+      - field: inventory_transaction_id
+        width: 150
+        render_as: association
+        target_type: inventory_transaction
+        display_field: transaction_no
+      - field: org_from_id
+        width: 150
+        render_as: association
+        target_type: org
+        display_field: name
+      - field: org_to_id
+        width: 150
+        render_as: association
+        target_type: org
+        display_field: name
+      - field: location_from_id
+        width: 150
+        render_as: association
+        target_type: location
+        display_field: name
+      - field: location_to_id
+        width: 150
+        render_as: association
+        target_type: location
+        display_field: name
+      - field: doc_type
+        width: 120
+      - field: doc_id
+        width: 100
+    selection:
+      enabled: false
+    searchFields: [remark]
+    actions: []
+    defaultSort:
+      field: txn_date
+      order: desc
+  form:
+    title: 序列号事件
+    layout: vertical
+    sections:
+      - title: 基本信息
+        columns:
+          - fields: [serial_id, inventory_transaction_id, txn_type, txn_date]
+      - title: 迁移
+        columns:
+          - fields: [org_from_id, org_to_id, location_from_id, location_to_id]
+          - fields: [batch_from_id, batch_to_id]
+      - title: 状态
+        columns:
+          - fields: [usage_from, usage_to, quality_from, quality_to]
+      - title: 来源
+        columns:
+          - fields: [doc_type, doc_id, line_id, remark]
+  detail:
+    layout: tabs
+    title: "序列号事件 {record.txn_type}"
+    tabs:
+      - id: basic
+        label: 基本信息
+        type: fields
+        fields: [serial_id, inventory_transaction_id, txn_type, txn_date,
+                 org_from_id, org_to_id, location_from_id, location_to_id,
+                 batch_from_id, batch_to_id, usage_from, usage_to, quality_from,
+                 quality_to, doc_type, doc_id, line_id, remark]

@@ -1,0 +1,412 @@
+# 库存盘点行（Inventory Count Line）—— INV-4
+# 依据: .trae/specs/excel-to-diagram/define-inventory-adjustment/spec.md FR-004/005
+#
+# 父子关系:
+#   parent_object=inventory_count，父字段 count_id；
+#   通过 inventory_count.yaml 的 child_sections 挂载，本对象不单独成菜单。
+#
+# 行口径:
+#   · start 生成快照行：snapshot_qty = 余额桶在手量，source_balance_id 指向余额行。
+#   · counting 可新增 snapshot_qty=0 的行（系统无账但实物存在）。
+#   · counted_qty 为空表示未盘；submit 要求全部录入。
+#   · variance_qty = counted_qty - snapshot_qty，submit 时固化。
+#   · 已生成的快照行不可删除，只能录入数量或标记为 0。
+
+id: inventory_count_line
+name: 库存盘点行
+table_name: inventory_count_lines
+description: 库存盘点单行（快照 + 实盘 + 差异）
+display_name_field: line_no
+parent_object: inventory_count
+
+hierarchy:
+  parent_field: count_id
+
+authorization:
+  check: true
+  permissions:
+    read: inventory_count:read
+    list: inventory_count:read
+    create: inventory_count:update
+    update: inventory_count:update
+    delete: inventory_count:update
+
+import_export:
+  auto_crud: false
+
+semantics:
+  meaning: 库存盘点行
+  category: business_document_line
+  business_key: []
+  aliases:
+    - 盘点行
+    - Inventory Count Line
+
+deletion_policy:
+  mode: cascade
+
+audit:
+  enabled: true
+  create:
+    enabled: true
+    fields: all
+  update:
+    enabled: true
+    fields: changed_only
+    exclude: [id, created_at, updated_at]
+  delete:
+    enabled: true
+    fields: business_only
+    exclude: [id, created_at, updated_at]
+
+org_scope:
+  mode: chain
+  via: count_id
+  host: inventory_count
+  field: org_id
+  function: inventory
+  write_check: true
+
+fields:
+  - id: id
+    name: ID
+    type: integer
+    db_column: id
+    required: true
+    unique: true
+    description: 技术主键
+    semantics:
+      meaning: 自增主键
+      primary_key: true
+
+  - id: count_id
+    name: 盘点单
+    type: integer
+    db_column: count_id
+    required: true
+    description: 所属盘点单（父字段）
+    semantics:
+      meaning: 所属盘点单
+      display:
+        type: association
+        target_type: inventory_count
+        display_field: count_no
+    ui:
+      widget: select
+      relation: inventory_count
+      hidden_in_form: true
+
+  - id: line_no
+    name: 行号
+    type: integer
+    db_column: line_no
+    required: true
+    description: 单据内行号（唯一）
+    semantics:
+      meaning: 行号
+      searchable: true
+
+  - id: item_id
+    name: 物料
+    type: integer
+    db_column: item_id
+    required: true
+    description: 盘点物料
+    semantics:
+      meaning: 物料引用
+      display:
+        type: association
+        target_type: item
+        display_field: name
+      filterable: true
+      filter_type: relation
+      filter_label: 物料
+
+  - id: location_id
+    name: 库位
+    type: integer
+    db_column: location_id
+    required: true
+    description: 盘点库位
+    semantics:
+      meaning: 库位引用
+      display:
+        type: association
+        target_type: location
+        display_field: name
+
+  - id: batch_id
+    name: 批次
+    type: integer
+    db_column: batch_id
+    nullable: true
+    description: 批次引用；为空表示不按批次管理
+    semantics:
+      meaning: 批次引用
+      display:
+        type: association
+        target_type: batch
+        display_field: batch_no
+        placeholder: "无批次"
+
+  - id: uom_id
+    name: 单位
+    type: integer
+    db_column: uom_id
+    required: true
+    description: 录入单位；counted_qty 以基本单位存储
+    semantics:
+      meaning: 单位引用
+      display:
+        type: association
+        target_type: uom
+        display_field: name
+
+  - id: stock_status
+    name: 库存状态
+    type: string
+    db_column: stock_status
+    required: true
+    default: unrestricted
+    max_length: 20
+    description: 快照来源库存状态
+    enum_values:
+      - value: unrestricted
+        label: 可用
+        color: success
+      - value: inspection
+        label: 检验中
+        color: warning
+      - value: blocked
+        label: 冻结
+        color: danger
+    semantics:
+      meaning: 库存状态
+      filterable: true
+      filter_type: enum
+      filter_label: 库存状态
+
+  - id: snapshot_qty
+    name: 账面快照数量
+    type: number
+    db_column: snapshot_qty
+    required: true
+    default: 0
+    description: start 时冻结的账面数量（基本单位）；新增行固定为 0
+    constraints:
+      - type: numeric_range
+        gte: 0
+    semantics:
+      meaning: 账面快照数量
+
+  - id: counted_qty
+    name: 实盘数量
+    type: number
+    db_column: counted_qty
+    nullable: true
+    description: 实盘数量（基本单位）；为空表示未盘
+    constraints:
+      - type: numeric_range
+        gte: 0
+    semantics:
+      meaning: 实盘数量
+
+  - id: variance_qty
+    name: 差异数量
+    type: number
+    db_column: variance_qty
+    nullable: true
+    description: counted_qty - snapshot_qty（基本单位），submit 时固化
+    semantics:
+      meaning: 盘点差异数量
+
+  - id: serial_no
+    name: 序列号
+    type: string
+    db_column: serial_no
+    nullable: true
+    max_length: 200
+    description: 序列号（|差异|=1 快捷录入；|差异|>1 必须走 document_serial_links 序列号子表）
+    semantics:
+      meaning: 盘点差异行序列号（仅差异数量为 1 时快捷录入）
+      searchable: true
+    ui:
+      widget: input
+
+  - id: variance_reason
+    name: 差异原因
+    type: string
+    db_column: variance_reason
+    nullable: true
+    max_length: 200
+    description: 超容差差异的原因（提交时必填）
+    semantics:
+      meaning: 差异原因
+      searchable: true
+
+  - id: source_balance_id
+    name: 来源余额行
+    type: integer
+    db_column: source_balance_id
+    nullable: true
+    description: 快照来源 inventory_balances 行；新增行留空
+    semantics:
+      meaning: 来源余额行引用
+
+  - id: remark
+    name: 备注
+    type: string
+    db_column: remark
+    nullable: true
+    max_length: 200
+    description: 行备注
+    semantics:
+      meaning: 备注
+
+  - id: created_at
+    name: 创建时间
+    type: datetime
+    db_column: created_at
+    description: 创建时间
+    semantics:
+      meaning: 记录创建时间
+      audit_field: true
+
+  - id: updated_at
+    name: 更新时间
+    type: datetime
+    db_column: updated_at
+    description: 更新时间
+    semantics:
+      meaning: 记录更新时间
+      audit_field: true
+
+relations:
+  - id: inventory_count_line_to_header
+    name: 盘点单
+    type: reference
+    target: inventory_count
+    source_field: count_id
+    target_field: id
+    cardinality: N:1
+  - id: inventory_count_line_to_item
+    name: 物料
+    type: reference
+    target: item
+    source_field: item_id
+    target_field: id
+    cardinality: N:1
+  - id: inventory_count_line_to_location
+    name: 库位
+    type: reference
+    target: location
+    source_field: location_id
+    target_field: id
+    cardinality: N:1
+  - id: inventory_count_line_to_batch
+    name: 批次
+    type: reference
+    target: batch
+    source_field: batch_id
+    target_field: id
+    cardinality: N:1
+  - id: inventory_count_line_to_uom
+    name: 单位
+    type: reference
+    target: uom
+    source_field: uom_id
+    target_field: id
+    cardinality: N:1
+
+# [Rule Model M6a-3 2026-11-10] L0 派生度量：单行公式、单据内求值、不落库。
+# 校验规则 / 审批条件按 code 引用（MetricSession 缓存，多引用结果一致）；
+# 与 analytical_model（fact/measures/aggregates 报表语义层）互不混用。
+metrics:
+  - code: deviation_qty
+    formula: counted_qty - snapshot_qty
+    inputs: [counted_qty, snapshot_qty]
+    unit: 基本单位
+    precision: 2
+  - code: deviation_rate
+    formula: deviation_qty / snapshot_qty
+    inputs: [deviation_qty, snapshot_qty]
+    precision: 4
+
+# [Rule Model M6b 2026-11-10] 盘点行容差判定：全键超限才判超容差（all）。
+# 等价于原 limit = max(tolerance_qty_abs, snapshot_qty × tolerance_qty_pct)：
+#   率键按抬头快照的比例容差，绝对值键按抬头容差数量（实例值，经 overrides 传入，
+#   不落 control_parameter_defs —— 绝对容差是单据头快照而非参数）。
+# disposition=hold：可存不可过，释放动作为审批（inventory_count.approve）。
+rules:
+  - id: inventory_count_line_tolerance
+    name: 盘点数量容差
+    type: constraint
+    scope: object
+    enabled: true
+    combine_mode: all
+    disposition: hold
+    release_action: inventory_count.approve
+    keys:
+      - parameter: inventory_count_default_tolerance_qty_pct
+        metric: deviation_rate
+        severity: warning
+      - parameter: inventory_count_tolerance_qty_abs
+        metric: deviation_qty
+        severity: warning
+
+ui_view_config:
+  skip_auto_menu: true
+  list:
+    detail_mode: drawer
+    title: 盘点行
+    columns:
+      - field: line_no
+        width: 80
+        sortable: true
+      - field: item_id
+        width: 180
+        render_as: association
+        target_type: item
+        display_field: name
+      - field: location_id
+        width: 150
+        render_as: association
+        target_type: location
+        display_field: name
+      - field: batch_id
+        width: 130
+        render_as: association
+        target_type: batch
+        display_field: batch_no
+      - field: stock_status
+        width: 110
+      - field: snapshot_qty
+        width: 120
+      - field: counted_qty
+        width: 120
+      - field: variance_qty
+        width: 120
+      - field: variance_reason
+        width: 180
+    selection:
+      enabled: true
+      mode: multiple
+    searchFields: [variance_reason]
+    actions: []
+  form:
+    title: 盘点行
+    layout: vertical
+    sections:
+      - title: 物料与维度
+        columns:
+          - fields: [line_no, item_id]
+          - fields: [location_id, batch_id]
+          - fields: [uom_id, stock_status]
+      - title: 数量
+        columns:
+          - fields: [snapshot_qty, counted_qty]
+          - fields: [variance_qty, variance_reason]
+          - fields: [serial_no]
+      - title: 追溯
+        columns:
+          - fields: [source_balance_id, remark]

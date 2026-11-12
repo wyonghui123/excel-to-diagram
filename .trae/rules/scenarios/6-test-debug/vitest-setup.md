@@ -1,6 +1,7 @@
 ---
 alwaysApply: false
 description: "Vitest 配置 + 测试金字塔 + 容易测试的实践"
+globs: "src/**/*.test.js,src/**/*.spec.js,vitest.config.*"
 ---
 
 # Vitest 测试设置（v4.0 拆分）

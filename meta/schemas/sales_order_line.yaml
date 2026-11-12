@@ -67,6 +67,14 @@ audit:
   dissociate:
     enabled: true
 
+org_scope:
+  mode: chain
+  via: order_id
+  host: sales_order
+  field: sales_org_id
+  function: sales
+  write_check: true
+
 fields:
   - id: id
     name: ID
@@ -116,6 +124,94 @@ fields:
       widget: select
       relation: sales_order
       multiple: false
+
+  # 项目挂载（P1，可空）：只做归集，不改变订单行既有链路（AC-02 / AC-03）
+  - id: project_id
+    name: 项目
+    type: integer
+    db_column: project_id
+    nullable: true
+    description: 所属项目（可空；空 = 未归集到项目）
+    semantics:
+      meaning: 订单行所属项目
+      display:
+        type: association
+        target_type: project
+        display_field: name
+        placeholder: "未归集"
+    value_help:
+      source:
+        type: bo
+        target_bo: project
+        value_field: id
+        display_field: name
+        code_field: project_no
+        apply_target_permissions: true
+      behavior:
+        multiple: false
+        validation: true
+        binding_strength: strict
+        min_search_length: 0
+      presentation:
+        result_type: dropdown
+        display_format: "{project_no} {name}"
+        columns:
+          - field: project_no
+            label: 项目编号
+            width: 140
+          - field: name
+            label: 项目名称
+            width: 200
+    ui:
+      widget: select
+      relation: project
+      multiple: false
+      clearable: true
+
+  # 项目任务（G15 P2，可空）：挂任务时项目必填（行项目为空时取抬头项目），
+  # 任务须属于同一项目且为 activity + planned/in_progress；0 = 未挂任务。
+  - id: project_task_id
+    name: 项目任务
+    type: integer
+    db_column: project_task_id
+    nullable: true
+    default: 0
+    description: 所属项目任务（0 = 未挂任务；挂任务时项目必填）
+    semantics:
+      meaning: 订单行所属项目任务
+      display:
+        type: association
+        target_type: project_task
+        display_field: task_no
+        placeholder: "未挂任务"
+    value_help:
+      source:
+        type: bo
+        target_bo: project_task
+        value_field: id
+        display_field: task_no
+        code_field: task_no
+        apply_target_permissions: true
+      behavior:
+        multiple: false
+        validation: true
+        binding_strength: strict
+        min_search_length: 0
+      presentation:
+        result_type: dropdown
+        display_format: "{task_no} {name}"
+        columns:
+          - field: task_no
+            label: 任务编号
+            width: 140
+          - field: name
+            label: 任务名称
+            width: 200
+    ui:
+      widget: select
+      relation: project_task
+      multiple: false
+      clearable: true
 
   # 行号用字符串（10/20/30 留插入空间），同一订单内唯一
   - id: line_no
@@ -932,6 +1028,165 @@ fields:
       meaning: 派生确认时间，非人工维护
       audit_field: true
 
+  # S8 Wave B：行级开票路径（delivery 按发货量 / plan 按开票计划期次）
+  # 依据 docs/specs/s8-customer-invoice-wave-b/spec.md §3.2 / §6.2（R-INV-18）
+  - id: billing_relevance
+    name: 开票相关性
+    type: string
+    db_column: billing_relevance
+    required: true
+    default: delivery
+    max_length: 16
+    description: 开票路径（delivery 按发货量 / plan 按开票计划期次），受 R-INV-18 管控
+    enum_values:
+      - value: delivery
+        label: 按发货开票
+        color: primary
+        category: active
+        is_initial: true
+      - value: plan
+        label: 按开票计划
+        color: info
+        category: active
+    semantics:
+      meaning: 决定发票行来源是发货行还是开票计划期次
+      filterable: true
+      filter_type: enum
+      filter_label: 开票相关性
+      filter_scope: local
+    ui:
+      widget: select
+
+  # S8 Wave C：计划开票参数（仅 billing_relevance=plan 生效；里程碑按固定价，下列字段不参与计算）
+  # 依据 docs/specs/s8-customer-invoice-wave-c/spec.md §4.1（D40/D41）
+  - id: billing_period_count
+    name: 开票期数
+    type: integer
+    db_column: billing_period_count
+    nullable: true
+    description: 计划开票期数（1-120），均分时按此期数拆分、尾差归末期
+    constraints:
+      - type: numeric_range
+        min: 1
+        max: 120
+    semantics:
+      meaning: 计划开票期数
+    ui:
+      widget: number
+      visible_when: "billing_relevance == 'plan' and billing_method != 'milestone'"
+      hint: 例：12 表示分 12 期开票；里程碑行按固定价，不使用本字段
+
+  - id: billing_interval_months
+    name: 开票间隔（月）
+    type: integer
+    db_column: billing_interval_months
+    nullable: true
+    default: 1
+    description: 相邻期次间隔月数（默认 1 个月）
+    constraints:
+      - type: numeric_range
+        min: 1
+        max: 120
+    semantics:
+      meaning: 相邻开票期次的间隔月数
+    ui:
+      widget: number
+      visible_when: "billing_relevance == 'plan' and billing_method != 'milestone'"
+
+  - id: billing_anchor_date
+    name: 开票锚点日期
+    type: date
+    db_column: billing_anchor_date
+    nullable: true
+    description: 首期开票基准日期（空 = 订单确认日/计划起始日）
+    semantics:
+      meaning: 首期开票锚点日期
+      filterable: true
+      filter_type: date
+      filter_label: 开票锚点
+      filter_scope: local
+    ui:
+      widget: date
+      visible_when: "billing_relevance == 'plan'"
+
+  - id: billing_lead_days
+    name: 提前开票天数
+    type: integer
+    db_column: billing_lead_days
+    nullable: true
+    default: 0
+    description: 期次提前生成/开票的天数（默认 0，不提前）
+    constraints:
+      - type: numeric_range
+        min: 0
+        max: 365
+    semantics:
+      meaning: 开票期次相对服务期起点的提前天数
+    ui:
+      widget: number
+      visible_when: "billing_relevance == 'plan'"
+
+  - id: billing_proration
+    name: 首末期分摊
+    type: string
+    db_column: billing_proration
+    nullable: true
+    default: none
+    max_length: 8
+    description: 首末期是否按服务天数分摊（none 按整期 / daily 按日）
+    enum_values:
+      - value: none
+        label: 不分摊（整期计费）
+        color: info
+        category: active
+        is_initial: true
+      - value: daily
+        label: 按日分摊
+        color: primary
+        category: active
+    semantics:
+      meaning: 首末期按服务天数分摊方式
+    ui:
+      widget: select
+      visible_when: "billing_relevance == 'plan'"
+      hint: 选择按日分摊时，请确保行上填写服务期起止日期（缺失时按整期计费）
+
+  - id: billed_qty
+    name: 已开票数量
+    type: number
+    db_column: billed_qty
+    required: true
+    default: 0
+    description: 已过账发票累计数量（delivery 分支使用），服务层派生，只读
+    constraints:
+      - type: numeric_range
+        decimal_places: 4
+    semantics:
+      meaning: 已过账发票累计数量（delivery 分支）
+      derived: true
+      readonly: true
+    ui:
+      widget: number
+      editable: false
+
+  - id: billed_amount
+    name: 已开票金额
+    type: number
+    db_column: billed_amount
+    required: true
+    default: 0
+    description: 已过账发票累计净额（delivery 分支使用），服务层派生，只读
+    constraints:
+      - type: numeric_range
+        decimal_places: 4
+    semantics:
+      meaning: 已过账发票累计净额（delivery 分支）
+      derived: true
+      readonly: true
+    ui:
+      widget: number
+      editable: false
+
 # 状态机（C3 小改，独立验收）：open → closed；open / closed → cancelled
 # 与抬头 sales_order 的 4 条状态机刻意不同 —— 行状态极简，不复制抬头状态机。
 # 合法单向边只 3 条：
@@ -998,6 +1253,9 @@ indexes:
   - fields: [parent_line_id, component_no]
     unique: true
     name: uidx_sales_order_line_component
+  # P1：项目 360 聚合
+  - fields: [project_id]
+    name: idx_sales_order_line_project
 
 relations:
   - id: sales_order_line_to_order

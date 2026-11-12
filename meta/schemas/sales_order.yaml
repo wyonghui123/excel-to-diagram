@@ -17,12 +17,12 @@
 #   W0-R1  order_no 生成后不可改；取号失败不回退（允许跳号）
 #   W0-R2  qty > 0；方向由抬头单据类型决定
 #   W0-R3  退货单 net/tax/gross 必须为负；非退货单必须 >= 0
-#   W0-R4  order_type 必须 scope_bo='sales_order' + level='header'；
+#   W0-R4  document_type 必须 scope_bo='sales_order' + level='header'；
 #          行 line_type 必须 level='line'
-#   W0-R5  order_type.default_type_id 与行的 line_type 必须同 scope_bo
+#   W0-R5  document_type.default_type_id 与行的 line_type 必须同 scope_bo
 #   W0-R6  行 item_id 为空时 description 必填；uom_id 恒必填
 #   W0-R7  抬头合计恒等于行合计（任一行变更后重算回写）
-#   W0-R8  status != draft 后禁止删除行；禁止改 order_no / order_type_id / currency_id
+#   W0-R8  status != draft 后禁止删除行；禁止改 order_no / document_type_id / currency_id
 #   W0-R9  确认时冻结 exchange_rate / exchange_rate_type / exchange_rate_date
 #          / tax_rate_percent / unit_price
 #   W0-R10 sales_org_id 必须存在 org_functions.function_type='sales' 的行
@@ -90,6 +90,17 @@ audit:
   dissociate:
     enabled: true
 
+org_scope:
+  mode: direct
+  field: sales_org_id
+  function: sales
+  write_check: true
+
+numbering:
+  no_field: order_no
+  date_field: order_date
+  type_table: type_definitions
+
 fields:
   - id: id
     name: ID
@@ -121,14 +132,14 @@ fields:
       widget: input
       editable: false
 
-  - id: order_type_id
-    name: 订单类型
+  - id: document_type_id
+    name: 单据类型
     type: integer
-    db_column: order_type_id
+    db_column: document_type_id
     required: true
-    description: 订单类型（type_definitions，scope_bo='sales_order' + level='header'）
+    description: 单据类型（type_definitions，scope_bo='sales_order' + level='header'）
     semantics:
-      meaning: 订单单据类型
+      meaning: 销售订单单据类型（编号 / 审批 / 打印 / 权限的治理挂载点）
       display:
         type: association
         target_type: type_definition
@@ -179,6 +190,49 @@ fields:
       filter_scope: local
     ui:
       widget: date
+
+  # 项目挂载（P1，可空）：为空时订单行为与改造前完全一致（AC-02）
+  - id: project_id
+    name: 项目
+    type: integer
+    db_column: project_id
+    nullable: true
+    description: 所属项目（可空；空 = 未归集到项目）
+    semantics:
+      meaning: 所属项目
+      display:
+        type: association
+        target_type: project
+        display_field: name
+        placeholder: "未归集"
+    value_help:
+      source:
+        type: bo
+        target_bo: project
+        value_field: id
+        display_field: name
+        code_field: project_no
+        apply_target_permissions: true
+      behavior:
+        multiple: false
+        validation: true
+        binding_strength: strict
+        min_search_length: 0
+      presentation:
+        result_type: dropdown
+        display_format: "{project_no} {name}"
+        columns:
+          - field: project_no
+            label: 项目编号
+            width: 140
+          - field: name
+            label: 项目名称
+            width: 200
+    ui:
+      widget: select
+      relation: project
+      multiple: false
+      clearable: true
 
   - id: status
     name: 状态
@@ -1355,6 +1409,51 @@ fields:
       meaning: 派生确认时间，非人工维护
       audit_field: true
 
+  # S8 Wave B：订单级开票状态（delivery 发货开票 + plan 计划开票联合派生）
+  # 依据 docs/specs/s8-customer-invoice-wave-b/spec.md §3.2 / §5.6
+  - id: billing_status
+    name: 开票状态
+    type: string
+    db_column: billing_status
+    required: true
+    default: none
+    max_length: 16
+    description: 订单级开票进度（delivery 与 plan 联合派生），只读
+    enum_values:
+      - value: none
+        label: 未开票
+        color: info
+        category: active
+        is_initial: true
+      - value: partial
+        label: 部分开票
+        color: warning
+        category: active
+      - value: full
+        label: 已开满
+        color: success
+        category: active
+    semantics:
+      meaning: 订单级开票进度（none/partial/full）
+      filterable: true
+      filter_type: enum
+      filter_label: 开票状态
+      filter_scope: local
+      derived: true
+      readonly: true
+    ui:
+      readonly: true
+
+  - id: billing_derived_at
+    name: 开票派生时间
+    type: datetime
+    db_column: billing_derived_at
+    nullable: true
+    description: 最近一次开票状态派生确认时间（UTC），只读，不可见
+    semantics:
+      meaning: 派生确认时间，非人工维护
+      audit_field: true
+
   # M2 文档版本（FR-003）：内容变更计数，平台写入，界面不可编辑
   - id: revision_no
     name: 版本号
@@ -1431,21 +1530,24 @@ indexes:
     name: idx_sales_order_sales_org_date
   - fields: [status]
     name: idx_sales_order_status
-  - fields: [order_type_id]
-    name: idx_sales_order_type
+  - fields: [document_type_id]
+    name: idx_sales_order_document_type
   # [TER-M3] 区域维度过滤（列表按区域 / 数据范围）走快照列
   - fields: [territory_id]
     name: idx_sales_order_territory
+  # P1：项目 360 聚合
+  - fields: [project_id]
+    name: idx_sales_order_project
 
 relations:
   - id: sales_order_to_type_definition
-    name: 订单类型
+    name: 单据类型
     type: reference
     target: type_definition
-    source_field: order_type_id
+    source_field: document_type_id
     target_field: id
     cardinality: N:1
-    description: 订单单据类型引用（真外键，限定 header 层）
+    description: 销售订单单据类型引用（真外键，限定 header 层）
   - id: sales_order_to_customer_account
     name: 售达方
     type: reference
@@ -1572,7 +1674,7 @@ ui_view_config:
       - field: order_no
         width: 180
         sortable: true
-      - field: order_type_id
+      - field: document_type_id
         width: 120
       - field: order_date
         width: 120
@@ -1624,7 +1726,7 @@ ui_view_config:
         label: 新建订单
         icon: plus
         type: primary
-        permission: sales_order:sales_order_create
+        permission: sales_order:create
       - id: export
         label: 导出
         icon: download
@@ -1638,7 +1740,7 @@ ui_view_config:
     sections:
       - title: 单据信息
         columns:
-          - fields: [order_no, order_type_id]
+          - fields: [order_no, document_type_id]
           - fields: [order_date, status]
       - title: 客户与组织
         columns:
@@ -1685,6 +1787,16 @@ ui_view_config:
   #   ⇒ 跨单据数据泄漏。故用 customFetcher=target_change_requests 按 target 精确取数。
   #   只读：审批处理仍走任务收件箱（/api/v1/tasks/{id}/decision），不在详情页重复造审批 UI。
   detail:
+    # [S8 Wave C T43] 手工补跑开票计划（确认时自动生成；历史单据或生成失败后可在此重试）
+    #   幂等：已开票金额不会被重算；未完全开票时才显示。
+    actions:
+      - id: generate_billing_plan
+        label: 生成开票计划
+        icon: calendar
+        variant: secondary
+        permission: sales_order:update
+        action: sales_order.generate_billing_plan
+        visible_when: "billing_status != 'full'"
     facets:
       - title: 变更申请
         id: change_request_section
@@ -1693,6 +1805,16 @@ ui_view_config:
         customFetcher: target_change_requests
         readonly: true
         pageSize: 10
+    # [v1.7 2026-11-07] 规则推导分区（A 入口）：展示本单据的规则因子快照与命中结论。
+    #   权限：rule_center:trace（无权限时分区不显示）；
+    #   scenarios 缺省 5 个（default / control_parameter / line_type / approval / doc_flow），
+    #   codes 为控制参数维度的预置编码（可在分区内改）。
+    rule_trace:
+      enabled: true
+      label: 规则推导
+      permission: rule_center:trace
+      scenarios: [default, control_parameter, line_type, approval, doc_flow]
+      codes: [qty_required, price_required, default_incoterm]
 
   # 订单行子表：父字段由 sales_order_line.order_id 的 ui.relation=sales_order 推断
   child_sections:

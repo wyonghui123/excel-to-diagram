@@ -31,7 +31,7 @@ name: 交货单
 table_name: shipments
 description: 交货单头（交货行见 shipment_line）
 display_name_field: delivery_no
-aspects: [audit_aspect]
+aspects: [audit_aspect, document_type_aspect]
 
 semantics:
   meaning: 交货单
@@ -75,6 +75,14 @@ audit:
   dissociate:
     enabled: true
 
+org_scope:
+  mode: chain
+  via: ship_from_location_id
+  host: location
+  field: org_id
+  function: inventory
+  write_check: true
+
 fields:
   - id: id
     name: ID
@@ -86,6 +94,30 @@ fields:
     semantics:
       meaning: 自增主键
       primary_key: true
+
+  # [S8 Wave C T43] 单据类别派生字段：来自单据类型（standard / return）。
+  # 仅用于前端动作可见性判断（退货交货单不允许生成销售发票，R-INV-19），不落库。
+  - id: document_category
+    name: 单据类别
+    type: string
+    storage: virtual
+    description: 单据类别（由单据类型派生：standard / return）
+    ui:
+      visible: false
+      editable: false
+    semantics:
+      meaning: 区分标准交货单 / 退货交货单
+      derived_from: document_type_id
+      readonly_always: true
+    redundancy:
+      type: virtual
+      source_field: document_type_id
+      derived_from: type_definitions.document_category
+      join_path:
+        - table: type_definitions
+          from: document_type_id
+          to: id
+          select: document_category
 
   # 编号由 shipment_service._next_delivery_no() 生成后回填；
   # 界面只读，用户不手工录入（W0-R1 同口径：生成后不可修改）。
@@ -149,6 +181,53 @@ fields:
       widget: value_help
       relation: sales_order
       multiple: false
+
+  # G6：项目锚点（与 work_order / sales_order 的 project_id 同构；
+  # 只声明字段 + 索引，不加 reference 关系/真外键，避免存量库 ALTER 与新建库 DDL 双源漂移）
+  - id: project_id
+    name: 项目
+    type: integer
+    db_column: project_id
+    nullable: true
+    description: 所属项目（可空；空 = 未归集到项目）
+    semantics:
+      meaning: 所属项目
+      display:
+        type: association
+        target_type: project
+        display_field: name
+        placeholder: "未归集"
+      filterable: true
+      filter_type: relation
+      filter_label: 所属项目
+      filter_scope: local
+    value_help:
+      source:
+        type: bo
+        target_bo: project
+        value_field: id
+        display_field: name
+        code_field: project_no
+        apply_target_permissions: true
+      behavior:
+        multiple: false
+        validation: true
+        binding_strength: strict
+        min_search_length: 0
+      presentation:
+        result_type: dropdown
+        display_format: "{project_no} {name}"
+        columns:
+          - field: project_no
+            label: 项目编号
+            width: 150
+          - field: name
+            label: 项目名称
+            width: 200
+    ui:
+      widget: select
+      relation: project
+      clearable: true
 
   - id: ship_from_location_id
     name: 发货库位
@@ -338,6 +417,27 @@ fields:
       meaning: 签收凭证引用
       data_category: text
 
+  - id: reversed_at
+    name: 冲销时间
+    type: datetime
+    db_column: reversed_at
+    nullable: true
+    description: 数据错误红冲时间（业务退货请用反向交货，不用此字段）
+    semantics:
+      meaning: 冲销时间
+      data_category: timestamp
+
+  - id: reversal_reason
+    name: 冲销原因
+    type: string
+    db_column: reversal_reason
+    nullable: true
+    max_length: 200
+    description: 数据错误红冲原因（必填由服务校验）
+    semantics:
+      meaning: 冲销原因
+      data_category: text
+
   - id: status
     name: 状态
     type: string
@@ -367,6 +467,10 @@ fields:
         label: 已签收
         color: success
         category: active
+      - value: reversed
+        label: 已冲销
+        color: danger
+        category: inactive
       - value: closed
         label: 已关闭
         color: info
@@ -442,10 +546,101 @@ fields:
       meaning: 记录更新时间
       audit_field: true
 
+# 逆向能力声明（Reversal Platform D4）：正向写面清单 + 逆向过渡条件。
+# 交货红冲由 ReversalOrchestrator 统一持事务执行；方向由服务按
+# document_category 透传（standard / return），退货入库走 return 分支，
+# 序列号 / HU / 预留只在出库方向产生，故按方向条件启用。
+# 规格：docs/specs/spec-reversal-platform-2026-11-06.md §12 D4。
+doc_effect:
+  posting:
+    direction_field: document_category
+  faces:
+    - id: inventory_standard
+      primitive: inventory_reverse_by_event
+      args:
+        event_key: "shipment:{id}:ship"
+        new_event_key: "shipment:{id}:ship_reverse"
+        source_doc_id: "{id}"
+        remark: "交货单 {id} 出库冲销"
+      enabled_when: "direction == 'standard'"
+      on_missing: skip
+    - id: inventory_return
+      primitive: inventory_reverse_by_event
+      args:
+        event_key: "shipment:{id}:return"
+        new_event_key: "shipment:{id}:return_reverse"
+        source_doc_id: "{id}"
+        remark: "交货单 {id} 退货入库冲销"
+      enabled_when: "direction == 'return'"
+      on_missing: skip
+    - id: serial
+      primitive: serial_reverse_by_txn
+      args:
+        txn_ids: "{inventory_standard.source_txn_ids}"
+      enabled_when: "direction == 'standard'"
+      on_missing: skip
+    - id: hu
+      primitive: hu_reverse_document
+      args:
+        doc_type: shipment
+        doc_id: "{id}"
+      enabled_when: "direction == 'standard'"
+      on_missing: skip
+    - id: reservation
+      primitive: reservation_unfulfill_by_shipment
+      args:
+        doc_id: "{id}"
+        demand_type: sales_order_line
+      enabled_when: "direction == 'standard'"
+      on_missing: skip
+    - id: doc_flow_standard
+      primitive: edge_compensate_by_source
+      args:
+        source_bo: shipment_line
+        rule_ids: [shipment_line_to_issue_txn]
+        ref: "{id}"
+        derived_by: shipment_reverse
+      enabled_when: "direction == 'standard'"
+      on_missing: skip
+    - id: doc_flow_return
+      primitive: edge_compensate_by_source
+      args:
+        source_bo: shipment_line
+        rule_ids: [shipment_line_to_return_in_txn]
+        ref: "{id}"
+        derived_by: shipment_reverse
+      enabled_when: "direction == 'return'"
+      on_missing: skip
+    - id: lines
+      primitive: shipment_reverse_lines
+      args:
+        doc_id: "{id}"
+        now: "{now}"
+      on_missing: skip
+  projections:
+    - id: schedule
+      primitive: recompute_schedule_delivered
+      args:
+        doc_id: "{id}"
+    - id: fulfillment
+      primitive: recompute_fulfillment
+      args:
+        order_id: "{order_id}"
+  reversal:
+    from_states: [shipped, delivered]
+    to_state: reversed
+    idempotent_states: [reversed]
+    order: declared
+    write_audit_fields:
+      reversed_at: "{now}"
+      reversal_reason: "{reason}"
+      updated_at: "{now}"
+
 # 状态机（B1）：draft → released → staged → shipped → delivered → closed；
-# shipped 之前可 cancelled。迁移由平台状态接口按 PUT status 执行；
-# 带跨表副作用的三段（shipped / delivered / cancelled）由
-# shipment_guard_interceptor 委托 shipment_service 执行（delivered_qty 唯一写入口）。
+# shipped 之前可 cancelled；shipped / delivered 可 reversed（仅数据错误红冲）。
+# 迁移由平台状态接口按 PUT status 执行；带跨表副作用的四段
+# （shipped / delivered / cancelled / reversed）由 shipment_guard_interceptor
+# 委托 shipment_service 执行（delivered_qty 唯一写入口）。
 rules:
   - id: release_shipment
     name: 释放交货单
@@ -496,6 +691,18 @@ rules:
       icon: check_circle
       confirm_message: "确认客户已签收，确定吗？"
 
+  - id: reverse_shipment
+    name: 冲销交货单
+    type: state_transition
+    state_field: status
+    from_states: [shipped, delivered]
+    to_state: reversed
+    triggers: [before_update]
+    ui_hints:
+      label: 冲销
+      icon: undo
+      confirm_message: "冲销将反向过账库存并回退序列号 / 装箱 / 预留台账，仅用于数据错误；业务退货请用反向交货。确定冲销吗？"
+
   - id: close_shipment
     name: 关闭交货单
     type: state_transition
@@ -527,8 +734,21 @@ indexes:
   # 列表按订单 + 状态筛选的主路径
   - fields: [order_id, status]
     name: idx_shipment_order_status
+  - fields: [document_type_id]
+    name: idx_shipment_document_type
+  # 项目 360 归集路径（G6）
+  - fields: [project_id]
+    name: idx_shipment_project
 
 relations:
+  - id: shipment_to_document_type
+    name: 单据类型
+    type: reference
+    target: type_definition
+    source_field: document_type_id
+    target_field: id
+    cardinality: N:1
+    description: 单据类型引用（type_definitions 的 header 行；真外键）
   - id: shipment_to_order
     name: 来源订单
     type: reference
@@ -564,6 +784,10 @@ ui_view_config:
         sortable: true
       - field: order_id
         width: 160
+        filterable: true
+        filter_type: select
+      - field: project_id
+        width: 180
         filterable: true
         filter_type: select
       - field: ship_to_party_id
@@ -611,7 +835,8 @@ ui_view_config:
     sections:
       - title: 基本信息
         columns:
-          - fields: [delivery_no, order_id, status]
+          - fields: [delivery_no, order_id]
+          - fields: [project_id, status]
           - fields: [source, ship_from_location_id]
       - title: 收货信息
         columns:
@@ -629,6 +854,17 @@ ui_view_config:
   detail:
     showChangeHistory: true
     showRelations: true
+    # 业务 Action（含 action 字段）：详情页标题栏「生成销售发票」，
+    # 派发 customer_invoice.create_from_shipment（spec §13）
+    actions:
+      - id: create_invoice
+        label: 生成销售发票
+        icon: plus
+        variant: secondary
+        permission: customer_invoice:create
+        action: customer_invoice.create_from_shipment
+        # [S8 Wave C T43] 退货交货单不显示「生成销售发票」（后端 R-INV-19 同样拒绝）
+        visible_when: "document_category != 'return'"
     facets:
       - title: 基本信息
         id: shipment_basic
@@ -636,6 +872,7 @@ ui_view_config:
         fields:
           - delivery_no
           - order_id
+          - project_id
           - status
           - source
           - ship_from_location_id

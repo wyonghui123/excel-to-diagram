@@ -599,7 +599,9 @@ class AuditService:
             # [v3.18 FR-003/004/005/009/013] 新增参数
             outcome: str = "success", cascade: bool = False,
             retention_until: str = None,
-            cascade_root_id: Any = None, cascade_root_action: str = None) -> bool:
+            cascade_root_id: Any = None, cascade_root_action: str = None,
+            # [E3 2026-11-11] 业务治理状态（ok/denied/error）；缺省保持 'written'
+            status: str = None) -> bool:
         """
         写入审计日志
 
@@ -834,7 +836,7 @@ class AuditService:
                     'agent_session_id': agent_session_id,
                     'tool_call_id': tool_call_id,
                     'agent_reasoning': agent_reasoning,
-                    'status': 'written',
+                    'status': status or 'written',
                     # [R018 P1 BUG-F] ensure_ascii=False 让中文字符直接以 UTF-8 字节
                     # 存入 SQLite TEXT 列, 避免双重编码 / 客户端 latin-1 错误显示 '?'
                     # (历史 7/18 数据 "??-????" 现象)
