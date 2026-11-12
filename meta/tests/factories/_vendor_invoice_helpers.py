@@ -19,7 +19,11 @@ from meta.core.doc_flow_rule_store import (
     ensure_doc_flow_rule_table,
     upsert_rules,
 )
-from meta.migrations.v252__vendor_invoice_object import HEADER_DDL, LINE_DDL
+from meta.migrations.v252__vendor_invoice_object import (
+    HEADER_DDL,
+    HEADER_TABLE,
+    LINE_DDL,
+)
 from meta.tests.shared.db_schema import create_audit_logs
 
 # ---------------------------------------------------------------- 业务常量
@@ -29,6 +33,11 @@ CURRENCY_ID = 1
 ORG_ID = 10
 PURCHASE_ORG_ID = 11
 DOC_TYPE_ID = 9101
+RED_TYPE_ID = 9102
+ADJUSTMENT_TYPE_ID = 9105
+VI_SEQUENCE_ID = 9201
+VCM_SEQUENCE_ID = 9202
+VIA_SEQUENCE_ID = 9203
 PO_ID = 7001
 PO_LINE_ID = 7101
 SCHEDULE_ID = 7201
@@ -63,14 +72,16 @@ SUPPORT_DDL = (
     )
     """,
     """
-    CREATE TABLE IF NOT EXISTS purchase_order_schedule (
+    CREATE TABLE IF NOT EXISTS purchase_order_schedules (
         id INTEGER PRIMARY KEY,
         order_id INTEGER,
         line_id INTEGER,
         schedule_kind VARCHAR(20) DEFAULT 'delivery',
         promised_qty NUMERIC(18,4) DEFAULT 0,
         returned_qty NUMERIC(18,4) DEFAULT 0,
-        status VARCHAR(20) DEFAULT 'planned'
+        status VARCHAR(20) DEFAULT 'planned',
+        created_at DATETIME,
+        updated_at DATETIME
     )
     """,
     """
@@ -84,7 +95,9 @@ SUPPORT_DDL = (
         qty_received NUMERIC(18,4) DEFAULT 0,
         qty_rejected NUMERIC(18,4) DEFAULT 0,
         rejection_disposition VARCHAR(30),
-        status VARCHAR(20) DEFAULT 'posted'
+        status VARCHAR(20) DEFAULT 'posted',
+        created_at DATETIME,
+        updated_at DATETIME
     )
     """,
     """
@@ -116,6 +129,37 @@ SUPPORT_DDL = (
         status VARCHAR(20) DEFAULT 'active'
     )
     """,
+    """
+    CREATE TABLE IF NOT EXISTS type_definitions (
+        id INTEGER PRIMARY KEY,
+        code VARCHAR(40),
+        scope_bo VARCHAR(60),
+        document_role VARCHAR(20),
+        document_category VARCHAR(30),
+        direction INTEGER DEFAULT 1,
+        reversal_type_id INTEGER,
+        level VARCHAR(20) DEFAULT 'header',
+        is_default INTEGER DEFAULT 0,
+        number_sequence_id INTEGER,
+        status VARCHAR(20) DEFAULT 'active'
+    )
+    """,
+    """
+    CREATE TABLE IF NOT EXISTS number_sequences (
+        id INTEGER PRIMARY KEY,
+        code VARCHAR(30) UNIQUE,
+        name VARCHAR(50),
+        pattern VARCHAR(80),
+        scope_fields TEXT,
+        date_field VARCHAR(30) DEFAULT 'order_date',
+        start_value INTEGER DEFAULT 1,
+        on_exhaust VARCHAR(20) DEFAULT 'error',
+        preview VARCHAR(40),
+        status VARCHAR(20) DEFAULT 'active',
+        description TEXT,
+        created_at DATETIME
+    )
+    """,
 )
 
 RULES = (
@@ -124,6 +168,7 @@ RULES = (
         'source_bo': 'purchase_order_schedule',
         'target_bo': 'vendor_invoice_line',
         'source_qty_field': 'promised_qty',
+        'target_qty_field': 'qty',
         'pool': 'billing',
     },
     {
@@ -131,6 +176,7 @@ RULES = (
         'source_bo': 'receipt_line',
         'target_bo': 'vendor_invoice_line',
         'source_qty_field': 'qty_received',
+        'target_qty_field': 'qty',
         'pool': 'ap_match',
     },
     {
@@ -138,6 +184,7 @@ RULES = (
         'source_bo': 'vendor_invoice_line',
         'target_bo': 'vendor_invoice_line',
         'source_qty_field': 'qty',
+        'target_qty_field': 'qty',
         'pool': 'billing',
     },
 )
@@ -158,6 +205,21 @@ def make_env(tmp_path):
     ds.connect(path=str(tmp_path / 'vendor_invoice_match.db'))
     ds.execute(HEADER_DDL)
     ds.execute(LINE_DDL)
+    # v258 补列（HEADER_DDL 是 v252 基线，生产库由迁移追加）
+    if 'reversal_reason' not in ds.get_table_columns(HEADER_TABLE):
+        ds.execute(
+            'ALTER TABLE vendor_invoices ADD COLUMN reversal_reason VARCHAR(256)')
+    # v259 调整单三列
+    columns = ds.get_table_columns(HEADER_TABLE)
+    if 'adjustment_of_invoice_id' not in columns:
+        ds.execute(
+            'ALTER TABLE vendor_invoices ADD COLUMN adjustment_of_invoice_id INTEGER')
+    if 'adjustment_direction' not in columns:
+        ds.execute(
+            'ALTER TABLE vendor_invoices ADD COLUMN adjustment_direction VARCHAR(10)')
+    if 'adjustment_reason' not in columns:
+        ds.execute(
+            'ALTER TABLE vendor_invoices ADD COLUMN adjustment_reason VARCHAR(256)')
     for ddl in SUPPORT_DDL:
         ds.execute(ddl)
     create_audit_logs(ds)
@@ -167,6 +229,62 @@ def make_env(tmp_path):
     seed_params(ds)
     ds.commit()
     return ds
+
+
+def seed_type_definitions(ds, *, reversal_type_id=RED_TYPE_ID):
+    """采购发票类型（正向）/ 红字贷项（direction -1）/ 调整单各一行。"""
+    ds.execute('DELETE FROM type_definitions WHERE scope_bo = ?',
+               ['vendor_invoice'])
+    _seed_sequence(ds, VI_SEQUENCE_ID, 'VI', 'VI-{DATE:yyyymm}-{SEQ:5}')
+    _seed_sequence(ds, VCM_SEQUENCE_ID, 'VCM', 'VCM-{DATE:yyyymm}-{SEQ:5}')
+    _seed_sequence(ds, VIA_SEQUENCE_ID, 'VIA', 'VIA-{DATE:yyyymm}-{SEQ:5}')
+    ds.execute(
+        'INSERT INTO type_definitions '
+        '(id, code, scope_bo, document_role, document_category, direction, '
+        ' reversal_type_id, level, is_default, number_sequence_id, status) '
+        'VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)',
+        [DOC_TYPE_ID, 'VENDOR_INVOICE', 'vendor_invoice', 'invoice',
+         'invoice', 1, reversal_type_id, 'header', 1, VI_SEQUENCE_ID, 'active'],
+    )
+    ds.execute(
+        'INSERT INTO type_definitions '
+        '(id, code, scope_bo, document_role, document_category, direction, '
+        ' reversal_type_id, level, is_default, number_sequence_id, status) '
+        'VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)',
+        [RED_TYPE_ID, 'VENDOR_CREDIT_MEMO', 'vendor_invoice', 'credit_memo',
+         'credit_memo', -1, None, 'header', 0, VCM_SEQUENCE_ID, 'active'],
+    )
+    ds.execute(
+        'INSERT INTO type_definitions '
+        '(id, code, scope_bo, document_role, document_category, direction, '
+        ' reversal_type_id, level, is_default, number_sequence_id, status) '
+        'VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)',
+        [ADJUSTMENT_TYPE_ID, 'VENDOR_INVOICE_ADJUSTMENT', 'vendor_invoice',
+         'adjustment', 'adjustment', 1, None, 'header', 0, VIA_SEQUENCE_ID,
+         'active'],
+    )
+    ds.commit()
+
+
+def _seed_sequence(ds, sequence_id, code, pattern):
+    ds.execute(
+        'INSERT OR REPLACE INTO number_sequences '
+        '(id, code, name, pattern, scope_fields, date_field, start_value, '
+        ' on_exhaust, status) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)',
+        [sequence_id, code, code, pattern, '', 'invoice_date', 1, 'error',
+         'active'],
+    )
+
+
+def get_header(ds, invoice_id):
+    rows = ds.query('SELECT * FROM vendor_invoices WHERE id = ?', [invoice_id])
+    return rows[0] if rows else None
+
+
+def get_lines(ds, invoice_id):
+    return ds.query(
+        'SELECT * FROM vendor_invoice_lines WHERE invoice_id = ? ORDER BY line_no',
+        [invoice_id])
 
 
 def seed_params(ds):
@@ -196,7 +314,7 @@ def seed_purchase_order(ds, *, promised_qty=10.0, returned_qty=0.0,
         [PO_LINE_ID, PO_ID, 1, ITEM_ID, None, line_type_id, UOM_ID, unit_price],
     )
     ds.execute(
-        'INSERT OR REPLACE INTO purchase_order_schedule '
+        'INSERT OR REPLACE INTO purchase_order_schedules '
         '(id, order_id, line_id, schedule_kind, promised_qty, returned_qty, '
         ' status) VALUES (?, ?, ?, ?, ?, ?, ?)',
         [SCHEDULE_ID, PO_ID, PO_LINE_ID, 'delivery', promised_qty,
@@ -304,3 +422,11 @@ def count_edges(ds, **where):
     if clause:
         sql += ' WHERE ' + clause
     return ds.query(sql, params)[0]['n']
+
+
+def update_edge_quantity(ds, rule_id, target_line_id, quantity):
+    """改写指定原行某规则的 normal 边数量（模拟一条发票行分属多条计划行）。"""
+    ds.execute(
+        'UPDATE doc_flow_edges SET quantity = ? WHERE rule_id = ? AND target_id = ?',
+        [quantity, rule_id, str(target_line_id)])
+    ds.commit()

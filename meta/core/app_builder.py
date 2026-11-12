@@ -304,6 +304,12 @@ class ApplicationBuilder:
         #   与 server.py create_app() 同位登记 —— 两条启动路径缺一会静默失效。
         from meta.core.interceptors.customer_invoice_guard_interceptor import CustomerInvoiceGuardInterceptor
         bo_framework.register_interceptor(CustomerInvoiceGuardInterceptor())
+        # [VENDOR_INVOICE W5 2026-11-11] 采购发票守卫（P51）：抬头创建/删除与状态迁移
+        #   接线（submit/post/cancel 委托 vendor_invoice_match_service，写 doc_flow 边
+        #   与匹配结果）、行写入仅限草稿父单；红冲链未实现时显式拒绝。
+        #   与 server.py create_app() 同位登记 —— 两条启动路径缺一会静默失效。
+        from meta.core.interceptors.vendor_invoice_guard_interceptor import VendorInvoiceGuardInterceptor
+        bo_framework.register_interceptor(VendorInvoiceGuardInterceptor())
         # [RECEIPT 2026-11-01] 收货单守卫（P52）：抬头创建归一化与取号、状态迁移委托
         #   receipt_service（计划行 received_qty / rejected_qty 回写、分配拆分、履约派生）、
         #   行冗余列校验回填、posted 后冻结（R-RC-0~R-RC-18）。

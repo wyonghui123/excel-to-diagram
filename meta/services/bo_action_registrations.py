@@ -149,6 +149,8 @@ def register_all_bo_actions(registry=None):
         submit_handler as vendor_invoice_submit_handler,
         post_handler as vendor_invoice_post_handler,
         cancel_handler as vendor_invoice_cancel_handler,
+        reverse_handler as vendor_invoice_reverse_handler,
+        create_adjustment_handler as vendor_invoice_create_adjustment_handler,
     )
 
     # M4 调拨单: 下达 / 发货 / 收货 / 取消 / 关闭（spec-transfer-order-object-model §6/§7）
@@ -1805,7 +1807,7 @@ def register_all_bo_actions(registry=None):
             'status': {'type': 'string'},
             'match_status': {'type': 'string'},
             'match_mode': {'type': 'string'},
-            'duplicate_of_id': {'type': 'integer'},
+            'duplicate_of': {'type': 'integer'},
             'lines': {'type': 'array', 'items': {'type': 'object'}},
             'amounts': {'type': 'object'},
         },
@@ -1935,6 +1937,57 @@ def register_all_bo_actions(registry=None):
         output_schema=_vendor_invoice_output_schema,
         requires_auth=True,
         idempotent=True,
+    )
+    registry.register(
+        'vendor_invoice.reverse',
+        vendor_invoice_reverse_handler,
+        governance='audit',
+        description='红冲已过账采购发票（posted → reversed；生成红字采购贷项凭证并写红字单据流边）',
+        object_type='vendor_invoice',
+        category='business',
+        permission_required='vendor_invoice:reverse',
+        input_schema={
+            'type': 'object',
+            'properties': {
+                'invoice_id': {'type': 'integer'},
+                'id': {'type': 'integer'},
+                'reason': {'type': 'string'},
+                'reversal_reason': {'type': 'string'},
+                'invoice_date': {'type': 'string'},
+            },
+        },
+        output_schema=_vendor_invoice_output_schema,
+        requires_auth=True,
+        idempotent=True,
+    )
+    registry.register(
+        'vendor_invoice.create_adjustment',
+        vendor_invoice_create_adjustment_handler,
+        governance='audit',
+        description='基于已过账采购发票创建正向调整单（increase 追加 / decrease 冲减；原票保持 posted）',
+        object_type='vendor_invoice',
+        category='business',
+        permission_required='vendor_invoice:create',
+        input_schema={
+            'type': 'object',
+            'required': ['direction'],
+            'properties': {
+                'invoice_id': {'type': 'integer'},
+                'id': {'type': 'integer'},
+                'direction': {'type': 'string', 'enum': ['increase', 'decrease']},
+                'adjustment_direction': {'type': 'string', 'enum': ['increase', 'decrease']},
+                'reason': {'type': 'string'},
+                'adjustment_reason': {'type': 'string'},
+                'invoice_date': {'type': 'string'},
+                'lines': {
+                    'type': 'array',
+                    'description': '可选；为空表示整单全额调整。元素: invoice_line_id / qty / unit_price / net_amount / tax_amount',
+                },
+            },
+        },
+        output_schema=_vendor_invoice_output_schema,
+        requires_auth=True,
+        idempotent=False,
     )
 
     # ==================== 单据流 derive / reverse（§9.3.13 S1/S3） ====================

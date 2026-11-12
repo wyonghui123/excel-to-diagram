@@ -9,8 +9,12 @@
   · `vendor_invoice.submit`             —— draft → submitted
   · `vendor_invoice.post`               —— submitted → posted（写 doc_flow 边）
   · `vendor_invoice.cancel`             —— draft / submitted → cancelled
+  · `vendor_invoice.reverse`            —— posted → reversed（红冲生成红字贷项凭证）
+  · `vendor_invoice.create_adjustment`  —— 基于已过账发票创建正向调整单（increase / decrease）
 
 事务边界由 handler 控制；服务层不自行提交，异常整体回滚（R-VI-18）。
+`reverse` 例外：服务内部先在事务外分配红字单号，再由 ReversalOrchestrator
+自持事务执行 7 步，故 handler 不包外层事务。
 """
 
 import logging
@@ -33,7 +37,12 @@ def _fail(message: str, code: str) -> Dict[str, Any]:
 
 
 def _invoice_id(params: Dict[str, Any]) -> Any:
-    return params.get('invoice_id') or params.get('id')
+    """目标发票 ID：显式 invoice_id / id 优先，退化为详情页下发的 source_doc_id。
+
+    DetailPage 的业务动作统一以 `source_doc_id` 传入当前记录（见 useBoAction），
+    此前只认 invoice_id / id ⇒ match / override_* / reverse 均报「缺少采购发票 ID」。
+    """
+    return params.get('invoice_id') or params.get('id') or params.get('source_doc_id')
 
 
 def _current_user_name() -> str:
@@ -135,3 +144,64 @@ def post_handler(params: Dict[str, Any], context: Any = None) -> Dict[str, Any]:
 def cancel_handler(params: Dict[str, Any], context: Any = None) -> Dict[str, Any]:
     user_name = _current_user_name()
     return _handle(params, '取消', lambda svc, invoice_id: svc.cancel(invoice_id, user_name=user_name))
+
+
+def reverse_handler(params: Dict[str, Any], context: Any = None) -> Dict[str, Any]:
+    """红冲已过账采购发票（生成红字采购贷项凭证）。
+
+    不包外层事务：``VendorInvoiceMatchService.reverse`` 在事务外预取单号，
+    随后由 ``ReversalOrchestrator.execute`` 自持事务完成 faces / state。
+    """
+    params = params or {}
+    reason = params.get('reversal_reason') or params.get('reason') or ''
+    invoice_id = _invoice_id(params)
+    if not invoice_id:
+        return _fail('缺少采购发票 ID', 'VI_NOT_FOUND')
+    if not reason:
+        return _fail('红冲必须填写原因', 'VI_REVERSAL_REASON_REQUIRED')
+    _set_user_context()
+    service = _service()
+    try:
+        data = service.reverse(
+            invoice_id, reason=reason,
+            invoice_date=params.get('invoice_date'),
+            user_name=_current_user_name(),
+        )
+        return _ok(data, '采购发票红冲成功')
+    except VendorInvoiceError as exc:
+        return _fail(exc.message, exc.rule)
+    except Exception as exc:  # noqa: BLE001 - 统一转业务失败，避免 500
+        logger.exception('[vendor_invoice] reverse failed')
+        return _fail(str(exc), 'VI_ACTION_FAILED')
+
+
+def create_adjustment_handler(params: Dict[str, Any], context: Any = None) -> Dict[str, Any]:
+    """基于已过账发票创建正向调整单（draft）。
+
+    不包外层事务：``create_adjustment`` 在事务外取号，再单事务插入头 + 行。
+    """
+    params = params or {}
+    invoice_id = _invoice_id(params)
+    if not invoice_id:
+        return _fail('缺少采购发票 ID', 'VI_NOT_FOUND')
+    direction = params.get('direction') or params.get('adjustment_direction') or ''
+    reason = params.get('reason') or params.get('adjustment_reason') or ''
+    if not reason:
+        return _fail('调整单必须填写调整原因', 'VI_ADJUSTMENT_REASON_REQUIRED')
+    _set_user_context()
+    service = _service()
+    try:
+        data = service.create_adjustment(
+            invoice_id,
+            direction=direction,
+            reason=reason,
+            invoice_date=params.get('invoice_date'),
+            lines=params.get('lines'),
+            user_name=_current_user_name(),
+        )
+        return _ok(data, '采购发票调整单创建成功')
+    except VendorInvoiceError as exc:
+        return _fail(exc.message, exc.rule)
+    except Exception as exc:  # noqa: BLE001 - 统一转业务失败，避免 500
+        logger.exception('[vendor_invoice] create_adjustment failed')
+        return _fail(str(exc), 'VI_ACTION_FAILED')

@@ -625,7 +625,7 @@ doc_effect:
 | 详情子表 | `child_sections: [vendor_invoice_line]` |
 | 行列表列 | `line_no / schedule_id / receipt_line_id / item_id / qty / uom_id / unit_price / po_unit_price / price_diff_amount / net_amount / tax_amount / match_status` |
 | 行表单分区 | 锚点（`schedule_id` 只读派生 `order_line_id / item_id / uom_id`；`receipt_line_id` 仅 `gr_based` 可编辑）；数量金额（`qty / unit_price / price_includes_tax`）；税额（`tax_code_id / tax_amount`）；匹配（`match_status / match_exception_reason` 只读） |
-| 详情动作 | 提交 / 过账 / 重新匹配 / 例外放行 / 生成贷项 / 生成借项 / 取消 / 红冲 |
+| 详情动作 | 提交 / 过账 / 重新匹配 / 例外放行 / 取消 / 红冲（手工新建贷项 / 借项 / 取消单由守卫拦截） |
 
 ### 12.2 YAML `actions` 清单（复用 `bo_action_registrations`，禁手写路由）
 
@@ -643,8 +643,6 @@ doc_effect:
 | `vendor_invoice_override_duplicate` | custom | `POST /api/v1/vendor_invoices/{id}/override-duplicate` | `vendor_invoice:override_duplicate` |
 | `vendor_invoice_cancel` | custom | `POST /api/v1/vendor_invoices/{id}/cancel` | `vendor_invoice:cancel` |
 | `vendor_invoice_reverse` | custom | `POST /api/v1/vendor_invoices/{id}/reverse` | `vendor_invoice:reverse` |
-| `vendor_invoice_create_credit_memo` | custom | `POST /api/v1/vendor_invoices/{id}/create-credit-memo` | `vendor_invoice:create_credit` |
-| `vendor_invoice_create_debit_memo` | custom | `POST /api/v1/vendor_invoices/{id}/create-debit-memo` | `vendor_invoice:create_debit` |
 | `vendor_invoice_line_create / update / delete / list` | crud | `/api/v1/vendor_invoice_lines` | `vendor_invoice_line:*` |
 
 ### 12.3 菜单与路由
@@ -667,15 +665,16 @@ doc_effect:
 
 ## 13. 迁移与实施顺序
 
-> 磁盘实际最大迁移为 `v256__align_status_check.py`（已被他人占用，C）；本 Spec 落盘 **v252–v255**（W1–W4），W5 无迁移。
+> 磁盘实际最大迁移为 `v256__align_status_check.py`（已被他人占用，C）；本 Spec 落盘 **v252–v255 + v258**（W1–W4 / W6），W5 无迁移。
 
 | 波次 | 迁移 | 内容 | 验证 |
 |---|---|---|---|
 | W1 | `v252__vendor_invoice_object.py` | `vendor_invoices` / `vendor_invoice_lines` 建表 + 索引（`uq_vendor_invoice_no`、`uq_vendor_invoice_reversal`、`uq_line_no`）；含 `org_id`、`settlement_mode`，**不含** `payment_block`（TBD-3） | `python d:\filework\test.py --file meta/tests/migrations/test_vendor_invoice_migrations.py` |
 | W2 | `v253__vendor_invoice_type_seed.py` | 四类类型种子（§3.2）+ 四条序列绑定 + **6 条参数**（`vi_match_mode` + 5 条容差，§5.3；`control_parameter_def` 种子，非 `type_definitions` 列） | 同上 `--file meta/tests/migrations/test_vendor_invoice_migrations.py` |
 | W3 | `v254__vendor_invoice_doc_flow.py` | 3 条 `doc_flow_rule`（§8.1）+ `v_doc_flow_consumed_amount` 视图 | 同上 `--file meta/tests/migrations/test_vendor_invoice_migrations.py` |
-| W4 | `v255__vendor_invoice_actions.py` | 19 权限码 + 菜单 + 退役旧自动菜单 / 幽灵元数据（动作注册在 `bo_action_registrations` 静态块，不建表） | 同上 `--file meta/tests/migrations/test_vendor_invoice_migrations.py` |
+| W4 | `v255__vendor_invoice_actions.py` | 17 权限码 + 菜单 + 退役旧自动菜单 / 幽灵元数据（动作注册在 `bo_action_registrations` 静态块，不建表）；**已退役手工 `create_credit_memo` / `create_debit_memo` 动作与权限** | 同上 `--file meta/tests/migrations/test_vendor_invoice_migrations.py` |
 | W5 | **无迁移**（无表变更） | 匹配服务 `vendor_invoice_match_service.py` + 动作层 `vendor_invoice_actions.py` | `--file meta/tests/services/test_vendor_invoice_match.py` |
+| W6 | `v258__vendor_invoice_reversal.py` | 补 `reversal_reason` 列；回填 `VENDOR_INVOICE.reversal_type_id → VENDOR_CREDIT_MEMO`；清理死权限 `create_credit_memo` / `create_debit_memo` | 同上 `--file meta/tests/migrations/test_vendor_invoice_migrations.py` |
 
 **W3 之后才能做 W5**：匹配服务依赖 `v_doc_flow_consumed_qty` 的 `ap_match` 切片与 `consumed_amount`。
 
@@ -978,19 +977,141 @@ doc_effect:
 - W1 `v252` 建表（**不含** `payment_block`，含 `org_id` / `settlement_mode`）。
 - W2 `v253` 种子：4 类型 + 4 序列 + **6 条参数**（`vi_match_mode`（`domain='procurement'`）+ `vi_price_tolerance` / `vi_qty_tolerance_receipt` / `vi_qty_tolerance_order` / `vi_amount_tolerance_abs` / `vi_rounding_tolerance_abs`）。
 - W3 `v254` doc_flow 规则 + `v_doc_flow_consumed_amount`。
-- W4 `v255` 动作 / 权限 / 菜单（**前置：TBD-10 幽灵元数据清理**；新增 `vendor_invoice:override_duplicate`）。
+- W4 `v255` 动作 / 权限 / 菜单（**前置：TBD-10 幽灵元数据清理**；新增 `vendor_invoice:override_duplicate`；**不含**手工贷项 / 借项动作）。
 - W5 **无迁移**：匹配服务（`qty_invoiceable` 口径 + `BEGIN IMMEDIATE` + 重复票硬拦）。
+- W6 `v258` 红冲链（`reversal_reason` 列 + 类型反转指针回填 + 死权限清理）。
 
-### 20.8 实施落地口径（W1–W5 已落盘）
+### 20.8 实施落地口径（W1–W6 已落盘）
 
 | 项 | 落地口径 |
 |---|---|
 | 重复发票 override | 头表**不加** `duplicate_of_id` / `duplicate_override_reason` 列；override 写 `audit_logs`（`action='override_duplicate'`），过账时查询放行 |
 | `doc_flow_edges.source_item` | attach 模式实际为空串 ⇒ 已开票量一律按 `(source_bo, source_id, pool)` 聚合，不按行精确匹配 |
-| 冲销类单据（credit / debit / cancellation） | 不做量价匹配，`_match_line` 早退 `matched`；借项单方向例外 |
+| 冲销类单据（credit / debit / cancellation） | **禁止手工新建**：守卫拦截器在 create 阶段拒绝非草稿状态与 `credit_memo` / `debit_memo` / `cancellation`（`VI_MANUAL_ADJUSTMENT_FORBIDDEN`）；调整单改走正向调整单（Phase 2，未授权） |
 | 贷项净额归零 | 不建 `vendor_invoice_line_to_credit_memo_line` 规则；对原发票行的 billing / ap_match 边写 `red_ink_edge`（`derive_key='red:{orig}:{ref}'`），`_red_available` 防超冲 |
+| 红冲链（posted → reversed） | YAML `doc_effect.reversal` + `faces` 声明；`VendorInvoiceMatchService.reverse()` 事务外预取号 → `ReversalOrchestrator.execute` 自持事务 7 步；红字单类型由 `VENDOR_INVOICE.reversal_type_id`（v258 回填 → `VENDOR_CREDIT_MEMO`）派生，方向必须为 `-1` |
+| 红冲守卫 | `_assert_reversible`：正向角色 + `direction=1` + 类型已声明反转 + `status='posted'` + 无有效红字单；原因必填（`VI_REVERSAL_REASON_REQUIRED`） |
 | 容差超派生 | 写边时 `edge_qty = min(qty, open_qty)`，金额按比例缩放 |
 | 双池双写 | post 同时写 billing（PO 计划行）+ ap_match（收货行）两条边，属设计意图（D-VI-10） |
-| 事务 | 匹配提交 / 过账统一 `with ds.transaction()`（SQLite `BEGIN IMMEDIATE`）内重算剩余量 |
+| 事务 | 匹配提交 / 过账统一 `with ds.transaction()`（SQLite `BEGIN IMMEDIATE`）内重算剩余量；红冲由 ReversalOrchestrator 自持事务 |
 
 > 本轮**不提交**（git commit 未授权）。
+
+---
+
+## 21. Phase 2：正向调整单（增减调整流程）
+
+> 决策来源：§20.8「调整单改走正向调整单」。核心结论：**调整单是正向链上的新事实，不是对原票的行级负向冲减**。
+> 逆向三档中，`cancel` / `reverse` 走 Orchestrator（负向补偿）；`return` / 调整 走正向链。本节只定义正向链。
+
+### 21.1 语义定位
+
+| 维度 | 红冲（credit_memo，Phase 1） | 调整单（Phase 2） |
+|---|---|---|
+| 事实性质 | 对原票的**负向补偿**（原票置 reversed） | **正向新单据**（原票保持 posted 不变） |
+| 生命周期 | 引擎派生（red_letter creator），一步到 posted | 正常单据链 draft → submitted → posted |
+| 状态归属 | 原票承担 `reversed` 终态 | 调整单自带状态；原票只读 |
+| 数量口径 | 红字边 `quantity_sign='red'` 全额/部分冲减 | increase 写 normal 边追加；decrease 写 red 边冲减 |
+| 撤销方式 | 无（终态） | 新建**方向相反**的反向调整单 |
+
+不变量：
+- **R-VI-20** 调整单必须回指一张 `status='posted'` 的原票（或已过账的调整单），原票任何字段不被修改。
+- **R-VI-21** `adjustment_direction` ∈ {increase, decrease}，创建后不可变。
+- **R-VI-22** 调整单**不声明** `doc_effect.reversal`；`posted` 后禁止 `status='reversed'`。
+- **R-VI-23** increase 的行数量不得超过目标池 `open_qty`（严格拒绝，不截断）；decrease 不得超过原行边的 `_red_available`。
+
+### 21.2 类型与编号
+
+`v259` 新增（不动 v253 的历史 4 类型）：
+
+| code | document_role | document_category | direction | is_default | sequence | reversal_type_id |
+|---|---|---|---|---|---|---|
+| `VENDOR_INVOICE_ADJUSTMENT` | `adjustment` | `adjustment` | `1` | `0` | `VIA` | **NULL** |
+
+序列：`VIA`，`pattern='VIA-{DATE:yyyymm}-{SEQ:5}'`，`date_field='invoice_date'`。
+`reversal_type_id` 为 NULL 是**设计意图**：调整单不能进入红冲引擎（§21.4）。
+
+### 21.3 头字段（`vendor_invoices` 扩列）
+
+| 字段 | 类型 | 可空 | 说明 |
+|---|---|---|---|
+| `adjustment_of_invoice_id` | integer | 是 | 回指原票 / 原调整单（`vendor_invoice.id`）；调整单必填 |
+| `adjustment_direction` | string(10) | 是 | `increase` / `decrease`；调整单必填且不可变 |
+| `adjustment_reason` | string(256) | 是 | 调整原因；调整单创建必填 |
+
+金额口径：
+- increase：行金额为**正数**，头金额 = Σ 行金额。
+- decrease：行数量存**正数幅值**，行金额存**负数**（`-abs(amount)`），头金额 = Σ 行金额（负数）。
+- `direction` 仍由类型派生为 `1`（文档方向），**不**用 `direction` 表达增减；增减只由 `adjustment_direction` 表达。
+
+### 21.4 状态机与 `doc_effect`
+
+- 复用 `draft → submitted → posted`，`draft|submitted → cancelled`。
+- **不声明** `doc_effect.reversal`，因此 `ReversalOrchestrator` 无法对调整单执行红冲。
+- 守卫拦截器：`category='adjustment'` 且 `status='posted'` 时，`status=reversed` 请求抛 `VI_ADJUSTMENT_NOT_REVERSIBLE`（提示新建反向调整单）。
+- `vendor_invoice.yaml` 的 `doc_effect.faces` / `reversal` 保持 Phase 1 声明不变（仅对 invoice 角色生效）。
+
+### 21.5 过账边语义（`post`）
+
+| 场景 | 边类型 | 目标 | 数量校验 | 金额 |
+|---|---|---|---|---|
+| increase | **normal**（`attach_edge`） | 原行的 `purchase_order_schedule` / `receipt_line` 锚点 | `qty <= open_qty`，超出 → `VI_ADJUSTMENT_EXCEEDED` | 边 `amount` = 调整行 `net_amount`（边数量 = 行数量，无需再分摊） |
+| decrease | **red**（`red_ink_edge`） | 原行该规则的**全部** active normal 边 | 先按 `Σ_red_available` 校验，超出 → `VI_ADJUSTMENT_EXCEEDED`；无 active 边 → `VI_ADJUSTMENT_ANCHOR_MISSING` | 同上（负数金额写正数 quantity + `quantity_sign='red'`） |
+| qty=0 | 不写边 | — | 纯金额调整（如价格差异） | 仅头/行金额变化 |
+
+- 行金额口径：`lines[]` 只给 `qty` 未给 `net_amount` / `tax_amount` 时，按**原行数量比例**折算金额（`net × qty/qty_原行`），避免「数量是部分、金额是全额」的口径失衡。
+- decrease 分摊：同一原行可能因 increase 产生多条 normal 边（分属多条计划行），按 `rowid` FIFO 依次冲减直至满足本次冲减量；校验用累计可用量而非单边可用量。
+- 原票边**永不**被 update/delete；decrease 通过新增红字边使 `_red_available` 归零，语义与 Phase 1 红冲一致。
+- increase 的 open 量按 `(source_bo, source_id, pool)` 聚合后减去该行的已开票量（含红字抵扣），复用 `v_doc_flow_consumed_amount`。
+
+### 21.6 行模型与 `line_source_policy`
+
+- 调整行**必须**携带 `invoice_line_id` 回指原行；锚点（schedule / receipt）在 `_normalize_line_anchors` 中从**原行**解析，不重复落库到调整行。
+- `line_source_policy.adjustment` = `[invoice_line]`（仅允许回指原行；不允许 `manual`，也不允许直接挂 PO/收货锚点）。
+- 行 create/update 守卫：父单为 adjustment 且 `invoice_line_id` 为空 → `VI_ADJUSTMENT_ANCHOR_REQUIRED`。
+- 调整行不参与数量/价格容差匹配（`_match_line` 与 credit_memo 同组直接置 matched）。
+
+### 21.7 权限与动作
+
+| 动作 | 权限 | 治理 | 幂等 | 说明 |
+|---|---|---|---|---|
+| `vendor_invoice.create_adjustment` | **复用** `vendor_invoice:create` | audit | 否 | 入参 `invoice_id` / `direction` / `reason` / `invoice_date?` / `lines?` |
+
+- 不新增 DB 权限码：调整单属于发票创建能力的变体，避免 `permission_set_permissions` / 菜单绑定迁移风险。
+- 无独立「调整单列表」菜单；通过 `document_category=adjustment` 过滤查看（list filters 已含 `document_category`）。
+- UI 入口（2026-11-12 修复）：`ui_view_config.detail.actions` 已全链路透传
+  （`UIDetailViewConfig.actions` → `parse_ui_detail_view_config` → `/api/v2/meta/<obj>/ui-config`；
+  form 不可渲染时 `UIConfigBuilder` 的整体替换分支也保留声明的 `detail.actions`）；
+  详情页按 `permission` / `visible_when` 门控，声明 `input_fields` 的动作先弹 `AppModal` 收集参数再派发 BO Action。
+  通用派发默认只带 `source_doc_id`，handler `_invoice_id` 已兼容。
+- 已声明动作：`match` / `override_match` / `override_duplicate` / `create_adjustment`；
+  `create_adjustment` 仅 `status == 'posted'` 可见，入参 `direction`（increase / decrease，必填）+ `reason`（必填）。
+
+### 21.8 明确不做（边界）
+
+- 不做行级红冲（不写 `reversal_of_line_id`，不对原行做负向冲减）。
+- 不做调整单自身的红冲（撤销 = 新建反向调整单，即对调整单建 `decrease` 调整单，红字冲减其入边）。
+- 不支持对调整单再 `increase`（调整行不落锚点列，过账无法解析订单/收货锚点；需要继续加量请对原发票行做 `increase`）。服务层与守卫均在创建期拒绝，规则码 `VI_ADJUSTMENT_INCREASE_UNSUPPORTED`。
+- 不支持调整单跨供应商 / 跨币种 / 跨 org（头字段全部从原票复制）。
+- 不支持调整单修改数量以外的价格模型重算（价格差异用 qty=0 的纯金额调整表达）。
+
+### 21.9 迁移与测试（W7 = v259）
+
+| 项 | 内容 |
+|---|---|
+| 迁移 | `v259__vendor_invoice_adjustment.py`：三列 ALTER（PRAGMA 幂等）+ 索引 `idx_vendor_invoice_adjustment_of`（旧库升级不执行 generated_schema，索引须在迁移内建）+ 类型 `VENDOR_INVOICE_ADJUSTMENT` + 序列 `VIA` |
+| `verify` | 列存在；索引存在；类型 code/category/role/direction 正确且 `reversal_type_id IS NULL`；序列存在且 pattern 正确 |
+| `rollback` | 删索引 → 删序列 → 删类型 → 清三列值（不 DROP COLUMN） |
+| 服务 | `create_adjustment()` / `_write_adjustment_increase_edges()` / `_write_adjustment_decrease_edges()`；`_insert_lines(..., negate=False)` |
+| 守卫 | create 校验原票 posted / 方向 / 原因；posted 拒绝 reversed；行必须回指原行 |
+| 平台修复 | `UIDetailViewConfig.actions`（此前缺字段，YAML `detail.actions` 加载即丢弃）+ `parse_ui_detail_view_config` 解析；`UIConfigBuilder` 兜底替换时保留声明动作（此前只保留 `hub`）；`DetailPage` 映射 `confirm_message` / `input_fields` 并用 `AppModal` 收集入参；`vendor_invoice_actions._invoice_id` 兼容 `source_doc_id` |
+| 平台测试 | `test_yaml_loader.py::TestDetailViewActionsParsing`（解析 + 真实 YAML 声明）、`test_bo_api.py::TestBoAPIV2Meta::test_ui_config_exposes_detail_actions`（接口下发）、`test_ui_config_enhanced.py::TestUIConfigBuilderDeclaredDetailActions`（兜底分支保留 / 不误加）、`test_vendor_invoice_match.py::test_match_handler_accepts_source_doc_id`（派发定位） |
+| 测试 | `meta/tests/test_vendor_invoice_adjustment.py`（创建 / increase 边 / decrease 红边 / 超额拒绝 / 无锚点 / 原票只读 / 状态机 / 不可红冲 / 仅数量覆盖按比例折算金额 / 多边 FIFO 分摊） |
+
+### 21.10 与逆向三档的最终对照
+
+| 档 | 触发 | 原票状态 | 补偿载体 | 落地方案 |
+|---|---|---|---|---|
+| `cancel` | 草稿/已提交撤销 | → cancelled | 无（未过账） | 既有状态迁移 |
+| `reverse` | 已过账全额红冲 | → reversed | 红字单（引擎派生） | Phase 1，`doc_effect.reversal` |
+| `return` / 调整 | 已过账部分增减 | **保持 posted** | **调整单（正向新事实）** | Phase 2，本节 |

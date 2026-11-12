@@ -35,7 +35,7 @@ deletion_policy:
   mode: restrict
   restrict_on: []
   cascade_delete:
-    - vendor_invoice_line
+    - vendor_invoice_lines
 
 audit:
   enabled: true
@@ -147,7 +147,7 @@ fields:
     required: true
     max_length: 20
     default: invoice
-    description: 由单据类型派生（invoice / credit_memo / debit_memo / cancellation）
+    description: 由单据类型派生（invoice / credit_memo / debit_memo / cancellation / adjustment）
     enum_values:
       - value: invoice
         label: 发票
@@ -165,6 +165,10 @@ fields:
       - value: cancellation
         label: 取消单
         color: danger
+        category: active
+      - value: adjustment
+        label: 调整单
+        color: warning
         category: active
     semantics:
       meaning: 单据类别
@@ -263,7 +267,6 @@ fields:
         category: terminal
     semantics:
       meaning: 单据状态
-      derived_from: match_status
       filterable: true
       filter_type: enum
       filter_label: 状态
@@ -619,12 +622,12 @@ fields:
         label: 价格超容差
         color: danger
         category: active
-      - value: qty_over_receipt
-        label: 超收量
+      - value: qty_over_receipt_tolerance
+        label: 超收量（容差）
         color: danger
         category: active
-      - value: qty_over_order
-        label: 超订单量
+      - value: qty_over_order_tolerance
+        label: 超订单量（容差）
         color: danger
         category: active
       - value: no_receipt
@@ -638,6 +641,14 @@ fields:
       - value: supplier_mismatch
         label: 供应商不一致
         color: danger
+        category: active
+      - value: manual_pricing_required
+        label: 需人工计价
+        color: danger
+        category: active
+      - value: receipt_price_mode
+        label: 收货价计价模式
+        color: warning
         category: active
     semantics:
       meaning: 匹配异常原因
@@ -717,6 +728,81 @@ fields:
       multiple: false
       hidden_in_form: true
 
+  - id: reversal_reason
+    name: 红冲原因
+    type: string
+    db_column: reversal_reason
+    nullable: true
+    max_length: 256
+    description: 红冲原因（posted 后红冲必填）
+    semantics:
+      meaning: 红冲原因
+      data_category: text
+    ui:
+      widget: textarea
+      rows: 2
+      hidden_in_form: true
+
+  - id: adjustment_of_invoice_id
+    name: 调整原单
+    type: integer
+    db_column: adjustment_of_invoice_id
+    nullable: true
+    description: 调整单回指的原发票 / 原调整单（正向往返链，不修改原单）
+    semantics:
+      meaning: 调整原单
+      display:
+        type: association
+        target_type: vendor_invoice
+        display_field: invoice_no
+    ui:
+      widget: select
+      relation: vendor_invoice
+      multiple: false
+      hidden_in_form: true
+
+  - id: adjustment_direction
+    name: 调整方向
+    type: string
+    db_column: adjustment_direction
+    nullable: true
+    max_length: 10
+    description: 调整方向（increase 追加 / decrease 冲减），调整单必填且不可变
+    enum_values:
+      - value: increase
+        label: 追加
+        color: success
+        category: active
+      - value: decrease
+        label: 冲减
+        color: warning
+        category: active
+    semantics:
+      meaning: 调整方向
+      immutable: true
+      filterable: true
+      filter_type: enum
+      filter_label: 调整方向
+      filter_scope: local
+    ui:
+      widget: select
+      editable: false
+
+  - id: adjustment_reason
+    name: 调整原因
+    type: string
+    db_column: adjustment_reason
+    nullable: true
+    max_length: 256
+    description: 调整原因（调整单创建必填）
+    semantics:
+      meaning: 调整原因
+      data_category: text
+    ui:
+      widget: textarea
+      rows: 2
+      hidden_in_form: true
+
   - id: remark
     name: 备注
     type: text
@@ -785,8 +871,11 @@ fields:
       editable: false
 
 # 状态机：提交 / 过账 / 取消 / 红冲由 vendor_invoice_guard_interceptor 委托
-# vendor_invoice_service 执行（跨表副作用唯一写入口）。
+# vendor_invoice_match_service 执行（跨表副作用唯一写入口）。
 # 过账前置：match_status ∈ {matched, overridden} 且重复票硬拦通过（§6.1）。
+# 红冲（posted → reversed）= 生成红字采购贷项凭证（direction=-1，回指原票）
+# + 对原票行已写出的 billing / ap_match 边写红字冲减，由 reversal_orchestrator
+# 按固定 7 步执行（自持事务，调用方只预取号）。
 rules:
   - id: submit_vendor_invoice
     name: 提交发票
@@ -835,20 +924,32 @@ rules:
     ui_hints:
       label: 红冲
       icon: undo
-      confirm_message: "红冲将生成一张贷项凭证并回退已开票量，原发票不可再修改、不可再次红冲；确定红冲吗？"
+      confirm_message: "红冲将生成一张红字采购贷项凭证并对已开票量写红字冲减，原发票不可再修改、不可再次红冲；确定红冲吗？"
       input_fields:
-        - field: remark
+        - field: reversal_reason
           label: 红冲原因
           type: textarea
           required: true
           placeholder: 请填写红冲原因
 
-# 逆向声明（平台统一逆向引擎）：红冲 = 建贷项凭证 + 回滚已开票量 +
-# 写反向事实边，由 reversal_orchestrator 按固定步骤执行。
 doc_effect:
   posting:
     event_key: "vendor_invoice:{id}:post"
     direction_field: direction
+  faces:
+    - id: doc_flow_red
+      primitive: vendor_invoice_doc_flow_red_edge
+      args:
+        doc_id: "{reversal.doc.id}"
+  reversal:
+    from_states: [posted]
+    to_state: reversed
+    idempotent_states: [reversed]
+    order: declared
+    create_document:
+      primitive: vendor_invoice_red_letter
+    write_audit_fields:
+      updated_at: "{now}"
 
 # 行来源策略：document_role → 允许的行来源种类（§4.3）
 # 内核在插入行时按头表角色校验；声明了策略但角色缺失 → 默认拒绝（fail-closed）
@@ -857,6 +958,7 @@ line_source_policy:
   credit_memo: [invoice_line, return_line, manual]
   debit_memo: [invoice_line, manual]
   cancellation: [invoice_line]
+  adjustment: [invoice_line]
 
 indexes:
   - fields: [invoice_no]
@@ -867,6 +969,11 @@ indexes:
     unique: true
     condition: "reversal_of_invoice_id IS NOT NULL"
     name: uq_vendor_invoice_reversal
+  - fields: [adjustment_of_invoice_id]
+    type: partial
+    unique: false
+    condition: "adjustment_of_invoice_id IS NOT NULL"
+    name: idx_vendor_invoice_adjustment_of
   - fields: [status, invoice_date]
     name: idx_vendor_invoice_status_date
   - fields: [supplier_account_id, status]
@@ -937,6 +1044,14 @@ relations:
     target_field: id
     cardinality: N:1
     description: 红字 / 取消单指向原发票（可空）
+  - id: vendor_invoice_to_adjustment
+    name: 调整原单
+    type: reference
+    target: vendor_invoice
+    source_field: adjustment_of_invoice_id
+    target_field: id
+    cardinality: N:1
+    description: 调整单指向原发票 / 原调整单（可空）
 
 ui_view_config:
   list:
@@ -977,6 +1092,7 @@ ui_view_config:
       - field: match_status
       - field: supplier_account_id
       - field: invoice_date
+      - field: adjustment_direction
     selection:
       enabled: true
       mode: multiple
@@ -1021,6 +1137,10 @@ ui_view_config:
       - title: 备注
         columns:
           - fields: [remark]
+      - title: 调整信息
+        columns:
+          - fields: [adjustment_of_invoice_id, adjustment_direction]
+          - fields: [adjustment_reason]
   detail:
     showChangeHistory: true
     showRelations: true
@@ -1031,30 +1151,51 @@ ui_view_config:
         variant: secondary
         permission: vendor_invoice:match
         action: vendor_invoice.match
+        visible_when: "status in ['draft', 'submitted']"
       - id: override_match
         label: 例外放行
         icon: unlock
         variant: secondary
         permission: vendor_invoice:override_match
         action: vendor_invoice.override_match
+        visible_when: "status in ['draft', 'submitted']"
+        input_fields:
+          - field: override_reason
+            label: 放行原因
+            type: textarea
+            required: true
       - id: override_duplicate
         label: 重复票放行
         icon: unlock
         variant: secondary
         permission: vendor_invoice:override_duplicate
         action: vendor_invoice.override_duplicate
-      - id: create_credit
-        label: 创建贷项
-        icon: plus
+        input_fields:
+          - field: reason
+            label: 放行原因
+            type: textarea
+            required: true
+      - id: create_adjustment
+        label: 新建调整单
+        icon: edit
         variant: secondary
-        permission: vendor_invoice:create_credit_memo
-        action: vendor_invoice.create_credit_from_invoice
-      - id: create_debit
-        label: 创建借项
-        icon: plus
-        variant: secondary
-        permission: vendor_invoice:create_debit_memo
-        action: vendor_invoice.create_debit_from_invoice
+        permission: vendor_invoice:create
+        action: vendor_invoice.create_adjustment
+        visible_when: "status == 'posted'"
+        input_fields:
+          - field: direction
+            label: 调整方向
+            type: select
+            required: true
+            options:
+              - value: increase
+                label: 增加（补开数量/金额）
+              - value: decrease
+                label: 减少（冲减数量/金额）
+          - field: reason
+            label: 调整原因
+            type: textarea
+            required: true
     facets:
       - title: 基本信息
         id: vendor_invoice_basic
@@ -1107,6 +1248,9 @@ ui_view_config:
           - org_id
           - purchase_org_id
           - reversal_of_invoice_id
+          - adjustment_of_invoice_id
+          - adjustment_direction
+          - adjustment_reason
           - remark
           - created_at
           - updated_at

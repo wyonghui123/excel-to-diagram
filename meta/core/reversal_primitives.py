@@ -558,6 +558,18 @@ def recompute_customer_billing_status(ds, args, ctx) -> Dict[str, Any]:
 
 
 # ─────────────────────────────────────────────────────────────────────────────
+# 采购发票（W6）
+# ─────────────────────────────────────────────────────────────────────────────
+
+def vendor_invoice_doc_flow_red_edge(ds, args, ctx) -> Dict[str, Any]:
+    """按红字采购贷项凭证行写红字消耗边（回写原票行锚点，幂等）。"""
+    from meta.services.vendor_invoice_match_service import VendorInvoiceMatchService
+
+    invoice_id = args.get("doc_id", ctx.doc_id)
+    return VendorInvoiceMatchService(ds).write_red_edges_for_red_doc(invoice_id)
+
+
+# ─────────────────────────────────────────────────────────────────────────────
 # 注册表
 # ─────────────────────────────────────────────────────────────────────────────
 
@@ -586,6 +598,7 @@ PRIMITIVES: Dict[str, Primitive] = {
     "invoice_schedule_cancel": invoice_schedule_cancel,
     "invoice_doc_flow_red_edge": invoice_doc_flow_red_edge,
     "recompute_customer_billing_status": recompute_customer_billing_status,
+    "vendor_invoice_doc_flow_red_edge": vendor_invoice_doc_flow_red_edge,
 }
 
 
@@ -632,12 +645,25 @@ def customer_invoice_red_letter(ds, ctx) -> Dict[str, Any]:
         reason=ctx.reason)
 
 
+def vendor_invoice_red_letter(ds, ctx) -> Dict[str, Any]:
+    """采购发票：创建红字采购贷项凭证（单号 / 业务日期由调用方预分配后透传）。"""
+    from meta.services.vendor_invoice_match_service import VendorInvoiceMatchService
+
+    params = ctx.params or {}
+    return VendorInvoiceMatchService(ds).create_red_document(
+        ctx.doc_id,
+        invoice_no=params.get("invoice_no"),
+        invoice_date=params.get("invoice_date"),
+        reason=ctx.reason)
+
+
 DocCreator = Callable[[Any, ReversalContext], Dict[str, Any]]
 
 DOC_CREATORS: Dict[str, DocCreator] = {
     "inventory_adjustment_red_letter": inventory_adjustment_red_letter,
     "receipt_red_letter": receipt_red_letter,
     "customer_invoice_red_letter": customer_invoice_red_letter,
+    "vendor_invoice_red_letter": vendor_invoice_red_letter,
 }
 
 

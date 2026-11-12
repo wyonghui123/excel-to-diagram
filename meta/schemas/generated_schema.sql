@@ -1,5 +1,5 @@
 -- 自动生成的 Schema
--- 生成时间: 2026-11-11 20:20:00.386991
+-- 生成时间: 2026-11-12 07:08:11.714192
 
 -- 地址: 结构化地址库（支持对象）：国家 / 省 / 市 / 区 / 街道 / 门牌 / 邮编分列 + 格式化全文；只被引用，不承载用途 / 角色
 CREATE TABLE IF NOT EXISTS addresses (
@@ -4039,7 +4039,7 @@ CREATE TABLE IF NOT EXISTS vendor_invoices (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     invoice_no VARCHAR(30) NOT NULL,
     document_type_id INTEGER NOT NULL,
-    document_category VARCHAR(20) NOT NULL DEFAULT 'invoice' CHECK (document_category IN ('invoice', 'credit_memo', 'debit_memo', 'cancellation')),
+    document_category VARCHAR(20) NOT NULL DEFAULT 'invoice' CHECK (document_category IN ('invoice', 'credit_memo', 'debit_memo', 'cancellation', 'adjustment')),
     direction INTEGER NOT NULL DEFAULT 1,
     invoice_date DATETIME NOT NULL,
     received_date DATETIME,
@@ -4063,11 +4063,15 @@ CREATE TABLE IF NOT EXISTS vendor_invoices (
     gross_amount REAL NOT NULL DEFAULT 0,
     rounding_diff REAL DEFAULT 0,
     match_pricing_mode VARCHAR(20) NOT NULL DEFAULT 'po_price' CHECK (match_pricing_mode IN ('po_price', 'receipt_price', 'manual')),
-    match_exception_reason VARCHAR(200) CHECK (match_exception_reason IN ('price_over_tolerance', 'qty_over_receipt', 'qty_over_order', 'no_receipt', 'currency_mismatch', 'supplier_mismatch')),
+    match_exception_reason VARCHAR(200) CHECK (match_exception_reason IN ('price_over_tolerance', 'qty_over_receipt_tolerance', 'qty_over_order_tolerance', 'no_receipt', 'currency_mismatch', 'supplier_mismatch', 'manual_pricing_required', 'receipt_price_mode')),
     match_matched_at DATETIME,
     match_matched_by VARCHAR(200),
     settlement_mode VARCHAR(20) NOT NULL DEFAULT 'supplier_invoice' CHECK (settlement_mode IN ('supplier_invoice', 'ers')),
     reversal_of_invoice_id INTEGER,
+    reversal_reason VARCHAR(256),
+    adjustment_of_invoice_id INTEGER,
+    adjustment_direction VARCHAR(10) CHECK (adjustment_direction IN ('increase', 'decrease')),
+    adjustment_reason VARCHAR(256),
     remark TEXT,
     created_at DATETIME,
     created_by VARCHAR(200),
@@ -4079,7 +4083,8 @@ CREATE TABLE IF NOT EXISTS vendor_invoices (
     FOREIGN KEY (currency_id) REFERENCES currencies(id),
     FOREIGN KEY (org_id) REFERENCES orgs(id),
     FOREIGN KEY (purchase_org_id) REFERENCES orgs(id),
-    FOREIGN KEY (reversal_of_invoice_id) REFERENCES vendor_invoices(id)
+    FOREIGN KEY (reversal_of_invoice_id) REFERENCES vendor_invoices(id),
+    FOREIGN KEY (adjustment_of_invoice_id) REFERENCES vendor_invoices(id)
 )
 
 -- 采购发票行: 采购发票行（来源：采购订单计划行 / 收货行 / 原发票行 / 退货行 / 手工）
@@ -5536,6 +5541,7 @@ CREATE INDEX IF NOT EXISTS idx_vendor_invoices_currency_id ON vendor_invoices(cu
 CREATE INDEX IF NOT EXISTS idx_vendor_invoices_org_id ON vendor_invoices(org_id)
 CREATE UNIQUE INDEX IF NOT EXISTS uq_vendor_invoice_no ON vendor_invoices(invoice_no)
 CREATE UNIQUE INDEX IF NOT EXISTS uq_vendor_invoice_reversal ON vendor_invoices(reversal_of_invoice_id) WHERE reversal_of_invoice_id IS NOT NULL
+CREATE INDEX IF NOT EXISTS idx_vendor_invoice_adjustment_of ON vendor_invoices(adjustment_of_invoice_id) WHERE adjustment_of_invoice_id IS NOT NULL
 CREATE INDEX IF NOT EXISTS idx_vendor_invoice_status_date ON vendor_invoices(status, invoice_date)
 CREATE INDEX IF NOT EXISTS idx_vendor_invoice_supplier_status ON vendor_invoices(supplier_account_id, status)
 CREATE INDEX IF NOT EXISTS idx_vendor_invoice_supplier_no ON vendor_invoices(supplier_account_id, supplier_invoice_no)

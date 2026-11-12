@@ -8,10 +8,11 @@
 内容:
   1. permissions 单段式权限码（v249 归一后口径）:
        vendor_invoice:       create/read/update/delete/list/submit/post/match/
-                             override_match/override_duplicate/cancel/reverse/
-                             create_credit_memo/create_debit_memo（14）
+                             override_match/override_duplicate/cancel/reverse（12）
        vendor_invoice_line:  create/read/update/delete/list（5）
      授予 admin / default 权限集。
+     注：create_credit_memo / create_debit_memo 已退役（无 handler，手工创建
+     贷项 / 借项会被守卫拒绝；调整单由 Phase 2 正向流程承担）。
   2. menus 一条「采购发票管理」挂到 procurement 下：
        vendor-invoice-management → /vendor-invoices
      同步 menu_permissions（required_permissions / bo_bindings）。
@@ -60,8 +61,6 @@ HEADER_ACTIONS = (
     ('override_duplicate', '重复发票例外放行'),
     ('cancel', '取消采购发票'),
     ('reverse', '冲销采购发票'),
-    ('create_credit_memo', '生成采购贷项凭证'),
-    ('create_debit_memo', '生成采购借项通知单'),
 )
 
 LINE_ACTIONS = (
@@ -114,7 +113,7 @@ MENU_ROW = {
     'parent_menu': ROOT_MENU_CODE,
     'icon': 'Receipt',
     'color': '#f59e0b',
-    'description': '采购发票：PO/收货匹配、过账应付、贷项/借项与取消冲销',
+    'description': '采购发票：PO/收货匹配、过账应付、红冲冲销',
     'sort_order': 6,
     'show_in_sidebar': 1,
     'data_permission_hint': {
@@ -468,7 +467,7 @@ def verify(db_path: Path) -> bool:
         for problem in problems:
             print('[v255] FAIL: %s' % problem)
         return False
-    print('[v255] PASS: 19 权限 / 菜单 / 旧菜单退役 / 幽灵元数据退役')
+    print('[v255] PASS: 17 权限 / 菜单 / 旧菜单退役 / 幽灵元数据退役')
     return True
 
 
@@ -502,6 +501,10 @@ def rollback(db_path: Path) -> bool:
         if _table_exists(conn, MENU_TABLE):
             conn.execute('UPDATE %s SET is_active = 0 WHERE menu_code = ?'
                          % MENU_TABLE, [MENU_CODE])
+            # 升级时被退役的自动菜单在本迁移之前是启用的，回滚需复原
+            for code in RETIRED_MENU_CODES:
+                conn.execute('UPDATE %s SET is_active = 1 WHERE menu_code = ?'
+                             % MENU_TABLE, [code])
         conn.commit()
         print('[v255] 完成: 已删除权限并停用菜单')
         return True

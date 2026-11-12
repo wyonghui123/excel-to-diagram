@@ -289,3 +289,16 @@ def test_credit_memo_red_quantity_capped_by_original(ds, service):
     assert len(red) == 1
     assert float(red[0]['quantity']) == 4.0
     assert H.consumed_qty(ds, 'receipt_line', H.RECEIPT_LINE_ID, 'ap_match') == 0.0
+
+
+def test_match_handler_accepts_source_doc_id(ds, service, monkeypatch):
+    """详情页业务动作只带 source_doc_id 时，match 等 handler 也能定位发票。"""
+    from meta.services import vendor_invoice_actions
+
+    invoice_id = _ready_receipt_invoice(ds)
+    monkeypatch.setattr(vendor_invoice_actions, '_service', lambda: service)
+
+    result = vendor_invoice_actions.match_handler({'source_doc_id': invoice_id})
+
+    assert result['success'] is True
+    assert result['data']['match_status'] == 'matched'

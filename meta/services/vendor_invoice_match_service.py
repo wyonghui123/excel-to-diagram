@@ -12,7 +12,9 @@
      (source_bo, source_id, pool) 聚合，不按 source_item 切片。
   3. 重复发票放行留痕走 audit_logs（action='override_duplicate'）；
      头表无 duplicate_override_reason 列，保持 W5「无表变更」。
-  4. 本波不实现 posted→reversed 的红字发票生成（W6）与 guard interceptor。
+  4. 红冲（posted → reversed）接入平台统一逆向引擎：`reverse()` 事务外预取红字
+     单号，`ReversalOrchestrator` 按 YAML `doc_effect` 声明自持事务执行
+     7 步（creator 生成红字贷项凭证 + 写红字消耗边 + 原票置 reversed）。
 
 不变量覆盖（R-VI-x 见 Spec §6.3）:
   R-VI-2  匹配锚点互斥        -> _validate_anchors
@@ -33,7 +35,7 @@
 from __future__ import annotations
 
 import logging
-from datetime import datetime
+from datetime import date, datetime
 from typing import Any, Dict, List, Optional
 
 from meta.core.doc_flow_attach import attach_edge
@@ -43,7 +45,8 @@ logger = logging.getLogger(__name__)
 
 HEADER_TABLE = 'vendor_invoices'
 LINE_TABLE = 'vendor_invoice_lines'
-SCHEDULE_TABLE = 'purchase_order_schedule'
+SCOPE_BO = 'vendor_invoice'
+SCHEDULE_TABLE = 'purchase_order_schedules'
 ORDER_LINE_TABLE = 'purchase_order_lines'
 ORDER_TABLE = 'purchase_orders'
 RECEIPT_LINE_TABLE = 'receipt_lines'
@@ -76,6 +79,11 @@ CATEGORY_INVOICE = 'invoice'
 CATEGORY_CREDIT_MEMO = 'credit_memo'
 CATEGORY_DEBIT_MEMO = 'debit_memo'
 CATEGORY_CANCELLATION = 'cancellation'
+CATEGORY_ADJUSTMENT = 'adjustment'
+
+ADJUSTMENT_INCREASE = 'increase'
+ADJUSTMENT_DECREASE = 'decrease'
+ADJUSTMENT_DIRECTIONS = (ADJUSTMENT_INCREASE, ADJUSTMENT_DECREASE)
 
 REASON_QTY_ORDER = 'qty_over_order_tolerance'
 REASON_QTY_RECEIPT = 'qty_over_receipt_tolerance'
@@ -89,10 +97,43 @@ LINE_SOURCE_POLICY = {
     CATEGORY_CREDIT_MEMO: {'invoice_line', 'return_line', 'manual'},
     CATEGORY_DEBIT_MEMO: {'invoice_line', 'manual'},
     CATEGORY_CANCELLATION: {'invoice_line'},
+    # 调整行必须回指原发票行（正向新事实；不允许 manual / 直接挂 PO 锚点）
+    CATEGORY_ADJUSTMENT: {'invoice_line'},
 }
 
 # 拒收处置中「不可开票」的两种处置；concession / rework 仍可开票（Spec §5.2）
 NON_INVOICEABLE_DISPOSITIONS = {'return_to_supplier', 'scrap'}
+
+# 红冲复制头字段时剔除的列：身份 / 状态 / 匹配结论 / 审计字段由创建器重写
+_RED_HEADER_DROP = frozenset({
+    'id', 'invoice_no', 'document_type_id', 'document_category', 'direction',
+    'posting_date', 'status', 'match_status', 'match_matched_at',
+    'match_matched_by', 'match_exception_reason', 'supplier_invoice_no',
+    'reversal_of_invoice_id', 'reversal_reason',
+    'created_at', 'created_by', 'updated_at', 'updated_by',
+})
+
+# 调整单复制头字段时额外剔除的列（增减上下文由创建器重写）
+_ADJUSTMENT_HEADER_DROP = _RED_HEADER_DROP | {
+    'adjustment_of_invoice_id', 'adjustment_direction', 'adjustment_reason',
+    'rounding_diff',
+}
+
+# 调整行复制原行时剔除的锚点列（锚点在过账时从原行解析，不重复落库）
+_ADJUSTMENT_LINE_DROP = frozenset({
+    'id', 'invoice_id', 'invoice_line_id', 'line_no',
+    'schedule_id', 'receipt_line_id', 'order_line_id', 'return_line_id',
+    'match_status', 'match_matched_at', 'match_matched_by',
+    'match_exception_reason', 'override_reason', 'overridden_by', 'overridden_at',
+    'created_at', 'created_by', 'updated_at', 'updated_by',
+    'qty_over_receipt', 'price_diff_amount', 'price_diff_percent',
+})
+
+# 红字行取负的金额 / 数量字段（单价与比例保持原值）
+_RED_LINE_NEGATE_FIELDS = (
+    'qty', 'net_amount', 'tax_amount', 'gross_amount',
+    'price_diff_amount', 'qty_over_receipt',
+)
 
 EPS = 1e-6
 _DIM_WEIGHTS = (('org_id', 8), ('document_type_id', 4), ('line_type_id', 2), ('item_group_id', 1))
@@ -112,6 +153,10 @@ def _now() -> str:
     return datetime.now().strftime('%Y-%m-%d %H:%M:%S')
 
 
+def _today() -> str:
+    return date.today().strftime('%Y-%m-%d')
+
+
 def _f(value: Any) -> float:
     try:
         if value is None or value == '':
@@ -123,6 +168,17 @@ def _f(value: Any) -> float:
 
 def _s(value: Any) -> str:
     return '' if value is None else str(value).strip()
+
+
+def _db_value(value: Any) -> Any:
+    """落库值归一：Decimal→float，date/datetime→ISO 字符串。"""
+    from decimal import Decimal as _Decimal
+    if isinstance(value, _Decimal):
+        return float(value)
+    if isinstance(value, (datetime, date)):
+        return value.strftime('%Y-%m-%d %H:%M:%S') if isinstance(value, datetime) \
+            else value.strftime('%Y-%m-%d')
+    return value
 
 
 _ZERO_WIDTH = {'\u3000': ' '}
@@ -569,7 +625,7 @@ class VendorInvoiceMatchService:
 
         借项单（debit_memo）按原发票行补收，方向与原票一致，不适用本规则。
         """
-        if _s(header.get('document_category')) == CATEGORY_DEBIT_MEMO:
+        if _s(header.get('document_category')) in (CATEGORY_DEBIT_MEMO, CATEGORY_ADJUSTMENT):
             return
         header_direction = _int(header.get('direction')) or 1
         for line in lines:
@@ -704,7 +760,8 @@ class VendorInvoiceMatchService:
         open_qty = 0.0
 
         category = _s(header.get('document_category')) or CATEGORY_INVOICE
-        if category in (CATEGORY_CREDIT_MEMO, CATEGORY_DEBIT_MEMO, CATEGORY_CANCELLATION):
+        if category in (CATEGORY_CREDIT_MEMO, CATEGORY_DEBIT_MEMO,
+                        CATEGORY_CANCELLATION, CATEGORY_ADJUSTMENT):
             # 冲销 / 补收类单据按原发票行核销，不做量价匹配；
             # 红字可用量在写边时由 _red_available 兜底，避免超冲。
             return {
@@ -858,6 +915,19 @@ class VendorInvoiceMatchService:
                 self._write_credit_red_edges(header, line)
             return
 
+        if category == CATEGORY_ADJUSTMENT:
+            direction = _s(header.get('adjustment_direction'))
+            if direction not in ADJUSTMENT_DIRECTIONS:
+                raise VendorInvoiceError(
+                    '调整方向必须为 increase / decrease', 'VI_ADJUSTMENT_DIRECTION_INVALID',
+                    'adjustment_direction')
+            for line in lines:
+                if direction == ADJUSTMENT_INCREASE:
+                    self._write_adjustment_increase_edges(header, line)
+                else:
+                    self._write_adjustment_decrease_edges(header, line)
+            return
+
         for line in lines:
             line_id = line.get('id')
             qty = abs(_f(line.get('qty')))
@@ -918,15 +988,119 @@ class VendorInvoiceMatchService:
                 raise VendorInvoiceError(
                     '红字冲减失败: {0}'.format(exc), 'VI_RED_INK_FAILED', 'invoice_line_id')
 
-    def _find_active_edge(self, rule_id: str, target_line_id: Any) -> Optional[Dict[str, Any]]:
-        return self._one(
+    def _write_adjustment_increase_edges(self, header: Dict[str, Any],
+                                        line: Dict[str, Any]) -> None:
+        """increase：对原行锚点写 normal 边追加消耗（严格校验 open，不截断）。"""
+        original_line_id = line.get('invoice_line_id')
+        if not original_line_id:
+            raise VendorInvoiceError(
+                '调整行必须回指原发票行', 'VI_ADJUSTMENT_ANCHOR_REQUIRED', 'invoice_line_id')
+        qty = abs(_f(line.get('qty')))
+        if qty <= 0:
+            return  # 纯金额调整不写边
+        original = self._load_line(original_line_id) or {}
+        resolved = self._normalize_line_anchors(header, original)
+        line_id = line.get('id')
+        unit = _s(line.get('uom_id') or resolved.get('uom_id'))
+        net_amount = _f(line.get('net_amount'))
+        wrote = False
+
+        schedule_id = resolved.get('schedule_id')
+        if schedule_id:
+            schedule = self._schedule(schedule_id) or {}
+            open_qty = max(_f(schedule.get('promised_qty')) -
+                           self._consumed_qty('purchase_order_schedule', schedule_id, POOL_BILLING), 0.0)
+            if qty > open_qty + EPS:
+                raise VendorInvoiceError(
+                    '调整数量 {0} 超过订单可开票余量 {1}'.format(qty, open_qty),
+                    'VI_ADJUSTMENT_EXCEEDED', 'qty')
+            attach_edge(
+                self.ds, self.platform_ds, RULE_SCHEDULE_BILLING,
+                schedule_id, line_id, qty,
+                target_item=str(line_id), unit=unit,
+                amount=net_amount,
+                derived_by='vendor_invoice_match_service',
+            )
+            wrote = True
+
+        receipt_line_id = resolved.get('receipt_line_id')
+        if receipt_line_id:
+            receipt = self._receipt_line(receipt_line_id) or {}
+            open_qty = max(qty_invoiceable(receipt) -
+                           self._consumed_qty('receipt_line', receipt_line_id, POOL_AP_MATCH), 0.0)
+            if qty > open_qty + EPS:
+                raise VendorInvoiceError(
+                    '调整数量 {0} 超过收货可开票余量 {1}'.format(qty, open_qty),
+                    'VI_ADJUSTMENT_EXCEEDED', 'qty')
+            attach_edge(
+                self.ds, self.platform_ds, RULE_RECEIPT_AP,
+                receipt_line_id, line_id, qty,
+                target_item=str(line_id), unit=unit,
+                amount=net_amount,
+                derived_by='vendor_invoice_match_service',
+            )
+            wrote = True
+
+        if not wrote:
+            raise VendorInvoiceError(
+                '原发票行没有可追加的订单 / 收货锚点', 'VI_ADJUSTMENT_ANCHOR_MISSING',
+                'invoice_line_id')
+
+    def _write_adjustment_decrease_edges(self, header: Dict[str, Any],
+                                        line: Dict[str, Any]) -> None:
+        """decrease：对原行 active 边写红字冲减（严格校验可用量，不截断）。"""
+        original_line_id = line.get('invoice_line_id')
+        if not original_line_id:
+            raise VendorInvoiceError(
+                '调整行必须回指原发票行', 'VI_ADJUSTMENT_ANCHOR_REQUIRED', 'invoice_line_id')
+        qty = abs(_f(line.get('qty')))
+        if qty <= 0:
+            return  # 纯金额调整不写边
+        wrote = False
+        for rule_id in (RULE_SCHEDULE_BILLING, RULE_RECEIPT_AP):
+            edges = self._find_active_edges(rule_id, original_line_id)
+            if not edges:
+                continue
+            # 同一原行可能因 increase 调整产生多条 normal 边，需按累计可用量校验并逐条分摊
+            available = sum(self._red_available(edge) for edge in edges)
+            if qty > available + EPS:
+                raise VendorInvoiceError(
+                    '冲减数量 {0} 超过可冲减余量 {1}'.format(qty, available),
+                    'VI_ADJUSTMENT_EXCEEDED', 'qty')
+            remaining = qty
+            for edge in edges:
+                if remaining <= EPS:
+                    break
+                red_qty = min(remaining, self._red_available(edge))
+                if red_qty <= EPS:
+                    continue
+                try:
+                    red_ink_edge(self.ds, edge.get('id'), quantity=red_qty,
+                                 ref_id=str(line.get('id')),
+                                 derived_by='vendor_invoice_match_service')
+                except Exception as exc:
+                    raise VendorInvoiceError(
+                        '调整红字冲减失败: {0}'.format(exc), 'VI_RED_INK_FAILED', 'invoice_line_id')
+                remaining -= red_qty
+            wrote = True
+        if not wrote:
+            raise VendorInvoiceError(
+                '原发票行没有可冲减的过账边', 'VI_ADJUSTMENT_ANCHOR_MISSING', 'invoice_line_id')
+
+    def _find_active_edges(self, rule_id: str, target_line_id: Any) -> List[Dict[str, Any]]:
+        """按 id 升序返回该原行的全部 active normal 边（increase 可能追加多条）。"""
+        return self._rows(
             'SELECT id, quantity, rule_id FROM doc_flow_edges '
             "WHERE rule_id = ? AND source_bo IN ('purchase_order_schedule', 'receipt_line') "
             "AND target_bo = 'vendor_invoice_line' AND target_id = ? "
             "AND status = 'active' AND quantity_sign = 'normal' AND edge_kind = 'normal' "
-            'ORDER BY id DESC LIMIT 1',
+            'ORDER BY rowid',
             [rule_id, str(target_line_id)],
         )
+
+    def _find_active_edge(self, rule_id: str, target_line_id: Any) -> Optional[Dict[str, Any]]:
+        edges = self._find_active_edges(rule_id, target_line_id)
+        return edges[-1] if edges else None
 
     def _red_available(self, edge: Dict[str, Any]) -> float:
         rows = self._rows(
@@ -936,6 +1110,425 @@ class VendorInvoiceMatchService:
         )
         red_sum = _f(rows[0].get('q')) if rows else 0.0
         return max(_f(edge.get('quantity')) - red_sum, 0.0)
+
+    # ------------------------------------------------------------------ 红冲
+    def reverse(self, invoice_id: Any, *, reason: str, invoice_date: Optional[str] = None,
+                user_name: str = 'system') -> Dict[str, Any]:
+        """红冲已过账采购发票：生成红字采购贷项凭证并冲减原票消耗量。
+
+        事务边界：先事务外预取红字单号（单号服务自持事务），随后交由
+        reversal_orchestrator 按 doc_effect.reversal 自持事务执行为固定 7 步。
+        """
+        reason = _s(reason)
+        if not reason:
+            raise VendorInvoiceError('红冲必须填写原因', 'VI_REVERSAL_REASON_REQUIRED', 'reason')
+        header = self._require_header(invoice_id)
+        self._assert_reversible(header)
+
+        source_meta = self._resolve_document_meta(header.get('document_type_id'))
+        red_type_id = _int(source_meta.get('reversal_type_id'))
+        if not red_type_id:
+            raise VendorInvoiceError(
+                '采购发票类型未声明红字类型', 'VI_REVERSAL_NOT_DECLARED', 'document_type_id')
+        red_meta = self._resolve_document_meta(red_type_id)
+        if _int(red_meta.get('direction')) >= 0:
+            raise VendorInvoiceError(
+                '红字类型方向必须为 -1', 'VI_TYPE_INVALID', 'document_type_id')
+
+        posting_date = _s(header.get('posting_date') or header.get('invoice_date'))[:10]
+        red_date = _s(invoice_date)[:10] or _today()
+        if posting_date and red_date < posting_date:
+            raise VendorInvoiceError(
+                '红字日期不能早于原发票过账日期', 'VI_REVERSAL_DATE_INVALID', 'invoice_date')
+
+        red_no = self._allocate_number(red_date, red_type_id)
+
+        from meta.core.reversal_orchestrator import ReversalError, execute
+        try:
+            outcome = execute(
+                self.ds, schema_id=SCOPE_BO, doc_id=_int(invoice_id),
+                reason=reason, user_info={'name': user_name or 'system'},
+                params={'invoice_no': red_no, 'invoice_date': red_date,
+                        'direction': _int(red_meta.get('direction'))})
+        except ReversalError as exc:
+            raise VendorInvoiceError(exc.message, exc.code, exc.field_name) from exc
+
+        document = outcome.document or {}
+        red_id = _int(document.get('id'))
+        self._audit(invoice_id, 'reverse', user_name=user_name,
+                    extra={'reason': reason, 'red_invoice_id': red_id,
+                           'red_invoice_no': document.get('invoice_no') or red_no})
+        return {
+            'invoice_id': _int(invoice_id),
+            'status': STATUS_REVERSED,
+            'reversal_reason': reason,
+            'red_invoice_id': red_id,
+            'red_invoice_no': document.get('invoice_no') or red_no,
+            'red_line_ids': document.get('line_ids') or [],
+        }
+
+    def create_red_document(self, invoice_id: Any, *, invoice_no: Optional[str],
+                            invoice_date: Optional[str],
+                            reason: str) -> Dict[str, Any]:
+        """由 reversal_orchestrator 调用：复制原票生成红字贷项凭证（status=posted）。"""
+        invoice_no = _s(invoice_no)
+        if not invoice_no:
+            raise VendorInvoiceError('红字单号未预分配', 'VI_NUMBER_UNAVAILABLE', 'invoice_no')
+        original = self._require_header(invoice_id)
+        self._assert_reversible(original)
+        lines = self._load_lines(invoice_id)
+        if not lines:
+            raise VendorInvoiceError('原发票无明细行，无法红冲', 'VI_LINES_EMPTY', 'lines')
+
+        source_meta = self._resolve_document_meta(original.get('document_type_id'))
+        red_meta = self._resolve_document_meta(source_meta.get('reversal_type_id'))
+        red_direction = _int(red_meta.get('direction'))
+        if red_direction >= 0:
+            raise VendorInvoiceError(
+                '红字类型方向必须为 -1', 'VI_TYPE_INVALID', 'document_type_id')
+
+        now = _now()
+        red_date = _s(invoice_date)[:10] or _today()
+        data: Dict[str, Any] = {
+            key: value for key, value in original.items()
+            if key not in _RED_HEADER_DROP
+        }
+        data.update({
+            'invoice_no': invoice_no,
+            'document_type_id': _int(red_meta.get('id')),
+            'document_category': _s(red_meta.get('document_category')) or CATEGORY_CREDIT_MEMO,
+            'direction': red_direction,
+            'invoice_date': red_date,
+            'posting_date': red_date,
+            'status': STATUS_POSTED,
+            'match_status': MATCH_MATCHED,
+            'match_matched_at': now,
+            'match_matched_by': 'system',
+            'supplier_invoice_no': '',
+            'reversal_of_invoice_id': _int(invoice_id),
+            'reversal_reason': _s(reason),
+            'net_amount': -abs(_f(original.get('net_amount'))),
+            'tax_amount': -abs(_f(original.get('tax_amount'))),
+            'gross_amount': -abs(_f(original.get('gross_amount'))),
+            'rounding_diff': -_f(original.get('rounding_diff')),
+            'created_at': now,
+            'created_by': 'system',
+            'updated_at': now,
+            'updated_by': 'system',
+        })
+        red_id = self._insert_header(data)
+        if not red_id:
+            raise VendorInvoiceError('红字贷项凭证创建失败', 'VI_REVERSAL_FAILED', 'invoice_no')
+        red_line_ids = self._insert_lines(red_id, lines, now)
+        return {
+            'id': red_id,
+            'invoice_id': red_id,
+            'invoice_no': invoice_no,
+            'line_ids': red_line_ids,
+            'red_line_ids': red_line_ids,
+            'reversal_of_invoice_id': _int(invoice_id),
+            'net_amount': data['net_amount'],
+            'tax_amount': data['tax_amount'],
+            'gross_amount': data['gross_amount'],
+        }
+
+    # -------------------------------------------------------- 正向调整单（Phase 2）
+    def create_adjustment(self, invoice_id: Any, *, direction: str, reason: str,
+                          invoice_date: Optional[str] = None,
+                          lines: Optional[List[Dict[str, Any]]] = None,
+                          user_name: str = 'system') -> Dict[str, Any]:
+        """创建正向调整单（draft）：原票保持 posted，调整单走正常单据链。
+
+        increase：行金额为正，过账写 normal 边追加消耗；
+        decrease：行金额为负（数量仍存正数幅值），过账写红字边冲减。
+        事务边界：先事务外取号（编号服务自持事务），再单事务插入头 + 行。
+        """
+        direction = _s(direction)
+        if direction not in ADJUSTMENT_DIRECTIONS:
+            raise VendorInvoiceError(
+                '调整方向必须为 increase / decrease', 'VI_ADJUSTMENT_DIRECTION_INVALID',
+                'direction')
+        reason = _s(reason)
+        if not reason:
+            raise VendorInvoiceError(
+                '调整单必须填写调整原因', 'VI_ADJUSTMENT_REASON_REQUIRED', 'adjustment_reason')
+
+        original = self._require_header(invoice_id)
+        original_category = _s(original.get('document_category'))
+        if original_category not in (CATEGORY_INVOICE, CATEGORY_ADJUSTMENT):
+            raise VendorInvoiceError(
+                '只有发票 / 调整单可创建调整单', 'VI_ADJUSTMENT_SOURCE_INVALID',
+                'adjustment_of_invoice_id')
+        if _s(original.get('status')) != STATUS_POSTED:
+            raise VendorInvoiceError(
+                '原单未过账，不可调整', 'VI_ADJUSTMENT_SOURCE_NOT_POSTED',
+                'adjustment_of_invoice_id')
+        if _int(original.get('direction')) != 1:
+            raise VendorInvoiceError(
+                '原单方向不为正，不可调整', 'VI_ADJUSTMENT_SOURCE_INVALID',
+                'adjustment_of_invoice_id')
+        if original_category == CATEGORY_ADJUSTMENT and direction == ADJUSTMENT_INCREASE:
+            # 调整行不落锚点列，increase 过账时无法解析订单 / 收货锚点；
+            # 需要继续加量请对原发票行创建 increase（内容与锚点等价）。
+            raise VendorInvoiceError(
+                '调整单不支持再增加数量，请对原发票行做 increase 调整',
+                'VI_ADJUSTMENT_INCREASE_UNSUPPORTED', 'adjustment_direction')
+
+        adjustment_meta = self._adjustment_type_meta()
+        originals = self._load_lines(invoice_id)
+        if not originals:
+            raise VendorInvoiceError('原单无明细行，无法调整', 'VI_LINES_EMPTY', 'lines')
+        built = self._build_adjustment_lines(originals, direction, lines)
+        if not built:
+            raise VendorInvoiceError('调整行不能为空', 'VI_LINES_EMPTY', 'lines')
+
+        adjustment_date = _s(invoice_date)[:10] or _today()
+        invoice_no = self._allocate_number(adjustment_date, adjustment_meta.get('id'))
+
+        now = _now()
+        data = {key: value for key, value in original.items()
+                if key not in _ADJUSTMENT_HEADER_DROP}
+        data.update({
+            'invoice_no': invoice_no,
+            'document_type_id': _int(adjustment_meta.get('id')),
+            'document_category': CATEGORY_ADJUSTMENT,
+            'direction': _int(adjustment_meta.get('direction')) or 1,
+            'invoice_date': adjustment_date,
+            'posting_date': None,
+            'status': STATUS_DRAFT,
+            'match_status': MATCH_UNMATCHED,
+            'match_matched_at': None,
+            'match_matched_by': None,
+            'supplier_invoice_no': '',
+            'adjustment_of_invoice_id': _int(invoice_id),
+            'adjustment_direction': direction,
+            'adjustment_reason': reason,
+            'reversal_of_invoice_id': None,
+            'reversal_reason': None,
+            'net_amount': sum(_f(row.get('net_amount')) for row in built),
+            'tax_amount': sum(_f(row.get('tax_amount')) for row in built),
+            'gross_amount': sum(_f(row.get('gross_amount')) for row in built),
+            'rounding_diff': 0.0,
+            'created_at': now,
+            'created_by': 'system',
+            'updated_at': now,
+            'updated_by': 'system',
+        })
+        with self.ds.transaction():
+            adjustment_id = self._insert_header(data)
+            if not adjustment_id:
+                raise VendorInvoiceError(
+                    '调整单创建失败', 'VI_ADJUSTMENT_FAILED', 'invoice_no')
+            line_ids = self._insert_adjustment_lines(adjustment_id, built, now)
+
+        self._audit(adjustment_id, 'create_adjustment', user_name=user_name,
+                    extra={'adjustment_of_invoice_id': _int(invoice_id),
+                           'adjustment_direction': direction, 'reason': reason})
+        return {
+            'invoice_id': adjustment_id,
+            'id': adjustment_id,
+            'invoice_no': invoice_no,
+            'status': STATUS_DRAFT,
+            'document_category': CATEGORY_ADJUSTMENT,
+            'adjustment_of_invoice_id': _int(invoice_id),
+            'adjustment_direction': direction,
+            'adjustment_reason': reason,
+            'line_ids': line_ids,
+            'net_amount': data['net_amount'],
+            'tax_amount': data['tax_amount'],
+            'gross_amount': data['gross_amount'],
+        }
+
+    def _adjustment_type_meta(self) -> Dict[str, Any]:
+        rows = self._rows(
+            'SELECT id, code, document_role, document_category, direction, '
+            'reversal_type_id FROM type_definitions '
+            "WHERE scope_bo = ? AND level = 'header' AND document_role = 'adjustment' "
+            "AND status = 'active' ORDER BY id LIMIT 1",
+            [SCOPE_BO],
+        )
+        if not rows:
+            raise VendorInvoiceError(
+                '缺少采购发票调整单类型', 'VI_TYPE_UNKNOWN', 'document_type_id')
+        return rows[0]
+
+    def _build_adjustment_lines(self, originals: List[Dict[str, Any]], direction: str,
+                                requested: Optional[List[Dict[str, Any]]]) -> List[Dict[str, Any]]:
+        """按原行生成调整行；requested 为空表示整单全额调整。"""
+        by_id = {_int(row.get('id')): row for row in originals}
+        picks: List[Any] = []
+        if requested:
+            seen = set()
+            for item in requested:
+                line_id = _int(item.get('invoice_line_id') or item.get('id'))
+                if not line_id or line_id not in by_id:
+                    raise VendorInvoiceError(
+                        '调整行必须回指原单明细行', 'VI_ADJUSTMENT_ANCHOR_REQUIRED',
+                        'invoice_line_id')
+                if line_id in seen:
+                    raise VendorInvoiceError(
+                        '同一原行不能重复调整', 'VI_ADJUSTMENT_LINE_DUPLICATE', 'invoice_line_id')
+                seen.add(line_id)
+                picks.append((line_id, item))
+        else:
+            picks = [(lid, {}) for lid in by_id]
+
+        sign = 1.0 if direction == ADJUSTMENT_INCREASE else -1.0
+        built: List[Dict[str, Any]] = []
+        for line_id, override in picks:
+            source = by_id[line_id]
+            source_qty = abs(_f(source.get('qty')))
+            qty = abs(_f(override['qty'] if override.get('qty') is not None
+                         else source.get('qty')))
+            unit_price = _f(override['unit_price'] if override.get('unit_price') is not None
+                            else source.get('unit_price'))
+            # 只给数量不给金额时按数量比例折算，避免行金额仍是原行全额（数量/金额口径失衡）
+            ratio = (qty / source_qty) if qty > 0 and source_qty > 0 and qty != source_qty else 1.0
+            net = abs(_f(override['net_amount'])) if override.get('net_amount') is not None \
+                else round(abs(_f(source.get('net_amount'))) * ratio, 2)
+            tax = abs(_f(override['tax_amount'])) if override.get('tax_amount') is not None \
+                else round(abs(_f(source.get('tax_amount'))) * ratio, 2)
+            if qty <= 0 and net <= 0:
+                continue
+            row = {
+                key: value for key, value in source.items()
+                if key not in _ADJUSTMENT_LINE_DROP
+            }
+            row.update({
+                'original_line_id': line_id,
+                'qty': qty,
+                'unit_price': unit_price,
+                'net_amount': sign * net,
+                'tax_amount': sign * tax,
+                'gross_amount': sign * (net + tax),
+            })
+            built.append(row)
+        return built
+
+    def _insert_adjustment_lines(self, invoice_id: int,
+                                 lines: List[Dict[str, Any]], now: str) -> List[int]:
+        """调整行保持正数数量与带符号金额，不做红字取负。"""
+        return self._insert_lines(invoice_id, lines, now, negate=False)
+
+    def write_red_edges_for_red_doc(self, red_invoice_id: Any) -> Dict[str, Any]:
+        """face 原语：为红字贷项凭证的每行写红字消耗边（幂等，按可用量截断）。"""
+        header = self._require_header(red_invoice_id)
+        category = _s(header.get('document_category'))
+        if category not in (CATEGORY_CREDIT_MEMO, CATEGORY_CANCELLATION):
+            raise VendorInvoiceError(
+                '仅贷项 / 取消凭证可写红字消耗边', 'VI_RED_INK_INVALID', 'document_category')
+        written = 0
+        for line in self._load_lines(red_invoice_id):
+            if _s(line.get('invoice_line_id')) == '':
+                continue
+            self._write_credit_red_edges(header, line)
+            written += 1
+        return {'invoice_id': _int(red_invoice_id), 'red_edges': written}
+
+    def _assert_reversible(self, header: Dict[str, Any]) -> None:
+        meta = self._resolve_document_meta(header.get('document_type_id'))
+        if _s(meta.get('document_role')) != 'invoice' or _int(meta.get('direction')) != 1:
+            raise VendorInvoiceError(
+                '只有正向采购发票可红冲', 'VI_NOT_REVERSIBLE', 'document_type_id')
+        if not _int(meta.get('reversal_type_id')):
+            raise VendorInvoiceError(
+                '采购发票类型未声明红字类型', 'VI_REVERSAL_NOT_DECLARED', 'document_type_id')
+        if _s(header.get('status')) != STATUS_POSTED:
+            raise VendorInvoiceError(
+                '仅已过账采购发票可红冲', 'VI_STATE_INVALID', 'status')
+        if self._find_red_document(header.get('id')):
+            raise VendorInvoiceError(
+                '该采购发票已红冲', 'VI_REVERSAL_EXISTS', 'id')
+
+    def _resolve_document_meta(self, document_type_id: Any) -> Dict[str, Any]:
+        rows = self._rows(
+            'SELECT id, code, document_role, document_category, direction, '
+            'reversal_type_id FROM type_definitions '
+            'WHERE id = ? AND scope_bo = ?',
+            [_int(document_type_id), SCOPE_BO],
+        )
+        if not rows:
+            raise VendorInvoiceError(
+                '采购发票单据类型不存在', 'VI_TYPE_UNKNOWN', 'document_type_id')
+        return rows[0]
+
+    def _find_red_document(self, invoice_id: Any) -> Optional[Dict[str, Any]]:
+        return self._one(
+            'SELECT id, invoice_no, status FROM {0} '
+            'WHERE reversal_of_invoice_id = ? AND direction < 0 '
+            "AND status != 'cancelled'".format(HEADER_TABLE),
+            [_int(invoice_id)],
+        )
+
+    def _allocate_number(self, invoice_date: str, document_type_id: Any) -> str:
+        try:
+            from meta.services.document_number_service import DocumentNumberService
+            return DocumentNumberService(self.ds).allocate_for(
+                SCOPE_BO,
+                {'invoice_date': _s(invoice_date)[:10],
+                 'document_type_id': _int(document_type_id)},
+                required=True,
+            )
+        except Exception as exc:
+            raise VendorInvoiceError(
+                '采购发票单号分配失败: {0}'.format(exc),
+                'VI_NUMBER_UNAVAILABLE', 'invoice_no') from exc
+
+    def _insert_header(self, data: Dict[str, Any]) -> int:
+        columns = self._columns(HEADER_TABLE)
+        payload = {key: _db_value(value) for key, value in data.items()
+                   if key in columns}
+        if not payload:
+            return 0
+        names = ', '.join(payload)
+        marks = ', '.join('?' for _ in payload)
+        cursor = self.ds.execute(
+            'INSERT INTO {0} ({1}) VALUES ({2})'.format(HEADER_TABLE, names, marks),
+            list(payload.values()),
+        )
+        new_id = _int(getattr(cursor, 'lastrowid', 0))
+        if not new_id:
+            row = self._one(
+                'SELECT id FROM {0} WHERE invoice_no = ? ORDER BY id DESC LIMIT 1'
+                .format(HEADER_TABLE), [payload.get('invoice_no')])
+            new_id = _int(row.get('id')) if row else 0
+        return new_id
+
+    def _insert_lines(self, invoice_id: int, lines: List[Dict[str, Any]],
+                      now: str, negate: bool = True) -> List[int]:
+        columns = self._columns(LINE_TABLE)
+        new_ids: List[int] = []
+        for index, line in enumerate(lines, start=1):
+            payload = {key: _db_value(value) for key, value in line.items()
+                       if key in columns}
+            payload.pop('id', None)
+            if negate:
+                for field in _RED_LINE_NEGATE_FIELDS:
+                    if field in payload:
+                        payload[field] = -abs(_f(payload[field]))
+            payload.update({
+                'invoice_id': int(invoice_id),
+                'line_no': index,
+                'invoice_line_id': _int(line.get('original_line_id') or line.get('id')),
+                'match_status': MATCH_MATCHED,
+                'match_exception_reason': None,
+                'override_reason': None,
+                'overridden_by': None,
+                'overridden_at': None,
+                'created_at': now,
+                'created_by': 'system',
+                'updated_at': now,
+                'updated_by': 'system',
+            })
+            payload = {key: value for key, value in payload.items() if key in columns}
+            names = ', '.join(payload)
+            marks = ', '.join('?' for _ in payload)
+            cursor = self.ds.execute(
+                'INSERT INTO {0} ({1}) VALUES ({2})'.format(LINE_TABLE, names, marks),
+                list(payload.values()),
+            )
+            new_ids.append(_int(getattr(cursor, 'lastrowid', 0)))
+        return new_ids
 
     # ------------------------------------------------------------------ 审计
     def _audit(self, invoice_id: Any, action: str, *, user_name: str = 'system',

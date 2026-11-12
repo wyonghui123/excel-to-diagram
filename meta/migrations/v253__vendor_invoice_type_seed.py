@@ -7,11 +7,13 @@
 
 范围:
   1. type_definitions 4 个 header 类型（scope_bo='vendor_invoice'）:
-       VENDOR_INVOICE        采购发票       invoice      +1  is_default=1  VI
+       VENDOR_INVOICE        采购发票       invoice      +1  is_default=1  VI   → 反转 VENDOR_CREDIT_MEMO
        VENDOR_CREDIT_MEMO    采购贷项凭证   credit_memo  -1               VCM  → 反转 VENDOR_DEBIT_MEMO
        VENDOR_DEBIT_MEMO     采购借项通知单 debit_memo   +1               VDM  → 反转 VENDOR_CREDIT_MEMO
        VENDOR_INVOICE_CANCEL 采购发票取消单 cancellation -1               VIC  → 反转 VENDOR_INVOICE
-     不变量: 反转类型 direction 与原类型相反；默认类型 reversal_type_id 为空。
+     不变量: 反转类型 direction 与原类型相反。
+     说明: 默认类型 VENDOR_INVOICE 的 reversal_type_id 指向 VENDOR_CREDIT_MEMO，
+           红冲引擎据此定位红字单据类型（方向必须为 -1）。
   2. number_sequences 4 条（VI / VCM / VDM / VIC）
   3. control_parameter_defs 6 条:
        vi_match_mode（domain=procurement，enum，默认 gr_based）
@@ -48,8 +50,8 @@ VENDOR_TYPES = (
         'direction': 1,
         'is_default': 1,
         'sequence': 'VI',
-        'reversal_of': None,
-        'description': '标准采购发票：正向入账，采购发票默认类型',
+        'reversal_of': 'VENDOR_CREDIT_MEMO',
+        'description': '标准采购发票：正向入账，采购发票默认类型；红冲生成采购贷项凭证',
     },
     {
         'code': 'VENDOR_CREDIT_MEMO',
@@ -131,8 +133,6 @@ PARAMS = (
 )
 
 PARAM_CODES = tuple(param[0] for param in PARAMS)
-
-DEFAULT_INDEX = 'uq_type_default_role'
 
 
 # --------------------------------------------------------------------- helpers
@@ -250,7 +250,7 @@ def _do_types(conn, sequence_ids):
             continue
         conn.execute('UPDATE %s SET reversal_type_id = ? WHERE id = ?'
                      % TYPE_TABLE, [target_id, source_id])
-    print('[v253] 反转链已回填（credit↔debit / cancel→invoice）')
+    print('[v253] 反转链已回填（invoice→credit / credit↔debit / cancel→invoice）')
     return ids
 
 
@@ -344,9 +344,6 @@ def verify(db_path: Path) -> bool:
                         if int(source[2] or 0) == int(target[2] or 0):
                             problems.append('反转链 %s↔%s direction 未相反'
                                             % (spec['code'], spec['reversal_of']))
-                elif source and source[4]:
-                    problems.append('默认类型 %s reversal_type_id 应为空'
-                                    % spec['code'])
             # 默认类型唯一：同一 (scope_bo, level, document_role) 最多 1 条
             conflicts = conn.execute(
                 'SELECT document_role, COUNT(*) FROM %s '
@@ -398,12 +395,12 @@ def rollback(db_path: Path) -> bool:
             conn.execute('DELETE FROM %s WHERE code IN (%s)'
                          % (PARAM_TABLE, placeholders), list(PARAM_CODES))
         if _table_exists(conn, TYPE_TABLE):
-            for spec in VENDOR_TYPES:
-                conn.execute(
-                    'UPDATE %s SET reversal_type_id = NULL WHERE scope_bo = ? '
-                    'AND level = ? AND reversal_type_id IN '
-                    '(SELECT id FROM %s WHERE scope_bo = ? AND level = ?)'
-                    % (TYPE_TABLE, TYPE_TABLE), [SCOPE_BO, LEVEL, SCOPE_BO, LEVEL])
+            # 先断开反转指针（指向本批类型的所有引用），再按 code 删除
+            conn.execute(
+                'UPDATE %s SET reversal_type_id = NULL WHERE scope_bo = ? '
+                'AND level = ? AND reversal_type_id IN '
+                '(SELECT id FROM %s WHERE scope_bo = ? AND level = ?)'
+                % (TYPE_TABLE, TYPE_TABLE), [SCOPE_BO, LEVEL, SCOPE_BO, LEVEL])
             for spec in VENDOR_TYPES:
                 conn.execute(
                     'DELETE FROM %s WHERE scope_bo = ? AND level = ? AND code = ?'
