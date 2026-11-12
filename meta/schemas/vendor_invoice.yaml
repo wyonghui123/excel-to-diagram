@@ -127,6 +127,9 @@ fields:
           scope_bo: vendor_invoice
           level: header
           status: active
+          # [2026-11-12] 调整单只允许由「新建调整单」动作生成（携带 adjustment_of_invoice_id）；
+          #   手工新建表单直选该类型会因必填字段 hidden_in_form 而保存失败，故从候选排除。
+          code__notin: [VENDOR_INVOICE_ADJUSTMENT]
       behavior:
         multiple: false
         validation: true
@@ -188,6 +191,16 @@ fields:
     required: true
     default: 1
     description: 金额方向（1 正向 / -1 负向），由单据类型派生
+    enum_values:
+      - value: 1
+        label: 正向
+        color: success
+        category: active
+        is_initial: true
+      - value: -1
+        label: 负向
+        color: danger
+        category: active
     semantics:
       meaning: 金额方向
       immutable: true
@@ -1061,9 +1074,13 @@ ui_view_config:
       - field: invoice_no
         width: 170
         sortable: true
+      - field: document_type_id
+        width: 150
       - field: invoice_date
         width: 130
         sortable: true
+      - field: direction
+        width: 90
       - field: supplier_account_id
         width: 180
         filterable: true
@@ -1170,6 +1187,8 @@ ui_view_config:
         variant: secondary
         permission: vendor_invoice:override_duplicate
         action: vendor_invoice.override_duplicate
+        # [2026-11-12] 补齐 visible_when：其余三个动作均有，唯它缺失导致已过账单据仍可放行
+        visible_when: "status in ['draft', 'submitted']"
         input_fields:
           - field: reason
             label: 放行原因

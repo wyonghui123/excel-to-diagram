@@ -41,10 +41,11 @@ async function reload() {
   }
   loading.value = true
   try {
+    // [2026-11-12] 后端 /doc-flow/edges 返回 {items, total}（分页规范），不是 {edges}
     const incoming = await listEdges({ target_bo: props.objectType, target_id: props.recordId })
-    upstream.value = incoming.edges || []
+    upstream.value = incoming?.items || []
     const outgoing = await listEdges({ source_bo: props.objectType, source_id: props.recordId })
-    downstream.value = outgoing.edges || []
+    downstream.value = outgoing?.items || []
   } finally {
     loading.value = false
   }

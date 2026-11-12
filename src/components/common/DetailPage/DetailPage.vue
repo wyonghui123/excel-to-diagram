@@ -304,10 +304,16 @@ const ruleTraceConfig = computed(
 
 // [单据流 2026-11-08] 平台级追溯面板：规则命中当前 BO（源或目标）即渲染，
 //   不要求 BO YAML 重复声明 detail.facets。
+// [2026-11-12] 兼容行级规则：单据头（vendor_invoice）与行（vendor_invoice_line）
+//   是两张表，规则只声明到行级；头级实例通过 `<bo>_line` 等后缀规则关联，
+//   故按「等于或前缀命中」判定，否则头级详情页永不显示追溯面板。
 const docFlowRules = ref([])
-const docFlowMatched = computed(() => docFlowRules.value.some(
-  (rule) => rule.source_bo === props.objectType || rule.target_bo === props.objectType,
-))
+const docFlowMatched = computed(() => docFlowRules.value.some((rule) => {
+  const t = props.objectType
+  return rule.source_bo === t || rule.target_bo === t
+    || String(rule.source_bo || '').startsWith(`${t}_`)
+    || String(rule.target_bo || '').startsWith(`${t}_`)
+}))
 
 async function loadDocFlowRules() {
   try {
@@ -686,6 +692,31 @@ const detailDescription = computed(() => {
   return entityMeta.value?.ui_view_config?.detail?.description || ''
 })
 
+// [2026-11-12] 编辑按钮门控（P0）：
+//   1) 权限：权限码 v249 起为单段式 `{bo}:{action}`；管理员直通。
+//   2) 状态：状态枚举含 draft 的单据类对象仅草稿可编辑（已提交/已过账走业务动作）；
+//      主数据（无 draft 生命周期）维持可编辑。
+//   此前无条件渲染 → 已过账单据仍显示编辑，点击后后端拒绝。
+const canEditRecord = computed(() => {
+  if (!authStore.user) return false
+  const bo = props.objectType
+  if (!(authStore.isAdmin
+    || authStore.hasPermission(`${bo}:edit`)
+    || authStore.hasPermission(`${bo}:update`))) {
+    return false
+  }
+  const statusField = getStatusFieldName()
+  const field = (entityMeta.value?.fields || []).find(
+    (f) => (f.id || f.name) === statusField
+  )
+  const options = field?.enum_values || field?.options || []
+  const hasDraftLifecycle = options.some(
+    (o) => String(o?.value ?? o).toLowerCase() === 'draft'
+  )
+  if (!hasDraftLifecycle) return true
+  return String(data.value?.[statusField] ?? '').toLowerCase() === 'draft'
+})
+
 const computedActions = computed(() => {
   if (props.readonly) return []
 
@@ -747,7 +778,8 @@ const computedActions = computed(() => {
     return actions
   }
 
-  const actions = [buildAction('edit')]
+  // [2026-11-12] 编辑入口按权限 + 单据状态门控（见 canEditRecord）
+  const actions = canEditRecord.value ? [buildAction('edit')] : []
   if (internalEditing.value) {
     actions.push(buildAction('save'))
     actions.push(buildAction('cancel'))

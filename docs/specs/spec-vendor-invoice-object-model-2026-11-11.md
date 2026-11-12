@@ -1085,7 +1085,19 @@ doc_effect:
   详情页按 `permission` / `visible_when` 门控，声明 `input_fields` 的动作先弹 `AppModal` 收集参数再派发 BO Action。
   通用派发默认只带 `source_doc_id`，handler `_invoice_id` 已兼容。
 - 已声明动作：`match` / `override_match` / `override_duplicate` / `create_adjustment`；
+  四个动作**均**带 `visible_when`（`override_duplicate` 此前缺失，已补 `status in ['draft','submitted']`）；
   `create_adjustment` 仅 `status == 'posted'` 可见，入参 `direction`（increase / decrease，必填）+ `reason`（必填）。
+- 平台通用编辑入口（2026-11-12 修复）：`DetailPage` 默认「编辑」按钮不再无条件渲染，
+  改为 `authStore` 权限（`{bo}:edit` / `{bo}:update`，管理员直通）+ 单据状态双门控；
+  状态枚举含 `draft` 的对象仅草稿可编辑，已提交/已过账只能走业务动作。
+- 单据流追溯面板（2026-11-12 修复）：规则只声明到行级（`vendor_invoice_line`），
+  头级详情页的 `docFlowMatched` 改为「等于或 `<bo>_` 前缀命中」判定；
+  `DocFlowTracePanel` 按 `/doc-flow/edges` 实际响应 `{items,total}` 读取（此前读不存在的 `.edges`，恒空）。
+- 新建表单不再可选调整单类型：`document_type_id` 的 `value_filter` 增加
+  `code__notin: [VENDOR_INVOICE_ADJUSTMENT]`（调整单只能由 `create_adjustment` 生成，
+  其必填字段在表单中 `hidden_in_form`，直选必保存失败）；服务层创建调整单走直插，不受该过滤影响。
+- `direction` 补齐静态 `enum_values`（1 正向 / -1 负向），详情页与列表按标签显示；
+  列表列补 `document_type_id` / `direction`。
 
 ### 21.8 明确不做（边界）
 
@@ -1105,7 +1117,7 @@ doc_effect:
 | 服务 | `create_adjustment()` / `_write_adjustment_increase_edges()` / `_write_adjustment_decrease_edges()`；`_insert_lines(..., negate=False)` |
 | 守卫 | create 校验原票 posted / 方向 / 原因；posted 拒绝 reversed；行必须回指原行 |
 | 平台修复 | `UIDetailViewConfig.actions`（此前缺字段，YAML `detail.actions` 加载即丢弃）+ `parse_ui_detail_view_config` 解析；`UIConfigBuilder` 兜底替换时保留声明动作（此前只保留 `hub`）；`DetailPage` 映射 `confirm_message` / `input_fields` 并用 `AppModal` 收集入参；`vendor_invoice_actions._invoice_id` 兼容 `source_doc_id` |
-| 平台测试 | `test_yaml_loader.py::TestDetailViewActionsParsing`（解析 + 真实 YAML 声明）、`test_bo_api.py::TestBoAPIV2Meta::test_ui_config_exposes_detail_actions`（接口下发）、`test_ui_config_enhanced.py::TestUIConfigBuilderDeclaredDetailActions`（兜底分支保留 / 不误加）、`test_vendor_invoice_match.py::test_match_handler_accepts_source_doc_id`（派发定位） |
+| 平台测试 | `test_yaml_loader.py::TestDetailViewActionsParsing`（解析 + 真实 YAML 声明）、`test_bo_api.py::TestBoAPIV2Meta::test_ui_config_exposes_detail_actions`（接口下发）、`test_ui_config_enhanced.py::TestUIConfigBuilderDeclaredDetailActions`（兜底分支保留 / 不误加）、`test_vendor_invoice_match.py::test_match_handler_accepts_source_doc_id`（派发定位）、`test_bo_api.py::TestBoAPIV2Meta::test_vendor_invoice_ui_fixes_exposed`（2026-11-12：`direction` 枚举 / `override_duplicate.visible_when` / 调整单排除 / 列表列 随 ui-config 下发） |
 | 测试 | `meta/tests/test_vendor_invoice_adjustment.py`（创建 / increase 边 / decrease 红边 / 超额拒绝 / 无锚点 / 原票只读 / 状态机 / 不可红冲 / 仅数量覆盖按比例折算金额 / 多边 FIFO 分摊） |
 
 ### 21.10 与逆向三档的最终对照

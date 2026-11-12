@@ -261,6 +261,32 @@ class TestBoAPIV2Meta:
         action_ids = {item.get('id') for item in detail.get('actions') or []}
         assert {'match', 'create_adjustment'} <= action_ids
 
+    def test_vendor_invoice_ui_fixes_exposed(self, app_client, admin_headers):
+        """[UI 修复 2026-11-12] 方向枚举 / 重复票放行可见性 / 调整单排除 / 列表列 必须随 ui-config 下发。"""
+        app, client = app_client
+        resp = client.get('/api/v2/meta/vendor_invoice/ui-config', headers=admin_headers)
+        if resp.status_code != 200:
+            pytest.skip('vendor_invoice ui-config 不可用（无认证 / 未注册）')
+        d = json.loads(resp.data)
+        data = d.get('data') or {}
+        ui = data.get('ui_view_config') or {}
+
+        actions = {item.get('id'): item for item in ((ui.get('detail') or {}).get('actions') or [])}
+        assert actions.get('override_duplicate', {}).get('visible_when') == "status in ['draft', 'submitted']"
+
+        columns = [c.get('key') for c in ((ui.get('list') or {}).get('columns') or [])]
+        assert 'document_type_id' in columns and 'direction' in columns
+
+        fields = {f.get('id'): f for f in (data.get('fields') or [])}
+        direction = fields.get('direction') or {}
+        labels = {str(opt.get('value')): opt.get('label') for opt in (direction.get('enum_values') or [])}
+        assert labels == {'1': '正向', '-1': '负向'}
+
+        doc_type = fields.get('document_type_id') or {}
+        value_filter = (((doc_type.get('value_help') or {}).get('source') or {})
+                        .get('value_filter') or {})
+        assert 'VENDOR_INVOICE_ADJUSTMENT' in (value_filter.get('code__notin') or [])
+
     def test_schema_returns_data(self, app_client, admin_headers):
         app, client = app_client
         resp = client.get('/api/v2/meta/user/schema', headers=admin_headers)
