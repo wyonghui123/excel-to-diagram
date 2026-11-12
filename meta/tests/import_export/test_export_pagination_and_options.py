@@ -435,24 +435,21 @@ class TestEnumDropdownFix:
                     wb.close()
                     os.remove(file_path)
 
-    @pytest.mark.xfail(
-        reason="[BUG 2026-11-12] relationship 用 filters 过滤到空结果时 /api/v1/export "
-               "返回 500（原本断言全在 if status==200 内，故长期假绿）",
-        strict=False,
-    )
     def test_export_has_empty_rows_when_no_data(self):
         """测试无数据时批量导出会添加5个新增行"""
         app, client = get_shared_app()
         headers = get_auth_headers()
 
         # 使用过滤条件确保没有数据
+        # [FIX 2026-11-12] filters 契约为 dict（service 内部直接 filters.get()），
+        # 原写法传 list 会触发 AttributeError → 500
         response = client.post(
             '/api/v1/export',
             json={
                 'object_type': 'relationship',
                 'scope': 'single',
                 'options': {'include_operation_mode': True},
-                'filters': [{'field': 'id', 'operator': 'eq', 'value': -999999}]
+                'filters': {'id__in': [-999999]}
             },
             headers=headers
         )
