@@ -410,7 +410,6 @@ class TestSQLiteAdapterPoolMode:
                 try:
                     for i in range(5, 10):
                         adapter.insert("test_items", {"name": "writer_{0}".format(i), "value": i})
-                    time.sleep(0.01)
                 except Exception as e:
                     errors.append(str(e))
 
@@ -510,10 +509,11 @@ class TestThreadLocalStorage:
         lock = threading.Lock()
 
         def worker():
+            # reader() 内部持有 pool 条件锁，5 个线程本身即串行取连接；
+            # 断言的是"每线程各自独立连接"，无需制造重叠窗口
             with pool.reader() as conn:
                 with lock:
                     conn_ids.append(id(conn))
-                time.sleep(0.1)
 
         threads = [threading.Thread(target=worker) for _ in range(5)]
         for t in threads:

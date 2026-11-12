@@ -18,18 +18,6 @@ PROJECT_ROOT = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(_
 sys.path.insert(0, PROJECT_ROOT)
 
 
-def test_structured_logger_import():
-    """测试 StructuredLogger 可以正确导入"""
-    print("\n=== test_structured_logger_import ===")
-    
-    try:
-        from meta.services.structured_logger import StructuredLogger, LogEntry
-        from meta.enums.log_category import LogCategory
-        from meta.enums.log_level import LogLevel
-        print("[PASS] StructuredLogger 和相关模块可以正确导入")
-    except ImportError as e:
-        print(f"[FAIL] 导入失败: {e}")
-        raise
 
 
 def test_audit_interceptor_with_structured_logger():

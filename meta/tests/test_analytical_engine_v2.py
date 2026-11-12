@@ -20,6 +20,7 @@ _PROJECT_ROOT = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(
 sys.path.insert(0, _PROJECT_ROOT)
 
 import meta
+from meta.tests.shared.polling import wait_until
 from meta.core.analytical_engine import (
     AnalyticalEngine, OlapQueryCache, HierarchyNavigation, DimensionMember
 )
@@ -251,11 +252,10 @@ class TestOlapQueryCache:
         cache.put('relationship', ['version_id'], ['relation_count'],
                   None, None, None, [{'version_id': 1}])
 
-        time.sleep(0.01)
-
-        result = cache.get('relationship', ['version_id'], ['relation_count'],
-                           None, None, None)
-        assert result is None
+        assert wait_until(
+            lambda: cache.get('relationship', ['version_id'], ['relation_count'],
+                              None, None, None) is None,
+            timeout=1.0, desc='ttl_seconds=0 的缓存项应立即过期')
 
     def test_cache_eviction(self):
         cache = OlapQueryCache(max_size=2, ttl_seconds=60)

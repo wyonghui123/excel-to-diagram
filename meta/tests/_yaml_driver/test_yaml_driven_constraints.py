@@ -185,15 +185,6 @@ def test_no_constraint_violations(constraint_specs):
         )
 
 
-def test_warning_constraints_listed(constraint_specs, capsys):
-    """warning 级约束即使不 fail, 也要在测试报告里可见"""
-    warnings = [s for s in constraint_specs if s.severity == "warning"]
-    if warnings:
-        print(f"\n[INFO] {len(warnings)} warning-level constraints:")
-        for w in warnings[:10]:
-            print(f"  - {w.test_id}: {w.description}")
-        if len(warnings) > 10:
-            print(f"  ... and {len(warnings) - 10} more")
 
 
 def test_loaded_object_count(meta_registry):

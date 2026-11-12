@@ -1,6 +1,8 @@
 # ALLOW_RAW_SQL: 本文件含裸 SQL 构造权限测试数据/DDL，守卫豁免（2026-11-09 恢复覆盖）
 import pytest
 
+from meta.tests.shared.polling import remove_file
+
 pytestmark = pytest.mark.integration
 
 # -*- coding: utf-8 -*-
@@ -35,12 +37,7 @@ class TestPermissionServiceUnified:
         fd, path = tempfile.mkstemp(suffix='.db')
         os.close(fd)
         yield path
-        try:
-            import time
-            time.sleep(0.1)
-            os.unlink(path)
-        except PermissionError:
-            pass
+        remove_file(path)
 
     @pytest.fixture
     def data_source(self, db_path):
@@ -145,12 +142,7 @@ class TestValidateActionCode:
             yield PermissionService(ds)
             ds.disconnect()
         finally:
-            import time
-            time.sleep(0.1)
-            try:
-                os.unlink(path)
-            except PermissionError:
-                pass
+            remove_file(path)
 
     def test_standard_action_create(self, service):
         assert service._validate_action_code('create') is True
@@ -261,12 +253,7 @@ class TestCreatePermissionUnified:
             yield service
             service.ds.disconnect()
         finally:
-            import time
-            time.sleep(0.1)
-            try:
-                os.unlink(path)
-            except PermissionError:
-                pass
+            remove_file(path)
 
     def test_create_with_valid_action_code(self, service):
         perm_id = service.create_permission_unified(
@@ -376,12 +363,7 @@ class TestCheckPermissionUnified:
             yield service
             service.ds.disconnect()
         finally:
-            import time
-            time.sleep(0.1)
-            try:
-                os.unlink(path)
-            except PermissionError:
-                pass
+            remove_file(path)
 
     def test_admin_has_create_permission(self, service):
         try:
@@ -492,12 +474,7 @@ class TestBackwardCompatibility:
             yield service
             service.ds.disconnect()
         finally:
-            import time
-            time.sleep(0.1)
-            try:
-                os.unlink(path)
-            except PermissionError:
-                pass
+            remove_file(path)
 
     def test_permission_code_format(self, service):
         perm_id = service.create_permission_unified(

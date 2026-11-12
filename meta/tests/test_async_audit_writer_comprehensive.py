@@ -21,6 +21,8 @@ import threading
 from datetime import datetime
 from unittest.mock import MagicMock, patch, PropertyMock
 
+from meta.tests.shared.polling import wait_until
+
 pytestmark = [
     pytest.mark.skip(reason="[TODO] AsyncAuditWriter requires running worker threads; incompatible with test mode - needs fix")
 ]
@@ -178,7 +180,8 @@ class TestAsyncAuditWriterStats:
             
             instance.submit(audit_fn, trace_id='test-trace')
             
-            time.sleep(0.5)
+            assert wait_until(lambda: instance.get_stats()['submitted'] >= 1,
+                              timeout=3.0, desc='submit 后统计应 +1')
             
             stats = instance.get_stats()
             assert stats['submitted'] >= 1
@@ -250,9 +253,8 @@ class TestAsyncAuditWriterSubmit:
             
             assert result is True
             
-            time.sleep(0.5)
-            
-            assert call_count['count'] >= 1
+            assert wait_until(lambda: call_count['count'] >= 1,
+                              timeout=3.0, desc='异步审计回调应被调用')
             
             AsyncAuditWriter.reset()
         finally:
@@ -322,7 +324,8 @@ class TestAsyncAuditWriterSubmit:
             
             assert result is True
             
-            time.sleep(0.5)
+            assert wait_until(lambda: 'transaction_id' in received_ids,
+                              timeout=3.0, desc='回调应收到 trace/transaction id')
             
             assert received_ids.get('trace_id') == 'trace-123'
             assert received_ids.get('transaction_id') == 'txn-456'
@@ -410,7 +413,8 @@ class TestAsyncAuditWriterRetry:
             
             result = instance.submit(failing_then_success_audit_fn)
             
-            time.sleep(1.0)
+            assert wait_until(lambda: call_count['count'] >= 2,
+                              timeout=3.0, desc='首次失败后应自动重试')
             
             stats = instance.get_stats()
             
@@ -607,7 +611,8 @@ class TestAsyncAuditWriterConcurrency:
             assert len(results) == 50
             assert all(r for r in results)
             
-            time.sleep(0.5)
+            assert wait_until(lambda: instance.get_stats()['submitted'] >= 50,
+                              timeout=5.0, desc='50 次并发提交应全部计入统计')
             
             stats = instance.get_stats()
             assert stats['submitted'] >= 50

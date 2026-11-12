@@ -28,12 +28,3 @@ class TestForceCascadeWriteScopeIntegration:
         assert 'integration' in __name__ or 'integration' in __file__
 
 
-class TestRegressionThreeLinkage:
-    def test_force_override_alone_works(self):
-        pass
-
-    def test_cascade_alone_works(self):
-        pass
-
-    def test_write_scope_alone_works(self):
-        pass

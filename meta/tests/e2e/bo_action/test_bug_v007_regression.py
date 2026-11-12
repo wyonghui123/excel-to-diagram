@@ -31,6 +31,8 @@ import uuid
 import pytest
 import os
 
+from meta.tests.shared.polling import wait_until
+
 DB_PATH = os.environ.get('TEST_DB_PATH') or os.environ.get('ARCH_DB_PATH') or os.path.join(
     os.path.dirname(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))),
     'meta', 'architecture.db'
@@ -311,9 +313,16 @@ def test_bug_v007_audit_logs_complete_for_test888(bo_action_server_check,
                 data.get('data', {}).get('id')
     assert parent_id, f'[BUG-V007] 应有 parent_id, 实际 {data}'
 
-    time.sleep(0.5)  # 等待 audit 写入
-
-    # 查 parent 的 audit
+    assert wait_until(
+        lambda: _query_db(
+            """SELECT id, action, field_name, status, outcome
+               FROM audit_logs
+               WHERE object_id=? AND object_type='product' AND user_id=3371
+               ORDER BY id""",
+            (parent_id,)
+        ),
+        timeout=5.0, desc='[BUG-V007] TEST888 的 product audit 应写入'
+    )
     parent_audits = _query_db(
         """SELECT id, action, field_name, status, outcome
            FROM audit_logs

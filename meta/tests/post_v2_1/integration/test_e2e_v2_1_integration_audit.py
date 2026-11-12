@@ -35,9 +35,3 @@ class TestCascadeAnnotationAuditIntegration:
             assert 'trace_id' in source or 'transaction_id' in source
 
 
-class TestRegressionCascadeAnnotation:
-    def test_annotation_cascade_logged_as_delete(self):
-        pass
-
-    def test_orphan_annotation_check(self):
-        pass

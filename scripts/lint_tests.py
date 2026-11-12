@@ -107,6 +107,20 @@ def _has_assertion(func_node):
     return False
 
 
+def _loop_body_ranges(tree):
+    """循环体行号区间：循环内的 sleep 是轮询/退避，不算忙等。"""
+    ranges = []
+    for node in ast.walk(tree):
+        if isinstance(node, (ast.For, ast.AsyncFor, ast.While)) and node.body:
+            end = max((n.end_lineno or n.lineno) for n in node.body)
+            ranges.append((node.body[0].lineno, end))
+    return ranges
+
+
+def _in_ranges(line, ranges):
+    return any(lo <= line <= hi for lo, hi in ranges)
+
+
 def _normalized_hash(text):
     body = "\n".join(
         line.rstrip() for line in text.splitlines()
@@ -161,6 +175,7 @@ def scan(files, strict=False):
 
         content_hash[_normalized_hash(text)].append(rel)
         allow_raw_sql = "ALLOW_RAW_SQL" in text
+        allow_sleep = "ALLOW_SLEEP" in text
         has_shared_app = "get_shared_app" in text or "shared" in text
         has_marker = False
 
@@ -197,6 +212,8 @@ def scan(files, strict=False):
                         rel, node.lineno, "no-assert",
                         f"{node.name} 内没有 assert / 断言 helper"))
 
+        loop_ranges = _loop_body_ranges(tree)
+
         for node in ast.walk(tree):
             if not isinstance(node, ast.Call):
                 continue
@@ -218,10 +235,12 @@ def scan(files, strict=False):
                     f"{name}() 内联 SQL「{snippet}」；改用 factories/"
                     "_raw_sql_bridge，或文件头加 ALLOW_RAW_SQL + 理由"))
 
-            if last == "sleep":
+            if last == "sleep" and not allow_sleep \
+                    and not _in_ranges(node.lineno, loop_ranges):
                 findings.append(Finding(
                     rel, node.lineno, "sleep",
-                    "用轮询 helper 替代固定 sleep（慢机器假失败）"))
+                    "用 shared/polling.wait_until 替代固定 sleep（慢机器假失败）；"
+                    "确需固定延迟（TTL/性能采样）时在文件头加 ALLOW_SLEEP + 理由"))
 
             if strict and last == "create_app" and not has_shared_app:
                 findings.append(Finding(
@@ -318,7 +337,7 @@ def main(argv=None):
                         help="存在该级别及以上问题时退出码 1")
     args = parser.parse_args(argv)
 
-    root = Path(args.root) if args.root else REPO_ROOT / "meta" / "tests"
+    root = (Path(args.root) if args.root else REPO_ROOT / "meta" / "tests").resolve()
     if not root.exists():
         print(f"扫描根目录不存在: {root}", file=sys.stderr)
         return 2

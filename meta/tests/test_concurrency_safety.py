@@ -213,6 +213,8 @@ class TestDatabaseLocking:
     def test_write_lock_blocks_read(self, concurrent_db):
         """写入锁应影响后续读取"""
         write_started = threading.Event()
+        write_locked = threading.Event()
+        read_attempted = threading.Event()
         read_results = []
 
         def write_task():
@@ -221,12 +223,15 @@ class TestDatabaseLocking:
                 "INSERT INTO domains (name, code) VALUES (?, ?)",
                 ("lock_test", "LOCK_TEST")
             )
-            time.sleep(0.1)
+            write_locked.set()
+            # 持有写锁直到读线程真的发起读取（确定性，无固定等待）
+            read_attempted.wait(timeout=2)
             concurrent_db.commit()
 
         def read_task():
             write_started.wait(timeout=2)
-            time.sleep(0.1)
+            write_locked.wait(timeout=2)
+            read_attempted.set()
             start = time.time()
             try:
                 cursor = concurrent_db.execute("SELECT * FROM domains")

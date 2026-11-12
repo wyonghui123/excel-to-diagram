@@ -21,8 +21,6 @@ class TestCascadeBrowserE2E:
         except Exception:
             pytest.skip(f"Backend not running at {base}")
 
-    def test_test333_batch_delete_with_versions(self):
-        pass
 
     def test_api_batch_delete_endpoint_exists(self):
         from meta.api import bo_api

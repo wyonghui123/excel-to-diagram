@@ -1,4 +1,5 @@
 # ALLOW_RAW_SQL: 本文件含裸 SQL 构造解锁管理员测试数据/DDL，守卫豁免（2026-11-09 恢复覆盖）
+# ALLOW_SLEEP: --watch 模式需真实运行观察窗口（外部进程，无可轮询的内部状态）
 # -*- coding: utf-8 -*-
 """
 [MODULE] B1: v3.14 unlock_admin 脚本测试
@@ -14,6 +15,7 @@ import http.client
 
 # admin_token 路径在 conftest.py 已配 (走 sys.path)
 from admin_token import call_action, get_admin_cookie  # noqa: E402
+from meta.tests.shared.polling import wait_until  # noqa: E402
 
 
 _PROJECT_ROOT = os.path.dirname(  # .../excel-to-diagram
@@ -169,14 +171,18 @@ def test_unlock_admin_writes_audit_log():
     assert result.returncode == 0
 
     # 查 audit_log 增量
-    time.sleep(0.5)  # 给 audit 写入时间
-    conn = sqlite3.connect(db_path, timeout=5)
-    try:
-        after = conn.execute(
-            "SELECT COUNT(*) FROM audit_logs WHERE action = 'unlock' AND object_type = 'user'"
-        ).fetchone()[0]
-    finally:
-        conn.close()
+    def _unlock_count():
+        _conn = sqlite3.connect(db_path, timeout=5)
+        try:
+            return _conn.execute(
+                "SELECT COUNT(*) FROM audit_logs WHERE action = 'unlock' AND object_type = 'user'"
+            ).fetchone()[0]
+        finally:
+            _conn.close()
+
+    assert wait_until(lambda: _unlock_count() > before, timeout=5.0,
+                      desc='unlock 后 audit_log 应 +1')
+    after = _unlock_count()
 
     # unlock 后 audit log 应 +1
     assert after == before + 1, f'unlock 后 audit log 应 +1, 实际 {before} -> {after}'

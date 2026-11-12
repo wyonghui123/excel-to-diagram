@@ -32,7 +32,3 @@ from meta.core.index_management_service import IndexManagementService
 class TestLargeDataScenario:
     """大数据量场景测试"""
     
-    @pytest.mark.slow
-    def test_large_data_import_performance(self):
-        """测试大数据量导入性能"""
-        pass

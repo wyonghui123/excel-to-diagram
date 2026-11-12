@@ -118,9 +118,6 @@ class TestAutoFillIntegration:
         if create_result.success:
             original = adapter.find_by_id('domains', create_result.last_insert_id)
             if original:
-                import time
-                time.sleep(0.01)
-
                 update_result = executor.execute(domain, 'crud_update', {
                     'id': create_result.last_insert_id,
                     'name': 'Updated Domain Name',
@@ -319,9 +316,6 @@ class TestAnnotationAutoFill:
         })
 
         if create_result.success:
-            import time
-            time.sleep(0.01)
-
             executor.set_audit_user(user_id=2, user_name='second_author')
 
             update_result = executor.execute(annotation, 'crud_update', {

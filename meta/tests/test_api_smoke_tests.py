@@ -24,6 +24,8 @@ import json
 import os
 import time
 
+from meta.tests.shared.polling import wait_until
+
 
 BASE_URL = os.environ.get('TEST_API_URL', 'http://localhost:3010')  # v3.18 P1: 修复端口不一致
 
@@ -140,8 +142,6 @@ class TestAPISmokeTests:
         role_id = create_response.json().get('data', {}).get('id')
         assert role_id, "创建角色应该返回 id"
 
-        time.sleep(0.1)
-
         delete_response = requests.delete(
             f'{BASE_URL}/api/v2/bo/roles/{role_id}',
             headers=self.headers,
@@ -151,28 +151,29 @@ class TestAPISmokeTests:
         assert delete_response.status_code == 200, \
             f"删除角色应该返回 200，实际返回 {delete_response.status_code}: {delete_response.text}"
 
-        time.sleep(0.1)
+        def _delete_logs():
+            resp = requests.get(
+                f'{BASE_URL}/api/v2/bo/audit/logs',
+                headers=self.headers,
+                params={
+                    'object_type': 'role',
+                    'object_id': str(role_id),
+                    'page': 1,
+                    'page_size': 100
+                },
+                timeout=10
+            )
+            assert resp.status_code == 200, \
+                f"查询审计日志应该返回 200，实际返回 {resp.status_code}"
+            return [log for log in resp.json().get('data', [])
+                    if log.get('action') == 'DELETE']
 
-        audit_response = requests.get(
-            f'{BASE_URL}/api/v2/bo/audit/logs',
-            headers=self.headers,
-            params={
-                'object_type': 'role',
-                'object_id': str(role_id),
-                'page': 1,
-                'page_size': 100
-            },
-            timeout=10
-        )
-
-        assert audit_response.status_code == 200, \
-            f"查询审计日志应该返回 200，实际返回 {audit_response.status_code}"
-
-        audit_logs = audit_response.json().get('data', [])
-        delete_logs = [log for log in audit_logs if log.get('action') == 'DELETE']
+        assert wait_until(lambda: _delete_logs(), timeout=5.0,
+                          desc='删除角色后应写入 DELETE 审计日志')
+        delete_logs = _delete_logs()
 
         assert len(delete_logs) > 0, \
-            f"应该存在 DELETE 类型的审计日志，实际审计日志: {audit_logs}"
+            f"应该存在 DELETE 类型的审计日志，实际审计日志: {delete_logs}"
 
         code_delete_logs = [log for log in delete_logs if log.get('field_name') == 'code']
         assert len(code_delete_logs) > 0, \

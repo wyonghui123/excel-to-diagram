@@ -1,3 +1,4 @@
+# ALLOW_SLEEP: 性能测试需模拟 1ms 昂贵 loader，固定延迟本身就是测试输入
 # -*- coding: utf-8 -*-
 """
 [FILE] test_permission_cache_perf.py

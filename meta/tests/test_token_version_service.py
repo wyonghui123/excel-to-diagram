@@ -291,13 +291,6 @@ def test_bump_non_list_input(svc, ds):
 # G. 集成场景：assign_role 应自动 bump
 # =========================================================================
 
-def test_assign_role_bumps_token_version(svc, ds):
-    """PermissionService.assign_role 应触发 token_version bump（集成）"""
-    # 这测试 token_version_service 与 PermissionService 的集成
-    # 单独的 token_version_service 测试已覆盖 bump 本身
-    # 这里验证 PermissionService.assign_role 调用了 token_version_service.bump
-    # 由于是全局单例，我们需要小心测试隔离
-    pass  # 集成测试在 test_permission_service_edge.py 中覆盖
 
 
 # =========================================================================

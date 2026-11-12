@@ -87,12 +87,14 @@ class TestThreadLocalUser:
     def test_concurrent_threads_isolated(self):
         """多线程间 thread-local 隔离"""
         results = {}
+        barrier = threading.Barrier(3)
 
         def worker(name, user_id):
             from meta.services.query_service import set_thread_user, _get_thread_user, clear_thread_user_id
             set_thread_user({'user_id': user_id, 'username': name, 'permissions': ['*']})
             try:
-                time.sleep(0.05)  # 让其他线程也有机会设置
+                # 三个线程都完成 set 后再各自读取，确定性覆盖并发窗口
+                barrier.wait(timeout=5)
                 u = _get_thread_user()
                 results[name] = u.get('user_id') if u else None
             finally:

@@ -8,6 +8,7 @@ from unittest.mock import MagicMock
 
 from meta.core.cache import LRUTTLCache, is_cache_disabled
 from meta.core.enrichment_engine import EnrichmentEngine
+from meta.tests.shared.polling import wait_until
 from meta.core.redundancy_registry import (
     RedundancyRegistry,
     RedundancyDef,
@@ -60,11 +61,11 @@ class TestLRUTTLCache:
         assert c.evictions == 1
 
     def test_ttl_expiration(self):
-        c = LRUTTLCache(max_size=10, ttl_seconds=1)
+        c = LRUTTLCache(max_size=10, ttl_seconds=0.05)
         c.set("k1", "v1")
         assert c.get("k1") == "v1"
-        time.sleep(1.1)
-        assert c.get("k1") is None
+        assert wait_until(lambda: c.get("k1") is None, timeout=2.0,
+                          desc='TTL 到期后应失效')
         assert c.expirations == 1
 
     def test_stats(self):

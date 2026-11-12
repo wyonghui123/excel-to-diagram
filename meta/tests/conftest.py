@@ -37,7 +37,20 @@ apply_early_flags()
 # 在 import 阶段抛 ConnectionRefusedError, 导致整个 pytest 收集期 exit 2,
 # 连 --failed 的 PRECHECK 都无法通过。它不是 pytest 用例 (0 个 def test_*),
 # 仅供手工 `python meta/tests/test_export_e2e.py` 执行, 故排除出收集面。
-collect_ignore = ['test_export_e2e.py']
+collect_ignore = [
+    'test_export_e2e.py',
+    # [TEST-EFF P0-3] 以下 4 个文件均为脚本式（0 个 def test_*），仅供手工
+    # `python meta/tests/<file>` 执行；留在收集面内只会白付一次模块 import 冷启动。
+    'test_performance.py',
+    'test_optimizer.py',
+    'migrations/test_e2e_verify.py',
+    'migrations/test_e2e_real_archive.py',
+    # P0-2 后已无用例（原用例均为零信号网络/脚本调用），保留脚本供手工执行
+    'performance/test_large_data_scenario.py',
+    'post_v2_1/cascade/test_cascade_e2e.py',
+    'post_v2_1/integration/test_e2e_v2_1_integration_audit.py',
+    'post_v2_1/integration/test_e2e_v2_1_integration_force.py',
+]
 
 logger = logging.getLogger(__name__)
 

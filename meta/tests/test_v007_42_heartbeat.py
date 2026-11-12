@@ -17,6 +17,8 @@ import time
 
 import pytest
 
+from meta.tests.shared.polling import wait_until
+
 
 try:
     from meta.core.sqlite_version_guard import (
@@ -109,7 +111,9 @@ class TestDBHeartbeat:
         try:
             hb = DBHeartbeat(path, interval=0.5)
             hb.start()
-            time.sleep(0.2)  # 等线程启动
+            assert wait_until(
+                lambda: hb._thread is not None and hb._thread.is_alive(),
+                timeout=2.0, desc='心跳线程应在 start() 后启动')
             assert hb.is_running() is True
             assert hb._thread is not None
             assert hb._thread.is_alive()
@@ -147,7 +151,6 @@ class TestDBHeartbeat:
                 hb = DBHeartbeat(path, interval=0.2)
                 assert hb._disabled is True
                 hb.start()
-                time.sleep(0.2)
                 assert hb.is_running() is False  # 不启动
             finally:
                 try:

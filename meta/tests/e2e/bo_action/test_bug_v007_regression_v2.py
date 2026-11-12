@@ -44,6 +44,7 @@ from meta.core.trace_id import TraceId
 from meta.core.error_fix_hints import get_fix_hint
 # [v2 P2] Factory 模式 (D.2)
 from meta.tests.factories import UserFactory, ProductFactory, VersionFactory
+from meta.tests.shared.polling import wait_until
 
 # ============================================================
 # 常量 / 日志
@@ -374,9 +375,16 @@ def test_bug_v007_audit_logs_complete(bo_action_server_check,
     if parent_id:
         created_product_ids.append(parent_id)
 
-    time.sleep(0.5)  # 等 audit 写入
-
-    # 查 parent audit
+    assert wait_until(
+        lambda: _query_db(
+            """SELECT id, action, field_name, status, outcome
+               FROM audit_logs
+               WHERE object_id=? AND object_type='product' AND user_id=?
+               ORDER BY id""",
+            (parent_id, user['id'])
+        ),
+        timeout=5.0, desc='product audit 应写入'
+    )
     parent_audits = _query_db(
         """SELECT id, action, field_name, status, outcome
            FROM audit_logs

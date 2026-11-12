@@ -106,9 +106,7 @@ class TestAsyncExportFilename:
         s = _make_service()
 
         # 连续调用 2 次, 时间戳不同 → 文件名不同
-        import time
         result1 = s._build_export_filename(['产品'], '20260624_120000')
-        time.sleep(0.001)  # 几乎不延迟
         result2 = s._build_export_filename(['产品'], '20260624_120001')
 
         # timestamp 不同时文件名应不同
