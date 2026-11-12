@@ -250,6 +250,17 @@ class TestBoAPIV2Meta:
             d = json.loads(resp.data)
             assert d.get('success')
 
+    def test_ui_config_exposes_detail_actions(self, app_client, admin_headers):
+        """[FIX 2026-11-12] detail.actions 必须随 ui-config 下发，否则前端业务按钮恒为空。"""
+        app, client = app_client
+        resp = client.get('/api/v2/meta/vendor_invoice/ui-config', headers=admin_headers)
+        if resp.status_code != 200:
+            pytest.skip('vendor_invoice ui-config 不可用（无认证 / 未注册）')
+        d = json.loads(resp.data)
+        detail = ((d.get('data') or {}).get('ui_view_config') or {}).get('detail') or {}
+        action_ids = {item.get('id') for item in detail.get('actions') or []}
+        assert {'match', 'create_adjustment'} <= action_ids
+
     def test_schema_returns_data(self, app_client, admin_headers):
         app, client = app_client
         resp = client.get('/api/v2/meta/user/schema', headers=admin_headers)

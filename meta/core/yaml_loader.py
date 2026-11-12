@@ -949,6 +949,9 @@ def parse_ui_detail_view_config(data: Dict[str, Any]) -> UIDetailViewConfig:
         showChangeHistory=data.get("showChangeHistory", True),
         showRelations=data.get("showRelations", True),
         rule_trace=data.get("rule_trace", {}) or {},
+        # [2026-11-12] detail.actions：业务动作 / 声明式动作的原样声明。
+        #   前端按 permission / visible_when 门控，含 action 的项派发 BO Action。
+        actions=data.get("actions", []) or [],
     )
 
 

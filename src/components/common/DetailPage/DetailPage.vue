@@ -169,6 +169,54 @@
     </div>
   </div>
 
+  <!-- [2026-11-12] detail.actions 入参弹窗：input_fields 声明由 YAML 提供，
+       形状对齐 StateTransitionButtons（field/label/type/required/options/default） -->
+  <AppModal
+    v-model="businessActionDialog.visible"
+    :title="businessActionDialog.action?.label || '填写操作参数'"
+    width="460"
+    :close-on-click-overlay="false"
+    @close="closeBusinessActionInputs(null)"
+  >
+    <div v-if="businessActionDialog.action?.confirmMessage" class="dp-action-confirm">
+      {{ businessActionDialog.action.confirmMessage }}
+    </div>
+    <el-form label-position="top" @submit.prevent>
+      <el-form-item
+        v-for="field in businessActionDialog.fields"
+        :key="field.field"
+        :label="field.label || field.field"
+        :required="!!field.required"
+      >
+        <el-select
+          v-if="Array.isArray(field.options) && field.options.length"
+          v-model="businessActionDialog.values[field.field]"
+          :placeholder="field.placeholder || '请选择'"
+          style="width: 100%"
+        >
+          <el-option
+            v-for="opt in field.options"
+            :key="opt.value !== undefined ? opt.value : opt"
+            :label="opt.label !== undefined ? opt.label : opt"
+            :value="opt.value !== undefined ? opt.value : opt"
+          />
+        </el-select>
+        <el-input
+          v-else
+          v-model="businessActionDialog.values[field.field]"
+          :type="field.type === 'textarea' ? 'textarea' : 'text'"
+          :rows="field.rows || 3"
+          :placeholder="field.placeholder || ''"
+        />
+      </el-form-item>
+      <p v-if="businessActionDialog.error" class="dp-action-error">{{ businessActionDialog.error }}</p>
+    </el-form>
+    <template #footer>
+      <AppButton variant="secondary" @click="closeBusinessActionInputs(null)">取消</AppButton>
+      <AppButton variant="primary" @click="confirmBusinessActionInputs">确定</AppButton>
+    </template>
+  </AppModal>
+
   <!-- [v70 2026-08-28] 权限体检弹窗：体检是权限集 object 的 validation action，
        入口在 ObjectPage/标题栏标准 action 区（objectType==='permission_set' 时显示） -->
   <PermissionAuditDialog
@@ -199,6 +247,7 @@ import boService from '@/services/boService'
 import { objectTypeService } from '@/services/objectTypeService'
 import { AppButton } from '@/components/common/AppButton'
 import { AppIcon } from '@/components/common/AppIcon'
+import { AppModal } from '@/components/common/AppModal'
 import { ObjectPage } from '@/components/common/ObjectPage'
 import PermissionAuditDialog from '@/views/SystemManagement/components/PermissionAuditDialog.vue'
 import SalesOrderExpandDialog from '@/components/business/SalesOrderExpandDialog.vue'
@@ -670,7 +719,10 @@ const computedActions = computed(() => {
       variant: a.variant || a.type,
       container: a.container,
       action: a.action,
-      params: a.params
+      params: a.params,
+      // [2026-11-12] 确认文案与入参声明来自 detail.actions（后端 UIDetailViewConfig.actions）
+      confirmMessage: a.confirm_message || a.confirmMessage,
+      inputFields: a.input_fields || a.inputFields || []
     }))
   const declarativeActions = yamlActions.filter(
     a => typeof a === 'string' || !(a && typeof a === 'object' && a.action)
@@ -1640,24 +1692,71 @@ function handleFieldDisplayUpdate({ key, displayValue }) {
 
 const objectPageRef = ref(null)
 
+// [2026-11-12] detail.actions 入参弹窗：声明 input_fields 的业务动作先收集参数
+//   （如调整方向 / 放行原因），再随 source_doc_id 一起派发 BO Action。
+const businessActionDialog = ref({
+  visible: false, action: null, fields: [], values: {}, error: '', resolve: null
+})
+
+function openBusinessActionInputs(action) {
+  const fields = action.inputFields || []
+  const values = {}
+  fields.forEach(field => {
+    if (field.default !== undefined) values[field.field] = field.default
+  })
+  return new Promise(resolve => {
+    businessActionDialog.value = {
+      visible: true, action, fields, values, error: '', resolve
+    }
+  })
+}
+
+function closeBusinessActionInputs(result) {
+  const resolve = businessActionDialog.value.resolve
+  businessActionDialog.value = {
+    visible: false, action: null, fields: [], values: {}, error: '', resolve: null
+  }
+  resolve?.(result)
+}
+
+function confirmBusinessActionInputs() {
+  const state = businessActionDialog.value
+  const missing = (state.fields || []).find(
+    field => field.required && !String(state.values[field.field] ?? '').trim()
+  )
+  if (missing) {
+    state.error = `请填写${missing.label || missing.field}`
+    return
+  }
+  closeBusinessActionInputs({ ...state.values })
+}
+
 // [spec §13] 业务 Action 派发：YAML detail.actions 中声明 action 的按钮
 //   → POST /api/v2/action/{actionId}，参数默认带 source_doc_id=当前对象 id。
 async function runBusinessAction(action) {
-  const { ElMessageBox } = await import('element-plus')
-  try {
-    await ElMessageBox.confirm(
-      action.confirmMessage || '确定要执行此操作吗？',
-      action.label || '确认操作',
-      { type: 'info', confirmButtonText: '确定', cancelButtonText: '取消' }
-    )
-  } catch {
-    return
+  let values = { ...(action.params || {}) }
+  const fields = action.inputFields || []
+  if (fields.length > 0) {
+    const collected = await openBusinessActionInputs(action)
+    if (!collected) return
+    values = { ...values, ...collected }
+  } else {
+    const { ElMessageBox } = await import('element-plus')
+    try {
+      await ElMessageBox.confirm(
+        action.confirmMessage || '确定要执行此操作吗？',
+        action.label || '确认操作',
+        { type: 'info', confirmButtonText: '确定', cancelButtonText: '取消' }
+      )
+    } catch {
+      return
+    }
   }
 
   const { call } = useBoAction()
   const result = await call(action.action, {
     source_doc_id: props.id,
-    ...(action.params || {})
+    ...values
   })
 
   if (result?.success) {
@@ -1915,6 +2014,23 @@ const showAuditDialog = ref(false)
     margin: 0;
     color: var(--color-text-tertiary);
   }
+}
+
+/* [2026-11-12] detail.actions 入参弹窗：说明文案 / 校验错误提示 */
+.dp-action-confirm {
+  margin-bottom: var(--spacing-sm);
+  padding: var(--spacing-sm) var(--spacing-md);
+  border-radius: var(--radius-sm, 6px);
+  background: var(--color-bg-secondary, var(--color-fill-2, #f4f6f8));
+  color: var(--color-text-secondary);
+  font-size: 13px;
+  line-height: 1.6;
+}
+
+.dp-action-error {
+  margin: 0;
+  color: var(--color-danger, #d93026);
+  font-size: 12px;
 }
 
 /* [2026-10-21 自解释说明] 「这是什么」说明横幅：中性底 + 左侧信息图标，

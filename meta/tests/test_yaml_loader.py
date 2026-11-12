@@ -704,3 +704,62 @@ class TestDetailTabActionParsing:
         })
 
         assert tab.actions == ["assign", "unassign"]
+
+
+class TestDetailViewActionsParsing:
+    """详情视图级 actions 解析（[FIX 2026-11-12]）。
+
+    UIDetailViewConfig 此前缺 actions 字段、parse_ui_detail_view_config 只解 tabs，
+    YAML `detail.actions` 在加载阶段被静默丢弃 ⇒ 前端 computedActions 恒为空，
+    match / create_adjustment / 贷项等业务按钮永不渲染。
+    """
+
+    def test_detail_actions_are_preserved(self):
+        from meta.core.yaml_loader import parse_ui_detail_view_config
+
+        config = parse_ui_detail_view_config({
+            "actions": [{
+                "id": "create_adjustment",
+                "label": "新建调整单",
+                "action": "vendor_invoice.create_adjustment",
+                "input_fields": [
+                    {"field": "direction", "type": "select", "required": True},
+                ],
+            }],
+        })
+
+        assert len(config.actions) == 1
+        action = config.actions[0]
+        assert action["action"] == "vendor_invoice.create_adjustment"
+        assert action["input_fields"][0]["field"] == "direction"
+
+    def test_detail_actions_default_to_empty_list(self):
+        from meta.core.yaml_loader import parse_ui_detail_view_config
+
+        config = parse_ui_detail_view_config({"facets": []})
+
+        assert config.actions == []
+
+    def test_vendor_invoice_yaml_declares_detail_actions(self):
+        import yaml
+        from meta.core.yaml_loader import parse_ui_view_config
+
+        schema_path = Path(__file__).resolve().parents[1] / "schemas" / "vendor_invoice.yaml"
+        raw = yaml.safe_load(schema_path.read_text(encoding="utf-8"))
+        detail = parse_ui_view_config(raw["ui_view_config"]).detail
+
+        actions = {item["id"]: item for item in detail.actions}
+        assert set(actions) == {
+            "match", "override_match", "override_duplicate", "create_adjustment",
+        }
+        assert actions["match"]["visible_when"] == "status in ['draft', 'submitted']"
+
+        adjustment = actions["create_adjustment"]
+        assert adjustment["action"] == "vendor_invoice.create_adjustment"
+        assert adjustment["visible_when"] == "status == 'posted'"
+        fields = {item["field"]: item for item in adjustment["input_fields"]}
+        assert fields["direction"]["required"] is True
+        assert [opt["value"] for opt in fields["direction"]["options"]] == [
+            "increase", "decrease",
+        ]
+        assert fields["reason"]["required"] is True
