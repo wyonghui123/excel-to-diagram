@@ -1,6 +1,6 @@
 # 测试执行效率优化 Spec
 
-- 版本：v4.6（2026-11-10）
+- 版本：v4.7（2026-11-12）
 - 状态：待评审
 - 适用仓库：`d:\filework\excel-to-diagram`
 - 唯一测试入口：`python d:\filework\test.py --all|--failed|--single|--file`（禁直接 pytest）
@@ -41,15 +41,16 @@
 | 收集用例总数 | 15,556 | `--collect-only` |
 | 每文件用例数（平均 / 中位） | 19.7 / 14 | 同上 |
 | 单文件耗时（140 文件实测）min/median/max | 4.1s / 9.9s / 135.4s | `_run_perfile.py` |
+| 单文件耗时复测（2026-11-12，治理后） | 最慢文件 27.97s（原 135.4s，本轮复测基线 67.09s） | `test.py --file` 实测 |
 | 用例数 ≤5 的文件 | 34 个，median 10.2s | 同上 |
 | 用例数 ≤2 的文件 | 3 个，median 7.0s | 同上 |
 | ≥20s 的文件占比 | 29/140（21%） | 同上 |
-| 纯进程冷启动成本 | 7.0s/文件 × 802 ≈ 93.6 分钟 | 同上 |
+| 纯进程冷启动成本 | 7.0s/文件 × 802 ≈ 93.6 分钟 | 同上（**已过时**：该值为 P0/P1 系列优化前的 `create_app()` 冷启动；优化后复测多文件边际成本约 1.32s/文件，两者口径不同，不可直接相乘） |
 | 逐文件串行全量推算 | 约 2.2 小时 | 中位 9.9s 外推 |
 | 用例数 ≤5 的文件总量 | 95 个 | 统计 |
 | 用例数 ≤10 的文件总量 | 293 个 | 统计 |
 | 同名 test 函数跨 ≥3 文件 | 82 个名字 / 362 处定义 | AST 扫描 |
-| 最慢文件 | `test_export_pagination_and_options.py` 135.4s / 仅 12 项 | 实测 |
+| 最慢文件 | `test_export_pagination_and_options.py` 135.4s / 仅 12 项（治理后 **27.97s / 12 项**，11 passed + 1 曾 xfail） | 实测 |
 | 第二大 | `_yaml_driver/test_yaml_driven_constraints.py` 88.5s / 1404 项（单文件占总用例 9%） | 实测 |
 
 关键非线性事实：**耗时与用例数不成比例**。135.4s 只有 12 项、80.2s 只有 11 项，说明存在少量真实重操作（Excel 导出、HTTP、全量 YAML 加载），不能靠「合并用例」解决。
@@ -161,6 +162,11 @@ env['PROGRESS_FILE'] = str(RESULTS_DIR / 'test_progress.json')
 #### R7：少量真实慢用例
 
 `test_export_pagination_and_options.py`（135.4s/12 项）、`test_annotation_metadata_driven.py`（82.7s/15 项）、`test_action_api.py`（80.2s/11 项）。合并文件不会让它们变快，必须单独治理。
+
+**2026-11-12 治理结果（R7 首项已闭环）**：`test_export_pagination_and_options.py` 由本轮复测 **67.09s → 27.97s**（整轮 Duration 72.75s → 36.31s，最慢用例 20.67s → 8.51s；12 项全绿，x列出 1 项已修真缺陷）。手段是三条**不改生产代码**的测试侧修正：
+1. relationship 导出的两个「列级行为」用例限定 `page_size=5`（枚举下拉/空白行填充与行数无关，全量导出 10000 行纯浪费，单用例约 20s → 8.5s 以内）；
+2. 所有 `if response.status_code == 200:` 内的断言外提为前置 `assert`（原写法在 500 时静默通过，属假绿）；
+3. 空结果用例的 `filters` 由 list 改为 dict（`{'id__in': [-999999]}`）——接口/服务契约是 `Dict`，传 list 会 `AttributeError` → 500；该用例长期被假绿掩盖。
 
 #### R8：`test.py` 的整体 300s 硬超时（实施期新发现，v1.0 遗漏）
 
@@ -690,7 +696,7 @@ def pytest_unconfigure(config):
 
 | 文件 | 用例数 | 耗时 | 初判原因 |
 |---|---|---|---|
-| `test_export_pagination_and_options.py` | 12 | 135.4s | 导出/分页真实 IO |
+| `test_export_pagination_and_options.py` | 12 | 135.4s → **27.97s**（已治理） | 导出/分页真实 IO + 全量导出 10000 行 |
 | `_consolidated/test_p0_other_domains.py` | 63 | 94.4s | 大杂烩合并文件 |
 | `_yaml_driver/test_yaml_driven_constraints.py` | 1404 | 88.5s | 单文件占 9% 用例 |
 | `test_annotation_metadata_driven.py` | 15 | 82.7s | 元数据驱动全量加载 |
@@ -843,3 +849,4 @@ python d:\filework\test.py --file meta/tests/test_bo_transaction_lock.py
 | 2026-11-10 | v4.4 | **P1-5 测试态跳过整库 quick_check 预检**（`meta/server.py::_preflight_db_check` + `meta/tests/conftest.py`）：`create_app()` 启动时对 `meta/architecture.db` 执行 `PRAGMA quick_check`（2026-11-09 P0 引入，用于页级损坏兜底）。实测 165MB 库单次 **1.35-1.56s**，且每个测试进程都要付一次——连 `--file` 单文件进程也付。<br>治理：新增 `SKIP_DB_PREFLIGHT=1` 开关，`_preflight_db_check` 入口早退；`conftest.pytest_configure()` 以 `os.environ.setdefault('SKIP_DB_PREFLIGHT', '1')` 打开（`setdefault` 保留外部显式值；需要验证预检链路的用例 `os.environ.pop('SKIP_DB_PREFLIGHT')` 后自建场景即可）。<br>**为什么测试态可以跳过**：测试库主要由 test.py 的 SQLite backup 快照产生（backup API 逐页读取，损坏会在快照阶段报错）；即便跳过，真损坏也会在首次 SQL 操作时以 `DatabaseError` 暴露；生产启动路径完全不变（未设该变量）。<br>**实测**（同进程热 `create_app()`）：未跳过 **3.625s / 3.599s** → 跳过 **2.158s / 2.093s**（-1.5s/进程，约 -42%）；按 802 个文件进程估算省约 **20 分钟**。<br>**测试**：`test_app_startup_contracts.py` 10 passed（`with_preflight_checks` 属 AppBuilder 另一机制，不受影响）、`test_db_integrity_check.py` 8 passed（该文件自带 `_preflight_db_integrity_check` 本地实现，直接验证损坏检测/隔离链路，不受环境开关影响）。 |
 | 2026-11-10 | v4.5 | **P0 测试基础设施三件套（把隐含契约变成可复用载体）**：前 20+ 项优化的正确性依赖若干口头约定（哈希必须确定性、版本+内容双因子、存在性前提、失败降级、全量成功后才落守卫、`GUARD_FORCE` 逃生），此前只存在于各实现注释里，下一个 Agent 很容易重写错或无法自证收益。本轮只新增工具，不改存量守卫实现。<br>① `meta/core/declaration_guard.py`（新增）——统一「声明内容哈希守卫」工具包：`GuardSpec(scope_key, version, payload, presence, namespace)` + `evaluate()` 七态判定（hit / no_record / version_miss / hash_miss / presence_missing / forced / error）+ `should_skip()` / `mark_applied()` / `log_decision()`（统一 `[GUARD] scope= v= hit= reason= hash=`）/ `status()` / `reset()`；`_normalize()` 对 set/frozenset **排序并 warning**（根治 P1-3 的 `PYTHONHASHSEED` 跨进程哈希抖动），非法类型直接 `TypeError` 而非静默错哈希；`GUARD_FORCE=1` 逃生口；守卫表 `declaration_guard(scope_key, version, declaration_hash, applied_at)`。存量 `schema_sync_guard` / `menu_sync_guard` / `enum_sync_guard` 保持原实现不动，新守卫用本工具包。<br>② `scripts/lint_tests.py`（新增）——把人工经验变成可执行检查，9 项规则：`syntax-error` / `duplicate-file` / `duplicate-test-def` / `inline-sql` / `sleep` / `missing-marker` / `no-assert` / `direct-create-app` / `hardcoded-version-id`；默认只报告（exit 0），`--fail-on low\|medium\|high` 供门禁，`--strict` 打开全量规则，`--json` 出结构化结果。首扫 **806 文件 / 2368 个 `test_*` 函数（含类方法）**：`inline-sql 175 处(high)`、`duplicate-test-def 87 处(medium)`、`sleep 40 处(medium)`、`duplicate-file 0`。<br>③ `scripts/debug/verify/startup_breakdown.py`（新增）——固化启动分段探针：计时包装 `Flask.register_blueprint` / `add_url_rule` / 21 个 `meta.server` 初始化钩子 / `menu_auto_generator.persist_to_db`，在 SQLite backup 复制库上跑两轮（first / warm）并输出 JSON 基线 `docs/testing/startup-baseline.json`（runs / guards / env）。实测 **`Run#0 total=1.884s`、`Run#1 warm=0.451s`**，规则 487 / 蓝图 74；分段：`register_blueprint 0.212→0.191s`、`add_url_rule 0.208→0.187s`、`yaml_register_from_directory 0.120→0.000s`、`menu_auto_persist 1.089→0.006s`、`init_menu_permissions 0.053s`、schema sync `0.035s`、`preflight 0.000s`（`SKIP_DB_PREFLIGHT` 生效）。首次运行 `menu_auto_persist` 会 miss 重跑一次（复制库继承的守卫行与当前声明不一致），属预期现象，基线需按 first/warm 两档记录。<br>④ 使用约定：改守卫/缓存/初始化链路后，必须跑 `python scripts/debug/verify/startup_breakdown.py --skip-preflight --json docs/testing/startup-baseline.json` 与基线对比；提交测试前跑 `python scripts/lint_tests.py --max-detail 5` 自查。<br>⑤ 未实施（需单独授权）：`meta/tests/shared/env_flags.py` 环境开关注册表（含「关闭态」用例规范）、`docs/testing/` 入口分层（README 路由页 / 本 spec 降级为决策日志）。`test.py` 不在 git 仓库内，运行器语义仍无法版本化。|
 | 2026-11-10 | v4.6 | **P1 测试基础设施两件（声明源收敛 + 入口分层）**：<br>① `meta/tests/shared/env_flags.py`（新增，P1-1）——测试态环境开关的**单一声明源**。7 条 `EnvFlag(name, value, phase, mode, purpose, owner, evidence)`：导入期 1 条（`DISABLE_RATE_LIMIT`，必须早于 `shared.*` 导入），configure 期 6 条（`TESTING` / `DISABLE_ASYNC_AUDIT_WRITER` / `DISABLE_TASK_SCHEDULER` / `DISABLE_WRITE_QUEUE` / `CRON_JOBS_ENABLED` / `SKIP_DB_PREFLIGHT`）。三种 mode 完整保留原语义：`set` / `setdefault`（外部已设值不被覆盖）/ `unless_env`（`TEST_ALLOW_CRON=1` 反制 `CRON_JOBS_ENABLED=0`）。`conftest.py` 顶部一段 `os.environ['DISABLE_RATE_LIMIT'] = 'true'` 与 `pytest_configure()` 内 6 段赋值收敛为 `apply_early_flags()` / `apply_test_flags()` 两行调用；新增开关只改注册表，不再散落在测试文件。附带 `snapshot()`（供基线输出真实运行态）与 `--json` CLI 自查。<br>② `docs/testing/README.md`（新增，P1-2）——入口分层路由页：L0 铁律（`.trae/rules/IRON-RULES-CHEATSHEET.md`）/ L1 执行规范（`test_rules` 等 4 个）/ L1.5 夹具与工具指南 / L2 本 spec（唯一决策日志，只追加）/ L3 `startup-baseline.json`（工具生成，禁手改）；配「我要做什么 → 先读 → 再执行」路由表与基础设施资产表（`declaration_guard` / `env_flags` / `lint_tests` / `startup_breakdown`），并标注 `scripts/debug/` 被 gitignore 需 `git add -f` 的约束。<br>**验证**：`python d:\filework\test.py --file meta/tests/test_app_startup_contracts.py` → **10 passed / Exit 0**（conftest 两阶段注入生效）；`python meta/tests/shared/env_flags.py --json` → 7 条声明完整输出。|
+| 2026-11-12 | v4.7 | **R7 首项闭环：`test_export_pagination_and_options.py` 67.09s → 27.97s**（整轮 Duration 72.75s → 36.31s，最慢用例 20.67s → 8.51s，12 项全绿）。三条测试侧修正（不动生产代码）：<br>① relationship 导出两个「列级行为」用例限定 `page_size=5`——枚举下拉/空白行填充与行数无关，全量导出（relationship 已 10000 行）纯属浪费，单用例约 20s；<br>② `if response.status_code == 200:` 内的断言外提为前置 `assert`——原写法在 500 时静默通过（假绿）；<br>③ 空结果用例 `filters` 由 list 改为 dict（`{'id__in': [-999999]}`）——`export_import_api.export_data` docstring 与 `export_selected_types(filters: Optional[Dict])` 契约均为 dict，传 list 会 `AttributeError` → 500；该用例此前靠假绿掩盖，已删除 `xfail`。<br>**附带基线修正**：① 「纯进程冷启动 7.0s/文件 × 802 ≈ 93.6 分钟」为 P0/P1 优化前口径，优化后多文件同进程边际成本约 **1.32s/文件**，两者口径不同不可直接相乘，R6 的 94 分钟估算需重算；② 同轮补齐 `test_utils.py`（211 行纯工具库、0 个 `def test_*`）进 `collect_ignore`，消除每轮无意义收集。<br>**验证**：`python d:\filework\test.py --file meta/tests/import_export/test_export_pagination_and_options.py` → **12 passed / Exit 0**；`python d:\filework\test.py --file meta/tests/test_utils.py` → **Total 0 / Exit 5**（不再产生收集项）。|
