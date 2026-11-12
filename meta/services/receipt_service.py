@@ -44,8 +44,6 @@ ALLOCATION_TABLE = 'demand_allocations'
 TYPE_TABLE = 'type_definitions'
 LOCATION_TABLE = 'locations'
 PARTY_RELATION_TABLE = 'party_relations'
-PARAM_TABLE = 'control_parameter_defs'
-PARAM_VALUE_TABLE = 'control_parameter_values'
 ORG_TABLE = 'orgs'
 ORG_FUNCTION_TABLE = 'org_functions'
 FUNCTION_INVENTORY = 'inventory'
@@ -477,7 +475,7 @@ class ReceiptService:
                                field_name='lines', rule='RC_EMPTY')
 
         now = actual_arrival_date or _now()
-        tol = self._tolerance_ratio()
+        tol = self._tolerance_ratio(header)
         order = self._load_order(header.get('source_doc_id'))
         if order is None:
             raise ReceiptError('来源采购订单不存在', field_name='source_doc_id',
@@ -850,7 +848,7 @@ class ReceiptService:
                                rule='RC_REVERSAL_INVALID')
 
         now = _now()
-        tol = self._tolerance_ratio()
+        tol = self._tolerance_ratio(header)
         original_category = self._require_document_type(
             header.get('document_type_id'))['document_category']
         is_return_origin = original_category == DOC_CATEGORY_RETURN
@@ -1915,21 +1913,21 @@ class ReceiptService:
                 rule='RC_SUPPLIER_RELATION_MISSING')
 
     # ------------------------------------------------------------------ 容差
-    def _tolerance_ratio(self) -> Decimal:
-        """`receipt_over_tolerance_percent`（百分数）→ 倍数（5 → 0.05）。"""
+    def _tolerance_ratio(self, header: Optional[Dict[str, Any]] = None) -> Decimal:
+        """`receipt_over_tolerance_percent`（百分数）→ 倍数（5 → 0.05）。
+
+        统一走 ControlParameterResolver：按法人 / 单据类型匹配参数行，
+        具体度由 specificity_rank 决定；无命中行时回落 default_value。
+        """
         percent = None
         try:
-            rows = self.ds.query(
-                'SELECT id, default_value FROM %s WHERE code = ? AND status = ?'
-                % PARAM_TABLE, [TOLERANCE_PARAM, 'active'])
-            if rows:
-                percent = rows[0].get('default_value')
-                values = self.ds.query(
-                    'SELECT value FROM %s WHERE control_parameter_id = ? '
-                    "AND status = 'active' ORDER BY id DESC LIMIT 1"
-                    % PARAM_VALUE_TABLE, [rows[0]['id']])
-                if values and not _blank(values[0].get('value')):
-                    percent = values[0]['value']
+            from meta.services.control_parameter_service import (
+                ControlParameterResolver)
+            header = header or {}
+            percent = ControlParameterResolver(self.ds).resolve(
+                TOLERANCE_PARAM,
+                {'org_id': header.get('org_id'),
+                 'document_type_id': header.get('document_type_id')})
         except Exception as e:  # noqa: BLE001 - 单测库无参数表
             logger.debug('[receipt] 读取超收容差失败，按 0 处理: %s', e)
         try:
