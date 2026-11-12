@@ -25,3 +25,9 @@ export async function listEdges(params = {}) {
   const resp = await apiV2.get('/doc-flow/edges', { params })
   return resp.data
 }
+
+/** 头→行展开后的上下游追溯（id 可传单据头或行，单次返回 upstream/downstream） */
+export async function traceDocuments(params = {}) {
+  const resp = await apiV2.get('/doc-flow/trace', { params })
+  return resp.data
+}

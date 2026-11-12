@@ -1419,6 +1419,60 @@ class MetaObject:
         path_parts = ancestors + [self.id]
         return separator.join(path_parts)
     
+    # ── 聚合根（aggregate_root）派生访问器 [2026-11-12] ─────────────────
+    # 单据聚合的可追溯起点 = 沿 parent_object 上溯到最顶层单据头。
+    # 不落 schema 字段：parent_object 同时承载「单据聚合 / 主数据从属 /
+    # 架构层级」三种语义，semantics.category 也不能单独判定（无父的
+    # business_document_line 确实存在），只能按链动态推导。
+    # 命名避开 root_object：permission_dimension_api / audit_operation_api
+    # 已分别占用「架构根」「审计级联根」语义。
+
+    @staticmethod
+    def _is_document_object(obj: 'MetaObject') -> bool:
+        return getattr(obj.semantics, 'category', '') in (
+            'business_document', 'business_document_line')
+
+    def get_aggregate_root(self) -> Optional['MetaObject']:
+        """返回聚合根（最顶层单据头）；不属于单据聚合时返回 None。"""
+        cursor = self
+        visited = {cursor.id}
+        while True:
+            parent_id = (cursor.parent_object or '').strip()
+            if not parent_id:
+                # 无父：单据头自身即根；无父的行级对象明确不参与聚合
+                if getattr(cursor.semantics, 'category', '') == 'business_document':
+                    return cursor
+                return None
+            if parent_id in visited:
+                return None  # 环保护
+            parent = registry.get(parent_id)
+            if parent is None:
+                return None
+            visited.add(parent_id)
+            if not self._is_document_object(parent):
+                return None  # 跨入主数据 / 架构链：不是单据聚合
+            if (getattr(parent.semantics, 'category', '') == 'business_document'
+                    and not (parent.parent_object or '').strip()):
+                return parent
+            cursor = parent
+
+    def get_aggregate_children(self) -> List['MetaObject']:
+        """返回以本对象为单据头的全部子对象（按 id 稳定排序）。"""
+        if getattr(self.semantics, 'category', '') != 'business_document':
+            return []
+        children = [obj for obj in registry.all()
+                    if (obj.parent_object or '').strip() == self.id]
+        return sorted(children, key=lambda obj: obj.id)
+
+    def get_aggregate_parent_field(self) -> str:
+        """返回指向聚合父对象的字段名；hierarchy.parent_field 优先，回落 {parent}_id。"""
+        if isinstance(self.hierarchy, dict):
+            field_name = (self.hierarchy.get('parent_field') or '').strip()
+            if field_name:
+                return field_name
+        parent_id = (self.parent_object or '').strip()
+        return '{0}_id'.format(parent_id) if parent_id else ''
+
     def get_category_behavior(self, property_name: str) -> Any:
         """获取分类决定的默认行为"""
         if self.category_config:

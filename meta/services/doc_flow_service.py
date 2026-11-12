@@ -27,6 +27,9 @@ logger = logging.getLogger(__name__)
 _QTY_EPSILON = 1e-9
 _DEFAULT_PAGE_SIZE = 50
 _MAX_PAGE_SIZE = 200
+# [2026-11-12] 头→行追溯上限：超出只置 truncated，不报错
+_MAX_TRACE_LINES = 500
+_MAX_TRACE_EDGES = 1000
 
 _ENGINE_ERROR_MAP = {
     "BATCH_EMPTY": ("DOC_FLOW_QTY_INVALID", 400),
@@ -427,6 +430,211 @@ class DocFlowService:
             tuple(params),
         ).fetchall()
         items = [dict(zip(_EDGE_COLUMNS, row)) for row in rows]
+        return {"items": items, "total": len(items)}
+
+    # -------------------------------------------------------------- 头→行追溯
+    # [2026-11-12] 单端点追溯：请求 id 可以是单据头 id，也可以是行 id。
+    # 解析规则只读 parent_object + hierarchy.parent_field（MetaObject 的
+    # get_aggregate_root / get_aggregate_children / get_aggregate_parent_field），
+    # 不读 doc_flow_rule.target_line_bo——规则层声明只是 P1 一致性 lint 的对象。
+
+    def trace_records(self, bo: str, record_id: Any) -> Dict[str, Any]:
+        """返回聚合后的上下游 + 展开信息（spec-doc-flow-header-trace-2026-11-12 §4）。"""
+        scope = self._resolve_scope(bo, record_id)
+        upstream = self._aggregate_edges(
+            self._query_trace_edges(scope["pairs"], "target"), "source")
+        downstream = self._aggregate_edges(
+            self._query_trace_edges(scope["pairs"], "source"), "target")
+        return {
+            "object": scope["object"],
+            "root_object": scope["root_object"],
+            "root_id": scope["root_id"],
+            "upstream": upstream,
+            "downstream": downstream,
+            "expanded": scope["expanded"],
+            "line_scope": {
+                "object": scope["line_object"],
+                "count": len(scope["line_ids"]),
+                "ids": scope["line_ids"],
+            },
+            "truncated": scope["truncated"],
+        }
+
+    def _resolve_scope(self, bo: str, record_id: Any) -> Dict[str, Any]:
+        """把「头 id 或行 id」解析为 [(对象, [id...])]，供边查询使用。"""
+        obj = registry.get(bo)
+        if obj is None:
+            raise DocFlowServiceError(
+                "DOC_FLOW_BO_NOT_FOUND", "对象不存在: {0}".format(bo), 404)
+        rid = str(record_id)
+        root = obj.get_aggregate_root()
+
+        if root is None:
+            # 非单据对象（主数据 / 架构链 / 无父行级）：退化为直接按 id 查
+            return self._scope_payload(obj.id, "", "", [(obj.id, [rid])])
+        if root.id != obj.id:
+            head_id = self._head_id_of_line(obj, rid)
+            if not head_id:
+                # 历史脏数据：行反查不到头，仍按行直查，不报错
+                return self._scope_payload(obj.id, root.id, "",
+                                           [(obj.id, [rid])])
+            rid = head_id
+
+        payload = self._scope_payload(obj.id, root.id, rid,
+                                      [(root.id, [rid])])
+        children = root.get_aggregate_children()
+        if not children:
+            return payload
+
+        pairs: List[Tuple[str, List[str]]] = [(root.id, [rid])]
+        line_ids: List[str] = []
+        line_object = ""
+        remaining = _MAX_TRACE_LINES
+        truncated = False
+        for child in children:
+            fk = child.get_aggregate_parent_field()
+            id_field = child.get_field("id")
+            if not fk or id_field is None:
+                logger.warning("聚合子对象缺少父字段: %s", child.id)
+                continue
+            rows = self.app_ds.execute(
+                "SELECT CAST({id_col} AS TEXT) FROM {table}"
+                " WHERE CAST({fk} AS TEXT) = ?".format(
+                    id_col=id_field.db_column,
+                    table=child.table_name, fk=fk),
+                (rid,),
+            ).fetchall()
+            child_ids = sorted({
+                str(row[0]) for row in rows if row and row[0] not in (None, "")
+            })
+            if not child_ids:
+                continue
+            if len(child_ids) > remaining:
+                child_ids = child_ids[:remaining]
+                truncated = True
+            if not child_ids:
+                truncated = True
+                break
+            remaining -= len(child_ids)
+            pairs.append((child.id, child_ids))
+            line_ids.extend(child_ids)
+            if not line_object:
+                line_object = child.id
+
+        if not line_ids:
+            return payload
+        payload.update({
+            "pairs": pairs,
+            "line_object": line_object,
+            "line_ids": line_ids,
+            "expanded": True,
+            "truncated": truncated,
+        })
+        return payload
+
+    @staticmethod
+    def _scope_payload(object_id: str, root_object: str, root_id: str,
+                       pairs: List[Tuple[str, List[str]]]) -> Dict[str, Any]:
+        return {
+            "object": object_id,
+            "root_object": root_object,
+            "root_id": root_id,
+            "pairs": pairs,
+            "line_object": "",
+            "line_ids": [],
+            "expanded": False,
+            "truncated": False,
+        }
+
+    def _head_id_of_line(self, obj, rid: str) -> str:
+        """行 id → 所属单据头 id；解析不到返回空串。"""
+        fk = obj.get_aggregate_parent_field()
+        id_field = obj.get_field("id")
+        if not fk or id_field is None:
+            return ""
+        rows = self.app_ds.execute(
+            "SELECT CAST({fk} AS TEXT) FROM {table}"
+            " WHERE CAST({id_col} AS TEXT) = ?".format(
+                fk=fk, table=obj.table_name, id_col=id_field.db_column),
+            (rid,),
+        ).fetchall()
+        if not rows or rows[0][0] in (None, ""):
+            return ""
+        return str(rows[0][0])
+
+    def _query_trace_edges(self, pairs: List[Tuple[str, List[str]]],
+                           side: str) -> List[Dict[str, Any]]:
+        """按 (对象, id 列表) 批量取边；side 取 'source' 或 'target'。"""
+        groups: List[str] = []
+        params: List[Any] = []
+        for pair_bo, pair_ids in pairs:
+            if not pair_ids:
+                continue
+            placeholders = ", ".join("?" * len(pair_ids))
+            groups.append("({0}_bo = ? AND {0}_id IN ({1}))".format(
+                side, placeholders))
+            params.append(pair_bo)
+            params.extend(pair_ids)
+        if not groups:
+            return []
+        rows = self.app_ds.execute(
+            "SELECT " + ", ".join(_EDGE_COLUMNS) + " FROM doc_flow_edges"
+            " WHERE " + " OR ".join(groups) +
+            " ORDER BY derived_at, id LIMIT ?",
+            tuple(params + [_MAX_TRACE_EDGES]),
+        ).fetchall()
+        return [dict(zip(_EDGE_COLUMNS, row)) for row in rows]
+
+    def _aggregate_edges(self, rows: List[Dict[str, Any]],
+                         peer_prefix: str) -> Dict[str, Any]:
+        """按 (对端 bo, 对端 id, 对端 item, rule_id) 聚合；数量 = Σnormal − Σred。"""
+        buckets: Dict[Tuple[Any, ...], Dict[str, Any]] = {}
+        order: List[Tuple[Any, ...]] = []
+        for row in rows:
+            key = (
+                row.get("{0}_bo".format(peer_prefix)),
+                str(row.get("{0}_id".format(peer_prefix))),
+                row.get("{0}_item".format(peer_prefix)) or "",
+                row.get("rule_id") or "",
+            )
+            bucket = buckets.get(key)
+            if bucket is None:
+                bucket = {
+                    "peer_bo": key[0], "peer_id": key[1],
+                    "peer_item": key[2], "rule_id": key[3],
+                    "quantity": 0.0, "unit": "",
+                    "edge_ids": [], "edge_count": 0, "raw_count": 0,
+                    "first_derived_at": None, "last_derived_at": None,
+                }
+                buckets[key] = bucket
+                order.append(key)
+            bucket["raw_count"] += 1
+            bucket["edge_ids"].append(row.get("id"))
+            if row.get("unit"):
+                bucket["unit"] = row["unit"]
+            derived_at = row.get("derived_at")
+            if derived_at:
+                first = bucket["first_derived_at"]
+                last = bucket["last_derived_at"]
+                if first is None or str(derived_at) < str(first):
+                    bucket["first_derived_at"] = derived_at
+                if last is None or str(derived_at) > str(last):
+                    bucket["last_derived_at"] = derived_at
+            if (row.get("status") or "active") != "active":
+                continue
+            bucket["edge_count"] += 1
+            quantity = abs(_num(row.get("quantity")))
+            if (row.get("quantity_sign") or "normal") == "red":
+                bucket["quantity"] -= quantity
+            else:
+                bucket["quantity"] += quantity
+
+        items: List[Dict[str, Any]] = []
+        for key in order:
+            bucket = buckets[key]
+            bucket["quantity"] = round(bucket["quantity"], 6)
+            bucket["balanced"] = abs(bucket["quantity"]) < _QTY_EPSILON
+            items.append(bucket)
         return {"items": items, "total": len(items)}
 
 

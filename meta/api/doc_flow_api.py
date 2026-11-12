@@ -1,11 +1,12 @@
 # -*- coding: utf-8 -*-
 """单据流服务 HTTP API（/api/v2/doc-flow）。
 
-四个只做「参数翻译 + 错误映射」的端点：
+五个只做「参数翻译 + 错误映射」的端点：
   GET  /rules    规则清单（含 display_fields / 目标模式）
   GET  /sources  上游实例 + 已生成 + 未结量（分页）
   POST /derive   按上游行生成本次下游数量（批量）
   GET  /edges    边追溯（源侧或目标侧二选一）
+  GET  /trace    头→行展开后的上下游追溯（id 可传单据头或行）
 
 视图体与装饰器分离：`_xxx_view()` 是纯函数（测试直接调用），
 `xxx()` 只负责套 `@login_required`。
@@ -16,7 +17,10 @@ from typing import Any, Dict, Tuple
 
 from flask import Blueprint, request
 
-from meta.services.auth_middleware import login_required
+from meta.services.auth_middleware import (
+    check_generic_read_permission,
+    login_required,
+)
 from meta.services.doc_flow_service import (
     DocFlowServiceError,
     get_doc_flow_service,
@@ -54,6 +58,18 @@ def _filters_from_args() -> Dict[str, Any]:
         if key.startswith('filter_') and value != '':
             filters[key[len('filter_'):]] = value
     return filters
+
+
+def _forbidden(bo: Any) -> Any:
+    """对象读权限判定：放行返回 None，拒绝返回 `(payload, 403)`。"""
+    object_id = (bo or '').strip() if isinstance(bo, str) else ''
+    if not object_id:
+        return None
+    decision = check_generic_read_permission(object_id)
+    if decision is None:
+        return None
+    return _fail('DOC_FLOW_FORBIDDEN',
+                 '无权访问对象: {0}'.format(object_id), 403)
 
 
 # ----------------------------------------------------------------------
@@ -109,8 +125,29 @@ def _edges_view() -> Any:
         return _fail('DOC_FLOW_EDGE_FILTER_REQUIRED',
                      '至少提供一个追溯条件（source_bo+source_id 或 target_bo+target_id）',
                      400)
+    for key in ('source_bo', 'target_bo'):
+        denied = _forbidden(kwargs.get(key))
+        if denied is not None:
+            return denied
     try:
         data = service.list_edges(**kwargs)
+    except DocFlowServiceError as error:
+        return _fail(error.code, error.message, error.status)
+    return _ok(data)
+
+
+def _trace_view() -> Any:
+    """头→行展开追溯：`bo` + `id`（id 可传单据头或行）。"""
+    service = get_doc_flow_service()
+    bo = (request.args.get('bo') or '').strip()
+    record_id = (request.args.get('id') or '').strip()
+    if not bo or not record_id:
+        return _fail('DOC_FLOW_TRACE_ARGS_REQUIRED', '缺少 bo 或 id', 400)
+    denied = _forbidden(bo)
+    if denied is not None:
+        return denied
+    try:
+        data = service.trace_records(bo, record_id)
     except DocFlowServiceError as error:
         return _fail(error.code, error.message, error.status)
     return _ok(data)
@@ -141,3 +178,9 @@ def derive_route():
 @login_required
 def list_edges_route():
     return _edges_view()
+
+
+@doc_flow_bp.route('/trace', methods=['GET'])
+@login_required
+def trace_route():
+    return _trace_view()
