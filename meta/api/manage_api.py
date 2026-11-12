@@ -6,11 +6,13 @@ from meta.services.query_service import QueryService, SearchRequest, QueryCondit
 from meta.services.audit_service import AuditService, AuditQuery
 from meta.services.hierarchy_filter_service import HierarchyFilterService
 from meta.services.cascade_service import get_type_order, HierarchyConfigLoader
-from meta.services.auth_middleware import login_required, get_current_user, is_admin
+from meta.services.auth_middleware import (
+    login_required, get_current_user, is_admin,
+    check_generic_read_permission)
 from meta.services.data_permission_filter import DataPermissionFilter
 from meta.api._deprecation import v1_deprecated
 from meta.core.datasource import get_data_source
-from meta.core.models import registry
+from meta.core.models import registry, generic_api_allows, generic_api_mode_of
 from meta.core.rule_provider import get_rule_provider
 from meta.core.enrichment_engine import init_enrichment_engine, enrich_record, enrich_records
 from meta.api.special_routes_api import _compute_category, list_relationships
@@ -28,16 +30,31 @@ def _reject_skip_generic_api_objects():
     """[G7 2026-11-02] 平台机制对象（skip_generic_api=True）不开放通用 CRUD。
 
     路径形如 /api/v1/<object_type>/...；仅对已注册且声明了该开关的对象返回 404。
+
+    [P3 2026-11-10] 新增 `generic_api_mode: read_only`：GET 放行，写操作 404。
+    只读档位不放宽读权限：read_only 对象还要过对象级功能权限
+    （canonical `<object_type>:read` 或 yaml authorization 声明）。
     """
     parts = (request.path or '').split('/')
     if len(parts) >= 4 and parts[1] == 'api' and parts[2] == 'v1':
         obj = registry.get(parts[3])
-        if obj is not None and getattr(obj, 'skip_generic_api', False):
-            return error_response(
-                f'对象 {parts[3]} 未开放通用 CRUD API',
-                error_code='GENERIC_API_DISABLED',
-                status=404,
-            )
+        if obj is not None:
+            mode = generic_api_mode_of(obj)
+            if not generic_api_allows(mode, request.method):
+                return error_response(
+                    f'对象 {parts[3]} 未开放通用 CRUD API',
+                    error_code=('GENERIC_API_READ_ONLY' if mode == 'read_only'
+                                else 'GENERIC_API_DISABLED'),
+                    status=404,
+                )
+            if mode == 'read_only':
+                denied = check_generic_read_permission(parts[3])
+                if denied is not None:
+                    return error_response(
+                        f'无权读取对象 {parts[3]}（需要权限 {denied.required}）',
+                        error_code='GENERIC_API_FORBIDDEN',
+                        status=403,
+                    )
     return None
 
 
@@ -68,11 +85,12 @@ def init_services(data_source=None):
     init_enrichment_engine(_data_source)
 
     try:
-        from meta.core.schema_generator import sync_schema_from_meta
+        from meta.core.schema_sync_guard import guarded_sync_schema
         from meta.core.models import registry as meta_registry, FieldStorage
         meta_objects = [meta_registry.get(ot) for ot in meta_registry.list_types()]
         meta_objects = [obj for obj in meta_objects if obj is not None]
-        sync_schema_from_meta(_data_source, meta_objects)
+        # [TEST-EFF P1-1] 声明哈希守卫：声明未变且表齐全时跳过整轮 sync（约 2.9s/进程）
+        guarded_sync_schema(_data_source, meta_objects)
     except Exception as e:
         import logging
         logging.getLogger(__name__).warning("Schema sync skipped: %s", str(e))

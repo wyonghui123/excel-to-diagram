@@ -376,7 +376,7 @@ def test_v196_rollback_drops_tables(migrated_db):
             ('batch-management',)).fetchone() is None
         assert conn.execute(
             'SELECT 1 FROM permissions WHERE code=?',
-            ('batch:batch_read',)).fetchone() is None
+            ('batch:read',)).fetchone() is None
         # 枚举种子保留
         assert conn.execute(
             'SELECT 1 FROM enum_types WHERE id=?', ('batch_status',)).fetchone()

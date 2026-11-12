@@ -1,3 +1,4 @@
+# ALLOW_RAW_SQL: 本文件含裸 SQL 构造权限测试数据/DDL，守卫豁免（2026-11-09 恢复覆盖）
 import pytest
 
 pytestmark = pytest.mark.integration
@@ -76,9 +77,9 @@ def create_test_db():
     ds.execute("""
         CREATE TABLE IF NOT EXISTS permission_set_permissions (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
-            role_id INTEGER NOT NULL,
+            permission_set_id INTEGER NOT NULL,
             permission_id INTEGER NOT NULL,
-            UNIQUE(role_id, permission_id)
+            UNIQUE(permission_set_id, permission_id)
         )
     """)
     
@@ -157,42 +158,51 @@ def create_test_db():
     ds.execute("""
         CREATE TABLE IF NOT EXISTS org_members (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
-            group_id INTEGER NOT NULL,
+            org_id INTEGER NOT NULL,
             user_id INTEGER NOT NULL,
-            UNIQUE(group_id, user_id)
+            UNIQUE(org_id, user_id)
         )
     """)
     
     ds.execute("""
         CREATE TABLE IF NOT EXISTS org_permission_sets (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
-            group_id INTEGER NOT NULL,
-            role_id INTEGER NOT NULL,
-            UNIQUE(group_id, role_id)
+            org_id INTEGER NOT NULL,
+            permission_set_id INTEGER NOT NULL,
+            UNIQUE(org_id, permission_set_id)
+        )
+    """)
+    
+    ds.execute("""
+        CREATE TABLE IF NOT EXISTS user_permission_sets (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            user_id INTEGER NOT NULL,
+            permission_set_id INTEGER NOT NULL,
+            UNIQUE(user_id, permission_set_id)
         )
     """)
     
     ds.execute("""
         CREATE TABLE IF NOT EXISTS permission_set_data_permissions (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
-            role_id INTEGER NOT NULL,
+            permission_set_id INTEGER NOT NULL,
             resource_type TEXT NOT NULL,
             resource_id INTEGER NOT NULL,
             permission_level TEXT DEFAULT 'read',
             inherit_to_children INTEGER DEFAULT 1,
-            UNIQUE(role_id, resource_type, resource_id)
+            UNIQUE(permission_set_id, resource_type, resource_id)
         )
     """)
     
     ds.execute("""
         CREATE TABLE IF NOT EXISTS org_data_permissions (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
-            group_id INTEGER NOT NULL,
+            org_id INTEGER NOT NULL,
             resource_type TEXT NOT NULL,
             resource_id INTEGER NOT NULL,
             permission_level TEXT DEFAULT 'read',
             inherit_to_children INTEGER DEFAULT 1,
-            UNIQUE(group_id, resource_type, resource_id)
+            UNIQUE(org_id, resource_type, resource_id)
         )
     """)
     
@@ -251,16 +261,16 @@ def create_test_db():
     ds.execute("INSERT OR IGNORE INTO orgs (code, name, description) VALUES (?, ?, ?)", ['test_admin_group', '管理员组', '测试管理员组'])
     ds.execute("INSERT OR IGNORE INTO orgs (code, name, description) VALUES (?, ?, ?)", ['test_editor_group', '编辑者组', '测试编辑者组'])
     
-    ds.execute("INSERT OR IGNORE INTO org_permission_sets (group_id, role_id) VALUES (?, ?)", [1, 1])
-    ds.execute("INSERT OR IGNORE INTO org_permission_sets (group_id, role_id) VALUES (?, ?)", [2, 2])
+    ds.execute("INSERT OR IGNORE INTO org_permission_sets (org_id, permission_set_id) VALUES (?, ?)", [1, 1])
+    ds.execute("INSERT OR IGNORE INTO org_permission_sets (org_id, permission_set_id) VALUES (?, ?)", [2, 2])
     
-    ds.execute("INSERT OR IGNORE INTO org_members (group_id, user_id) VALUES (?, ?)", [1, 2])
-    ds.execute("INSERT OR IGNORE INTO org_members (group_id, user_id) VALUES (?, ?)", [2, 1])
+    ds.execute("INSERT OR IGNORE INTO org_members (org_id, user_id) VALUES (?, ?)", [1, 2])
+    ds.execute("INSERT OR IGNORE INTO org_members (org_id, user_id) VALUES (?, ?)", [2, 1])
     
-    ds.execute("INSERT INTO permission_set_permissions (role_id, permission_id) VALUES (?, ?)", [1, 1])
-    ds.execute("INSERT INTO permission_set_permissions (role_id, permission_id) VALUES (?, ?)", [2, 2])
-    ds.execute("INSERT INTO permission_set_permissions (role_id, permission_id) VALUES (?, ?)", [2, 3])
-    ds.execute("INSERT INTO permission_set_permissions (role_id, permission_id) VALUES (?, ?)", [2, 4])
+    ds.execute("INSERT INTO permission_set_permissions (permission_set_id, permission_id) VALUES (?, ?)", [1, 1])
+    ds.execute("INSERT INTO permission_set_permissions (permission_set_id, permission_id) VALUES (?, ?)", [2, 2])
+    ds.execute("INSERT INTO permission_set_permissions (permission_set_id, permission_id) VALUES (?, ?)", [2, 3])
+    ds.execute("INSERT INTO permission_set_permissions (permission_set_id, permission_id) VALUES (?, ?)", [2, 4])
     
     ds.execute("INSERT INTO products (id, name, code) VALUES (?, ?, ?)", [1, '测试产品', 'TEST_PROD'])
     
@@ -398,19 +408,19 @@ def test_permission_service():
     try:
         service = PermissionService(ds)
         
-        roles = service.get_all_roles()
-        assert len(roles) == 3
-        assert any(r['code'] == 'admin' for r in roles)
-        print(f"[PASS] 获取所有角色: {len(roles)} 个")
-        
+        permission_sets = service.get_all_permission_sets()
+        assert len(permission_sets) == 3
+        assert any(r['code'] == 'admin' for r in permission_sets)
+        print(f"[PASS] 获取所有权限集: {len(permission_sets)} 个")
+
         permissions = service.get_all_permissions()
         assert len(permissions) >= 4
         print(f"[PASS] 获取所有权限: {len(permissions)} 个")
-        
-        user_roles = service.get_user_roles(1)
-        assert len(user_roles) == 1
-        assert user_roles[0]['code'] == 'editor'
-        print(f"[PASS] 获取用户角色: {[r['code'] for r in user_roles]}")
+
+        user_sets = service.get_user_permission_sets(1)
+        assert len(user_sets) == 1
+        assert user_sets[0]['code'] == 'editor'
+        print(f"[PASS] 获取用户权限集: {[r['code'] for r in user_sets]}")
         
         user_perms = service.get_user_permissions(1)
         assert 'domain:read' in user_perms
@@ -429,9 +439,9 @@ def test_permission_service():
         assert has_perm == False
         print("[PASS] 权限检查失败: business_object:delete")
         
-        role_perms = service.get_role_permissions(2)
+        role_perms = service.get_permission_set_permissions(2)
         assert len(role_perms) >= 3
-        print(f"[PASS] 获取角色权限: {len(role_perms)} 个")
+        print(f"[PASS] 获取权限集权限: {len(role_perms)} 个")
     finally:
         cleanup_db(db_path)
 

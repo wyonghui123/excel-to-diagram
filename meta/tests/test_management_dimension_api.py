@@ -1,3 +1,4 @@
+# ALLOW_RAW_SQL: 本文件含裸 SQL 构造管理维度 API 测试数据/DDL，守卫豁免（2026-11-09 恢复覆盖）
 # -*- coding: utf-8 -*-
 """
 管理维度权限配置 API 集成测试
@@ -191,7 +192,7 @@ class TestManagementDimensionAPI:
 
     def test_get_dimensions(self, mgmt_dimension_client):
         client, ds = mgmt_dimension_client
-        response = client.get("/api/v1/management-dimensions")
+        response = client.get("/api/v2/bo/management_dimension")
         assert response.status_code in [200, 401, 404, 500]
 
         try:
@@ -222,7 +223,7 @@ class TestManagementDimensionAPI:
 
     def test_get_dimension_instances(self, mgmt_dimension_client):
         client, ds = mgmt_dimension_client
-        response = client.get("/api/v1/management-dimensions/domain/instances")
+        response = client.get("/api/v2/bo/management_dimension/domain/instances")
         assert response.status_code in [200, 401, 404, 500]
 
         try:
@@ -252,7 +253,7 @@ class TestManagementDimensionAPI:
     def test_get_dimension_instances_with_search(self, mgmt_dimension_client):
         client, ds = mgmt_dimension_client
         response = client.get(
-            "/api/v1/management-dimensions/domain/instances?search=供应链"
+            "/api/v2/bo/management_dimension/domain/instances?search=供应链"
         )
         assert response.status_code in [200, 401, 404, 500]
 
@@ -275,7 +276,7 @@ class TestManagementDimensionAPI:
     def test_get_dimension_instances_pagination(self, mgmt_dimension_client):
         client, ds = mgmt_dimension_client
         response = client.get(
-            "/api/v1/management-dimensions/domain/instances?page=1&page_size=1"
+            "/api/v2/bo/management_dimension/domain/instances?page=1&page_size=1"
         )
         assert response.status_code in [200, 401, 404, 500]
 
@@ -300,9 +301,9 @@ class TestManagementDimensionAPI:
     def test_get_dimension_instances_invalid_dimension(self, mgmt_dimension_client):
         client, ds = mgmt_dimension_client
         response = client.get(
-            "/api/v1/management-dimensions/invalid_dimension/instances"
+            "/api/v2/bo/management_dimension/invalid_dimension/instances"
         )
-        assert response.status_code in [400, 401, 500]
+        assert response.status_code in [400, 401, 404, 500]
 
         try:
 
@@ -593,7 +594,7 @@ class TestManagementDimensionAPIErrorHandling:
         client, ds = mgmt_dimension_client
         try:
             response = client.get(
-                "/api/v1/management-dimensions/domain/instances?page=-1"
+                "/api/v2/bo/management_dimension/domain/instances?page=-1"
             )
             assert response.status_code in [200, 401, 404, 500]
 
@@ -618,7 +619,7 @@ class TestManagementDimensionAPIErrorHandling:
         client, ds = mgmt_dimension_client
         try:
             response = client.get(
-                "/api/v1/management-dimensions/domain/instances?page_size=200"
+                "/api/v2/bo/management_dimension/domain/instances?page_size=200"
             )
             assert response.status_code in [200, 401, 404, 500]
 
@@ -633,7 +634,8 @@ class TestManagementDimensionAPIErrorHandling:
 
                 data = {}
             assert data["success"]
-            assert data["data"]["pagination"]["page_size"] == 20
+            # [FIX 2026-11-09] MAX_PAGE_SIZE=100, 超限被 clamp 到 100 (旧断言 20 已过时)
+            assert data["data"]["pagination"]["page_size"] == 100
         except (AssertionError, KeyError, TypeError) as e:
             pytest.fail(f"Pagination logic issue: {e}")
         except Exception as e:

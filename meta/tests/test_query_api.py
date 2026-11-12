@@ -13,7 +13,12 @@ OK_500 = HTTPStatus.PAGINATION_OK  # (200, 500)
 class TestQueryAPI:
     def test_search_empty(self, api_client):
         r = expect(api_client, 'post', '/api/v1/query/search', OK_500, json={})
-        assert_data_contains(r, 'data', 'total')
+        # search 返回 {success, data: [...], total, page, page_size}，data 是列表而非 dict
+        if r.status_code == 200:
+            body = r.get_json()
+            assert 'total' in body, f'缺 total 字段: {list(body.keys())}'
+            data = body.get('data')
+            assert isinstance(data, list), f'data 应为列表: {type(data)}'
 
     def test_search_with_conditions(self, api_client):
         expect(api_client, 'post', '/api/v1/query/search', OK_500, json={

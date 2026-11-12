@@ -12,9 +12,11 @@ from meta.core.permission_gate import declare_permission
 MAX_USER_PAGE_SIZE = 500
 
 from meta.core.bo_framework import bo_framework
-from meta.core.models import registry, resolve_write_anchor
+from meta.core.models import registry, resolve_write_anchor, generic_api_allows, generic_api_mode_of
 from meta.core.rule_provider import get_rule_provider
-from meta.services.auth_middleware import login_required, get_current_user, require_permission
+from meta.services.auth_middleware import (
+    login_required, get_current_user, require_permission,
+    check_generic_read_permission)
 from meta.services.field_policy_engine import FieldPolicyEngine, PolicyContext, ObjectContext, UserContext
 from meta.services.view_config_service import view_config_service
 from meta.services.computation_service import computation_service
@@ -38,16 +40,31 @@ def _reject_skip_generic_api_objects():
 
     路径形如 /api/v2/bo/<object_type>；仅对已注册且声明了该开关的对象返回 404。
     （/api/v2/bo/architecture/... 等非对象路径 registry 查不到，直接放行。）
+
+    [P3 2026-11-10] 新增 `generic_api_mode: read_only`：GET 放行，写操作 404。
+    只读档位不放宽读权限：read_only 对象还要过对象级功能权限
+    （canonical `<object_type>:read` 或 yaml authorization 声明）。
     """
     parts = (request.path or '').split('/')
     if len(parts) >= 5 and parts[1] == 'api' and parts[2] == 'v2' and parts[3] == 'bo':
         obj = registry.get(parts[4])
-        if obj is not None and getattr(obj, 'skip_generic_api', False):
-            return error_response(
-                f'对象 {parts[4]} 未开放通用 BO API',
-                error_code='GENERIC_API_DISABLED',
-                status=404,
-            )
+        if obj is not None:
+            mode = generic_api_mode_of(obj)
+            if not generic_api_allows(mode, request.method):
+                return error_response(
+                    f'对象 {parts[4]} 未开放通用 BO API',
+                    error_code=('GENERIC_API_READ_ONLY' if mode == 'read_only'
+                                else 'GENERIC_API_DISABLED'),
+                    status=404,
+                )
+            if mode == 'read_only':
+                denied = check_generic_read_permission(parts[4])
+                if denied is not None:
+                    return error_response(
+                        f'无权读取对象 {parts[4]}（需要权限 {denied.required}）',
+                        error_code='GENERIC_API_FORBIDDEN',
+                        status=403,
+                    )
     return None
 
 
@@ -2646,6 +2663,7 @@ def get_state_transitions(object_type, obj_id):
             'confirmMessage': ui_hints.confirm_message if ui_hints else '',
             'highlight': ui_hints.highlight if ui_hints else False,
             'hidden': ui_hints.hidden if ui_hints else False,
+            'inputFields': list(getattr(ui_hints, 'input_fields', None) or []),
         }
 
         if rule.condition:
@@ -2700,6 +2718,7 @@ def get_state_transitions_by_string_id(object_type, obj_id):
             'confirmMessage': ui_hints.confirm_message if ui_hints else '',
             'highlight': ui_hints.highlight if ui_hints else False,
             'hidden': ui_hints.hidden if ui_hints else False,
+            'inputFields': list(getattr(ui_hints, 'input_fields', None) or []),
         }
 
         if rule.condition:
@@ -2893,7 +2912,7 @@ def get_number_sequences():
     """
     from meta.core.key_template_engine import _SEQUENCES_TABLE
     from meta.services.document_number_service import (
-        DocumentNumberService, NUMBERING, resolve_document_numbering)
+        DocumentNumberService, get_numbering_map, resolve_document_numbering)
 
     ds = _get_data_source()
     rows = ds.query(
@@ -2937,7 +2956,7 @@ def get_number_sequences():
 
     numbering = []
     seen = set()
-    for key in list(NUMBERING) + [obj.id for obj in registry.all()]:
+    for key in list(get_numbering_map()) + [obj.id for obj in registry.all()]:
         if key in seen:
             continue
         cfg = resolve_document_numbering(key)
@@ -4138,4 +4157,41 @@ def _generate_bo_crud_paths(meta_objects) -> dict:
             }
         }
     return paths
+
+
+# ---------------------------------------------------------------------------
+# 统一规则解释 / dry-run（FR-011）
+# ---------------------------------------------------------------------------
+
+@bo_bp.route('/<object_type>/rules/explain', methods=['POST'])
+@login_required
+def explain_bo_rules(object_type):
+    """解释一次规则决策：default / permission / state_transition / approval。
+
+    只读接口：不落库、不改变数据。
+    Body: ``{"scenario": "...", ...场景参数}``
+    """
+    from meta.core.rule_explainer import SCENARIOS, explain
+
+    payload = request.get_json(silent=True) or {}
+    scenario = payload.get('scenario')
+    if scenario not in SCENARIOS or registry.get(object_type) is None:
+        return error_response(
+            'scenario 或 object_type 非法', code='BAD_REQUEST', status=400)
+
+    try:
+        result = explain(
+            object_type,
+            scenario,
+            data=payload.get('data'),
+            user_id=payload.get('user_id'),
+            action_id=payload.get('action_id') or 'read',
+            record_id=payload.get('record_id'),
+            state_field=payload.get('state_field') or 'status',
+            from_state=payload.get('from_state'),
+            to_state=payload.get('to_state'),
+        )
+    except ValueError as exc:
+        return error_response(str(exc), code='BAD_REQUEST', status=400)
+    return ok(result)
 

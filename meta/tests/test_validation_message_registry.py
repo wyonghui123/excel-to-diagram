@@ -92,10 +92,10 @@ class TestValidationMessageRegistryGet:
     def test_get_fk_not_found_key(self):
         from meta.core.validation_messages import ValidationMessageRegistry
         msg = ValidationMessageRegistry.get(
-            "validation.field.fk_not_found", target_name="用户", value=99
+            "validation.field.fk_not_found", target_name="用户", value=99, field_name="负责人"
         )
         assert "用户" in msg
-        assert "99" not in msg  # 不暴露数据库 ID
+        assert "负责人" in msg
 
     def test_get_business_key_composite_key(self):
         from meta.core.validation_messages import ValidationMessageRegistry

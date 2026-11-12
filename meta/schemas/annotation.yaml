@@ -283,14 +283,13 @@ fields:
       import_visible: true
       virtual: true
       parent_key: true
+      # 多态外键的在编辑时不可改（与 target_type 一致），新增时必填可编辑
+      immutable: true
       import_order: 2
     ui:
       title: 关联对象编码
       width: 120
       visible: true
-    ui:
-      title: 关联对象编码
-      width: 20
 
   - id: target_name
     name: 关联对象名称

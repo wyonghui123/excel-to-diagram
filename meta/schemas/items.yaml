@@ -93,6 +93,9 @@ revision_policy:
     - {field: valuation_relevant,  editable: true,  diff: true, audit: true}
     - {field: status,              editable: false, diff: true, audit: true}
 
+org_scope:
+  mode: global
+
 fields:
   - id: id
     name: ID

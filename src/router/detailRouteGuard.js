@@ -81,7 +81,10 @@ const SUPPORTED_OBJECT_TYPES = [
   'purchase_order',
   // 收货轴 2026-11-01: receipt 的 list.detail_mode=page，detail 子表为收货行；
   //   与 purchase_order 同口径纳入白名单。
-  'receipt'
+  // 采购发票轴 2026-11-11: vendor_invoice 的 detail 子表为发票行，列表行点击
+  //   与 /detail/vendor_invoice/<id> 需要可导航。
+  'receipt',
+  'vendor_invoice'
 ]
 
 export async function validateDetailRoute(to, from, next) {
@@ -153,7 +156,9 @@ export function getBreadcrumbs(objectType, id, objectName = null) {
     'party_relation': '业务伙伴关系',
     // [采购轴 2026-11-01] 与 SUPPORTED_OBJECT_TYPES 同步，缺了面包屑会回退英文 id
     'purchase_order': '采购订单',
-    'receipt': '收货单'
+    'receipt': '收货单',
+    // 采购发票轴 2026-11-11
+    'vendor_invoice': '采购发票'
   }
 
   const label = typeLabels[normalizedType] || objectType

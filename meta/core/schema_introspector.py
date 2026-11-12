@@ -112,7 +112,7 @@ class SchemaIntrospector:
             ['+ field: xxx', '- field: yyy', ...]
         """
         actual = self.introspect(table_name)
-        import yaml
+        from meta.core import yaml_compat as yaml
         try:
             with open(yaml_path, 'r', encoding='utf-8') as f:
                 yaml_content = yaml.safe_load(f)

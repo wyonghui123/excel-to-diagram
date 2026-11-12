@@ -82,14 +82,7 @@ class FieldPolicy:
 
 class FieldPolicyEngine:
     """字段策略引擎"""
-    
-    SYSTEM_FIELDS = {
-        'created_at', 'updated_at', 'created_by', 'updated_by',
-        'created_date', 'updated_date', 'created_user', 'updated_user',
-        'is_system', 'system_flag', 'readonly',
-        'id', '_id', 'tenant_id'
-    }
-    
+
     def __init__(self, meta_object=None, data_source=None):
         self.meta_object = meta_object
         self.data_source = data_source
@@ -160,8 +153,10 @@ class FieldPolicyEngine:
         return None
     
     def _is_system_field(self, field_id: str) -> bool:
-        """检查是否是系统字段"""
-        return field_id.lower() in self.SYSTEM_FIELDS
+        """检查是否是系统字段（声明见 shared_properties.yaml#system_fields）"""
+        from meta.core.system_field_loader import get_system_fields
+
+        return field_id.lower() in get_system_fields()
     
     def _get_field(self, field_id: str):
         """获取字段定义"""

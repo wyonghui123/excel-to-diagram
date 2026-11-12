@@ -1,23 +1,26 @@
 # -*- coding: utf-8 -*-
-"""属性引用影响 —— 删除定义前的引用计数。
+"""属性影响面 —— 删除守卫计数 + 规则表达式引用扫描。
 
 依据: docs/superpowers/specs/2026-10-25-attribute-extension-and-dictionary-spec.md §6
       （变更危险性分级：停用等同删除；有引用时必须先清引用）
+      docs/superpowers/specs/2026-11-09-rule-model-scenario-and-extended-attributes-spec.md
+      §9.5 P2（定义变更 → 受影响规则）
 
-为什么需要它: 「删除」在属性字典里是唯一不可自助的高危动作 —— 删掉定义会让值表里的行
-变成孤儿。SQLite 的外键约束在运行时不保证开启，schema 的 restrict 只是声明，因此必须在
-写入前用应用层计数拦住。
-
-计数口径:
-  - 适用范围行（attribute_scopes）：任何状态都算引用，停用的范围行需先清理
-  - 值行：按已注册值表逐个 COUNT；值表由 registry 中「表名以 _attribute_values 结尾
-    且含 attribute_id 字段」的对象自动发现，新增值表无需改本文件
+两条口径:
+  1. 删除守卫：适用范围行（attribute_scopes）+ 已注册值表逐表 COUNT；
+     任何一项 > 0 都拒绝删除，引导改为停用。
+  2. 影响面：静态扫描元模型规则表达式中的 ``attrs.<code>`` /
+     ``item.attrs.<code>`` / ``attrs['<code>']`` 引用，不执行规则、不访问数据库。
 """
 
 import logging
+import re
 from typing import Any, Dict, List, Optional
 
 logger = logging.getLogger(__name__)
+
+#: 可能引用扩展属性的规则字段（与 MetaRule 家族一致）
+SCANNED_FIELDS = ('condition', 'action', 'formula', 'source_value')
 
 
 class AttributeImpactError(ValueError):
@@ -35,15 +38,18 @@ class AttributeImpactService:
     Args:
         data_source: 数据源（提供 query(sql, params) -> List[dict]）
         value_tables: 显式指定值表；缺省按 registry 自动发现
+        registry: 规则扫描用的元模型注册表；缺省取全局 registry
     """
 
     SCOPE_TABLE = 'attribute_scopes'
 
-    def __init__(self, data_source=None, value_tables: Optional[List[str]] = None):
+    def __init__(self, data_source=None, value_tables: Optional[List[str]] = None,
+                 registry: Any = None):
         self.ds = data_source
         self._value_tables = list(value_tables) if value_tables is not None else None
+        self._registry = registry
 
-    # ---------- 对外 ----------
+    # ---------- 对外：删除守卫 ----------
 
     def preview(self, attribute_id: Any) -> Dict[str, Any]:
         """返回该属性的引用概览；任何一项 >0 即视为被引用。"""
@@ -80,6 +86,52 @@ class AttributeImpactService:
             field_name='id',
         )
 
+    # ---------- 对外：规则表达式影响面（spec 2026-11-09 §9.5 P2）----------
+
+    def find_rule_references(self, attribute_code: str,
+                             object_type: Optional[str] = None
+                             ) -> List[Dict[str, Any]]:
+        """返回引用该属性的规则清单（按对象 / 规则排序）。
+
+        每项: ``{object_type, rule_id, rule_name, attribute_code, field,
+        expression}``。
+        """
+        code = str(attribute_code or '')
+        if not code:
+            return []
+        pattern = _reference_pattern(code)
+        impacts: List[Dict[str, Any]] = []
+        for meta_object in self._objects():
+            if object_type and meta_object.id != object_type:
+                continue
+            for rule in getattr(meta_object, 'rules', None) or []:
+                for field_name in SCANNED_FIELDS:
+                    expression = getattr(rule, field_name, '') or ''
+                    if not isinstance(expression, str):
+                        continue
+                    if not pattern.search(expression):
+                        continue
+                    impacts.append({
+                        'object_type': meta_object.id,
+                        'rule_id': getattr(rule, 'id', ''),
+                        'rule_name': getattr(rule, 'name', ''),
+                        'attribute_code': code,
+                        'field': field_name,
+                        'expression': expression.strip(),
+                    })
+        impacts.sort(key=lambda item: (
+            str(item['object_type']), str(item['rule_id']), item['field']))
+        return impacts
+
+    def find_many_rule_references(
+            self, attribute_codes,
+            object_type: Optional[str] = None
+    ) -> Dict[str, List[Dict[str, Any]]]:
+        return {
+            code: self.find_rule_references(code, object_type=object_type)
+            for code in dict.fromkeys(str(c) for c in attribute_codes if c)
+        }
+
     # ---------- 值表发现 ----------
 
     def value_tables(self) -> List[str]:
@@ -104,6 +156,18 @@ class AttributeImpactService:
 
     # ---------- 查询辅助（可覆写注入）----------
 
+    def _objects(self) -> List[Any]:
+        registry = self._registry
+        if registry is None:
+            from meta.core.models import registry as default_registry
+            registry = default_registry
+        get_all = getattr(registry, 'get_all', None)
+        if callable(get_all):
+            result = get_all() or {}
+            return list(result.values()) if isinstance(result, dict) else list(result)
+        all_method = getattr(registry, 'all', None)
+        return list(all_method() or []) if callable(all_method) else []
+
     def _count(self, table: str, attribute_id: Any) -> int:
         rows = self._query(
             f'SELECT COUNT(*) AS cnt FROM {table} WHERE attribute_id = ?',
@@ -125,3 +189,11 @@ class AttributeImpactService:
         except Exception as e:  # 查询失败 → fail-open（不阻断既有维护流程）
             logger.warning(f'[attribute_impact] 查询失败，跳过该项计数: {e}')
             return []
+
+
+def _reference_pattern(code: str) -> 're.Pattern':
+    """匹配 ``attrs.code`` / ``item.attrs.code`` / ``attrs['code']``。"""
+    token = re.escape(code)
+    return re.compile(
+        r'(?:\b(?:item|related|self)\.)?\battrs\s*'
+        r'(?:\.\s*%s\b|\[\s*[\'"]%s[\'"]\s*\])' % (token, token))

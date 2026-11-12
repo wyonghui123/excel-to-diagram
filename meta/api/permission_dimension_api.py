@@ -29,19 +29,17 @@ from meta.services.permission_dimension_engine import (
     ConditionEvaluator,
 )
 from meta.services.dimension_scope_engine import DimensionScopeEngine
+from meta.core.hierarchy_loader import (
+    get_dimension_levels,
+    get_parent_info_map,
+    get_scope_chain,
+)
 from meta.core.db_path import get_meta_db_path
 # [FIX 2026-09-25 缺陷④] permission_set_permissions 写入统一走 schema 自适应助手
 from meta.core.permission_set_permissions import ensure_granted as ensure_psp_granted
 
-_PARENT_INFO_MAP = {
-    'version': ('product', 'products', 'product_id', 'name'),
-    'domain': ('version', 'versions', 'version_id', 'name'),
-    # [FIX 2026-06-15] parent_display 字段名纠正: 实际 schema 中所有子表都用 'name' 而非 'parent_name'
-    # 之前用 domain_name / sub_domain_name / module_name 在 SQL JOIN 时报 "no such column"
-    'sub_domain': ('domain', 'domains', 'domain_id', 'name'),
-    'service_module': ('sub_domain', 'sub_domains', 'sub_domain_id', 'name'),
-    'business_object': ('service_module', 'service_modules', 'service_module_id', 'name'),
-}
+# [Rule Convergence M1 2026-11-07] 父级映射统一读 hierarchies.yaml（SSOT）。
+_PARENT_INFO_MAP = get_parent_info_map()
 
 logger = logging.getLogger(__name__)
 
@@ -448,7 +446,8 @@ def _build_dimension_tree(dim: str, version_id: Optional[int] = None,
             }
         else:
             # YAML 里有 hierarchies 但不包含此 dim, 退回 CHAIN fallback
-            relevant_chain = ['product', 'version', 'domain', 'sub_domain']
+            # [Rule Convergence M3 2026-11-07] 授权链由 hierarchies.yaml 派生（FR-002）
+            relevant_chain = get_scope_chain()
             try:
                 relevant_chain = relevant_chain[:relevant_chain.index(dim) + 1]
             except ValueError:
@@ -457,7 +456,7 @@ def _build_dimension_tree(dim: str, version_id: Optional[int] = None,
             hierarchy_meta = _empty_hierarchy_meta()
     else:
         # YAML 加载失败, 退回旧硬编码 CHAIN (向后兼容)
-        CHAIN_FALLBACK = ['product', 'version', 'domain', 'sub_domain']
+        CHAIN_FALLBACK = get_scope_chain()
         try:
             relevant_chain = CHAIN_FALLBACK[:CHAIN_FALLBACK.index(dim) + 1]
         except ValueError:
@@ -748,7 +747,10 @@ def list_dimension_tree(dim: str):
     Query: search=<str>, version_id=<int>
     """
     # [R21 2026-07-24] 加 service_module/business_object: 详情页字段用 Tree Search Help
-    VALID_DIMS = {"product", "version", "domain", "sub_domain", "service_module", "business_object"}
+    # [Rule Convergence M3 2026-11-07] 合法维度由 hierarchies.yaml 派生（FR-002）
+    VALID_DIMS = {
+        lv.object for lv in get_dimension_levels() if lv.level_type == 'entity'
+    }
     if dim not in VALID_DIMS:
         return jsonify({"error": f"invalid dim: {dim}"}), 400
 
@@ -2000,14 +2002,12 @@ def get_dimension_instances(dimension_id: str):
 
         return ok(
             {
-                "data": {
-                    "instances": instances,
-                    "pagination": {
-                        "page": page,
-                        "page_size": page_size,
-                        "total_count": total_count,
-                        "total_pages": (total_count + page_size - 1) // page_size,
-                    },
+                "instances": instances,
+                "pagination": {
+                    "page": page,
+                    "page_size": page_size,
+                    "total_count": total_count,
+                    "total_pages": (total_count + page_size - 1) // page_size,
                 },
             }
         )
@@ -2271,7 +2271,7 @@ def save_permission_rule(permission_set_id: int):
 
         rule_id = cursor.lastrowid
 
-        engine.invalidate_cache(permission_set_id=permission_set_id)
+        engine.invalidate_cache(permission_set_id)
 
         logger.info(f"保存权限规则成功 [permission_set_id={permission_set_id}, rule_id={rule_id}]")
 
@@ -2409,7 +2409,7 @@ def save_resource_action_matrix(permission_set_id: int):
         # 缓存失效（与 POST /permission-rules 同样的 invalidate 模式）
         try:
             engine = _get_engine()
-            engine.invalidate_cache(permission_set_id=permission_set_id)
+            engine.invalidate_cache(permission_set_id)
         except Exception as cache_err:
             logger.warning(f"[resource-action-matrix] 缓存失效失败（非阻断）: {cache_err}")
 

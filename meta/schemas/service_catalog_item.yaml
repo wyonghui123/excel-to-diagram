@@ -355,7 +355,7 @@ ui_view_config:
         label: 新建目录项
         icon: plus
         type: primary
-        permission: service_catalog_item:service_catalog_item_create
+        permission: service_catalog_item:create
       - id: export
         label: 导出
         icon: download
@@ -384,9 +384,9 @@ ui_view_config:
         fields: [code, name, status, default_priority, default_provider_org_id, requires_approval, approval_policy, description]
 
 category_config:
-  create_permission: service_catalog_item:service_catalog_item_create
-  update_permission: service_catalog_item:service_catalog_item_update
-  delete_permission: service_catalog_item:service_catalog_item_delete
+  create_permission: service_catalog_item:create
+  update_permission: service_catalog_item:update
+  delete_permission: service_catalog_item:delete
   owner_auto_permission: false
 
 import_export:

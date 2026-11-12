@@ -119,6 +119,8 @@ class InventoryCountGuardInterceptor(Interceptor):
 
         if context.action == 'crud_delete':
             service.assert_deletable(count_id)
+            # 删除前释放本单全部挂起（与删除同事务，失败回滚不误放行）
+            service.release_holds_for_count(count_id, context.user_info)
             return
         if context.action == 'crud_create':
             header = service.prepare_create(params, context.user_info)
@@ -166,6 +168,8 @@ class InventoryCountGuardInterceptor(Interceptor):
 
         if context.action == 'crud_delete':
             service.assert_line_deletable(parent_id, line_id)
+            # 删除前释放该行挂起（与删除同事务，失败回滚不误放行）
+            service.release_holds_for_line(line_id, context.user_info)
             return
         if context.action == 'crud_create':
             values = service.prepare_line_create(

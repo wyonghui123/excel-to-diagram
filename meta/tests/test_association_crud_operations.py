@@ -1,3 +1,4 @@
+# ALLOW_RAW_SQL: 本文件含裸 SQL 构造关联测试数据/DDL，守卫豁免（2026-11-09 恢复覆盖）
 import pytest
 
 pytestmark = pytest.mark.integration
@@ -33,6 +34,10 @@ class TestRolePermissionAssociation:
         conn = sqlite3.connect(db_path)
         cursor = conn.cursor()
 
+        # [夹具补齐 2026-11-09] 裸 sqlite3 连接绕开 server 初始化，写路径需要 runtime config 单例
+        from meta.core.db_config_detector import detect_runtime_config
+        detect_runtime_config(db_path)
+
         cursor.execute('''
             CREATE TABLE permission_sets (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -56,10 +61,10 @@ class TestRolePermissionAssociation:
         cursor.execute('''
             CREATE TABLE permission_set_permissions (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
-                role_id INTEGER NOT NULL,
+                permission_set_id INTEGER NOT NULL,
                 permission_id INTEGER NOT NULL,
                 created_at TEXT,
-                UNIQUE(role_id, permission_id)
+                UNIQUE(permission_set_id, permission_id)
             )
         ''')
 
@@ -109,7 +114,7 @@ class TestRolePermissionAssociation:
         assert result.success, f"分配失败: {result.message}"
 
         cursor.execute(
-            "SELECT * FROM permission_set_permissions WHERE role_id = ? AND permission_id = ?",
+            "SELECT * FROM permission_set_permissions WHERE permission_set_id = ? AND permission_id = ?",
             (role_id, perm_id)
         )
         assoc = cursor.fetchone()
@@ -131,7 +136,7 @@ class TestRolePermissionAssociation:
         perm_id = cursor.lastrowid
 
         cursor.execute(
-            "INSERT INTO permission_set_permissions (role_id, permission_id) VALUES (?, ?)",
+            "INSERT INTO permission_set_permissions (permission_set_id, permission_id) VALUES (?, ?)",
             (role_id, perm_id)
         )
         db_connection.commit()
@@ -169,7 +174,7 @@ class TestRolePermissionAssociation:
             assert result.success
 
         cursor.execute(
-            "SELECT COUNT(*) FROM permission_set_permissions WHERE role_id = ?",
+            "SELECT COUNT(*) FROM permission_set_permissions WHERE permission_set_id = ?",
             (role_id,)
         )
         count = cursor.fetchone()[0]
@@ -191,7 +196,7 @@ class TestRolePermissionAssociation:
         perm_id = cursor.lastrowid
 
         cursor.execute(
-            "INSERT INTO permission_set_permissions (role_id, permission_id) VALUES (?, ?)",
+            "INSERT INTO permission_set_permissions (permission_set_id, permission_id) VALUES (?, ?)",
             (role_id, perm_id)
         )
         db_connection.commit()
@@ -204,7 +209,7 @@ class TestRolePermissionAssociation:
         assert result.success
 
         cursor.execute(
-            "SELECT * FROM permission_set_permissions WHERE role_id = ? AND permission_id = ?",
+            "SELECT * FROM permission_set_permissions WHERE permission_set_id = ? AND permission_id = ?",
             (role_id, perm_id)
         )
         assert cursor.fetchone() is None
@@ -239,6 +244,10 @@ class TestUserGroupMemberAssociation:
         conn = sqlite3.connect(db_path)
         cursor = conn.cursor()
 
+        # [夹具补齐 2026-11-09] 写路径需要 runtime config 单例
+        from meta.core.db_config_detector import detect_runtime_config
+        detect_runtime_config(db_path)
+
         cursor.execute('''
             CREATE TABLE orgs (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -260,10 +269,10 @@ class TestUserGroupMemberAssociation:
         cursor.execute('''
             CREATE TABLE org_members (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
-                group_id INTEGER NOT NULL,
+                org_id INTEGER NOT NULL,
                 user_id INTEGER NOT NULL,
                 created_at TEXT,
-                UNIQUE(group_id, user_id)
+                UNIQUE(org_id, user_id)
             )
         ''')
 
@@ -306,14 +315,14 @@ class TestUserGroupMemberAssociation:
         db_connection.commit()
 
         result = bo_framework.associate(
-            'user_group', group_id, 'user', user_id,
+            'org', group_id, 'user', user_id,
             association_name='members'
         )
 
         assert result.success, f"添加成员失败: {result.message}"
 
         cursor.execute(
-            "SELECT * FROM org_members WHERE group_id = ? AND user_id = ?",
+            "SELECT * FROM org_members WHERE org_id = ? AND user_id = ?",
             (group_id, user_id)
         )
         member = cursor.fetchone()
@@ -335,13 +344,13 @@ class TestUserGroupMemberAssociation:
         user_id = cursor.lastrowid
 
         cursor.execute(
-            "INSERT INTO org_members (group_id, user_id) VALUES (?, ?)",
+            "INSERT INTO org_members (org_id, user_id) VALUES (?, ?)",
             (group_id, user_id)
         )
         db_connection.commit()
 
         result = bo_framework.associate(
-            'user_group', group_id, 'user', user_id,
+            'org', group_id, 'user', user_id,
             association_name='members'
         )
 
@@ -367,13 +376,13 @@ class TestUserGroupMemberAssociation:
 
         for user_id in user_ids:
             result = bo_framework.associate(
-                'user_group', group_id, 'user', user_id,
+                'org', group_id, 'user', user_id,
                 association_name='members'
             )
             assert result.success
 
         cursor.execute(
-            "SELECT COUNT(*) FROM org_members WHERE group_id = ?",
+            "SELECT COUNT(*) FROM org_members WHERE org_id = ?",
             (group_id,)
         )
         count = cursor.fetchone()[0]
@@ -395,20 +404,20 @@ class TestUserGroupMemberAssociation:
         user_id = cursor.lastrowid
 
         cursor.execute(
-            "INSERT INTO org_members (group_id, user_id) VALUES (?, ?)",
+            "INSERT INTO org_members (org_id, user_id) VALUES (?, ?)",
             (group_id, user_id)
         )
         db_connection.commit()
 
         result = bo_framework.dissociate(
-            'user_group', group_id, 'user', user_id,
+            'org', group_id, 'user', user_id,
             association_name='members'
         )
 
         assert result.success
 
         cursor.execute(
-            "SELECT * FROM org_members WHERE group_id = ? AND user_id = ?",
+            "SELECT * FROM org_members WHERE org_id = ? AND user_id = ?",
             (group_id, user_id)
         )
         assert cursor.fetchone() is None
@@ -424,7 +433,7 @@ class TestUserGroupMemberAssociation:
         db_connection.commit()
 
         result = bo_framework.dissociate(
-            'user_group', group_id, 'user', 99999,
+            'org', group_id, 'user', 99999,
             association_name='members'
         )
 
@@ -442,6 +451,10 @@ class TestAssociationQuery:
 
         conn = sqlite3.connect(db_path)
         cursor = conn.cursor()
+
+        # [夹具补齐 2026-11-09] 写路径需要 runtime config 单例
+        from meta.core.db_config_detector import detect_runtime_config
+        detect_runtime_config(db_path)
 
         cursor.execute('''
             CREATE TABLE permission_sets (
@@ -465,10 +478,10 @@ class TestAssociationQuery:
         cursor.execute('''
             CREATE TABLE permission_set_permissions (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
-                role_id INTEGER NOT NULL,
+                permission_set_id INTEGER NOT NULL,
                 permission_id INTEGER NOT NULL,
                 created_at TEXT,
-                UNIQUE(role_id, permission_id)
+                UNIQUE(permission_set_id, permission_id)
             )
         ''')
 
@@ -493,20 +506,20 @@ class TestAssociationQuery:
         cursor.execute('''
             CREATE TABLE org_members (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
-                group_id INTEGER NOT NULL,
+                org_id INTEGER NOT NULL,
                 user_id INTEGER NOT NULL,
                 created_at TEXT,
-                UNIQUE(group_id, user_id)
+                UNIQUE(org_id, user_id)
             )
         ''')
 
         cursor.execute('''
             CREATE TABLE org_permission_sets (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
-                group_id INTEGER NOT NULL,
-                role_id INTEGER NOT NULL,
+                org_id INTEGER NOT NULL,
+                permission_set_id INTEGER NOT NULL,
                 created_at TEXT,
-                UNIQUE(group_id, role_id)
+                UNIQUE(org_id, permission_set_id)
             )
         ''')
 
@@ -541,7 +554,7 @@ class TestAssociationQuery:
             )
             perm_id = cursor.lastrowid
             cursor.execute(
-                "INSERT INTO permission_set_permissions (role_id, permission_id) VALUES (?, ?)",
+                "INSERT INTO permission_set_permissions (permission_set_id, permission_id) VALUES (?, ?)",
                 (role_id, perm_id)
             )
         db_connection.commit()
@@ -570,13 +583,13 @@ class TestAssociationQuery:
             )
             user_id = cursor.lastrowid
             cursor.execute(
-                "INSERT INTO org_members (group_id, user_id) VALUES (?, ?)",
+                "INSERT INTO org_members (org_id, user_id) VALUES (?, ?)",
                 (group_id, user_id)
             )
         db_connection.commit()
 
         result = bo_framework.query_associations(
-            'user_group', group_id, 'members'
+            'org', group_id, 'members'
         )
 
         assert result.success
@@ -605,17 +618,17 @@ class TestAssociationQuery:
         role_id = cursor.lastrowid
 
         cursor.execute(
-            "INSERT INTO org_members (user_id, group_id) VALUES (?, ?)",
+            "INSERT INTO org_members (user_id, org_id) VALUES (?, ?)",
             (user_id, group_id)
         )
         cursor.execute(
-            "INSERT INTO org_permission_sets (group_id, role_id) VALUES (?, ?)",
+            "INSERT INTO org_permission_sets (org_id, permission_set_id) VALUES (?, ?)",
             (group_id, role_id)
         )
         db_connection.commit()
 
         result = bo_framework.query_associations(
-            'user_group', group_id, 'roles'
+            'org', group_id, 'permission_sets'
         )
 
         assert result.success
@@ -636,7 +649,7 @@ class TestAssociationQuery:
             )
             perm_id = cursor.lastrowid
             cursor.execute(
-                "INSERT INTO permission_set_permissions (role_id, permission_id) VALUES (?, ?)",
+                "INSERT INTO permission_set_permissions (permission_set_id, permission_id) VALUES (?, ?)",
                 (role_id, perm_id)
             )
         db_connection.commit()
@@ -665,13 +678,13 @@ class TestAssociationQuery:
             )
             user_id = cursor.lastrowid
             cursor.execute(
-                "INSERT INTO org_members (group_id, user_id) VALUES (?, ?)",
+                "INSERT INTO org_members (org_id, user_id) VALUES (?, ?)",
                 (group_id, user_id)
             )
         db_connection.commit()
 
         result = bo_framework.execute(
-            'user_group',
+            'org',
             'read',
             {'id': group_id}
         )

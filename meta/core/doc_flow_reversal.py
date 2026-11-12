@@ -178,6 +178,51 @@ def reverse_edge(app_ds, edge_id: str, *,
                               replay=False, cascaded_edges=cascaded)
 
 
+def release_target_edges(app_ds, target_bo: str, target_ids,
+                         *, reversed_by: str = "") -> Dict[str, List[str]]:
+    """下游单据取消 → 释放其名下正向边对上游的占用（边保留，视图不计）。
+
+    边方向为「上游计划行 → 下游明细行」，故按 target 侧定位：
+    target_bo / target_id ∈ target_ids 且 status='active' 且
+    quantity_sign='normal' 的边逐条 reverse_edge。
+
+    幂等：已 reversed 的边不再命中查询，重复取消不会二次翻转。
+
+    Returns:
+        {'released': [边 ID...], 'replay': [幂等重放的边 ID...]}
+    """
+    ids = [str(value) for value in (target_ids or []) if value not in (None, "")]
+    if not target_bo or not ids:
+        return {"released": [], "replay": []}
+    placeholders = ", ".join(["?"] * len(ids))
+    try:
+        rows = app_ds.execute(
+            "SELECT id FROM doc_flow_edges WHERE target_bo=?"
+            " AND target_id IN ({0}) AND status='active'"
+            " AND quantity_sign='normal' ORDER BY id".format(placeholders),
+            tuple([target_bo] + ids),
+        ).fetchall()
+    except Exception as error:  # noqa: BLE001 - 单据流未启用的库无此表
+        if "no such table" not in str(error):
+            raise
+        logger.warning("[DocFlow] 边表不可读，跳过取消释放 %s: %s",
+                       target_bo, error)
+        return {"released": [], "replay": []}
+    released: List[str] = []
+    replay: List[str] = []
+    with app_ds.transaction():
+        for row in rows:
+            edge_id = row["id"] if isinstance(row, dict) else row[0]
+            result = reverse_edge(app_ds, edge_id, reversed_by=reversed_by)
+            if result.replay:
+                replay.append(edge_id)
+            else:
+                released.append(edge_id)
+    logger.info("[DocFlow] 取消释放 %s 目标边：翻转 %d 条，重放 %d 条（%s）",
+                target_bo, len(released), len(replay), reversed_by)
+    return {"released": released, "replay": replay}
+
+
 def red_ink_edge(app_ds, orig_edge_id: str, *, quantity: float, ref_id: str,
                  derived_by: str = "") -> ReversalResult:
     """C 档：数量调整——同方向红字新边（quantity_sign='red'，status=active）。
@@ -296,7 +341,7 @@ def counter_edge(app_ds, platform_ds, orig_edge_id: str, *,
             "退货数量必须 > 0（正向新增请走 derive），实际: {0}".format(quantity),
         )
 
-    from meta.core.doc_flow_rule_store import get_rule
+    from meta.core.rule_provider import get_doc_flow_rule as get_rule
     rule = get_rule(platform_ds, return_rule_id)
     if rule is None:
         raise DocFlowDeriveError(

@@ -92,14 +92,14 @@ def test_service_module_storage():
     version_id_field = obj.get_field("version_id")
     assert version_id_field is not None, "version_id 字段不存在"
 
-    assert domain_id_field.storage == FieldStorage.VIRTUAL, f"domain_id.storage 应为 VIRTUAL，实际为 {domain_id_field.storage}"
+    assert domain_id_field.storage == FieldStorage.STORED, f"domain_id.storage 应为 STORED，实际为 {domain_id_field.storage}"
     assert sub_domain_id_field.storage == FieldStorage.STORED, f"sub_domain_id.storage 应为 STORED，实际为 {sub_domain_id_field.storage}"
     assert version_id_field.storage == FieldStorage.STORED, f"version_id.storage 应为 STORED，实际为 {version_id_field.storage}"
 
     persistent_fields = obj.get_persistent_fields()
     persistent_ids = [f.id for f in persistent_fields]
 
-    assert "domain_id" not in persistent_ids, "domain_id 不应在 persistent_fields 中"
+    assert "domain_id" in persistent_ids, "domain_id 应在 persistent_fields 中"
     assert "sub_domain_id" in persistent_ids, "sub_domain_id 应在 persistent_fields 中"
     assert "version_id" in persistent_ids, "version_id 应在 persistent_fields 中"
 
@@ -117,15 +117,15 @@ def test_business_object_storage():
     sub_domain_id_field = obj.get_field("sub_domain_id")
     service_module_id_field = obj.get_field("service_module_id")
 
-    assert domain_id_field.storage == FieldStorage.VIRTUAL, f"domain_id.storage 应为 VIRTUAL，实际为 {domain_id_field.storage}"
-    assert sub_domain_id_field.storage == FieldStorage.VIRTUAL, f"sub_domain_id.storage 应为 VIRTUAL，实际为 {sub_domain_id_field.storage}"
+    assert domain_id_field.storage == FieldStorage.STORED, f"domain_id.storage 应为 STORED，实际为 {domain_id_field.storage}"
+    assert sub_domain_id_field.storage == FieldStorage.STORED, f"sub_domain_id.storage 应为 STORED，实际为 {sub_domain_id_field.storage}"
     assert service_module_id_field.storage == FieldStorage.STORED, f"service_module_id.storage 应为 STORED，实际为 {service_module_id_field.storage}"
 
     persistent_fields = obj.get_persistent_fields()
     persistent_ids = [f.id for f in persistent_fields]
 
-    assert "domain_id" not in persistent_ids, "domain_id 不应在 persistent_fields 中"
-    assert "sub_domain_id" not in persistent_ids, "sub_domain_id 不应在 persistent_fields 中"
+    assert "domain_id" in persistent_ids, "domain_id 应在 persistent_fields 中"
+    assert "sub_domain_id" in persistent_ids, "sub_domain_id 应在 persistent_fields 中"
     assert "service_module_id" in persistent_ids, "service_module_id 应在 persistent_fields 中"
 
     print("[PASS] business_object storage 配置测试通过")
@@ -177,13 +177,14 @@ def test_action_executor_filtering():
     expected_persistent = {
         "version_id": 1,
         "sub_domain_id": 2,
+        "domain_id": 3,
         "code": "TEST",
         "name": "Test"
     }
 
     filtered = {k: v for k, v in test_data.items() if k in persistent_field_ids}
 
-    assert "domain_id" not in filtered, "domain_id (virtual) 不应在过滤结果中"
+    assert "domain_id" in filtered, "domain_id (stored) 应在过滤结果中"
     assert "version_name" not in filtered, "version_name (virtual) 不应在过滤结果中"
     assert "domain_name" not in filtered, "domain_name (virtual) 不应在过滤结果中"
     assert filtered == expected_persistent, f"过滤结果不正确: {filtered}"

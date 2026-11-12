@@ -107,7 +107,7 @@ class TestSchemaWiring:
         archive = _load('party_archive')
         children = [c['child_object']
                     for c in archive['ui_view_config']['child_sections']]
-        assert children == ['party_tax_registration']
+        assert children == ['party_tax_registration', 'party_address']
 
         reg = _load('party_tax_registration')
         party_field = next(f for f in reg['fields'] if f['id'] == 'party_id')

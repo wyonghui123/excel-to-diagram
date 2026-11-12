@@ -52,7 +52,7 @@ def load_scope_rules_from_ref(ref: str) -> List[Dict[str, Any]]:
     file_name, key = parts
     
     try:
-        import yaml
+        from meta.core import yaml_compat as yaml
         from pathlib import Path
         
         schema_dir = Path(__file__).parent.parent / 'schemas'

@@ -63,12 +63,16 @@ def _execute_read_query(sql, params=()):
 def _execute_write_query(sql, params=()):
     """[V007.41] L0 写查询 (force_no_tx)
 
-    事务由调用方的 bo_framework.transaction() 负责提交, 本函数不自行 commit.
+    [BUG-FIX 2026-11-09] 本函数每次开独立裸连接，外层 bo_framework.transaction()
+    的 commit 作用在 datasource 自己的连接上，无法提交这里的写事务；若不在本函数内
+    commit，连接关闭时 SQLite 会回滚 → 过滤变体写入静默丢失（列表永远为空）。
+    因此必须在此显式 commit，恢复 V007.40 的持久化语义。
     """
     db_path = _get_db_path()
     with safe_connect_for_write(db_path, force_no_tx=True) as conn:
         cursor = conn.cursor()
         cursor.execute(sql, params)
+        conn.commit()
         return cursor.lastrowid
 
 

@@ -25,16 +25,10 @@ from meta.services.management_dimension_engine import (
     ConditionEvaluator,
 )
 from meta.services.dimension_scope_engine import DimensionScopeEngine
+from meta.core.hierarchy_loader import get_parent_info_map
 
-_PARENT_INFO_MAP = {
-    'version': ('product', 'products', 'product_id', 'name'),
-    'domain': ('version', 'versions', 'version_id', 'name'),
-    # [FIX 2026-06-15] parent_display 字段名纠正: 实际 schema 中所有子表都用 'name' 而非 'parent_name'
-    # 之前用 domain_name / sub_domain_name / module_name 在 SQL JOIN 时报 "no such column"
-    'sub_domain': ('domain', 'domains', 'domain_id', 'name'),
-    'service_module': ('sub_domain', 'sub_domains', 'sub_domain_id', 'name'),
-    'business_object': ('service_module', 'service_modules', 'service_module_id', 'name'),
-}
+# [Rule Convergence M1 2026-11-07] 父级映射统一读 hierarchies.yaml（SSOT）。
+_PARENT_INFO_MAP = get_parent_info_map()
 
 logger = logging.getLogger(__name__)
 

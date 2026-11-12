@@ -139,6 +139,16 @@ class UIDetailViewConfig:
     layout: str = "tabs"
     showChangeHistory: bool = True
     showRelations: bool = True
+    # [v1.7 2026-11-07] 规则推导分区声明（原样透传给前端 DetailPage）：
+    #   {enabled, label, permission, scenarios, codes}
+    #   不入库、不参与规则解析，仅决定详情页是否挂载「规则推导」分区。
+    rule_trace: Dict[str, Any] = field(default_factory=dict)
+    # [2026-11-12] 详情页业务动作声明（原样透传给前端 DetailPage）：
+    #   [{id, label, icon, variant, permission, action, params, confirm_message,
+    #     visible_when, input_fields}]；含 action 的项由前端派发 BO Action，
+    #   不含 action 的项沿用声明式按钮语义（edit / delete / print …）。
+    #   此前 dataclass 缺该字段 ⇒ YAML detail.actions 在加载时被静默丢弃。
+    actions: List[Any] = field(default_factory=list)
 
 
 @dataclass

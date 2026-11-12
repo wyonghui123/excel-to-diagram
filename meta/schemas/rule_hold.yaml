@@ -1,0 +1,128 @@
+# ============================================
+# 规则挂起对象（holds）
+# 说明: spec-rule-model §10.4 A 纯派生方案的唯一事实源。
+#       单据侧不落 hold_state 冗余列；active 行由 released_at IS NULL 派生。
+#       释放 = UPDATE released_by / released_at，不删行（历史可追溯）。
+#       两个部分索引均带 released_at IS NULL 谓词，查询必须重复该谓词才能命中。
+# ============================================
+
+id: rule_hold
+name: 规则挂起
+table_name: holds
+description: 规则命中后的挂起明细；部分唯一索引保证同一对象同一规则只有一条 active 行
+persistent: true
+is_view: false
+skip_generic_api: true
+
+semantics:
+  meaning: 规则挂起记录
+  category: system_entity
+  hierarchy_level: 0
+  aliases:
+    - 规则挂起
+    - RuleHold
+    - Holds
+
+fields:
+  - id: id
+    name: ID
+    type: integer
+    db_column: id
+    required: true
+    unique: true
+    description: 技术主键
+    semantics:
+      meaning: 自增主键
+
+  - id: object_type
+    name: 对象类型
+    type: string
+    db_column: object_type
+    required: true
+    description: 被挂起的业务对象类型（如 inventory_count_line）
+    semantics:
+      meaning: 多态对象类型，与 record_id 组成挂起目标
+
+  - id: record_id
+    name: 记录ID
+    type: integer
+    db_column: record_id
+    required: true
+    description: 被挂起业务对象的记录 ID
+    semantics:
+      meaning: 多态记录 ID，与 object_type 组成挂起目标
+
+  - id: rule_key
+    name: 规则标识
+    type: string
+    db_column: rule_key
+    required: true
+    description: 产生该挂起的规则标识
+    semantics:
+      meaning: 对应 BO yaml 中 rules[].id
+
+  - id: code
+    name: 挂起代码
+    type: string
+    db_column: code
+    description: 挂起原因代码
+    semantics:
+      meaning: 机器可读的挂起代码
+
+  - id: reason
+    name: 挂起原因
+    type: string
+    db_column: reason
+    description: 挂起原因文本
+    semantics:
+      meaning: 人可读的挂起说明
+
+  - id: applied_by
+    name: 挂起人
+    type: string
+    db_column: applied_by
+    description: 执行挂起的用户
+    semantics:
+      meaning: 挂起操作人
+
+  - id: applied_at
+    name: 挂起时间
+    type: datetime
+    db_column: applied_at
+    required: true
+    description: 挂起发生时间
+    semantics:
+      meaning: 挂起时间戳
+
+  - id: released_by
+    name: 释放人
+    type: string
+    db_column: released_by
+    description: 执行释放的用户
+    semantics:
+      meaning: 释放操作人；NULL 表示尚未释放
+
+  - id: released_at
+    name: 释放时间
+    type: datetime
+    db_column: released_at
+    description: 释放发生时间
+    semantics:
+      meaning: 释放时间戳；NULL 表示 active
+
+indexes:
+  - fields: [object_type, record_id]
+    name: idx_holds_active
+    type: partial
+    condition: "released_at IS NULL"
+    description: active 挂起按目标查询（部分索引）
+
+  - fields: [object_type, record_id, rule_key]
+    name: uq_holds_active
+    unique: true
+    type: partial
+    condition: "released_at IS NULL"
+    description: 同一目标同一规则只允许一条 active 挂起（幂等防重）
+
+ui_view_config:
+  skip_auto_menu: true

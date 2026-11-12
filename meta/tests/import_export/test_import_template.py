@@ -91,13 +91,14 @@ class TestImportTemplateContent:
                 f.write(response.data)
 
             wb = load_workbook(file_path)
-            assert '角色' in wb.sheetnames, "模板应包含'角色'工作表"
+            # [FIX 2026-11-07] 2026-08-28 schema 重构: role → permission_set, 导出 sheet 名为「权限集」
+            assert '权限集' in wb.sheetnames, "模板应包含'权限集'工作表"
 
-            ws = wb['角色']
+            ws = wb['权限集']
             headers = [cell.value for cell in ws[1] if cell.value]
 
             # 验证基本表头
-            expected_headers = ['操作模式', '角色编码', '角色名称']
+            expected_headers = ['操作模式', '权限集编码', '权限集名称']
             for header in expected_headers:
                 assert header in headers, f"表头应包含'{header}'"
 
@@ -124,7 +125,7 @@ class TestImportTemplateContent:
                 f.write(response.data)
 
             wb = load_workbook(file_path)
-            ws = wb['角色']
+            ws = wb['权限集']
 
             # 获取表头
             headers = [cell.value for cell in ws[1] if cell.value]
@@ -188,7 +189,7 @@ class TestImportTemplateContent:
                 f.write(response.data)
 
             wb = load_workbook(file_path)
-            ws = wb['角色']
+            ws = wb['权限集']
 
             # 检查业务键字段的背景色（浅绿色 FFF2CC）
             business_key_fields = []
@@ -213,8 +214,8 @@ class TestImportTemplateContent:
 
             print(f"业务键字段: {business_key_fields}")
 
-            # 角色编码应该是业务键
-            assert '角色编码' in business_key_fields, "'角色编码' 应该是业务键字段（浅绿色背景）"
+            # 权限集编码应该是业务键
+            assert '权限集编码' in business_key_fields, "'权限集编码' 应该是业务键字段（浅绿色背景）"
 
             wb.close()
 
@@ -279,7 +280,7 @@ class TestImportTemplateComments:
                 f.write(response.data)
 
             wb = load_workbook(file_path)
-            ws = wb['角色']
+            ws = wb['权限集']
 
             # 检查表头单元格是否有注释
             comments_count = 0

@@ -134,8 +134,12 @@ class ApplicationBuilder:
         立即执行（不延迟到 build），因为 Action 注册是模块级操作。
         """
         from meta.services.bo_action_registrations import register_all_bo_actions
+        from meta.services.fulfillment_action_registrations import (
+            register_fulfillment_actions,
+        )
         from meta.core.bo_action_registry import bo_action_registry
         register_all_bo_actions(bo_action_registry)
+        register_fulfillment_actions(bo_action_registry)
         logger.info(f"[AppBuilder] BO actions registered: {len(bo_action_registry.list_ids())}")
         return self
 
@@ -231,6 +235,9 @@ class ApplicationBuilder:
         # [V1.1.8] WriteScopeInterceptor (P35) 在 PermissionInterceptor 之后
         bo_framework.register_interceptor(WriteScopeInterceptor())
         bo_framework.register_interceptor(DataPermissionInterceptor())
+        # [Spec 24 T3/T4 2026-11-06] 业务对象组织边界（读过滤 + 写校验，三态开关默认 off）
+        from meta.core.interceptors.org_scope_interceptor import OrgScopeInterceptor
+        bo_framework.register_interceptor(OrgScopeInterceptor())
         bo_framework.register_interceptor(FieldPolicyInterceptor())
         from meta.core.interceptors.constraint_validation_interceptor import ConstraintValidationInterceptor
         bo_framework.register_interceptor(ConstraintValidationInterceptor())
@@ -295,6 +302,18 @@ class ApplicationBuilder:
         #   与 server.py create_app() 同位登记 —— 两条启动路径缺一会静默失效。
         from meta.core.interceptors.shipment_guard_interceptor import ShipmentGuardInterceptor
         bo_framework.register_interceptor(ShipmentGuardInterceptor())
+        # [BILLING S8-A 2026-11-09] 销售发票守卫（P51）：抬头创建取号、submit/post/
+        #   cancel/reverse 迁移委托 customer_invoice_service（期次 / billed 回写 /
+        #   doc_flow / billing_status 派生）、行来源与金额校验、期次严格只读（R-INV-22）。
+        #   与 server.py create_app() 同位登记 —— 两条启动路径缺一会静默失效。
+        from meta.core.interceptors.customer_invoice_guard_interceptor import CustomerInvoiceGuardInterceptor
+        bo_framework.register_interceptor(CustomerInvoiceGuardInterceptor())
+        # [VENDOR_INVOICE W5 2026-11-11] 采购发票守卫（P51）：抬头创建/删除与状态迁移
+        #   接线（submit/post/cancel 委托 vendor_invoice_match_service，写 doc_flow 边
+        #   与匹配结果）、行写入仅限草稿父单；红冲链未实现时显式拒绝。
+        #   与 server.py create_app() 同位登记 —— 两条启动路径缺一会静默失效。
+        from meta.core.interceptors.vendor_invoice_guard_interceptor import VendorInvoiceGuardInterceptor
+        bo_framework.register_interceptor(VendorInvoiceGuardInterceptor())
         # [RECEIPT 2026-11-01] 收货单守卫（P52）：抬头创建归一化与取号、状态迁移委托
         #   receipt_service（计划行 received_qty / rejected_qty 回写、分配拆分、履约派生）、
         #   行冗余列校验回填、posted 后冻结（R-RC-0~R-RC-18）。
@@ -505,8 +524,10 @@ class ApplicationBuilder:
         from meta.api.work_order_api import work_order_bp
         # [P6a-2 v218 2026-11-05] 包装容器作业台（扫码预检 / 封箱 / 批量封箱）。
         from meta.api.handling_unit_api import handling_unit_bp
+        from meta.api.doc_flow_api import doc_flow_bp
         from meta.api.engineering_change_api import engineering_change_bp
         from meta.api.inventory_aging_api import inventory_aging_bp
+        from meta.api.rule_center_api import rule_center_bp, rule_trace_bp
         from meta.api.schema_api import schema_dashboard_bp
         from meta.graphql import graphql_bp
         from telemetry import telemetry_bp
@@ -588,6 +609,11 @@ class ApplicationBuilder:
         app.register_blueprint(engineering_change_bp)
         # [P8 2026-11-06] 库存库龄只读报表/明细（薄路由，不新增 View BO）。
         app.register_blueprint(inventory_aging_bp)
+        # [单据流 Phase 3 2026-11-08] 通用服务 API（规则/上游/派生/追溯）。
+        app.register_blueprint(doc_flow_bp)
+        # [规则收敛 v1.6 2026-11-07] 规则中心目录 + 单据规则推导（只读）。
+        app.register_blueprint(rule_center_bp)
+        app.register_blueprint(rule_trace_bp)
         app.register_blueprint(schema_dashboard_bp)
         app.register_blueprint(graphql_bp)
         # [多产品平台 §11 Q5 S2 / 2026-09-24] 原 mcp_bp 注册已移除（/mcp 三路由无鉴权，

@@ -72,6 +72,9 @@ audit:
   dissociate:
     enabled: true
 
+org_scope:
+  mode: global
+
 fields:
   - id: id
     name: ID
@@ -576,7 +579,7 @@ ui_view_config:
         label: 新建规则
         icon: plus
         type: primary
-        permission: pricing_determination:pricing_determination_create
+        permission: pricing_determination:create
       - id: export
         label: 导出
         icon: download
@@ -608,7 +611,7 @@ ui_view_config:
           - fields: [description]
 
 category_config:
-  create_permission: pricing_determination:pricing_determination_create
-  update_permission: pricing_determination:pricing_determination_update
-  delete_permission: pricing_determination:pricing_determination_delete
+  create_permission: pricing_determination:create
+  update_permission: pricing_determination:update
+  delete_permission: pricing_determination:delete
   owner_auto_permission: false

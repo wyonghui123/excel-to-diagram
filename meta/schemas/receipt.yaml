@@ -102,7 +102,18 @@ actions:
     description: "按已过账收货行生成退货采购订单与退货出库收货草稿（from_states: posted）"
     action_ref: receipt.create_vendor_return
     authorization:
-      permission: receipt:receipt_create_vendor_return
+      permission: receipt:create_vendor_return
+
+org_scope:
+  mode: direct
+  field: inventory_org_id
+  function: inventory
+  write_check: true
+
+numbering:
+  no_field: receipt_no
+  date_field: receipt_date
+  type_table: type_definitions
 
 fields:
   - id: id
@@ -912,7 +923,7 @@ ui_view_config:
         label: 新建收货单
         icon: plus
         type: primary
-        permission: receipt:receipt_create
+        permission: receipt:create
       - id: export
         label: 导出
         icon: download

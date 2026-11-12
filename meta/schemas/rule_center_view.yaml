@@ -1,0 +1,413 @@
+# 规则中心视图元数据
+#
+# 顶层无 `id:` —— 按 yaml_loader.load_yaml_directory 的语义判据，本文件不是 BO 对象定义，
+# 不会被注册为 MetaObject，由 rule_center_api / 前端 RuleCenterPage 单独消费。
+#
+# 职责边界：只描述「规则怎么显示」，不参与任何规则解析。
+# 规则本体来自 RuleCatalogService 聚合（BO YAML / DB 配置 / 只读声明）。
+
+version: 2
+title: 规则中心
+description: 统一展示、查询与管理所有可配置规则，并在单据详情展示规则推导过程。
+
+permission:
+  read: rule_center:read
+  write: rule_center:write
+  trace: rule_center:trace
+
+# 来源枚举：与 RuleCatalogService.SOURCES 保持一致；未知来源在加载期报错。
+sources:
+  - id: bo_yaml
+    label: BO 规则
+  - id: doc_flow
+    label: 单据流
+  - id: approval
+    label: 审批策略
+  - id: control_parameter
+    label: 控制参数
+  - id: line_type
+    label: 行类型
+  - id: state_machine
+    label: 状态机
+  - id: numbering
+    label: 编号规则
+  - id: validation
+    label: 校验与默认值
+  - id: sourcing
+    label: 供应来源
+
+# 列/筛选的展示文案（前端壳只读这里的映射，不得在组件内写死中文）
+column_labels:
+  rule_key: 规则键
+  name: 名称
+  rule_type: 类型
+  source: 来源
+  layer: 层级
+  scope_bo: 作用对象
+  factors: 因子
+  configurable: 可配置
+  status: 状态
+  updated_at: 更新时间
+  org: 组织
+  document_type: 单据类型
+  line_type: 行类型
+  item_group: 物料组
+  value: 取值
+  source_kind: 取值来源
+  source_bo: 来源单据
+  target_bo: 目标单据
+  pool: 归属池
+  condition_summary: 条件摘要
+  step_count: 审批层级
+  severity: 严重度
+  enabled: 启用
+  priority: 优先级
+  version: 版本
+  effective_from: 生效日期
+  check_key: 检查项
+  label: 检查项名称
+  finding_count: 问题数
+  sample: 样例
+  # 单据推导表单 / 因子快照
+  scenario: 场景
+  config_mode: 配置口径
+  object_type: 单据对象
+  record_id: 记录 ID
+  scenarios: 推导场景
+  codes: 控制参数编码
+  org_id: 组织 ID
+  document_type_id: 单据类型 ID
+  line_type_id: 行类型 ID
+  item_group_id: 物料组 ID
+
+filter_labels:
+  keyword: 关键字
+  domain: 域
+  rule_type: 规则类型
+  source: 来源
+  configurable: 可配置
+  status: 状态
+  document_type: 单据类型
+  line_type: 行类型
+  item_group: 物料组
+  source_bo: 来源单据
+  target_bo: 目标单据
+  scope_bo: 作用对象
+  severity: 严重度
+  enabled: 启用
+
+# 只允许静态封闭值域；source / rule_type / domain 由服务端按代码声明派生（spec §13.4）
+filter_options:
+  status: [active, inactive, draft]
+  severity: [error, warning, info]
+  enabled: ['true', 'false']
+  configurable: ['true', 'false']
+
+tabs:
+  - id: all
+    label: 全部规则
+    default: true
+    # 表格页签只列已接入来源；未接入（state_machine / numbering）在 sources 中标记
+    sources: [bo_yaml, doc_flow, approval, control_parameter, line_type, validation]
+    columns: [rule_key, name, rule_type, source, scope_bo, factors, configurable, status, updated_at]
+    filters: [domain, rule_type, source, configurable, status, keyword]
+    actions: [detail, edit, view_source, simulate, copy_key]
+
+  - id: control_parameter
+    label: 控制参数
+    sources: [control_parameter]
+    columns: [rule_key, name, org, document_type, line_type, item_group, value, status]
+    filters: [domain, status, keyword]
+    actions: [detail, edit, publish, rollback, copy_key]
+
+  - id: line_type
+    label: 行类型
+    sources: [line_type]
+    columns: [rule_key, name, document_type, item_group, line_type, source_kind, status]
+    filters: [document_type, status, keyword]
+    actions: [detail, edit, copy_key]
+
+  - id: doc_flow
+    label: 单据流
+    sources: [doc_flow]
+    columns: [rule_key, name, source_bo, target_bo, pool, status]
+    filters: [source_bo, target_bo, status, keyword]
+    actions: [detail, edit]
+
+  - id: approval
+    label: 审批策略
+    sources: [approval]
+    columns: [rule_key, name, scope_bo, condition_summary, step_count, status]
+    filters: [scope_bo, status, keyword]
+    actions: [detail]
+
+  - id: validation
+    label: 校验与默认值
+    sources: [validation]
+    columns: [rule_key, name, rule_type, scope_bo, severity, enabled, version, effective_from, priority]
+    filters: [scope_bo, rule_type, severity, enabled, keyword]
+    actions: [detail, view_source, copy_key]
+
+  - id: simulate
+    label: 规则试算
+    kind: simulate
+    require: rule_center:read
+    sources: []
+    columns: []
+    filters: []
+    actions: []
+
+  - id: health
+    label: 健康检查
+    kind: health
+    sources: []
+    columns: [check_key, label, severity, finding_count, sample]
+    filters: [severity]
+    actions: [detail]
+
+  - id: trace
+    label: 单据推导
+    kind: rule_trace
+    require: rule_center:trace
+    sources: []
+    columns: []
+    filters: []
+    actions: [rerun]
+
+detail:
+  sections:
+    - id: basic
+      label: 基本信息
+      fields: [rule_key, name, rule_type, source, scope_bo, factors, priority, status, updated_at]
+    - id: expression
+      label: 规则表达式
+      widget: code
+    - id: factors
+      label: 因子矩阵
+      widget: factor_matrix
+    - id: source
+      label: 声明位置
+      widget: source_snippet
+    - id: history
+      label: 变更记录
+      widget: audit_log
+      params:
+        # 后端 /rules/config/history 按 rule_key 前缀推导发布目标
+        rule_key: "{rule_key}"
+
+trace:
+  scenarios: [default, control_parameter, line_type, approval, state_transition, doc_flow, sourcing]
+  # 场景展示文案（前端不得写死中文；未知值回落原文）
+  scenario_labels:
+    default: 属性确定
+    control_parameter: 控制参数
+    line_type: 行类型
+    approval: 审批策略
+    state_transition: 状态流转
+    doc_flow: 单据流
+    sourcing: 供应来源
+  # 节点执行阶段（后端 STAGE_MAP / TRACE_STAGES 同源；只用于展示分组）
+  stages:
+    before_save: 保存前
+    validate: 校验
+    calc: 计算
+    approve: 审批
+    status_transition: 状态流转
+    scope: 作用域匹配
+    filter: 资格过滤
+    select: 取源排序
+  # 规则全集归属（spec §11.4；判定在后端 scope_of，前端只渲染）
+  scopes:
+    evaluated: { label: 已评估, type: success }
+    not_triggered: { label: 未触发, type: info }
+    downstream: { label: 下游, type: warning }
+  # 因子键顺序与中文名（与后端 factors 同源）
+  factor_keys: [org_id, document_type_id, line_type_id, item_group_id]
+  factor_labels:
+    org_id: 组织
+    document_type_id: 单据类型
+    line_type_id: 行类型
+    item_group_id: 物料组
+  # 控制参数命中链列契约
+  chain_columns:
+    code: { label: 编码, min_width: 160 }
+    value: { label: 取值, min_width: 100 }
+    source: { label: 来源, min_width: 140 }
+    specificity_rank: { label: 匹配度, min_width: 120 }
+    candidates: { label: 候选数, min_width: 90 }
+  # 命中链取值来源（对应 source.type）
+  source_types:
+    value: 命中取值
+    default: 取默认值
+    missing: 未定义
+  # 各场景 detail.rules 列契约（未知场景回落 rules_columns 之外的通用两列）
+  scenario_rules:
+    default:
+      columns:
+        rule_id: { label: 规则, min_width: 180 }
+        target_field: { label: 目标字段, min_width: 140 }
+        value: { label: 取值, min_width: 100 }
+        status: { label: 结论, min_width: 110 }
+        skip_reason: { label: 跳过原因, min_width: 140 }
+    doc_flow:
+      columns:
+        rule_id: { label: 规则, min_width: 180 }
+        target_bo: { label: 目标单据, min_width: 140 }
+        pool: { label: 归属池, min_width: 100 }
+        status: { label: 结论, min_width: 90 }
+  # 规则全集表列文案
+  rules_columns:
+    scenario: 场景
+    rule_id: 规则
+    scope: 归属
+    status: 结论
+    output: 输出
+  # 行内展开：可核对条件列文案
+  conditions_columns:
+    field: 字段
+    op: 运算
+    expected: 期望
+    actual: 实际
+    passed: 结果
+  # 归一决策类别（kind）：仅决定颜色与汇总口径，细分结论仍看 decisions
+  kinds:
+    hit: { label: 命中, type: success }
+    miss: { label: 未命中, type: danger }
+    skip: { label: 未评估, type: info }
+    error: { label: 推导失败, type: warning }
+    info: { label: 未知, type: info }
+  # 推导结论 → 展示文案/颜色（前端不得写死中文；未知值回落原文）
+  decisions:
+    applied: { label: 已应用, type: success }
+    skipped: { label: 已跳过, type: info }
+    granted: { label: 已授予, type: success }
+    denied: { label: 已拒绝, type: danger }
+    allowed: { label: 已允许, type: success }
+    rejected: { label: 已拒绝, type: danger }
+    matched: { label: 已命中, type: success }
+    not_matched: { label: 未命中, type: info }
+    resolved: { label: 已解析, type: success }
+    missing: { label: 缺配置, type: warning }
+    declared: { label: 已声明, type: success }
+    not_declared: { label: 未声明, type: info }
+    not_instrumented: { label: 未接入, type: info }
+    hit: { label: 命中, type: success }
+    miss: { label: 未命中, type: danger }
+  # 因子取值来源标注
+  factor_sources:
+    override: 请求指定
+    record: 单据取值
+    missing: 未提供
+  # 界面文案（空态 / 错误 / 操作提示），前端不得写死中文
+  messages:
+    rerun: 重新推导
+    copy_snapshot: 复制因子快照
+    copied: 因子快照已复制
+    copy_failed: 复制失败，请手动复制
+    clipboard_unsupported: 当前环境不支持剪贴板
+    missing_target: 请先选择单据对象并填写记录 ID
+    no_codes_requested: 需指定控制参数编码（codes）后重跑
+    empty_result: 未返回推导场景
+    idle: 尚未推导
+    failed: 推导失败
+    factor_detail: 因子明细
+    value_missing: 未提供
+    forbidden: '无权查看单据推导（缺少 rule_center:trace）'
+    not_found: 单据不存在或超出数据范围
+    all_codes_missing: 全部控制参数均未取到值
+    # L1：规则全集表
+    rules_all: 规则全集
+    rules_empty: 本次推导没有可展示的规则
+    scope_all: 全部
+    conditions_empty: 无可核对条件
+    condition_passed: 通过
+    condition_failed: 未通过
+    output_empty: 无输出
+    truncated: 规则节点过多，已截断展示
+    # 规则中心页面级文案（列表 / 抽屉 / 操作反馈）
+    action_column: 操作
+    detail: 详情
+    copy_key: 复制键
+    copied_key: 已复制规则键
+    p2_pending: P2
+    not_ready: 暂未接入
+    query: 查询
+    refresh: 刷新
+    simulate_run: 试算
+    simulate_reset: 重置
+    trace_run: 推导
+    trace_reset: 重置
+    scenario_placeholder: 选择场景
+    config_mode_placeholder: 配置口径
+    object_type_placeholder: 选择单据对象
+    scenarios_placeholder: 推导场景（缺省全部）
+    publish_draft: 发布草稿
+    rollback_previous: 回滚上一版本
+    history_empty: 暂无记录
+    history_time: 时间
+    history_action: 动作
+    history_operator: 操作人
+    history_before: 变更前
+    history_after: 变更后
+    history_value: 值
+    candidates: 候选集
+    simulate_failed: 规则试算失败
+    history_load_failed: 读取变更记录失败
+    publish_failed: 发布配置失败
+    rollback_failed: 回滚配置失败
+    publish_success: 已发布（替换 {count} 条生效配置）
+    rollback_success: 已回滚（恢复 {count} 条配置）
+    catalog_failed: 查询规则目录失败
+    fallback_warning: 规则中心视图元数据不可用，已回落默认视图
+    # 配置变更动作 → 展示文案
+    action_labels:
+      SAVE: 保存草稿
+      PUBLISH: 发布
+      ROLLBACK: 回滚
+  tab:
+    fields: [object_type, record_id, scenarios, codes, org_id, document_type_id, line_type_id, item_group_id]
+    actions: [rerun]
+
+simulate:
+  fields: [scenario, config_mode, codes, object_type, record_id, org_id, document_type_id, line_type_id, item_group_id]
+  config_modes: [baseline, draft, both]
+  max_codes: 20
+  # 候选集列契约（键顺序即展示顺序；前端不得写死列表或中文）
+  candidate_columns:
+    code: 编码
+    value: 取值
+    value_id: 取值 ID
+    line_type_id: 行类型 ID
+    document_type_id: 单据类型 ID
+    item_group_id: 物料组 ID
+    specificity_rank: 匹配度
+    status: 结论
+    hit: 命中
+    reason: 原因
+  # 字段占位提示（前端不得写死；缺省回落字段展示名）
+  hints:
+    codes: 控制参数编码，逗号分隔，如 qty_required, price_required
+    object_type: 单据对象类型，如 sales_order
+    record_id: 单据主键 ID（需配合 object_type）
+    org_id: 组织 ID
+    document_type_id: 单据类型 ID
+    line_type_id: 行类型 ID
+    item_group_id: 物料组 ID
+  # 结果摘要标签
+  summary:
+    scenario: 场景
+    config_mode: 配置口径
+    decision: 决策
+    source: 来源
+    rule_id: 规则键
+    reason: 原因
+    elapsed_ms: 耗时(ms)
+    cached: 缓存
+    cached_hit: 命中
+    cached_miss: 未命中
+  # 结果区块文案
+  blocks:
+    final: 最终取值
+    baseline: baseline 结果
+    draft: draft 结果
+    diff: 差异

@@ -472,7 +472,7 @@ ui_view_config:
         label: 新建活动
         icon: plus
         type: primary
-        permission: project:project_task_create
+        permission: project_task:create
     defaultSort:
       field: task_no
       order: asc
@@ -506,7 +506,7 @@ ui_view_config:
                  description]
 
 category_config:
-  create_permission: project:project_task_create
-  update_permission: project:project_task_update
-  delete_permission: project:project_task_delete
+  create_permission: project_task:create
+  update_permission: project_task:update
+  delete_permission: project_task:delete
   owner_auto_permission: false

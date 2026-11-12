@@ -15,8 +15,8 @@ display_name_field: id
 authorization:
   check: true
   permissions:
-    read: demand_trace_link:demand_trace_link_read
-    list: demand_trace_link:demand_trace_link_read
+    read: demand_trace_link:read
+    list: demand_trace_link:read
 
 import_export:
   auto_crud: false

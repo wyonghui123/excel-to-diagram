@@ -119,6 +119,12 @@ def cleanup_audit_logs_after(data_source):
 
 
 @pytest.fixture
+def user_no_export_perm():
+    """无导出/导入权限的普通用户 (供 H15.2/H15.3 可见性测试使用)"""
+    return {'user_id': 3, 'username': 'TEST_USER_NO_PERM', 'permissions': []}
+
+
+@pytest.fixture
 def perm_service_mock():
     class _PermMock:
         def __init__(self):

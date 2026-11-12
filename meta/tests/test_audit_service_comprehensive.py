@@ -27,6 +27,7 @@ from unittest.mock import MagicMock, patch
 
 from meta.services.audit_service import AuditService, AuditQuery, AuditRecord
 from meta.core.datasource import get_data_source
+from meta.tests.shared.db_schema import create_audit_logs
 
 
 class TestAuditServiceInit:
@@ -172,41 +173,7 @@ class TestAuditServiceLog:
         os.close(fd)
         conn = sqlite3.connect(path)
         conn.row_factory = sqlite3.Row
-        conn.executescript("""
-            CREATE TABLE IF NOT EXISTS audit_logs (
-                id INTEGER PRIMARY KEY AUTOINCREMENT,
-                object_type TEXT,
-                object_id TEXT,
-                action TEXT,
-                field_name TEXT,
-                old_value TEXT,
-                new_value TEXT,
-                user_id TEXT,
-                user_name TEXT,
-                ip_address TEXT,
-                user_agent TEXT,
-                created_at TEXT,
-                trace_id TEXT,
-                transaction_id TEXT,
-                status TEXT DEFAULT 'written',
-                retry_count INTEGER DEFAULT 0,
-                error_message TEXT,
-                log_category TEXT DEFAULT 'business',
-                log_level TEXT DEFAULT 'INFO',
-                extra_data TEXT,
-                parent_object_type TEXT,
-                parent_object_id TEXT,
-                agent_id TEXT,
-                agent_session_id TEXT,
-                tool_call_id TEXT,
-                agent_reasoning TEXT,
-                -- [v3.18 FR-005/009/013] AuditService.log() 必填列
-                outcome TEXT DEFAULT 'success',
-                retention_until TEXT,
-                cascade_root_id TEXT,
-                cascade_root_action TEXT
-            );
-        """)
+        create_audit_logs(conn)
         conn.commit()
         conn.close()
         
@@ -473,7 +440,7 @@ class TestAuditServiceLog:
             user_name='Administrator',
             new_data={'user_id': 2},
             parent_object_type='user_group',
-            parent_object_id='1',
+            parent_object_id=1,
             ip_address='127.0.0.1'
         )
         
@@ -486,7 +453,7 @@ class TestAuditServiceLog:
         conn.close()
         
         assert row['parent_object_type'] == 'user_group'
-        assert row['parent_object_id'] == '1'
+        assert row['parent_object_id'] == 1
 
 
 class TestAuditServiceQuery:
@@ -498,41 +465,7 @@ class TestAuditServiceQuery:
         os.close(fd)
         conn = sqlite3.connect(path)
         conn.row_factory = sqlite3.Row
-        conn.executescript("""
-            CREATE TABLE IF NOT EXISTS audit_logs (
-                id INTEGER PRIMARY KEY AUTOINCREMENT,
-                object_type TEXT,
-                object_id TEXT,
-                action TEXT,
-                field_name TEXT,
-                old_value TEXT,
-                new_value TEXT,
-                user_id TEXT,
-                user_name TEXT,
-                ip_address TEXT,
-                user_agent TEXT,
-                created_at TEXT,
-                trace_id TEXT,
-                transaction_id TEXT,
-                status TEXT DEFAULT 'written',
-                retry_count INTEGER DEFAULT 0,
-                error_message TEXT,
-                log_category TEXT DEFAULT 'business',
-                log_level TEXT DEFAULT 'INFO',
-                extra_data TEXT,
-                parent_object_type TEXT,
-                parent_object_id TEXT,
-                agent_id TEXT,
-                agent_session_id TEXT,
-                tool_call_id TEXT,
-                agent_reasoning TEXT,
-                -- [v3.18 FR-005/009/013] AuditService.log() 必填列
-                outcome TEXT DEFAULT 'success',
-                retention_until TEXT,
-                cascade_root_id TEXT,
-                cascade_root_action TEXT
-            );
-        """)
+        create_audit_logs(conn)
         
         # Pre-populate via service.log() (conn will be closed; service writes via ds)
         now = datetime.now().isoformat()
@@ -622,41 +555,7 @@ class TestAuditServiceObjectHistory:
         os.close(fd)
         conn = sqlite3.connect(path)
         conn.row_factory = sqlite3.Row
-        conn.executescript("""
-            CREATE TABLE IF NOT EXISTS audit_logs (
-                id INTEGER PRIMARY KEY AUTOINCREMENT,
-                object_type TEXT,
-                object_id TEXT,
-                action TEXT,
-                field_name TEXT,
-                old_value TEXT,
-                new_value TEXT,
-                user_id TEXT,
-                user_name TEXT,
-                ip_address TEXT,
-                user_agent TEXT,
-                created_at TEXT,
-                trace_id TEXT,
-                transaction_id TEXT,
-                status TEXT DEFAULT 'written',
-                retry_count INTEGER DEFAULT 0,
-                error_message TEXT,
-                log_category TEXT DEFAULT 'business',
-                log_level TEXT DEFAULT 'INFO',
-                extra_data TEXT,
-                parent_object_type TEXT,
-                parent_object_id TEXT,
-                agent_id TEXT,
-                agent_session_id TEXT,
-                tool_call_id TEXT,
-                agent_reasoning TEXT,
-                -- [v3.18 FR-005/009/013] AuditService.log() 必填列
-                outcome TEXT DEFAULT 'success',
-                retention_until TEXT,
-                cascade_root_id TEXT,
-                cascade_root_action TEXT
-            );
-        """)
+        create_audit_logs(conn)
         
         # Pre-populate via service.log() (conn will be closed; service writes via ds)
         now = datetime.now().isoformat()
@@ -703,41 +602,7 @@ class TestAuditServiceUserActivities:
         os.close(fd)
         conn = sqlite3.connect(path)
         conn.row_factory = sqlite3.Row
-        conn.executescript("""
-            CREATE TABLE IF NOT EXISTS audit_logs (
-                id INTEGER PRIMARY KEY AUTOINCREMENT,
-                object_type TEXT,
-                object_id TEXT,
-                action TEXT,
-                field_name TEXT,
-                old_value TEXT,
-                new_value TEXT,
-                user_id TEXT,
-                user_name TEXT,
-                ip_address TEXT,
-                user_agent TEXT,
-                created_at TEXT,
-                trace_id TEXT,
-                transaction_id TEXT,
-                status TEXT DEFAULT 'written',
-                retry_count INTEGER DEFAULT 0,
-                error_message TEXT,
-                log_category TEXT DEFAULT 'business',
-                log_level TEXT DEFAULT 'INFO',
-                extra_data TEXT,
-                parent_object_type TEXT,
-                parent_object_id TEXT,
-                agent_id TEXT,
-                agent_session_id TEXT,
-                tool_call_id TEXT,
-                agent_reasoning TEXT,
-                -- [v3.18 FR-005/009/013] AuditService.log() 必填列
-                outcome TEXT DEFAULT 'success',
-                retention_until TEXT,
-                cascade_root_id TEXT,
-                cascade_root_action TEXT
-            );
-        """)
+        create_audit_logs(conn)
         
         # conn closed - use AuditService.log() via ds
         conn.close()
@@ -785,41 +650,7 @@ class TestAuditServiceChangeSummary:
         os.close(fd)
         conn = sqlite3.connect(path)
         conn.row_factory = sqlite3.Row
-        conn.executescript("""
-            CREATE TABLE IF NOT EXISTS audit_logs (
-                id INTEGER PRIMARY KEY AUTOINCREMENT,
-                object_type TEXT,
-                object_id TEXT,
-                action TEXT,
-                field_name TEXT,
-                old_value TEXT,
-                new_value TEXT,
-                user_id TEXT,
-                user_name TEXT,
-                ip_address TEXT,
-                user_agent TEXT,
-                created_at TEXT,
-                trace_id TEXT,
-                transaction_id TEXT,
-                status TEXT DEFAULT 'written',
-                retry_count INTEGER DEFAULT 0,
-                error_message TEXT,
-                log_category TEXT DEFAULT 'business',
-                log_level TEXT DEFAULT 'INFO',
-                extra_data TEXT,
-                parent_object_type TEXT,
-                parent_object_id TEXT,
-                agent_id TEXT,
-                agent_session_id TEXT,
-                tool_call_id TEXT,
-                agent_reasoning TEXT,
-                -- [v3.18 FR-005/009/013] AuditService.log() 必填列
-                outcome TEXT DEFAULT 'success',
-                retention_until TEXT,
-                cascade_root_id TEXT,
-                cascade_root_action TEXT
-            );
-        """)
+        create_audit_logs(conn)
         
         # Pre-populate via service.log() (conn will be closed; service writes via ds)
         now = datetime.now().isoformat()
@@ -868,41 +699,7 @@ class TestAuditServiceCategoryStatistics:
         os.close(fd)
         conn = sqlite3.connect(path)
         conn.row_factory = sqlite3.Row
-        conn.executescript("""
-            CREATE TABLE IF NOT EXISTS audit_logs (
-                id INTEGER PRIMARY KEY AUTOINCREMENT,
-                object_type TEXT,
-                object_id TEXT,
-                action TEXT,
-                field_name TEXT,
-                old_value TEXT,
-                new_value TEXT,
-                user_id TEXT,
-                user_name TEXT,
-                ip_address TEXT,
-                user_agent TEXT,
-                created_at TEXT,
-                trace_id TEXT,
-                transaction_id TEXT,
-                status TEXT DEFAULT 'written',
-                retry_count INTEGER DEFAULT 0,
-                error_message TEXT,
-                log_category TEXT DEFAULT 'business',
-                log_level TEXT DEFAULT 'INFO',
-                extra_data TEXT,
-                parent_object_type TEXT,
-                parent_object_id TEXT,
-                agent_id TEXT,
-                agent_session_id TEXT,
-                tool_call_id TEXT,
-                agent_reasoning TEXT,
-                -- [v3.18 FR-005/009/013] AuditService.log() 必填列
-                outcome TEXT DEFAULT 'success',
-                retention_until TEXT,
-                cascade_root_id TEXT,
-                cascade_root_action TEXT
-            );
-        """)
+        create_audit_logs(conn)
         
         # Use AuditService.log() via ds (avoiding raw SQL in test files per conftest rule)
         conn.close()
@@ -950,41 +747,7 @@ class TestAuditServiceFailedLogs:
         os.close(fd)
         conn = sqlite3.connect(path)
         conn.row_factory = sqlite3.Row
-        conn.executescript("""
-            CREATE TABLE IF NOT EXISTS audit_logs (
-                id INTEGER PRIMARY KEY AUTOINCREMENT,
-                object_type TEXT,
-                object_id TEXT,
-                action TEXT,
-                field_name TEXT,
-                old_value TEXT,
-                new_value TEXT,
-                user_id TEXT,
-                user_name TEXT,
-                ip_address TEXT,
-                user_agent TEXT,
-                created_at TEXT,
-                trace_id TEXT,
-                transaction_id TEXT,
-                status TEXT DEFAULT 'written',
-                retry_count INTEGER DEFAULT 0,
-                error_message TEXT,
-                log_category TEXT DEFAULT 'business',
-                log_level TEXT DEFAULT 'INFO',
-                extra_data TEXT,
-                parent_object_type TEXT,
-                parent_object_id TEXT,
-                agent_id TEXT,
-                agent_session_id TEXT,
-                tool_call_id TEXT,
-                agent_reasoning TEXT,
-                -- [v3.18 FR-005/009/013] AuditService.log() 必填列
-                outcome TEXT DEFAULT 'success',
-                retention_until TEXT,
-                cascade_root_id TEXT,
-                cascade_root_action TEXT
-            );
-        """)
+        create_audit_logs(conn)
         
         # Pre-populate via service.log() (writes status='written' by default)
         # Then mark 2 as 'failed' using ds.update (avoids raw SQL per conftest rule)

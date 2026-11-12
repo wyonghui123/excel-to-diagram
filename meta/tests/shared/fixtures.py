@@ -28,6 +28,21 @@ import os
 import jwt as pyjwt
 
 
+# ==================== 端口/基址解析 ====================
+
+def backend_base_url() -> str:
+    """测试后端基址的唯一解析入口（消除硬编码 localhost:3010）。
+
+    优先级：BO_API_BASE → TEST_API_URL → TEST_PORT / AGENT_PORT → 3010
+    与 tests/fixtures/admin_token.py 的端口优先级保持一致，支持多 agent 隔离。
+    """
+    explicit = os.environ.get('BO_API_BASE') or os.environ.get('TEST_API_URL')
+    if explicit:
+        return explicit.rstrip('/')
+    port = os.environ.get('TEST_PORT') or os.environ.get('AGENT_PORT') or '3010'
+    return f"http://localhost:{port}"
+
+
 # ==================== Token Fixtures ====================
 
 @pytest.fixture(scope="session")

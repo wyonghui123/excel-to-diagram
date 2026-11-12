@@ -157,6 +157,28 @@ describe('FilterBar', () => {
     })
   })
 
+  describe('date input', () => {
+    it('renders DateTimePicker for single date field', () => {
+      const wrapper = createWrapper({
+        fields: [{ key: 'as_of', label: '截止日期', type: 'date' }],
+      })
+      const picker = wrapper.findComponent({ name: 'DateTimePicker' })
+      expect(picker.exists()).toBe(true)
+      expect(picker.props('placeholder')).toBe('请选择截止日期')
+      expect(picker.props('showTime')).toBe(false)
+    })
+
+    it('emits update:modelValue on date change', async () => {
+      const wrapper = createWrapper({
+        fields: [{ key: 'as_of', label: '截止日期', type: 'date' }],
+        modelValue: {},
+      })
+      await wrapper.find('.date-time-picker').setValue('2026-11-06')
+
+      expect(wrapper.emitted('update:modelValue')[0][0]).toEqual({ as_of: '2026-11-06' })
+    })
+  })
+
   describe('user input', () => {
     it('renders user text input field', () => {
       const wrapper = createWrapper({

@@ -46,7 +46,7 @@ def attach_edge(app_ds, platform_ds, rule_id: str, source_id: Any,
     platform_ds = _resolve_platform_ds(app_ds, platform_ds)
     try:
         from meta.core.doc_flow_derive_engine import derive
-        from meta.core.doc_flow_rule_store import get_rule
+        from meta.core.rule_provider import get_doc_flow_rule as get_rule
         rule = get_rule(platform_ds, rule_id)
     except Exception as exc:  # noqa: BLE001 - 规则表不可读时保持业务可用
         logger.warning('[doc_flow_attach] 规则表不可读，跳过 %s: %s', rule_id, exc)

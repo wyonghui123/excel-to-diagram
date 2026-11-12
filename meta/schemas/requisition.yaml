@@ -79,6 +79,11 @@ audit:
   dissociate:
     enabled: true
 
+# [Rule Convergence M2 2026-11-07] 审批对象注册（表名 + 金额取值优先级）
+approval:
+  table: requisitions
+  amount_fields: []
+
 fields:
   - id: id
     name: ID
@@ -580,7 +585,7 @@ ui_view_config:
         label: 新建采购申请
         icon: plus
         type: primary
-        permission: requisition:requisition_create
+        permission: requisition:create
       - id: export
         label: 导出
         icon: download
@@ -617,9 +622,9 @@ ui_view_config:
       rowMutability: fullEditable
 
 category_config:
-  create_permission: requisition:requisition_create
-  update_permission: requisition:requisition_update
-  delete_permission: requisition:requisition_delete
+  create_permission: requisition:create
+  update_permission: requisition:update
+  delete_permission: requisition:delete
   owner_auto_permission: false
 
 import_export:

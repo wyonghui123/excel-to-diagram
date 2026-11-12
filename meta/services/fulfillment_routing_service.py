@@ -52,6 +52,32 @@ class FulfillmentRoutingService:
     def __init__(self, data_source):
         self.ds = data_source
 
+    def start_fulfillment_run(self, payload: Optional[Dict[str, Any]] = None,
+                              *, line_refs: Any = None, doc_ref: str = "",
+                              created_by: str = "", trigger_kind: str = "api",
+                              **kwargs: Any) -> Dict[str, Any]:
+        """路由判定 → 幂等发布模板 → `start_run(line_refs=schedule_id)`。
+
+        返回 `{'workflow_key', 'rule_id', 'priority', 'matched', 'inputs', 'run'}`。
+        `line_refs` 全链路 = 计划行 `schedule_id`（任务详情可查）。
+        """
+        from meta.core.workflow_engine import start_run
+        from meta.services.fulfillment_templates import ensure_templates
+
+        result = self.resolve_workflow_key(payload, **kwargs)
+        ensure_templates(self.ds, created_by=created_by or "system")
+        run = start_run(
+            self.ds,
+            workflow_key=result["workflow_key"],
+            inputs=dict(payload or {}, **kwargs),
+            trigger_kind=trigger_kind,
+            doc_ref=doc_ref,
+            line_refs=line_refs,
+            created_by=created_by,
+        )
+        result["run"] = run
+        return result
+
     def resolve_workflow_key(self, payload: Optional[Dict[str, Any]] = None,
                              **kwargs: Any) -> Dict[str, Any]:
         """返回 `{'workflow_key', 'rule_id', 'priority', 'matched', 'inputs'}`。"""

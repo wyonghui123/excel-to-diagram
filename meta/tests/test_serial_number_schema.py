@@ -125,12 +125,12 @@ def test_serial_number_three_state_ui(serial_doc):
 def test_serial_number_four_permissions(serial_doc):
     actions = serial_doc['ui_view_config']['list']['actions']
     assert [a['permission'] for a in actions] == [
-        'serial_number:serial_number_create',
+        'serial_number:create',
     ]
     category = serial_doc['category_config']
-    assert category['create_permission'] == 'serial_number:serial_number_create'
-    assert category['update_permission'] == 'serial_number:serial_number_update'
-    assert category['delete_permission'] == 'serial_number:serial_number_delete'
+    assert category['create_permission'] == 'serial_number:create'
+    assert category['update_permission'] == 'serial_number:update'
+    assert category['delete_permission'] == 'serial_number:delete'
 
 
 # ---------------- 事件账 / 对象清单（只读面） ----------------
@@ -148,9 +148,9 @@ def test_readonly_objects(doc_name, fields, permission_prefix):
         '%s_read' % permission_prefix, '%s_list' % permission_prefix,
     }
     assert doc['authorization']['permissions']['read'] == \
-        '%s:%s_read' % (permission_prefix, permission_prefix)
+        '%s:read' % permission_prefix
     assert doc['authorization']['permissions']['list'] == \
-        '%s:%s_list' % (permission_prefix, permission_prefix)
+        '%s:read' % permission_prefix
 
 
 def test_transaction_indexes(tx_doc):

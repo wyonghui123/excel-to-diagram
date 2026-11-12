@@ -21,7 +21,12 @@ import json
 import sys
 import io
 import glob
-import yaml
+import hashlib
+try:
+    # 优先 C 实现（libyaml）：本脚本启动时会全量解析 213 个 schema yaml
+    from meta.core import yaml_compat as yaml
+except ImportError:  # 作为脚本直接运行（sys.path 无项目根）时回退
+    import yaml
 if sys.stdout.encoding != 'utf-8':
     sys.stdout = io.TextIOWrapper(sys.stdout.buffer, encoding='utf-8', errors='replace')
 
@@ -37,6 +42,46 @@ MIGRATION_OWNED_MENUS = (
     'engineering-change',
     'inventory-aging-report',
 )
+
+
+# [P0-5 2026-11-09] 声明同步逻辑版本：步骤 5/6/6.5 的同步语义一旦变更就 +1，
+#   使库中旧哈希必然失配，强制下一次启动执行一次全量同步。
+_SYNC_DECLARATION_VERSION = 1
+
+
+def _ensure_guard_table(cursor):
+    """创建声明哈希守卫表（幂等）"""
+    cursor.execute("""
+        CREATE TABLE IF NOT EXISTS menu_sync_guard (
+            guard_key TEXT PRIMARY KEY,
+            guard_value TEXT NOT NULL,
+            updated_at TEXT
+        )
+    """)
+
+
+def _compute_declaration_hash(system_menus, schemas_dir):
+    """计算菜单声明的 sha256（步骤 5/6/6.5 的输入指纹）
+
+    覆盖范围：
+      - 过滤后的 system_menus（含 DISABLED_PLATFORM_MODULES 的过滤结果）
+      - meta/schemas/*.yaml 的原始字节（按文件名排序，避免依赖文件系统顺序）
+      - _SYNC_DECLARATION_VERSION（同步逻辑变更时手动递增）
+
+    只读 raw 字节、不做 yaml.safe_load —— 未变化时省掉 213 个文件的解析成本。
+    """
+    digest = hashlib.sha256()
+    digest.update(('v%d' % _SYNC_DECLARATION_VERSION).encode('utf-8'))
+    digest.update(json.dumps(system_menus, sort_keys=True, ensure_ascii=False).encode('utf-8'))
+    for yaml_path in sorted(glob.glob(os.path.join(schemas_dir, '*.yaml'))):
+        digest.update(os.path.basename(yaml_path).encode('utf-8'))
+        try:
+            with open(yaml_path, 'rb') as f:
+                digest.update(f.read())
+        except OSError:
+            # 读不到的文件用固定标记占位；下次可读时哈希必然变化并触发全量同步
+            digest.update(b'<unreadable>')
+    return digest.hexdigest()
 
 
 def init_menu_permissions(db_path):
@@ -371,6 +416,24 @@ def init_menu_permissions(db_path):
             })
         },
         {
+            # [规则收敛 v1.6 2026-11-07] 规则中心 —— 全部可配置规则目录 + 试算入口。
+            #   page_type=rule_center: 页面结构由 meta/schemas/rule_center_view.yaml 驱动,
+            #   dynamicRoutes.js 自动注册 RuleCenterPage, 无需静态路由。
+            'menu_code': 'rule-center',
+            'menu_name': '规则中心',
+            'menu_path': '/system/rule-center',
+            'icon': 'SetUp',
+            'color': '#0ea5e9',
+            'sort_order': 55,
+            'parent_menu': 'system',
+            'page_type': 'rule_center',
+            'primary_object_type': '',
+            'object_types': json.dumps([]),
+            'bo_bindings': json.dumps([]),
+            'required_permissions': json.dumps(['rule_center:read']),
+            'data_permission_hint': None
+        },
+        {
             # [C6 2026-10-14] 平台运维作业 —— 进程内调度器状态 + 手动触发页。
             #   形态照抄 business-config / audit-log 等同父菜单(system)条目:
             #     - page_type=custom_page ⇒ 无自动菜单, 由静态路由
@@ -424,8 +487,8 @@ def init_menu_permissions(db_path):
                 {'bo_id': 'org', 'role': 'primary', 'include_actions': ['create', 'read', 'update', 'delete', 'list']},
             ]),
             'required_permissions': json.dumps([
-                'org:org_create', 'org:org_read', 'org:org_update',
-                'org:org_delete', 'org:org_list',
+                'org:create', 'org:read', 'org:update',
+                'org:delete', 'org:read',
             ]),
             'data_permission_hint': json.dumps({
                 'resource_types': ['org'],
@@ -486,23 +549,23 @@ def init_menu_permissions(db_path):
                 # [注意] party 只有 create/update/delete 三个动作 (party.yaml:31 actions),
                 #   permissions 表里不存在 party_read / party_list。照 CRUD 惯例补齐
                 #   会让菜单因权限码不存在而永不可见, 故只声明实际存在的三个。
-                'party:party_create',
-                'party:party_update',
-                'party:party_delete',
+                'party:create',
+                'party:update',
+                'party:delete',
                 # 往来单位组 tab 需独立维护入口 (v093 下架 party_group-list 菜单),
                 # 权限一并声明 (5 条权限码已存在 permissions 表, 见 party_group.yaml actions)。
-                'party_group:party_group_create',
-                'party_group:party_group_read',
-                'party_group:party_group_update',
-                'party_group:party_group_delete',
-                'party_group:party_group_list',
+                'party_group:create',
+                'party_group:read',
+                'party_group:update',
+                'party_group:delete',
+                'party_group:read',
                 # 往来单位关系 tab (v 三 tab 2026-10-17 下架 party-relation-management 菜单),
                 # 权限随迁至此 (5 条权限码见 party_relation.yaml actions)。
-                'party_relation:party_relation_create',
-                'party_relation:party_relation_read',
-                'party_relation:party_relation_update',
-                'party_relation:party_relation_delete',
-                'party_relation:party_relation_list',
+                'party_relation:create',
+                'party_relation:read',
+                'party_relation:update',
+                'party_relation:delete',
+                'party_relation:read',
             ]),
             'show_in_sidebar': 0,
             'data_permission_hint': json.dumps({
@@ -572,18 +635,18 @@ def init_menu_permissions(db_path):
                  'include_actions': ['create', 'read', 'update', 'delete', 'list']},
             ]),
             'required_permissions': json.dumps([
-                'item:item_create',
-                'item:item_read',
-                'item:item_update',
-                'item:item_delete',
-                'item:item_list',
+                'item:create',
+                'item:read',
+                'item:update',
+                'item:delete',
+                'item:read',
                 # 物料组 tab 需要独立维护入口 (v092 下架了 item-group-list 独立菜单),
                 # 故权限一并声明; 少这 5 条会导致物料组 tab 被路由守卫拦下。
-                'item_group:item_group_create',
-                'item_group:item_group_read',
-                'item_group:item_group_update',
-                'item_group:item_group_delete',
-                'item_group:item_group_list',
+                'item_group:create',
+                'item_group:read',
+                'item_group:update',
+                'item_group:delete',
+                'item_group:read',
             ]),
             'show_in_sidebar': 0,
             'data_permission_hint': json.dumps({
@@ -625,11 +688,11 @@ def init_menu_permissions(db_path):
                 # 自动生成的老行里带 location:import / location:export, 但这两个权限码
                 # 在 permissions 表并不存在 ⇒ 前端路由守卫 (every 判定) 会因缺失码
                 # 把整页拦下。故此处按实际存在的权限码收敛。
-                'location:location_create',
-                'location:location_read',
-                'location:location_update',
-                'location:location_delete',
-                'location:location_list',
+                'location:create',
+                'location:read',
+                'location:update',
+                'location:delete',
+                'location:read',
             ]),
             'show_in_sidebar': 0,
             'data_permission_hint': json.dumps({
@@ -661,11 +724,11 @@ def init_menu_permissions(db_path):
                  'include_actions': ['create', 'read', 'update', 'delete', 'list']},
             ]),
             'required_permissions': json.dumps([
-                'address:address_create',
-                'address:address_read',
-                'address:address_update',
-                'address:address_delete',
-                'address:address_list',
+                'address:create',
+                'address:read',
+                'address:update',
+                'address:delete',
+                'address:read',
             ]),
             'show_in_sidebar': 0,
             'data_permission_hint': json.dumps({
@@ -695,11 +758,11 @@ def init_menu_permissions(db_path):
             'required_permissions': json.dumps([
                 # 同 location-list: 老行里的 region:import / region:export 在 permissions
                 # 表并不存在, 路由守卫 every 判定会把整页拦下, 故收敛为真实存在的 5 条。
-                'region:region_create',
-                'region:region_read',
-                'region:region_update',
-                'region:region_delete',
-                'region:region_list',
+                'region:create',
+                'region:read',
+                'region:update',
+                'region:delete',
+                'region:read',
             ]),
             'show_in_sidebar': 0,
             'data_permission_hint': json.dumps({
@@ -743,17 +806,17 @@ def init_menu_permissions(db_path):
                  'include_actions': ['create', 'read', 'update', 'delete', 'list']},
             ]),
             'required_permissions': json.dumps([
-                'calendar:calendar_create',
-                'calendar:calendar_read',
-                'calendar:calendar_update',
-                'calendar:calendar_delete',
-                'calendar:calendar_list',
+                'calendar:create',
+                'calendar:read',
+                'calendar:update',
+                'calendar:delete',
+                'calendar:read',
                 # 例外日 tab (v103 下架 calendar_day-list 菜单), 权限随迁至此
-                'calendar_day:calendar_day_create',
-                'calendar_day:calendar_day_read',
-                'calendar_day:calendar_day_update',
-                'calendar_day:calendar_day_delete',
-                'calendar_day:calendar_day_list',
+                'calendar_day:create',
+                'calendar_day:read',
+                'calendar_day:update',
+                'calendar_day:delete',
+                'calendar_day:read',
             ]),
             'show_in_sidebar': 0,
             'data_permission_hint': json.dumps({
@@ -794,16 +857,16 @@ def init_menu_permissions(db_path):
                  'include_actions': ['create', 'read', 'update', 'delete', 'list']},
             ]),
             'required_permissions': json.dumps([
-                'uom:uom_create',
-                'uom:uom_read',
-                'uom:uom_update',
-                'uom:uom_delete',
-                'uom:uom_list',
-                'uom_group:uom_group_create',
-                'uom_group:uom_group_read',
-                'uom_group:uom_group_update',
-                'uom_group:uom_group_delete',
-                'uom_group:uom_group_list',
+                'uom:create',
+                'uom:read',
+                'uom:update',
+                'uom:delete',
+                'uom:read',
+                'uom_group:create',
+                'uom_group:read',
+                'uom_group:update',
+                'uom_group:delete',
+                'uom_group:read',
             ]),
             'show_in_sidebar': 0,
             'data_permission_hint': json.dumps({
@@ -836,11 +899,11 @@ def init_menu_permissions(db_path):
                  'include_actions': ['create', 'read', 'update', 'delete', 'list']},
             ]),
             'required_permissions': json.dumps([
-                'sourcing_rule:sourcing_rule_create',
-                'sourcing_rule:sourcing_rule_read',
-                'sourcing_rule:sourcing_rule_update',
-                'sourcing_rule:sourcing_rule_delete',
-                'sourcing_rule:sourcing_rule_list',
+                'sourcing_rule:create',
+                'sourcing_rule:read',
+                'sourcing_rule:update',
+                'sourcing_rule:delete',
+                'sourcing_rule:read',
             ]),
             'show_in_sidebar': 0,
             'data_permission_hint': json.dumps({
@@ -868,11 +931,11 @@ def init_menu_permissions(db_path):
                  'include_actions': ['create', 'read', 'update', 'delete', 'list']},
             ]),
             'required_permissions': json.dumps([
-                'sourcing_mode_policy:sourcing_mode_policy_create',
-                'sourcing_mode_policy:sourcing_mode_policy_read',
-                'sourcing_mode_policy:sourcing_mode_policy_update',
-                'sourcing_mode_policy:sourcing_mode_policy_delete',
-                'sourcing_mode_policy:sourcing_mode_policy_list',
+                'sourcing_mode_policy:create',
+                'sourcing_mode_policy:read',
+                'sourcing_mode_policy:update',
+                'sourcing_mode_policy:delete',
+                'sourcing_mode_policy:read',
             ]),
             'show_in_sidebar': 0,
             'data_permission_hint': json.dumps({
@@ -934,11 +997,11 @@ def init_menu_permissions(db_path):
                  'include_actions': ['create', 'read', 'update', 'delete', 'list']},
             ]),
             'required_permissions': json.dumps([
-                'control_parameter_def:control_parameter_def_create',
-                'control_parameter_def:control_parameter_def_read',
-                'control_parameter_def:control_parameter_def_update',
-                'control_parameter_def:control_parameter_def_delete',
-                'control_parameter_def:control_parameter_def_list',
+                'control_parameter_def:create',
+                'control_parameter_def:read',
+                'control_parameter_def:update',
+                'control_parameter_def:delete',
+                'control_parameter_def:read',
             ]),
             'show_in_sidebar': 0,
             'data_permission_hint': json.dumps({
@@ -966,11 +1029,11 @@ def init_menu_permissions(db_path):
                  'include_actions': ['create', 'read', 'update', 'delete', 'list']},
             ]),
             'required_permissions': json.dumps([
-                'payment_term:payment_term_create',
-                'payment_term:payment_term_read',
-                'payment_term:payment_term_update',
-                'payment_term:payment_term_delete',
-                'payment_term:payment_term_list',
+                'payment_term:create',
+                'payment_term:read',
+                'payment_term:update',
+                'payment_term:delete',
+                'payment_term:read',
             ]),
             'show_in_sidebar': 0,
             'data_permission_hint': json.dumps({
@@ -998,11 +1061,11 @@ def init_menu_permissions(db_path):
                  'include_actions': ['create', 'read', 'update', 'delete', 'list']},
             ]),
             'required_permissions': json.dumps([
-                'incoterm:incoterm_create',
-                'incoterm:incoterm_read',
-                'incoterm:incoterm_update',
-                'incoterm:incoterm_delete',
-                'incoterm:incoterm_list',
+                'incoterm:create',
+                'incoterm:read',
+                'incoterm:update',
+                'incoterm:delete',
+                'incoterm:read',
             ]),
             'show_in_sidebar': 0,
             'data_permission_hint': json.dumps({
@@ -1031,11 +1094,11 @@ def init_menu_permissions(db_path):
                  'include_actions': ['create', 'read', 'update', 'delete', 'list']},
             ]),
             'required_permissions': json.dumps([
-                'attribute_definition:attribute_definition_create',
-                'attribute_definition:attribute_definition_read',
-                'attribute_definition:attribute_definition_update',
-                'attribute_definition:attribute_definition_delete',
-                'attribute_definition:attribute_definition_list',
+                'attribute_definition:create',
+                'attribute_definition:read',
+                'attribute_definition:update',
+                'attribute_definition:delete',
+                'attribute_definition:read',
             ]),
             'show_in_sidebar': 0,
             'data_permission_hint': json.dumps({
@@ -1061,11 +1124,11 @@ def init_menu_permissions(db_path):
                  'include_actions': ['create', 'read', 'update', 'delete', 'list']},
             ]),
             'required_permissions': json.dumps([
-                'attribute_scope:attribute_scope_create',
-                'attribute_scope:attribute_scope_read',
-                'attribute_scope:attribute_scope_update',
-                'attribute_scope:attribute_scope_delete',
-                'attribute_scope:attribute_scope_list',
+                'attribute_scope:create',
+                'attribute_scope:read',
+                'attribute_scope:update',
+                'attribute_scope:delete',
+                'attribute_scope:read',
             ]),
             'show_in_sidebar': 0,
             'data_permission_hint': json.dumps({
@@ -1094,11 +1157,11 @@ def init_menu_permissions(db_path):
                  'include_actions': ['create', 'read', 'update', 'delete', 'list']},
             ]),
             'required_permissions': json.dumps([
-                'tax_code:tax_code_create',
-                'tax_code:tax_code_read',
-                'tax_code:tax_code_update',
-                'tax_code:tax_code_delete',
-                'tax_code:tax_code_list',
+                'tax_code:create',
+                'tax_code:read',
+                'tax_code:update',
+                'tax_code:delete',
+                'tax_code:read',
             ]),
             'show_in_sidebar': 0,
             'data_permission_hint': json.dumps({
@@ -1123,11 +1186,11 @@ def init_menu_permissions(db_path):
                  'include_actions': ['create', 'read', 'update', 'delete', 'list']},
             ]),
             'required_permissions': json.dumps([
-                'tax_classification:tax_classification_create',
-                'tax_classification:tax_classification_read',
-                'tax_classification:tax_classification_update',
-                'tax_classification:tax_classification_delete',
-                'tax_classification:tax_classification_list',
+                'tax_classification:create',
+                'tax_classification:read',
+                'tax_classification:update',
+                'tax_classification:delete',
+                'tax_classification:read',
             ]),
             'show_in_sidebar': 0,
             'data_permission_hint': json.dumps({
@@ -1191,36 +1254,36 @@ def init_menu_permissions(db_path):
                  'include_actions': ['create', 'read', 'update', 'delete', 'list']},
             ]),
             'required_permissions': json.dumps([
-                'rate_table:rate_table_create',
-                'rate_table:rate_table_read',
-                'rate_table:rate_table_update',
-                'rate_table:rate_table_delete',
-                'rate_table:rate_table_list',
-                'rate_record:rate_record_create',
-                'rate_record:rate_record_read',
-                'rate_record:rate_record_update',
-                'rate_record:rate_record_delete',
-                'rate_record:rate_record_list',
-                'rate_type:rate_type_create',
-                'rate_type:rate_type_read',
-                'rate_type:rate_type_update',
-                'rate_type:rate_type_delete',
-                'rate_type:rate_type_list',
-                'key_schema:key_schema_create',
-                'key_schema:key_schema_read',
-                'key_schema:key_schema_update',
-                'key_schema:key_schema_delete',
-                'key_schema:key_schema_list',
-                'lookup_sequence:lookup_sequence_create',
-                'lookup_sequence:lookup_sequence_read',
-                'lookup_sequence:lookup_sequence_update',
-                'lookup_sequence:lookup_sequence_delete',
-                'lookup_sequence:lookup_sequence_list',
-                'exclusion_group:exclusion_group_create',
-                'exclusion_group:exclusion_group_read',
-                'exclusion_group:exclusion_group_update',
-                'exclusion_group:exclusion_group_delete',
-                'exclusion_group:exclusion_group_list',
+                'rate_table:create',
+                'rate_table:read',
+                'rate_table:update',
+                'rate_table:delete',
+                'rate_table:read',
+                'rate_record:create',
+                'rate_record:read',
+                'rate_record:update',
+                'rate_record:delete',
+                'rate_record:read',
+                'rate_type:create',
+                'rate_type:read',
+                'rate_type:update',
+                'rate_type:delete',
+                'rate_type:read',
+                'key_schema:create',
+                'key_schema:read',
+                'key_schema:update',
+                'key_schema:delete',
+                'key_schema:read',
+                'lookup_sequence:create',
+                'lookup_sequence:read',
+                'lookup_sequence:update',
+                'lookup_sequence:delete',
+                'lookup_sequence:read',
+                'exclusion_group:create',
+                'exclusion_group:read',
+                'exclusion_group:update',
+                'exclusion_group:delete',
+                'exclusion_group:read',
             ]),
             'show_in_sidebar': 1,
             'data_permission_hint': json.dumps({
@@ -1249,11 +1312,11 @@ def init_menu_permissions(db_path):
                  'include_actions': ['create', 'read', 'update', 'delete', 'list']},
             ]),
             'required_permissions': json.dumps([
-                'rate_table:rate_table_create',
-                'rate_table:rate_table_read',
-                'rate_table:rate_table_update',
-                'rate_table:rate_table_delete',
-                'rate_table:rate_table_list',
+                'rate_table:create',
+                'rate_table:read',
+                'rate_table:update',
+                'rate_table:delete',
+                'rate_table:read',
             ]),
             'show_in_sidebar': 0,
             'data_permission_hint': json.dumps({
@@ -1282,11 +1345,11 @@ def init_menu_permissions(db_path):
                  'include_actions': ['create', 'read', 'update', 'delete', 'list']},
             ]),
             'required_permissions': json.dumps([
-                'rate_record:rate_record_create',
-                'rate_record:rate_record_read',
-                'rate_record:rate_record_update',
-                'rate_record:rate_record_delete',
-                'rate_record:rate_record_list',
+                'rate_record:create',
+                'rate_record:read',
+                'rate_record:update',
+                'rate_record:delete',
+                'rate_record:read',
             ]),
             'show_in_sidebar': 0,
             'data_permission_hint': json.dumps({
@@ -1315,11 +1378,11 @@ def init_menu_permissions(db_path):
                  'include_actions': ['create', 'read', 'update', 'delete', 'list']},
             ]),
             'required_permissions': json.dumps([
-                'rate_type:rate_type_create',
-                'rate_type:rate_type_read',
-                'rate_type:rate_type_update',
-                'rate_type:rate_type_delete',
-                'rate_type:rate_type_list',
+                'rate_type:create',
+                'rate_type:read',
+                'rate_type:update',
+                'rate_type:delete',
+                'rate_type:read',
             ]),
             'show_in_sidebar': 0,
             'data_permission_hint': json.dumps({
@@ -1348,11 +1411,11 @@ def init_menu_permissions(db_path):
                  'include_actions': ['create', 'read', 'update', 'delete', 'list']},
             ]),
             'required_permissions': json.dumps([
-                'key_schema:key_schema_create',
-                'key_schema:key_schema_read',
-                'key_schema:key_schema_update',
-                'key_schema:key_schema_delete',
-                'key_schema:key_schema_list',
+                'key_schema:create',
+                'key_schema:read',
+                'key_schema:update',
+                'key_schema:delete',
+                'key_schema:read',
             ]),
             'show_in_sidebar': 0,
             'data_permission_hint': json.dumps({
@@ -1381,11 +1444,11 @@ def init_menu_permissions(db_path):
                  'include_actions': ['create', 'read', 'update', 'delete', 'list']},
             ]),
             'required_permissions': json.dumps([
-                'lookup_sequence:lookup_sequence_create',
-                'lookup_sequence:lookup_sequence_read',
-                'lookup_sequence:lookup_sequence_update',
-                'lookup_sequence:lookup_sequence_delete',
-                'lookup_sequence:lookup_sequence_list',
+                'lookup_sequence:create',
+                'lookup_sequence:read',
+                'lookup_sequence:update',
+                'lookup_sequence:delete',
+                'lookup_sequence:read',
             ]),
             'show_in_sidebar': 0,
             'data_permission_hint': json.dumps({
@@ -1414,11 +1477,11 @@ def init_menu_permissions(db_path):
                  'include_actions': ['create', 'read', 'update', 'delete', 'list']},
             ]),
             'required_permissions': json.dumps([
-                'exclusion_group:exclusion_group_create',
-                'exclusion_group:exclusion_group_read',
-                'exclusion_group:exclusion_group_update',
-                'exclusion_group:exclusion_group_delete',
-                'exclusion_group:exclusion_group_list',
+                'exclusion_group:create',
+                'exclusion_group:read',
+                'exclusion_group:update',
+                'exclusion_group:delete',
+                'exclusion_group:read',
             ]),
             'show_in_sidebar': 0,
             'data_permission_hint': json.dumps({
@@ -1447,11 +1510,11 @@ def init_menu_permissions(db_path):
                  'include_actions': ['create', 'read', 'update', 'delete', 'list']},
             ]),
             'required_permissions': json.dumps([
-                'pricing_determination:pricing_determination_create',
-                'pricing_determination:pricing_determination_read',
-                'pricing_determination:pricing_determination_update',
-                'pricing_determination:pricing_determination_delete',
-                'pricing_determination:pricing_determination_list',
+                'pricing_determination:create',
+                'pricing_determination:read',
+                'pricing_determination:update',
+                'pricing_determination:delete',
+                'pricing_determination:read',
             ]),
             'show_in_sidebar': 0,
             'data_permission_hint': json.dumps({
@@ -1490,16 +1553,16 @@ def init_menu_permissions(db_path):
                  'include_actions': ['create', 'read', 'update', 'delete', 'list']},
             ]),
             'required_permissions': json.dumps([
-                'calc_procedure:calc_procedure_create',
-                'calc_procedure:calc_procedure_read',
-                'calc_procedure:calc_procedure_update',
-                'calc_procedure:calc_procedure_delete',
-                'calc_procedure:calc_procedure_list',
-                'factor_catalog:factor_catalog_create',
-                'factor_catalog:factor_catalog_read',
-                'factor_catalog:factor_catalog_update',
-                'factor_catalog:factor_catalog_delete',
-                'factor_catalog:factor_catalog_list',
+                'calc_procedure:create',
+                'calc_procedure:read',
+                'calc_procedure:update',
+                'calc_procedure:delete',
+                'calc_procedure:read',
+                'factor_catalog:create',
+                'factor_catalog:read',
+                'factor_catalog:update',
+                'factor_catalog:delete',
+                'factor_catalog:read',
             ]),
             'show_in_sidebar': 1,
             'data_permission_hint': json.dumps({
@@ -1528,11 +1591,11 @@ def init_menu_permissions(db_path):
                  'include_actions': ['create', 'read', 'update', 'delete', 'list']},
             ]),
             'required_permissions': json.dumps([
-                'calc_procedure:calc_procedure_create',
-                'calc_procedure:calc_procedure_read',
-                'calc_procedure:calc_procedure_update',
-                'calc_procedure:calc_procedure_delete',
-                'calc_procedure:calc_procedure_list',
+                'calc_procedure:create',
+                'calc_procedure:read',
+                'calc_procedure:update',
+                'calc_procedure:delete',
+                'calc_procedure:read',
             ]),
             'show_in_sidebar': 0,
             'data_permission_hint': json.dumps({
@@ -1561,11 +1624,11 @@ def init_menu_permissions(db_path):
                  'include_actions': ['create', 'read', 'update', 'delete', 'list']},
             ]),
             'required_permissions': json.dumps([
-                'factor_catalog:factor_catalog_create',
-                'factor_catalog:factor_catalog_read',
-                'factor_catalog:factor_catalog_update',
-                'factor_catalog:factor_catalog_delete',
-                'factor_catalog:factor_catalog_list',
+                'factor_catalog:create',
+                'factor_catalog:read',
+                'factor_catalog:update',
+                'factor_catalog:delete',
+                'factor_catalog:read',
             ]),
             'show_in_sidebar': 0,
             'data_permission_hint': json.dumps({
@@ -1614,41 +1677,41 @@ def init_menu_permissions(db_path):
                  'include_actions': ['create', 'read', 'update', 'delete', 'list']},
             ]),
             'required_permissions': json.dumps([
-                'calc_result:calc_result_create',
-                'calc_result:calc_result_read',
-                'calc_result:calc_result_update',
-                'calc_result:calc_result_delete',
-                'calc_result:calc_result_list',
-                'calc_detail:calc_detail_create',
-                'calc_detail:calc_detail_read',
-                'calc_detail:calc_detail_update',
-                'calc_detail:calc_detail_delete',
-                'calc_detail:calc_detail_list',
-                'adjustment:adjustment_create',
-                'adjustment:adjustment_read',
-                'adjustment:adjustment_update',
-                'adjustment:adjustment_delete',
-                'adjustment:adjustment_list',
-                'allocation_rule:allocation_rule_create',
-                'allocation_rule:allocation_rule_read',
-                'allocation_rule:allocation_rule_update',
-                'allocation_rule:allocation_rule_delete',
-                'allocation_rule:allocation_rule_list',
-                'allocation_result:allocation_result_create',
-                'allocation_result:allocation_result_read',
-                'allocation_result:allocation_result_update',
-                'allocation_result:allocation_result_delete',
-                'allocation_result:allocation_result_list',
-                'cumulative_usage:cumulative_usage_create',
-                'cumulative_usage:cumulative_usage_read',
-                'cumulative_usage:cumulative_usage_update',
-                'cumulative_usage:cumulative_usage_delete',
-                'cumulative_usage:cumulative_usage_list',
-                'usage_group:usage_group_create',
-                'usage_group:usage_group_read',
-                'usage_group:usage_group_update',
-                'usage_group:usage_group_delete',
-                'usage_group:usage_group_list',
+                'calc_result:create',
+                'calc_result:read',
+                'calc_result:update',
+                'calc_result:delete',
+                'calc_result:read',
+                'calc_detail:create',
+                'calc_detail:read',
+                'calc_detail:update',
+                'calc_detail:delete',
+                'calc_detail:read',
+                'adjustment:create',
+                'adjustment:read',
+                'adjustment:update',
+                'adjustment:delete',
+                'adjustment:read',
+                'allocation_rule:create',
+                'allocation_rule:read',
+                'allocation_rule:update',
+                'allocation_rule:delete',
+                'allocation_rule:read',
+                'allocation_result:create',
+                'allocation_result:read',
+                'allocation_result:update',
+                'allocation_result:delete',
+                'allocation_result:read',
+                'cumulative_usage:create',
+                'cumulative_usage:read',
+                'cumulative_usage:update',
+                'cumulative_usage:delete',
+                'cumulative_usage:read',
+                'usage_group:create',
+                'usage_group:read',
+                'usage_group:update',
+                'usage_group:delete',
+                'usage_group:read',
             ]),
             'show_in_sidebar': 1,
             'data_permission_hint': json.dumps({
@@ -1677,11 +1740,11 @@ def init_menu_permissions(db_path):
                  'include_actions': ['create', 'read', 'update', 'delete', 'list']},
             ]),
             'required_permissions': json.dumps([
-                'calc_result:calc_result_create',
-                'calc_result:calc_result_read',
-                'calc_result:calc_result_update',
-                'calc_result:calc_result_delete',
-                'calc_result:calc_result_list',
+                'calc_result:create',
+                'calc_result:read',
+                'calc_result:update',
+                'calc_result:delete',
+                'calc_result:read',
             ]),
             'show_in_sidebar': 0,
             'data_permission_hint': json.dumps({
@@ -1710,11 +1773,11 @@ def init_menu_permissions(db_path):
                  'include_actions': ['create', 'read', 'update', 'delete', 'list']},
             ]),
             'required_permissions': json.dumps([
-                'calc_detail:calc_detail_create',
-                'calc_detail:calc_detail_read',
-                'calc_detail:calc_detail_update',
-                'calc_detail:calc_detail_delete',
-                'calc_detail:calc_detail_list',
+                'calc_detail:create',
+                'calc_detail:read',
+                'calc_detail:update',
+                'calc_detail:delete',
+                'calc_detail:read',
             ]),
             'show_in_sidebar': 0,
             'data_permission_hint': json.dumps({
@@ -1743,11 +1806,11 @@ def init_menu_permissions(db_path):
                  'include_actions': ['create', 'read', 'update', 'delete', 'list']},
             ]),
             'required_permissions': json.dumps([
-                'adjustment:adjustment_create',
-                'adjustment:adjustment_read',
-                'adjustment:adjustment_update',
-                'adjustment:adjustment_delete',
-                'adjustment:adjustment_list',
+                'adjustment:create',
+                'adjustment:read',
+                'adjustment:update',
+                'adjustment:delete',
+                'adjustment:read',
             ]),
             'show_in_sidebar': 0,
             'data_permission_hint': json.dumps({
@@ -1776,11 +1839,11 @@ def init_menu_permissions(db_path):
                  'include_actions': ['create', 'read', 'update', 'delete', 'list']},
             ]),
             'required_permissions': json.dumps([
-                'allocation_rule:allocation_rule_create',
-                'allocation_rule:allocation_rule_read',
-                'allocation_rule:allocation_rule_update',
-                'allocation_rule:allocation_rule_delete',
-                'allocation_rule:allocation_rule_list',
+                'allocation_rule:create',
+                'allocation_rule:read',
+                'allocation_rule:update',
+                'allocation_rule:delete',
+                'allocation_rule:read',
             ]),
             'show_in_sidebar': 0,
             'data_permission_hint': json.dumps({
@@ -1809,11 +1872,11 @@ def init_menu_permissions(db_path):
                  'include_actions': ['create', 'read', 'update', 'delete', 'list']},
             ]),
             'required_permissions': json.dumps([
-                'allocation_result:allocation_result_create',
-                'allocation_result:allocation_result_read',
-                'allocation_result:allocation_result_update',
-                'allocation_result:allocation_result_delete',
-                'allocation_result:allocation_result_list',
+                'allocation_result:create',
+                'allocation_result:read',
+                'allocation_result:update',
+                'allocation_result:delete',
+                'allocation_result:read',
             ]),
             'show_in_sidebar': 0,
             'data_permission_hint': json.dumps({
@@ -1842,11 +1905,11 @@ def init_menu_permissions(db_path):
                  'include_actions': ['create', 'read', 'update', 'delete', 'list']},
             ]),
             'required_permissions': json.dumps([
-                'cumulative_usage:cumulative_usage_create',
-                'cumulative_usage:cumulative_usage_read',
-                'cumulative_usage:cumulative_usage_update',
-                'cumulative_usage:cumulative_usage_delete',
-                'cumulative_usage:cumulative_usage_list',
+                'cumulative_usage:create',
+                'cumulative_usage:read',
+                'cumulative_usage:update',
+                'cumulative_usage:delete',
+                'cumulative_usage:read',
             ]),
             'show_in_sidebar': 0,
             'data_permission_hint': json.dumps({
@@ -1875,11 +1938,11 @@ def init_menu_permissions(db_path):
                  'include_actions': ['create', 'read', 'update', 'delete', 'list']},
             ]),
             'required_permissions': json.dumps([
-                'usage_group:usage_group_create',
-                'usage_group:usage_group_read',
-                'usage_group:usage_group_update',
-                'usage_group:usage_group_delete',
-                'usage_group:usage_group_list',
+                'usage_group:create',
+                'usage_group:read',
+                'usage_group:update',
+                'usage_group:delete',
+                'usage_group:read',
             ]),
             'show_in_sidebar': 0,
             'data_permission_hint': json.dumps({
@@ -1898,7 +1961,9 @@ def init_menu_permissions(db_path):
             'color': '#f59e0b',
             'sort_order': 30,
             'parent_menu': '',
-            'page_type': '',
+            # [v257 CHECK] 顶层分组容器统一用 multi_object_hub（同 user-permission / 库存域），
+            #   空串不在 menus.page_type 的枚举 CHECK 内，会在启动同步时触发 IntegrityError。
+            'page_type': 'multi_object_hub',
             'primary_object_type': '',
             'object_types': json.dumps([]),
             'bo_bindings': json.dumps([]),
@@ -1927,11 +1992,11 @@ def init_menu_permissions(db_path):
                  'include_actions': ['create', 'read', 'update', 'delete', 'list']},
             ]),
             'required_permissions': json.dumps([
-                'sales_order:sales_order_create',
-                'sales_order:sales_order_read',
-                'sales_order:sales_order_update',
-                'sales_order:sales_order_delete',
-                'sales_order:sales_order_list',
+                'sales_order:create',
+                'sales_order:read',
+                'sales_order:update',
+                'sales_order:delete',
+                'sales_order:read',
             ]),
             'description': '销售订单：抬头 + 可编辑行子表，按销售组织做数据范围',
             'show_in_sidebar': 0,
@@ -1959,11 +2024,11 @@ def init_menu_permissions(db_path):
                  'include_actions': ['create', 'read', 'update', 'delete', 'list']},
             ]),
             'required_permissions': json.dumps([
-                'project:project_create',
-                'project:project_read',
-                'project:project_update',
-                'project:project_delete',
-                'project:project_list',
+                'project:create',
+                'project:read',
+                'project:update',
+                'project:delete',
+                'project:read',
             ]),
             'description': '项目：商务层归集对象，挂载销售订单 / 订单行 / 计划行',
             'show_in_sidebar': 0,
@@ -1991,11 +2056,10 @@ def init_menu_permissions(db_path):
                  'include_actions': ['create', 'read', 'update', 'delete', 'list']},
             ]),
             'required_permissions': json.dumps([
-                'project:project_task_create',
-                'project:project_task_read',
-                'project:project_task_update',
-                'project:project_task_delete',
-                'project:project_task_list',
+                'project_task:create',
+                'project_task:read',
+                'project_task:update',
+                'project_task:delete',
             ]),
             'description': '项目活动：计划层 WBS 节点（阶段 / 工作包 / 活动），只产需求不产动作',
             'show_in_sidebar': 1,
@@ -2055,11 +2119,11 @@ def init_menu_permissions(db_path):
                  'include_actions': ['create', 'read', 'update', 'delete', 'list']},
             ]),
             'required_permissions': json.dumps([
-                'item_structure:item_structure_create',
-                'item_structure:item_structure_read',
-                'item_structure:item_structure_update',
-                'item_structure:item_structure_delete',
-                'item_structure:item_structure_list',
+                'item_structure:create',
+                'item_structure:read',
+                'item_structure:update',
+                'item_structure:delete',
+                'item_structure:read',
             ]),
             'description': '物料结构（BOM / 选配模型）：按物料、用途、替代结构与版本维护组件行',
             'show_in_sidebar': 0,
@@ -2087,11 +2151,11 @@ def init_menu_permissions(db_path):
                  'include_actions': ['create', 'read', 'update', 'delete', 'list']},
             ]),
             'required_permissions': json.dumps([
-                'salesperson:salesperson_create',
-                'salesperson:salesperson_read',
-                'salesperson:salesperson_update',
-                'salesperson:salesperson_delete',
-                'salesperson:salesperson_list',
+                'salesperson:create',
+                'salesperson:read',
+                'salesperson:update',
+                'salesperson:delete',
+                'salesperson:read',
             ]),
             'description': '销售员字典：编码、姓名及人员 / 账号绑定',
             'show_in_sidebar': 0,
@@ -2124,11 +2188,11 @@ def init_menu_permissions(db_path):
                  'include_actions': ['create', 'read', 'update', 'delete', 'list']},
             ]),
             'required_permissions': json.dumps([
-                'territory:territory_create',
-                'territory:territory_read',
-                'territory:territory_update',
-                'territory:territory_delete',
-                'territory:territory_list',
+                'territory:create',
+                'territory:read',
+                'territory:update',
+                'territory:delete',
+                'territory:read',
             ]),
             'description': '销售区域树：编码、名称与上级区域',
             'show_in_sidebar': 0,
@@ -2156,11 +2220,11 @@ def init_menu_permissions(db_path):
                  'include_actions': ['create', 'read', 'update', 'delete', 'list']},
             ]),
             'required_permissions': json.dumps([
-                'division:division_create',
-                'division:division_read',
-                'division:division_update',
-                'division:division_delete',
-                'division:division_list',
+                'division:create',
+                'division:read',
+                'division:update',
+                'division:delete',
+                'division:read',
             ]),
             'description': '产品组字典：编码、名称与启用状态',
             'show_in_sidebar': 0,
@@ -2189,10 +2253,10 @@ def init_menu_permissions(db_path):
                  'include_actions': ['create', 'read', 'update', 'delete', 'list']},
             ]),
             'required_permissions': json.dumps([
-                'resource:resource_create',
-                'resource:resource_read',
-                'resource:resource_update',
-                'resource:resource_delete',
+                'resource:create',
+                'resource:read',
+                'resource:update',
+                'resource:delete',
             ]),
             'description': '资源主数据：人 / 设备 / 车辆 / 工具 / 场地 / 站点 / 外协',
             'show_in_sidebar': 0,
@@ -2218,10 +2282,10 @@ def init_menu_permissions(db_path):
                  'include_actions': ['create', 'read', 'update', 'delete', 'list']},
             ]),
             'required_permissions': json.dumps([
-                'resource_group:resource_group_create',
-                'resource_group:resource_group_read',
-                'resource_group:resource_group_update',
-                'resource_group:resource_group_delete',
+                'resource_group:create',
+                'resource_group:read',
+                'resource_group:update',
+                'resource_group:delete',
             ]),
             'description': '资源组：工作中心 / 班组 / 资源池 / 车队 / 场地组（多层级）',
             'show_in_sidebar': 0,
@@ -2247,10 +2311,10 @@ def init_menu_permissions(db_path):
                  'include_actions': ['create', 'read', 'update', 'delete', 'list']},
             ]),
             'required_permissions': json.dumps([
-                'skill:skill_create',
-                'skill:skill_read',
-                'skill:skill_update',
-                'skill:skill_delete',
+                'skill:create',
+                'skill:read',
+                'skill:update',
+                'skill:delete',
             ]),
             'description': '技能主数据：工种 / 认证 / 语言 / 通用素质',
             'show_in_sidebar': 0,
@@ -2276,10 +2340,10 @@ def init_menu_permissions(db_path):
                  'include_actions': ['create', 'read', 'update', 'delete', 'list']},
             ]),
             'required_permissions': json.dumps([
-                'resource_group_member:resource_group_member_create',
-                'resource_group_member:resource_group_member_read',
-                'resource_group_member:resource_group_member_update',
-                'resource_group_member:resource_group_member_delete',
+                'resource_group_member:create',
+                'resource_group_member:read',
+                'resource_group_member:update',
+                'resource_group_member:delete',
             ]),
             'description': '资源组成员关系（分配比例 / 数量 / 有效期）',
             'show_in_sidebar': 0,
@@ -2305,10 +2369,10 @@ def init_menu_permissions(db_path):
                  'include_actions': ['create', 'read', 'update', 'delete', 'list']},
             ]),
             'required_permissions': json.dumps([
-                'resource_capability:resource_capability_create',
-                'resource_capability:resource_capability_read',
-                'resource_capability:resource_capability_update',
-                'resource_capability:resource_capability_delete',
+                'resource_capability:create',
+                'resource_capability:read',
+                'resource_capability:update',
+                'resource_capability:delete',
             ]),
             'description': '资源持有技能的能力记录（等级 / 有效期 / 认证）',
             'show_in_sidebar': 0,
@@ -2334,10 +2398,10 @@ def init_menu_permissions(db_path):
                  'include_actions': ['create', 'read', 'update', 'delete', 'list']},
             ]),
             'required_permissions': json.dumps([
-                'resource_rate:resource_rate_create',
-                'resource_rate:resource_rate_read',
-                'resource_rate:resource_rate_update',
-                'resource_rate:resource_rate_delete',
+                'resource_rate:create',
+                'resource_rate:read',
+                'resource_rate:update',
+                'resource_rate:delete',
             ]),
             'description': '资源 / 资源组费率（用途 / 基准 / 有效期 / 优先级）',
             'show_in_sidebar': 0,
@@ -2366,10 +2430,10 @@ def init_menu_permissions(db_path):
                  'include_actions': ['create', 'read', 'update', 'delete', 'list']},
             ]),
             'required_permissions': json.dumps([
-                'shift:shift_create',
-                'shift:shift_read',
-                'shift:shift_update',
-                'shift:shift_delete',
+                'shift:create',
+                'shift:read',
+                'shift:update',
+                'shift:delete',
             ]),
             'description': '班次时段模板（开始/结束/跨天/休息扣减/类型）',
             'show_in_sidebar': 0,
@@ -2395,10 +2459,10 @@ def init_menu_permissions(db_path):
                  'include_actions': ['create', 'read', 'update', 'delete', 'list']},
             ]),
             'required_permissions': json.dumps([
-                'calendar_shift:calendar_shift_create',
-                'calendar_shift:calendar_shift_read',
-                'calendar_shift:calendar_shift_update',
-                'calendar_shift:calendar_shift_delete',
+                'calendar_shift:create',
+                'calendar_shift:read',
+                'calendar_shift:update',
+                'calendar_shift:delete',
             ]),
             'description': '日历 × 星期掩码 × 班次（产能系数 / 同日多班排序）',
             'show_in_sidebar': 0,
@@ -2424,10 +2488,10 @@ def init_menu_permissions(db_path):
                  'include_actions': ['create', 'read', 'update', 'delete', 'list']},
             ]),
             'required_permissions': json.dumps([
-                'work_definition:work_definition_create',
-                'work_definition:work_definition_read',
-                'work_definition:work_definition_update',
-                'work_definition:work_definition_delete',
+                'work_definition:create',
+                'work_definition:read',
+                'work_definition:update',
+                'work_definition:delete',
             ]),
             'description': '标准作业定义：工艺路线 / 服务模板（编码 + 版本唯一）',
             'show_in_sidebar': 0,
@@ -2453,10 +2517,10 @@ def init_menu_permissions(db_path):
                  'include_actions': ['create', 'read', 'update', 'delete', 'list']},
             ]),
             'required_permissions': json.dumps([
-                'work_definition_operation:work_definition_operation_create',
-                'work_definition_operation:work_definition_operation_read',
-                'work_definition_operation:work_definition_operation_update',
-                'work_definition_operation:work_definition_operation_delete',
+                'work_definition_operation:create',
+                'work_definition_operation:read',
+                'work_definition_operation:update',
+                'work_definition_operation:delete',
             ]),
             'description': '作业定义下的工序（顺序 / 六类工时 / 产量倍数）',
             'show_in_sidebar': 0,
@@ -2482,10 +2546,10 @@ def init_menu_permissions(db_path):
                  'include_actions': ['create', 'read', 'update', 'delete', 'list']},
             ]),
             'required_permissions': json.dumps([
-                'operation_resource_requirement:operation_resource_requirement_create',
-                'operation_resource_requirement:operation_resource_requirement_read',
-                'operation_resource_requirement:operation_resource_requirement_update',
-                'operation_resource_requirement:operation_resource_requirement_delete',
+                'operation_resource_requirement:create',
+                'operation_resource_requirement:read',
+                'operation_resource_requirement:update',
+                'operation_resource_requirement:delete',
             ]),
             'description': '工序需要的资源组/资源、角色、数量与技能等级',
             'show_in_sidebar': 0,
@@ -2511,10 +2575,10 @@ def init_menu_permissions(db_path):
                  'include_actions': ['create', 'read', 'update', 'delete', 'list']},
             ]),
             'required_permissions': json.dumps([
-                'resource_capacity:resource_capacity_create',
-                'resource_capacity:resource_capacity_read',
-                'resource_capacity:resource_capacity_update',
-                'resource_capacity:resource_capacity_delete',
+                'resource_capacity:create',
+                'resource_capacity:read',
+                'resource_capacity:update',
+                'resource_capacity:delete',
             ]),
             'description': '资源 / 资源组的多口径产能（口径 + 单位 + 日产能 + 有效性）',
             'show_in_sidebar': 0,
@@ -2540,10 +2604,10 @@ def init_menu_permissions(db_path):
                  'include_actions': ['create', 'read', 'update', 'delete', 'list']},
             ]),
             'required_permissions': json.dumps([
-                'resource_assignment:resource_assignment_create',
-                'resource_assignment:resource_assignment_read',
-                'resource_assignment:resource_assignment_update',
-                'resource_assignment:resource_assignment_delete',
+                'resource_assignment:create',
+                'resource_assignment:read',
+                'resource_assignment:update',
+                'resource_assignment:delete',
             ]),
             'description': '工单工序的资源分配（资源 + 计划时间窗 + 计划量 + 状态）',
             'show_in_sidebar': 0,
@@ -2569,10 +2633,10 @@ def init_menu_permissions(db_path):
                  'include_actions': ['create', 'read', 'update', 'delete', 'list']},
             ]),
             'required_permissions': json.dumps([
-                'resource_territory_assignment:resource_territory_assignment_create',
-                'resource_territory_assignment:resource_territory_assignment_read',
-                'resource_territory_assignment:resource_territory_assignment_update',
-                'resource_territory_assignment:resource_territory_assignment_delete',
+                'resource_territory_assignment:create',
+                'resource_territory_assignment:read',
+                'resource_territory_assignment:update',
+                'resource_territory_assignment:delete',
             ]),
             'description': '资源/资源组的服务区域覆盖（区域 + 覆盖级别 + 生效区间）',
             'show_in_sidebar': 0,
@@ -2598,10 +2662,10 @@ def init_menu_permissions(db_path):
                  'include_actions': ['create', 'read', 'update', 'delete', 'list']},
             ]),
             'required_permissions': json.dumps([
-                'resource_availability:resource_availability_create',
-                'resource_availability:resource_availability_read',
-                'resource_availability:resource_availability_update',
-                'resource_availability:resource_availability_delete',
+                'resource_availability:create',
+                'resource_availability:read',
+                'resource_availability:update',
+                'resource_availability:delete',
             ]),
             'description': '资源可用性例外（加班 / 请假 / 检修的绝对时间窗 + 来源）',
             'show_in_sidebar': 0,
@@ -2628,10 +2692,10 @@ def init_menu_permissions(db_path):
                  'include_actions': ['create', 'read', 'update', 'delete', 'list']},
             ]),
             'required_permissions': json.dumps([
-                'employee:employee_create',
-                'employee:employee_read',
-                'employee:employee_update',
-                'employee:employee_delete',
+                'employee:create',
+                'employee:read',
+                'employee:update',
+                'employee:delete',
             ]),
             'description': '员工薄主数据（雇佣组织 / 地点 / 岗位 / 在职区间）',
             'show_in_sidebar': 0,
@@ -2676,12 +2740,34 @@ def init_menu_permissions(db_path):
         cursor.execute("DELETE FROM menu_permissions WHERE menu_code = ?", [code])
     conn.commit()
 
+    # ========== 声明哈希守卫（P0-5） ==========
+    # 步骤 5/6/6.5 是纯声明收敛（system_menus + meta/schemas/*.yaml → DB）：
+    # 输入未变时重复 UPSERT 与解析 213 个 yaml 只会得到相同结果。
+    # 声明变更（含 DISABLED_PLATFORM_MODULES 切换）⇒ 哈希失配 ⇒ 回退到原全量同步。
+    # 步骤 7.5/7.6/7.7/7.8 不受守卫影响：它们处理 DB 侧状态（stale 清理、角色
+    #   权限展开），新增角色或权限定义后必须每次重新展开。
+    schemas_dir = os.path.join(os.path.dirname(os.path.dirname(__file__)), 'schemas')
+    _ensure_guard_table(cursor)
+    declaration_hash = _compute_declaration_hash(system_menus, schemas_dir)
+    cursor.execute(
+        "SELECT guard_value FROM menu_sync_guard WHERE guard_key = 'menu_declaration'"
+    )
+    guard_row = cursor.fetchone()
+    declaration_unchanged = bool(guard_row and guard_row[0] == declaration_hash)
+    if declaration_unchanged:
+        print(f"\n[守卫] 菜单声明未变化 (sha256={declaration_hash[:12]}...)，"
+              "跳过步骤 5/6/6.5 全量同步")
+    else:
+        print(f"\n[守卫] 菜单声明有变化或无记录 (sha256={declaration_hash[:12]}...)，执行全量同步")
+    # 声明未变化时三个同步循环遍历空列表（保留原有打印与汇总结构）
+    sync_menus = [] if declaration_unchanged else system_menus
+
     # ========== 步骤5：写入/更新 menu_permissions 表（权限） ==========
     # [V007.49-A] 增量更新：每次启动都会 UPSERT，触发条件由 7.5 检测权限变更日志输出
     print("\n[步骤5] 同步 menu_permissions 表...")
     perm_new = 0
     perm_updated = 0
-    for menu in system_menus:
+    for menu in sync_menus:
         cursor.execute(
             "SELECT menu_code, required_permissions FROM menu_permissions WHERE menu_code = ?",
             [menu['menu_code']]
@@ -2745,7 +2831,7 @@ def init_menu_permissions(db_path):
     print("\n[步骤6] 同步 menus 导航表...")
     nav_new = 0
     nav_updated = 0
-    for menu in system_menus:
+    for menu in sync_menus:
         cursor.execute(
             "SELECT menu_code, bo_bindings FROM menus WHERE menu_code = ?",
             [menu['menu_code']]
@@ -2820,9 +2906,9 @@ def init_menu_permissions(db_path):
     # export_enabled, 自动补全到 menus.bo_bindings 对应 BO 的 include_actions.
     # 不删除人工显式声明 (yaml 未配但 menu 声明), 用 [KEEP] 日志标记.
     print("\n[步骤6.5] 对齐 yaml import_export → menu bo_bindings ...")
-    schemas_dir = os.path.join(os.path.dirname(os.path.dirname(__file__)), 'schemas')
     yaml_action_map = {}  # bo_id -> {'import': bool, 'export': bool}
-    for yaml_path in glob.glob(os.path.join(schemas_dir, '*.yaml')):
+    # [守卫] 声明未变化时 yaml 已在上面的哈希阶段以 raw 字节读过，无需再解析
+    for yaml_path in ([] if declaration_unchanged else glob.glob(os.path.join(schemas_dir, '*.yaml'))):
         try:
             with open(yaml_path, 'r', encoding='utf-8') as f:
                 data = yaml.safe_load(f)
@@ -2842,7 +2928,7 @@ def init_menu_permissions(db_path):
 
     align_total = 0
     keep_total = 0
-    for menu in system_menus:
+    for menu in sync_menus:
         menu_code = menu['menu_code']
         # 从 DB 读最新 bo_bindings (步骤 6 UPSERT 后)
         cursor.execute("SELECT bo_bindings FROM menus WHERE menu_code = ?", [menu_code])
@@ -3049,16 +3135,80 @@ def init_menu_permissions(db_path):
     #   sqlite3 默认隔离级别下 DML 会开隐式事务, 而 conn.close() 会回滚未提交事务
     #   —— 导致「清理冗余菜单」「展开权限到角色」「绑定 admin 菜单」每次都只打印
     #   日志、不落库。此处统一提交, 使四步真正生效。
+    # [P0-5] 全量同步完成后记录本次声明哈希（未变化时不重写同值记录）
+    if not declaration_unchanged:
+        cursor.execute(
+            "INSERT OR REPLACE INTO menu_sync_guard (guard_key, guard_value, updated_at) "
+            "VALUES ('menu_declaration', ?, datetime('now'))",
+            [declaration_hash]
+        )
     conn.commit()
     conn.close()
+
+
+def check_menu_permissions(db_path):
+    """只读体检（E1 门禁）：不重建菜单，只校验 DB 现状。
+
+    校验项：
+      1. menu_permissions 表存在
+      2. 菜单 required_permissions 引用的每个码都在 permissions 表（既不 403）
+      3. menu_sync_guard 的 menu_declaration 记录存在（声明同步跑过）
+
+    返回：0 = 一致 / 1 = 不一致 / 2 = 无法检查（库或表缺失）。
+    """
+    if not os.path.exists(db_path):
+        print(f'[check] FAIL: DB 不存在: {db_path}')
+        return 2
+
+    conn = sqlite3.connect(db_path)
+    try:
+        cursor = conn.cursor()
+        try:
+            cursor.execute('SELECT COUNT(*) FROM menu_permissions')
+        except sqlite3.Error:
+            print('[check] FAIL: menu_permissions 表不存在（菜单尚未初始化）')
+            return 2
+
+        stored = {row[0] for row in cursor.execute('SELECT code FROM permissions')}
+        missing = []
+        for menu_code, raw in cursor.execute(
+                'SELECT menu_code, required_permissions FROM menu_permissions'):
+            try:
+                values = json.loads(raw) if raw else []
+            except (TypeError, ValueError):
+                values = [part.strip() for part in str(raw).split(',') if part.strip()]
+            for code in values or []:
+                if code and code != '*' and code not in stored:
+                    missing.append(f'{menu_code} -> {code}')
+
+        guard_table = cursor.execute(
+            "SELECT 1 FROM sqlite_master WHERE type='table' AND name='menu_sync_guard'"
+        ).fetchone()
+        has_guard = bool(guard_table) and bool(cursor.execute(
+            "SELECT 1 FROM menu_sync_guard WHERE guard_key = 'menu_declaration'").fetchone())
+
+        print(f"[check] menu_permissions: {cursor.execute('SELECT COUNT(*) FROM menu_permissions').fetchone()[0]} 条"
+              f" / permissions: {len(stored)} 条")
+        if not has_guard:
+            print('[check] WARN: menu_sync_guard 缺 menu_declaration 记录（声明同步未跑过）')
+        if missing:
+            print(f'[check] FAIL: 菜单引用但未入库 {len(missing)} 条')
+            for item in missing[:50]:
+                print(f'  - {item}')
+            return 1
+        print('[check] PASS: 菜单引用码全部已入库')
+        return 0
+    finally:
+        conn.close()
 
 
 if __name__ == '__main__':
     # [H14.1] 支持通过环境变量指定 db_path (与 server.py:455-456 行为一致)
     # 优先级: CLI 参数 > ARCH_DB_PATH > SQLITE_DB_PATH > meta/architecture.db
-    db_path = None
-    if len(sys.argv) > 1:
-        db_path = sys.argv[1]
+    # 附加: `--check` 走只读体检（不重建菜单），用于 E1 门禁/CI
+    argv = [arg for arg in sys.argv[1:] if arg != '--check']
+    check_only = len(argv) != len(sys.argv[1:])
+    db_path = argv[0] if argv else None
     if not db_path:
         db_path = os.environ.get('ARCH_DB_PATH')
     if not db_path:
@@ -3066,4 +3216,6 @@ if __name__ == '__main__':
     if not db_path:
         db_path = os.path.join(os.path.dirname(os.path.dirname(__file__)), 'architecture.db')
     print(f"数据库路径: {db_path}")
+    if check_only:
+        sys.exit(check_menu_permissions(db_path))
     init_menu_permissions(db_path)

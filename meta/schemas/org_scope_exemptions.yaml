@@ -1,0 +1,55 @@
+# 组织边界（org_scope）一致性校验豁免清单 —— FR-003
+#
+# 用途：`org_scope_validator` 会扫描全部 BO，凡字段名形如 `org_id` / `*_org_id`
+# 或已声明 `org_scope` 的对象都视为候选，必须声明 org_scope；本文件用于登记
+# 「字段像组织字段、但不是 owning org」的对象，避免误报。
+#
+# 约束：
+#   1. 只能通过本文件添加豁免；
+#   2. `reason` 必填，空理由会导致 ORG_SCOPE_EXEMPTION_REASON_MISSING；
+#   3. 已声明 org_scope 的对象无需豁免（声明优先）。
+
+exemptions:
+  # ── 销售组织维度绑定（执行组织，非行归属） ──
+  - object: customer_sales_org
+    reason: sales_org_id 为客户-销售组织维度绑定，属于执行组织关系，不决定行级数据归属
+  - object: customer_salesperson_assignment
+    reason: sales_org_id 为销售人员销售组织分配，属于执行组织关系，不决定行级数据归属
+
+  # ── 关联/视图/权限配置 ──
+  - object: document_hu_link
+    reason: 单据-周转箱关联表，org_id 为建单时执行组织快照，行归属由单据链派生
+  - object: document_hu_link_view
+    reason: document_hu_link 的视图，随主表处理，不单独声明 org_scope
+  - object: org_data_permission
+    reason: 组织数据权限配置表，org_id 是被授权的目标组织，不是行归属组织
+  - object: org_member
+    reason: 组织成员关系表，org_id 表示成员所属组织；关系行由权限集控制，不参与行级组织边界
+
+  # ── 主数据/配置引用 ──
+  - object: party_relation
+    reason: 往来方关系表，le_org_id 为法人主体引用，不是行归属组织
+  - object: rate_table
+    reason: 费率表头，owner_org_id 为费率表所有者（全局主数据），不是行级数据归属
+  - object: territory
+    reason: 区域主数据，owner_org_id 为区域归属组织（主数据），不参与业务行级组织边界
+  - object: user
+    reason: primary_org_id 为用户主组织；规格 24 §5.1 明确主组织只作默认上下文、不授予数据访问
+  - object: service_catalog_item
+    reason: 服务目录项，default_provider_org_id 为默认服务提供组织，不是行归属组织
+
+  # ── 单据参与方组织（业务参考字段） ──
+  - object: requisition
+    reason: 采购申请，requester_org_id / deliver_to_org_id 为申请与交付参与方，行归属由申请组织链派生
+  - object: requisition_line
+    reason: 采购申请行，requested/resolved_source_org_id 为来源组织参考，行归属随申请头
+  - object: service_request
+    reason: 服务请求，requester_org_id / provider_org_id 为请求与提供参与方，行归属由请求组织链派生
+  - object: sla_coverage
+    reason: SLA 覆盖配置，org_id 为覆盖对象组织，属于配置数据而非业务行归属
+  - object: sourcing_mode_policy
+    reason: 寻源模式策略，org_id 为策略适用组织，属于配置数据
+  - object: sourcing_rule_assignment
+    reason: 寻源规则分配，dest_org_id 为规则目标组织，属于配置数据
+  - object: sourcing_rule_line
+    reason: 寻源规则行，source_org_id 为来源组织，属于配置数据

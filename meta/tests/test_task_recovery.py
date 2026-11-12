@@ -274,7 +274,9 @@ class TestCompensateTask:
         n1 = run["task_ids"]["n1"]
         _set_status(ds, n1, "done")
         declaration = {"action_id": "reverse_outbound", "mode": "red_ink_edge"}
-        result = compensate_task(ds, n1, bo_action=declaration)
+        # S3 接缝：update/red_ink 档必须携带业务权威锚 ref_id（spec §9.3.13）
+        result = compensate_task(ds, n1, bo_action=declaration,
+                                 ref_id="red-ink-anchor-1")
         assert _task_row(ds, result["task_id"])["meta"]["bo_action"] == declaration
 
     def test_compensation_visible_in_run_tasks(self, ds):

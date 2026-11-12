@@ -78,6 +78,7 @@ def setup_test_db():
             id INTEGER PRIMARY KEY AUTOINCREMENT,
             version_id INTEGER,
             sub_domain_id INTEGER,
+            domain_id INTEGER,
             code TEXT,
             name TEXT,
             owner_id INTEGER,

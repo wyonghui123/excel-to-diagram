@@ -46,6 +46,31 @@ REVERSAL_PROFILES = {
         'reason_required': True,
         'edges': (),
     },
+    'customer_invoice': {
+        'mode': MODE_RED_REVERSE,
+        'commitment': 'release_remaining',
+        'close_guard': True,
+        'reason_required': True,
+        'edges': ({
+            'rule_id': 'customer_invoice_to_credit_memo',
+            'source_bo': 'customer_invoice_line',
+        },),
+    },
+    # 采购发票：红冲生成红字采购贷项凭证；原票行写出的 billing / ap_match
+    # 正向边保留（历史事实），由红字边冲减消耗量。
+    'vendor_invoice': {
+        'mode': MODE_RED_INK,
+        'commitment': 'release_remaining',
+        'close_guard': True,
+        'reason_required': True,
+        'edges': ({
+            'rule_id': 'po_schedule_to_vendor_invoice_line',
+            'source_bo': 'vendor_invoice_line',
+        }, {
+            'rule_id': 'receipt_line_to_vendor_invoice_line',
+            'source_bo': 'vendor_invoice_line',
+        }),
+    },
 }
 
 

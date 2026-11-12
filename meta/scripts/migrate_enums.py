@@ -20,8 +20,12 @@
 import sys
 import os
 import json
+import hashlib
+import logging
 from datetime import datetime
 from enum import Enum
+
+logger = logging.getLogger(__name__)
 
 script_dir = os.path.dirname(os.path.abspath(__file__))
 project_root = os.path.dirname(os.path.dirname(script_dir))
@@ -410,6 +414,20 @@ def seed_party_group_role_scope(ds) -> tuple:
     return type_created, value_created
 
 
+def _resolve_category_mutability(enum_class: type, dim_config: dict) -> tuple:
+    """推导枚举类型的 (category, mutability)。
+
+    抽成函数是为了让「声明哈希」与「实际迁移」共用同一份推导逻辑，
+    避免两处漂移导致守卫错误命中。
+    """
+    # AnnotationCategory 和 DimensionKey 作为业务枚举，可编辑
+    if enum_class.__name__ in ('AnnotationCategory', 'DimensionKey'):
+        return 'business', 'fullEditable'
+    if dim_config:
+        return dim_config.get('category', 'system'), dim_config.get('mutability', 'locked')
+    return 'system', 'locked'
+
+
 def migrate_enum_class(ds, enum_class: type) -> tuple:
     """迁移单个枚举类，返回 (类型创建数, 值创建数)"""
     enum_type_id = get_enum_type_name(enum_class)
@@ -417,16 +435,7 @@ def migrate_enum_class(ds, enum_class: type) -> tuple:
 
     dim_config = ENUM_DIMENSION_CONFIG.get(enum_type_id, {})
 
-    # AnnotationCategory 和 DimensionKey 作为业务枚举，可编辑
-    if enum_class.__name__ in ('AnnotationCategory', 'DimensionKey'):
-        category = 'business'
-        mutability = 'fullEditable'
-    elif dim_config:
-        category = dim_config.get('category', 'system')
-        mutability = dim_config.get('mutability', 'locked')
-    else:
-        category = 'system'
-        mutability = 'locked'
+    category, mutability = _resolve_category_mutability(enum_class, dim_config)
 
     type_created = 0
     value_created = 0
@@ -567,30 +576,160 @@ def cleanup_orphan_enum_values(ds) -> int:
     return removed
 
 
-def migrate_enums(db_path: str = None) -> dict:
+# ─── [TEST-EFF P1-2] 声明哈希守卫 ────────────────────────────────────────────
+# 启动链路 init_enum_services() 每次 create_app() 都整轮 migrate_enums()：逐类型
+# /逐值 SELECT 判存在 + 逐行 INSERT/UPDATE（每行独立 commit），实测单进程约 1.1s。
+# 与 schema_sync_guard / menu_sync_guard 同一范式：
+#   1. 哈希覆盖「迁移的完整声明结果」（枚举类成员 + 类型/值/维度配置 + 中文名映射
+#      + 内联 seed 值 + 孤立值清理清单），声明不变 ⇒ 哈希不变（非版本号比对）；
+#   2. 守卫记录写在同一目标 DB 的 enum_sync_guard 表；
+#   3. 命中前提 = 哈希一致 **且** 期望的枚举类型/值全部存在（两次查询），否则回落
+#      全量迁移以保留自愈能力；
+#   4. 全量迁移抛异常时不写守卫 ⇒ 下次启动重试。
+# 维护约定：迁移的写入语义变化（新增 UPDATE 项等）时 _ENUM_DECLARATION_VERSION +1。
+_ENUM_DECLARATION_VERSION = 1
+_GUARD_TABLE = 'enum_sync_guard'
+_GUARD_KEY = 'declaration'
+
+
+def _enum_declaration_fingerprint() -> tuple:
+    """返回 (declaration_hash, expected_types, expected_values)。
+
+    expected_types: 期望的 enum_type_id 集合
+    expected_values: 期望的 (enum_type_id, code) 集合
     """
-    迁移所有枚举类型到数据库
-    
-    Args:
-        db_path: 数据库路径，默认为 meta/architecture.db
-        
-    Returns:
-        迁移统计信息
-    """
+    hasher = hashlib.sha256()
+    hasher.update(f"enum-sync-v{_ENUM_DECLARATION_VERSION}\n".encode('utf-8'))
+    for label, value in (
+        ('override', ENUM_TYPE_ID_OVERRIDE),
+        ('dimension', ENUM_DIMENSION_CONFIG),
+        ('value_names', ENUM_VALUE_NAME_MAP),
+        ('orphans', _ORPHAN_ENUM_VALUES),
+    ):
+        hasher.update(
+            (f"{label}:" + json.dumps(value, sort_keys=True, ensure_ascii=False) + "\n")
+            .encode('utf-8'))
+
+    expected_types = set()
+    expected_values = set()
+
+    def _add(enum_type_id, display_name, category, mutability, pairs):
+        expected_types.add(enum_type_id)
+        hasher.update(
+            f"type|{enum_type_id}|{display_name}|{category}|{mutability}\n".encode('utf-8'))
+        for code, name in pairs:
+            expected_values.add((enum_type_id, code))
+            hasher.update(f"value|{enum_type_id}.{code}|{name}\n".encode('utf-8'))
+
+    for enum_class in ENUM_CLASSES:
+        enum_type_id = get_enum_type_name(enum_class)
+        dim_config = ENUM_DIMENSION_CONFIG.get(enum_type_id, {})
+        category, mutability = _resolve_category_mutability(enum_class, dim_config)
+        value_names = dim_config.get('value_names', {})
+        pairs = []
+        for member in enum_class:
+            name = value_names.get(member.value) or member.name
+            pairs.append((member.value,
+                          get_enum_value_name(enum_type_id, member.value, name)))
+        _add(enum_type_id, get_enum_type_display_name(enum_class),
+             category, mutability, pairs)
+
+    # 内联 seed（user_status / party_relation_role / party_group_role_scope /
+    # rounding_mode）：display/category/mutability 仅创建期使用，不参与存量行语义
+    for enum_type_id, values in (
+        (USER_STATUS_ENUM_ID, USER_STATUS_VALUES),
+        (PARTY_RELATION_ROLE_ENUM_ID, PARTY_RELATION_ROLE_VALUES),
+        (PARTY_GROUP_ROLE_SCOPE_ENUM_ID, PARTY_GROUP_ROLE_SCOPE_VALUES),
+        (ROUNDING_MODE_ENUM_ID, ROUNDING_MODE_VALUES),
+    ):
+        pairs = [(code, get_enum_value_name(enum_type_id, code, name))
+                 for code, name, _ in values]
+        _add(enum_type_id, '', '', '', pairs)
+
+    return hasher.hexdigest(), expected_types, expected_values
+
+
+def _row_field(row, index: int, key: str):
+    """兼容 tuple / sqlite3.Row / dict 三种行形式。"""
+    return row[index] if isinstance(row, (tuple, list)) else row[key]
+
+
+def _lookup_guard(ds) -> str:
+    try:
+        cursor = ds.execute(
+            f"SELECT declaration_hash FROM {_GUARD_TABLE} WHERE guard_key = ?",
+            [_GUARD_KEY])
+        row = cursor.fetchone() if cursor is not None else None
+        if row is None:
+            return ''
+        return _row_field(row, 0, 'declaration_hash') or ''
+    except Exception:
+        return ''
+
+
+def _guard_hit(ds, declaration_hash: str, expected_types: set, expected_values: set) -> bool:
+    try:
+        ds.execute(
+            f"CREATE TABLE IF NOT EXISTS {_GUARD_TABLE} ("
+            "guard_key VARCHAR(40) PRIMARY KEY,"
+            "declaration_hash VARCHAR(64) NOT NULL,"
+            "applied_at DATETIME)")
+        ds.commit()
+        if _lookup_guard(ds) != declaration_hash:
+            return False
+
+        cursor = ds.execute("SELECT id FROM enum_types")
+        actual_types = {
+            _row_field(r, 0, 'id')
+            for r in (cursor.fetchall() if cursor is not None else [])
+        }
+        cursor = ds.execute("SELECT enum_type_id, code FROM enum_values")
+        actual_values = {
+            (_row_field(r, 0, 'enum_type_id'), _row_field(r, 1, 'code'))
+            for r in (cursor.fetchall() if cursor is not None else [])
+        }
+        missing_types = expected_types - actual_types
+        missing_values = expected_values - actual_values
+        if missing_types or missing_values:
+            logger.info(
+                "[EnumGuard] 声明未变但缺失枚举类型 %d 个 / 值 %d 个，回落全量迁移: %s",
+                len(missing_types), len(missing_values),
+                sorted(missing_types)[:5] or sorted(missing_values)[:5])
+            return False
+        return True
+    except Exception as e:
+        logger.warning("[EnumGuard] 守卫检查失败，回落全量迁移: %s", e)
+        return False
+
+
+def _write_guard(ds, declaration_hash: str) -> None:
+    ds.execute(
+        f"CREATE TABLE IF NOT EXISTS {_GUARD_TABLE} ("
+        "guard_key VARCHAR(40) PRIMARY KEY,"
+        "declaration_hash VARCHAR(64) NOT NULL,"
+        "applied_at DATETIME)")
+    ds.execute(
+        f"INSERT OR REPLACE INTO {_GUARD_TABLE} "
+        "(guard_key, declaration_hash, applied_at) VALUES (?, ?, ?)",
+        [_GUARD_KEY, declaration_hash,
+         datetime.now().isoformat(timespec='seconds')])
+    ds.commit()
+
+
+def _resolve_db_path(db_path: str = None) -> str:
     if db_path is None:
         script_dir = os.path.dirname(os.path.abspath(__file__))
         project_root = os.path.dirname(os.path.dirname(script_dir))
         db_path = os.path.join(project_root, 'meta', 'architecture.db')
-    
-    print(f"开始迁移枚举值到数据库: {db_path}")
-    print("=" * 60)
-    
-    ds = get_data_source("sqlite", database=db_path)
-    
+    return db_path
+
+
+def _run_migration(ds, db_path: str) -> dict:
+    """全量迁移（无守卫），返回统计信息。"""
     total_types_created = 0
     total_values_created = 0
     total_values_removed = 0
-    
+
     for enum_class in ENUM_CLASSES:
         print(f"\n处理枚举类: {enum_class.__name__}")
         print("-" * 40)
@@ -625,18 +764,71 @@ def migrate_enums(db_path: str = None) -> dict:
 
     removed = cleanup_orphan_enum_values(ds)
     total_values_removed += removed
-    
+
     print("\n" + "=" * 60)
     print(f"迁移完成!")
     print(f"  - 枚举类型创建: {total_types_created}")
     print(f"  - 枚举值创建: {total_values_created}")
     print(f"  - 孤立枚举值清理: {total_values_removed}")
-    
+
     return {
         "types_created": total_types_created,
         "values_created": total_values_created,
         "db_path": db_path,
     }
+
+
+def migrate_enums(db_path: str = None) -> dict:
+    """
+    迁移所有枚举类型到数据库（全量，无条件执行）
+
+    Args:
+        db_path: 数据库路径，默认为 meta/architecture.db
+
+    Returns:
+        迁移统计信息
+    """
+    db_path = _resolve_db_path(db_path)
+    print(f"开始迁移枚举值到数据库: {db_path}")
+    print("=" * 60)
+    ds = get_data_source("sqlite", database=db_path)
+    return _run_migration(ds, db_path)
+
+
+def guarded_migrate_enums(db_path: str = None) -> dict:
+    """带声明哈希守卫的 migrate_enums（启动路径专用，TEST-EFF P1-2）。
+
+    命中守卫时直接返回 skipped=True 的统计（与"迁移完成、无新增"同构）。
+    """
+    db_path = _resolve_db_path(db_path)
+    ds = get_data_source("sqlite", database=db_path)
+    try:
+        declaration_hash, expected_types, expected_values = _enum_declaration_fingerprint()
+    except Exception as e:
+        logger.warning("[EnumGuard] 指纹计算失败，回落全量迁移: %s", e)
+        print(f"开始迁移枚举值到数据库: {db_path}")
+        print("=" * 60)
+        return _run_migration(ds, db_path)
+
+    if _guard_hit(ds, declaration_hash, expected_types, expected_values):
+        logger.info(
+            "[EnumGuard] 声明未变且枚举齐全，跳过 migrate_enums（%d 类型 / %d 值）",
+            len(expected_types), len(expected_values))
+        return {
+            "types_created": 0,
+            "values_created": 0,
+            "db_path": db_path,
+            "skipped": True,
+        }
+
+    print(f"开始迁移枚举值到数据库: {db_path}")
+    print("=" * 60)
+    result = _run_migration(ds, db_path)
+    try:
+        _write_guard(ds, declaration_hash)
+    except Exception as e:
+        logger.warning("[EnumGuard] 守卫写入失败（下次将重跑全量）: %s", e)
+    return result
 
 
 if __name__ == '__main__':

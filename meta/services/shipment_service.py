@@ -24,6 +24,8 @@ from datetime import datetime
 from decimal import Decimal, InvalidOperation
 from typing import Any, Dict, List, Optional
 
+from meta.core.doc_flow_reversal import release_target_edges
+
 logger = logging.getLogger(__name__)
 
 HEADER_TABLE = 'shipments'
@@ -433,7 +435,7 @@ class ShipmentService:
         try:
             from meta.core.datasource import get_platform_data_source
             from meta.core.doc_flow_derive_engine import derive
-            from meta.core.doc_flow_rule_store import get_rule
+            from meta.core.rule_provider import get_doc_flow_rule as get_rule
         except Exception:  # pragma: no cover - 核心模块缺失时保持发运可用
             logger.warning('[shipment] DOC_FLOW 模块不可用，跳过转单边')
             return
@@ -622,18 +624,24 @@ class ShipmentService:
 
     def cancel(self, delivery_id: Any) -> Dict[str, Any]:
         """draft / released → cancelled（R-DN-2：shipped 之后不可取消）。"""
-        header = self._require_header(delivery_id)
-        if header['status'] not in CANCELLABLE_HEADER_STATUSES:
-            raise ShipmentError('仅草稿或已释放的交货单可取消',
-                                field_name='status', rule='DN_STATE_INVALID')
-        now = _now()
-        self.ds.execute(
-            'UPDATE %s SET status = ?, updated_at = ? WHERE id = ?' % HEADER_TABLE,
-            [STATUS_CANCELLED, now, delivery_id])
-        self.ds.execute(
-            'UPDATE %s SET status = ?, updated_at = ? WHERE delivery_id = ?' % LINE_TABLE,
-            [STATUS_CANCELLED, now, delivery_id])
-        return {'id': header['id'], 'status': STATUS_CANCELLED}
+        with self.ds.transaction():
+            header = self._require_header(delivery_id)
+            if header['status'] not in CANCELLABLE_HEADER_STATUSES:
+                raise ShipmentError('仅草稿或已释放的交货单可取消',
+                                    field_name='status', rule='DN_STATE_INVALID')
+            now = _now()
+            self.ds.execute(
+                'UPDATE %s SET status = ?, updated_at = ? WHERE id = ?' % HEADER_TABLE,
+                [STATUS_CANCELLED, now, delivery_id])
+            self.ds.execute(
+                'UPDATE %s SET status = ?, updated_at = ? WHERE delivery_id = ?' % LINE_TABLE,
+                [STATUS_CANCELLED, now, delivery_id])
+            line_ids = [row['id'] for row in self.ds.query(
+                'SELECT id FROM %s WHERE delivery_id = ?' % LINE_TABLE,
+                [header['id']])]
+            release_target_edges(self.ds, 'shipment_line', line_ids,
+                                 reversed_by='shipment_service.cancel')
+            return {'id': header['id'], 'status': STATUS_CANCELLED}
 
     def reverse(self, delivery_id: Any, reason: Optional[str] = None) -> Dict[str, Any]:
         """shipped / delivered → reversed：数据错误红冲（非退货业务）。

@@ -465,7 +465,7 @@ class AssociationDefinition:
 | 统一 MetadataDrivenValidator | 单一事实源、YAML 驱动 | 初期工作量较大 | Selected |
 | 拦截器链校验 | 声明式、优先级可控 | 增加调用链路复杂度 | Selected |
 
-### 9.5 Implementation & Migration Plan
+### 9.5 Implementation & Migration Plan（severity 见 §9.6，未实现）
 
 **Implementation Order**（已完成）：
 
@@ -491,6 +491,184 @@ class AssociationDefinition:
 - 代码级回滚（git revert）
 - 新增校验为非破坏性（仅影响新增/修改操作，不影响存量数据）
 
+### 9.6 校验严重性（severity）二层模型（增量提案，2026-11-10）
+
+> **状态**：设计结论，**未实现**。本文只固化语义边界与落地代价，不改变 §1–§9.5 已完成的“一律阻断”行为。
+> **动机**：SAP 的运行时消息类型（`A/E/W/I/S`）包含“刚性/柔性”语义，但直接照搬会把“判定结果”和“执行行为”焊死，导致同一条规则无法在不同操作场景下表现不同。
+
+#### 9.6.1 先分清 SAP 的两个 "message"
+
+| 概念 | 是什么 | 组成 | 本项目归属 |
+|---|---|---|---|
+| **ABAP Message Type** | 运行时消息严重性 | `A` 终止 / `E` 错误 / `W` 警告 / `I` 信息 / `S` 成功 | **校验域（本节）** |
+| **Message Control（MM/SD）** | 输出控制：谁在什么时点收到什么单据 | 消息类型 `NEU/ÄND/MAHN` + 输出类型 + 媒介（打印/EDI/邮件）+ 时点 `V1/V2/V3` | **通知域**（`change_subscription` / 统一消息中心） |
+
+二者在 SAP 中本就是两套独立机制。这也反证了 `spec-notification-task-alert.md` 的收敛结论：**校验严重性属于校验域，不属于消息中心。**
+
+#### 9.6.2 结论：引入二值 severity，拒绝五类
+
+| 类型 | 决策 | 理由 |
+|---|---|---|
+| `error` | 引入（显式化现有语义） | 刚性，阻断 |
+| `warning` | **引入** | 柔性，放行但必须 ack |
+| `info` | 拒绝 | 提示不属于“违规”；一旦进入 `errors` 数组，`ok` 判据即失效 |
+| `success` | 拒绝 | 是 UI 反馈，不是校验结果 |
+| `abort` | 拒绝 | 技术故障走异常通道，不属于业务校验 |
+| `tech_debt` | 拒绝 | 元模型自检（`metadata_validator.py`）专用，业务数据无此概念 |
+
+即 **severity 是二值枚举 `{"error", "warning"}`**。SAP 的五类是“消息”的等级，本项目只需要“违规”的等级。
+
+#### 9.6.3 三层拆分：判定 / 分级 / 处置
+
+```
+① 判定 Detection        规则命中 → finding {rule, severity}
+                        所有者：规则元数据（YAML）
+                        纯函数，不关心是否阻断
+        │
+② 分级 Classification   severity ∈ {error, warning}
+                        所有者：规则元数据声明
+                        禁止写在 Python 代码里
+        │
+③ 处置 Enforcement      在某操作上下文中：error → 阻断；warning → 放行 + ack
+                        所有者：操作上下文策略（operation × rule）
+                        唯一允许知道“保存 vs 过账”差异的层
+```
+
+**severity 属于 ②，是否阻断属于 ③。** SAP 把两者合并（“类型即行为”），因此无法表达：
+
+> 同一条校验规则，保存草稿时应为 `W`（可继续），过账时必须为 `E`（阻断）。
+
+这正是企业系统柔性校验的主要需求，因此本项目**学其分级语义、拒绝其类型即行为的耦合**。
+
+#### 9.6.4 现状证据：两个校验域的严重性支持不对称
+
+| 校验域 | 结果类型 | 分级 |
+|---|---|---|
+| 元模型自检（校验 YAML 自身） | [metadata_validator.py](../../meta/core/metadata_validator.py#L44-L50) `ValidationLevel` | 4 级：`ERROR / WARNING / TECH_DEBT / INFO` |
+| 业务数据校验（校验用户输入） | [validation_messages.py](../../meta/core/validation_messages.py#L13-L21) `ValidationDetail` | **0 级，无 severity 字段，一律视为 error** |
+
+元模型自检敢用 `WARNING`，因为它“只报告不阻断”；业务数据校验不敢用，因为“一有结果就阻断”。这不是设计取舍，而是缺口。
+
+#### 9.6.5 最小落地改动（不新增表）
+
+1. `ValidationDetail` 增加字段 `severity: Literal["error", "warning"] = "error"`
+   —— **默认必须是 `error`**，否则存量规则行为会静默改变（破坏 §6 TR-001 存量兼容约束）。
+2. 聚合层把结果拆成 `errors` / `warnings`，通过判据改为 `ok = not errors`。
+3. 规则 YAML 允许声明 `validation.severity: warning`；未声明即 `error`（元数据驱动，禁止在拦截器里按 rule 名硬编码）。
+4. 柔性放行必须记录 ack：落 `audit_log`，payload 记 `{rule, object_id, values_hash, actor, at}`。
+5. 若某 warning 必须由**他人**复核才能放行 → 复用 `tasks` 表生成 `type=validation_review` 的待办，不新建实体。
+
+**不新增任何表**：severity 是规则属性（YAML），ack 是审计事实（`audit_log` 已有），复核是待办（`tasks` 已有）。
+
+#### 9.6.6 三条红线
+
+1. **柔性 ≠ 不校验**：`warning` 必须显式确认（acknowledge）并落痕；禁止新建 `validation_acknowledgement` 表——ack 的所有者是 `audit_log`。
+2. **severity 不可由调用方/前端降级**：降级只能来自配置或 RBAC 授权，否则刚性校验失效。
+3. **severity 不做 per-record 快照**：只存在于规则元数据。若把某条记录的 severity 写入数据行，规则升级后会产生永久漂移（与“`ValidationDetail` 不落库”同一条红线）。
+
+#### 9.6.7 与 Event / Task / 通知中心的关系（引入 warning 后仍不需要新实体）
+
+| 场景 | 归属 | 说明 |
+|---|---|---|
+| `error` | 同步返回 `ValidationDetail[]`，事务回滚 | **不产生 Event**（什么都没发生），不产生 Task |
+| `warning` 由当前操作者确认 | `audit_log` | 审计事实；如需事后可查可订阅，可另发 `change_event` |
+| `warning` 需他人复核 | `tasks`（`type=validation_review`） + 复核后 `audit_log` | 复用待办，不新建机制 |
+| 异步/批量校验失败（无请求方可同步告知） | 编排层转 `task.fail_reason` 或 `change_event` | validator 仍只返回结构化结果，不自行投递 |
+
+一句话：**warning 的“确认”要么是审计记录、要么是待办任务，从来不是一条“消息”。** 因此 `ValidationDetail` 依然不落库、不进消息中心，只是多了 `severity` 字段与 ack 落点。
+
+#### 9.6.8 验收标准
+
+| 编号 | 验收项 | 判据 |
+|---|---|---|
+| S-1 | 存量兼容 | 未声明 severity 的规则行为与现状完全一致（仍阻断） |
+| S-2 | 柔性放行 | 声明 `warning` 的规则失败时写入成功，且 `audit_log` 存在对应 ack 记录 |
+| S-3 | 刚性阻断 | `error` 规则失败时写入被拒，且无 ack 记录 |
+| S-4 | 场景化处置 | 同一规则在「保存」上下文为 `warning`、在「过账」上下文为 `error`，无需改规则本身 |
+| S-5 | 判据正确 | `info`（若未来引入）不计入 `errors`，`ok` 判据不受影响 |
+
+### 9.7 审批触发条件与校验正交（增量提案，2026-11-10）
+
+> **状态**：设计结论，**审批侧已实现，校验侧未变**。本文只固化边界，不新增表、不改状态机。
+> **动机**：业务上常把「金额 > 100 万」「价格偏差 > 5%」当作「校验」，但两者的失败语义相反——校验失败要求**改数据**，金额超限要求**找人点头**。混为一谈会让合法数据被判为错误，或让审批人去做数据修补。
+
+#### 9.7.1 三者不是同一个问题
+
+| 问题 | 回答者 | 输出 | 条件不成立意味着 | 事实源 |
+|---|---|---|---|---|
+| 这张单能否保存 / 过门 | validation rule | `pass` / `warning` / `error` | **数据不合格**，必须改数据 | `audit_log(action=validate)` + 行缓存 `validation_status` |
+| 这张单要不要人点头 | approval policy 条件 | `required` / `not_required` | **不是错误**，只是不能自动放行 | `approval_policies` + `approval_policy_conditions` + resolve 快照 |
+| 人点了没有、点了什么 | approval task | `pending` / `approved` / `rejected` | 决策未完成 / 被否 | `tasks(type=approval)`；`approval_status` 只是只读缓存 |
+
+判别只需一问：**条件不成立时，是"改数据"还是"找人"？** 前者属校验域，后者属审批域。
+
+因此金额档、偏差档是**路由谓词（routing predicate）**，与 BPMN gateway condition、Oracle AME approval rule、SAP Release Strategy 特征组合同族——这三家都把它归在 release/approval，**没有一家把金额档写成 error message**。
+
+#### 9.7.2 唯一的真实重叠：容差（tolerance）
+
+同一度量可以有两种用途，但这是**配置差异，不是模型合并**：
+
+| 用法 | 语义 | 后果 | 归属 |
+|---|---|---|---|
+| 硬容差 | 偏差是数据错误 | 阻断提交 | validation rule（`error`） |
+| 软容差 | 偏差是需要判断的风险 | 放行到人审 | approval policy 条件（+ 可选 `warning`） |
+
+正确处理是**抽出派生度量，两处消费**：
+
+```
+computed: price_deviation_rate        ← 一处计算
+    ├─ validation rule 引用      → 判 warning / error
+    └─ approval policy 条件引用  → 判 required
+```
+
+否则两个模块各算一遍偏差率，会产生 4.9% / 5.1% 的口径漂移（同 §9.6.6 红线 3 的「判定真源多处」问题）。
+
+#### 9.7.3 现状证据：审批侧已经是这个模型
+
+| 能力 | 现有实现 | 语义 |
+|---|---|---|
+| 是否需要审批 | [document_approval_service.py](../../meta/services/document_approval_service.py) `resolve()` → `{required, policy_code, steps, snapshot}` | R4：无命中策略 = 免审批（`not_required`），不产生错误 |
+| 条件求值 | 同文件 `_condition_matches()`，支持 `= / in / between / >= / <= / is_null`，载体 `value_number / value_text / value_json` | 纯路由判定，无 severity |
+| 金额分段 | 步骤上的 `min_amount / max_amount`（R5） | 金额档不是多条策略，而是同一策略的步骤切分 |
+| 决策落库 | [document_approval_decision.py](../../meta/services/document_approval_decision.py) | 只写 `status` + `approval_status`，不写校验结论 |
+
+结论：**审批条件与 validation 在代码里本就分开，不需要为这次讨论改实现**，只需把边界写进 spec 防止后续被"合并"。
+
+#### 9.7.4 复用边界
+
+| 层 | 是否复用 | 理由 |
+|---|---|---|
+| 表达式 / 条件求值器 | **复用** | 避免 `>=` 在两处含义不同 |
+| 派生度量（偏差率、可用额度） | **复用** | 一处计算，两处消费 |
+| 实体与结果（finding / policy） | **不复用** | 语义不同：数据不合格 vs 需要人点头 |
+| severity 与展示通道 | **绝对不复用** | 审批条件不进 warning 列表、不进待办复核通道 |
+
+#### 9.7.5 与 §9.6 severity 的关系
+
+`§9.6` 的 `severity` 只描述**违规的等级**；审批条件**不产生违规**，因此：
+
+- 审批条件命中的结果**不得**塞进 `ValidationDetail[]`（否则 `ok = not errors` 判据被污染）；
+- 审批条件**不得**声明 `severity`（它没有"违规"可言）；
+- 软容差若同时产生 `warning`，是两个独立结论，分别落 `audit_log`（ack）与 `tasks(type=approval)`（决策），互不覆盖。
+
+#### 9.7.6 三条红线
+
+1. **金额阈值不得写成 validation rule + `severity=error`**：否则 120 万的合法单据被判「数据错误」，用户无法保存——刚性校验被用来表达业务授权，等于把自己锁死。
+2. **validation error 不得写成 approval policy**：缺必填项时进审批，审批人无权限改数据，责任错位（数据问题被当成判断问题）。
+3. **审批条件不得进 `tasks(type=validation_review)` 通道**：复核是「请你看数据对不对」，审批是「请你决定放不放行」，混入会产生语义错误的待办。
+
+一句话：**校验管「能不能过门」，审批策略管「要不要人点头」；共享求值器与派生度量，不共享实体、结果与展示。**
+
+#### 9.7.7 验收标准
+
+| 编号 | 验收项 | 判据 |
+|---|---|---|
+| A-1 | 正交性 | 金额超限但校验全过时，单据可保存，且 `approval_status='pending'`、`validation_status='validated'` |
+| A-2 | 免审批 | 无命中策略时 `approval_status='not_required'`，不生成 `tasks(type=approval)`，不产生任何 `ValidationDetail` |
+| A-3 | 度量单点 | 偏差率在 validation 与 approval 两处取值一致（同值同精度），共用同一派生字段 |
+| A-4 | 通道隔离 | 审批条件命中不写入 `errors` / `warnings`；`validation_review` 待办只由 warning 触发 |
+| A-5 | 责任归位 | validation `error` 的修复指引指向"修改字段"，审批任务的动作只有 approve / reject |
+
 ---
 
 ## 10. TBD List
@@ -500,6 +678,7 @@ class AssociationDefinition:
 | TBD-1 | cardinality allow_reassign | ✅ 已确认：需要支持 | 关闭 |
 | TBD-2 | FK 字段推断策略 | ✅ 已确认：命名约定 + semantics 标注可接受 | 关闭 |
 | TBD-4 | field_name 翻译支持 | ✅ 已确认：未来考虑，当前返回原始字段名 | 关闭 |
+| TBD-5 | severity 处置策略（§9.6 ③ 层） | 处置动作词表与 `rule_type × action` 白名单已由 [spec-rule-model-2026-11-10.md](./spec-rule-model-2026-11-10.md) §9.5 确定；仅剩声明位置未定（`inputs_schema` / `acceptance` / 新增 operation 配置项，建议 `operation.enforcement`） | 按新 spec §9.5.3 矩阵实现，禁止硬编码在拦截器 |
 
 ---
 

@@ -14,6 +14,7 @@ const PAGE_TYPE_COMPONENTS = {
   object_detail: () => import('@/views/ObjectDetailPage.vue'),
   multi_object_hub: () => import('@/views/GenericTabContainer.vue'),
   report: () => import('@/views/MetaReportPage.vue'),
+  rule_center: () => import('@/views/RuleCenterPage.vue'),
 }
 
 const STATIC_ROUTE_NAMES = new Set([

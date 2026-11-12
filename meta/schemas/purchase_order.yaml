@@ -167,6 +167,23 @@ audit:
   dissociate:
     enabled: true
 
+org_scope:
+  mode: direct
+  field: purchase_org_id
+  function: procurement
+  write_check: true
+
+numbering:
+  no_field: order_no
+  date_field: order_date
+  type_table: type_definitions
+
+# [Rule Convergence M2 2026-11-07] 审批对象注册（表名 + 金额取值优先级）；
+# 审批策略本身仍由 DB approval_policy 维护。
+approval:
+  table: purchase_orders
+  amount_fields: [gross_amount, net_amount, total_amount, amount]
+
 fields:
   - id: id
     name: ID
@@ -1468,7 +1485,7 @@ ui_view_config:
         label: 新建采购订单
         icon: plus
         type: primary
-        permission: purchase_order:purchase_order_create
+        permission: purchase_order:create
       - id: export
         label: 导出
         icon: download

@@ -18,13 +18,13 @@ aspects: [audit_aspect]
 authorization:
   check: true
   permissions:
-    read: inventory_reservation:inventory_reservation_read
+    read: inventory_reservation:read
     # 列表复用 read，不再新增 list 权限码（Spec §5 共 5 条）
-    list: inventory_reservation:inventory_reservation_read
-    create: inventory_reservation:inventory_reservation_create
-    update: inventory_reservation:inventory_reservation_update
-    delete: inventory_reservation:inventory_reservation_delete
-    release: inventory_reservation:inventory_reservation_update
+    list: inventory_reservation:read
+    create: inventory_reservation:create
+    update: inventory_reservation:update
+    delete: inventory_reservation:delete
+    release: inventory_reservation:update
 
 import_export:
   auto_crud: false
@@ -66,9 +66,9 @@ actions:
     method: POST
     path: "/api/v1/inventory_reservations/{id}/release"
     description: 释放预留（写 cancelled 并回写 qty_reserved 投影）
-    action_ref: inventory_reservation:inventory_reservation_update
+    action_ref: inventory_reservation:update
     authorization:
-      permission: inventory_reservation:inventory_reservation_update
+      permission: inventory_reservation:update
 
 semantics:
   meaning: 库存预留
@@ -84,6 +84,12 @@ semantics:
 deletion_policy:
   mode: restrict
   restrict_on: []
+
+org_scope:
+  mode: direct
+  field: org_id
+  function: inventory
+  write_check: true
 
 fields:
   - id: id

@@ -31,6 +31,8 @@ from datetime import datetime
 from decimal import Decimal, InvalidOperation
 from typing import Any, Dict, List, Optional
 
+from meta.core.doc_flow_reversal import release_target_edges
+
 logger = logging.getLogger(__name__)
 
 HEADER_TABLE = 'receipts'
@@ -435,6 +437,7 @@ class ReceiptService:
             'updated_at': now,
         }
         receipt_id = self._insert_header(row)
+        line_ids = []
         for seq, item in enumerate(normalized, start=1):
             if is_unordered:
                 payload = self._normalized_unordered_payload(item)
@@ -445,13 +448,13 @@ class ReceiptService:
             else:
                 payload = self._normalized_payload(item)
             payload['line_no'] = str(seq)
-            self._insert_line(receipt_id, payload, now)
+            line_ids.append(self._insert_line(receipt_id, payload, now))
 
         logger.info('[receipt] created id=%s no=%s lines=%s',
                     receipt_id, header['receipt_no'], len(normalized))
         return {'id': receipt_id, 'receipt_no': header['receipt_no'],
                 'status': STATUS_DRAFT, 'source_doc_id': source_doc_id,
-                'line_count': len(normalized)}
+                'line_count': len(normalized), 'line_ids': line_ids}
 
     def create_from_transfer_order(
             self, transfer_order_id: Any,
@@ -487,7 +490,24 @@ class ReceiptService:
         # R-RC-8：先取号（prepare_transfer_header），再开事务插入
         prepared, _order, _doc_type = self.prepare_transfer_header(header)
         with self.ds.transaction():
-            return self.create_receipt(prepared, lines)
+            result = self.create_receipt(prepared, lines)
+            self._write_transfer_edges(lines, result.get('line_ids') or [])
+            return result
+
+    def _write_transfer_edges(self, lines, line_ids) -> None:
+        """调拨行 → 调拨收货行（attach 模式，失败降级不阻断建单）。"""
+        from meta.core.doc_flow_attach import attach_edge
+        for source, line_id in zip(lines or [], line_ids or []):
+            source_line_id = source.get('source_line_id')
+            if source_line_id is None or not line_id:
+                continue
+            attach_edge(
+                self.ds, self.platform_ds,
+                'transfer_order_line_to_receipt_line',
+                source_line_id, line_id,
+                float(source.get('qty_received') or 0),
+                target_item=str(line_id), unit='',
+                derived_by='receipt_service')
 
     def create_from_work_order(
             self, work_order_id: Any, location_id: Any,
@@ -547,7 +567,7 @@ class ReceiptService:
                                field_name='lines', rule='RC_EMPTY')
 
         now = actual_arrival_date or _now()
-        tol = self._tolerance_ratio()
+        tol = self._tolerance_ratio(header)
         order = self._load_order(header.get('source_doc_id'))
         if order is None:
             raise ReceiptError('来源采购订单不存在', field_name='source_doc_id',
@@ -834,12 +854,18 @@ class ReceiptService:
             raise ReceiptError('仅草稿收货单可取消', field_name='status',
                                rule='RC_STATE_INVALID')
         now = _now()
-        self.ds.execute(
-            'UPDATE %s SET status = ?, updated_at = ? WHERE id = ?' % HEADER_TABLE,
-            [STATUS_CANCELLED, now, header['id']])
-        self.ds.execute(
-            'UPDATE %s SET status = ?, updated_at = ? WHERE receipt_id = ?' % LINE_TABLE,
-            [STATUS_CANCELLED, now, header['id']])
+        with self.ds.transaction():
+            self.ds.execute(
+                'UPDATE %s SET status = ?, updated_at = ? WHERE id = ?' % HEADER_TABLE,
+                [STATUS_CANCELLED, now, header['id']])
+            self.ds.execute(
+                'UPDATE %s SET status = ?, updated_at = ? WHERE receipt_id = ?' % LINE_TABLE,
+                [STATUS_CANCELLED, now, header['id']])
+            line_ids = [row['id'] for row in self.ds.query(
+                'SELECT id FROM %s WHERE receipt_id = ?' % LINE_TABLE,
+                [header['id']])]
+            release_target_edges(self.ds, 'receipt_line', line_ids,
+                                 reversed_by='receipt_service.cancel')
         return {'id': header['id'], 'status': STATUS_CANCELLED}
 
     # ------------------------------------------------------------------ 红冲
@@ -961,7 +987,7 @@ class ReceiptService:
                                rule='RC_REVERSAL_INVALID')
 
         now = _now()
-        tol = self._tolerance_ratio()
+        tol = self._tolerance_ratio(header)
         original_category = self._require_document_type(
             header.get('document_type_id'))['document_category']
         is_return_origin = original_category == DOC_CATEGORY_RETURN
@@ -2118,21 +2144,21 @@ class ReceiptService:
                 rule='RC_SUPPLIER_RELATION_MISSING')
 
     # ------------------------------------------------------------------ 容差
-    def _tolerance_ratio(self) -> Decimal:
-        """`receipt_over_tolerance_percent`（百分数）→ 倍数（5 → 0.05）。"""
+    def _tolerance_ratio(self, header: Optional[Dict[str, Any]] = None) -> Decimal:
+        """`receipt_over_tolerance_percent`（百分数）→ 倍数（5 → 0.05）。
+
+        统一走 ControlParameterResolver：按法人 / 单据类型匹配参数行，
+        具体度由 specificity_rank 决定；无命中行时回落 default_value。
+        """
         percent = None
         try:
-            rows = self.ds.query(
-                'SELECT id, default_value FROM %s WHERE code = ? AND status = ?'
-                % PARAM_TABLE, [TOLERANCE_PARAM, 'active'])
-            if rows:
-                percent = rows[0].get('default_value')
-                values = self.ds.query(
-                    'SELECT value FROM %s WHERE control_parameter_id = ? '
-                    "AND status = 'active' ORDER BY id DESC LIMIT 1"
-                    % PARAM_VALUE_TABLE, [rows[0]['id']])
-                if values and not _blank(values[0].get('value')):
-                    percent = values[0]['value']
+            from meta.services.control_parameter_service import (
+                ControlParameterResolver)
+            header = header or {}
+            percent = ControlParameterResolver(self.ds).resolve(
+                TOLERANCE_PARAM,
+                {'org_id': header.get('org_id'),
+                 'document_type_id': header.get('document_type_id')})
         except Exception as e:  # noqa: BLE001 - 单测库无参数表
             logger.debug('[receipt] 读取超收容差失败，按 0 处理: %s', e)
         try:

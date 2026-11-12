@@ -190,9 +190,10 @@ def test_user_current_status_duration_formula():
 
     formula = field.computation.get('formula', '') if isinstance(field.computation, dict) else getattr(field.computation, 'formula', '')
     assert 'DATEDIFF' in formula
-    # [FIX 2026-06-09] 不再引用 status_entered_at, 改为从 audit_logs 子查询派生
+    # [FIX 2026-06-09] 不再引用 status_entered_at, 改为从审计视图子查询派生
     assert 'status_entered_at' not in formula, f"formula 不应再引用 status_entered_at (已删除), 实际: {formula}"
-    assert 'audit_logs' in formula, f"formula 应从 audit_logs 派生, 实际: {formula}"
+    # [V007.51] 审计数据统一走 v_audit_all 视图
+    assert 'v_audit_all' in formula, f"formula 应从 v_audit_all 派生, 实际: {formula}"
     assert 'COALESCE' in formula, f"formula 应有 COALESCE 兜底 (没 audit log 时用 created_at), 实际: {formula}"
 
     print(f"  Formula: {formula}")

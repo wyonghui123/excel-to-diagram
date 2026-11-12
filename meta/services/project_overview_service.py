@@ -60,13 +60,17 @@ SECTION_SPECS = {
         'sql': (
             "SELECT id, order_id, line_id, schedule_no, schedule_kind, "
             "promised_date, promised_qty, billing_percent, "
+            "billing_fixed_amount, "
             "status FROM sales_order_schedules WHERE project_id = ? "
             "ORDER BY promised_date, id LIMIT ?"
         ),
         # billing_amount 在 sales_order_schedule.yaml 中是 computed（db_column: null），
-        # 不落库；本接口只透传 billing_percent，金额由调用方按行净额派生（不重算）
+        # 不落库；本接口只透传 billing_percent / billing_fixed_amount（二选一），
+        # 金额由调用方派生，规则与 customer_invoice_service._schedule_period_amount
+        # 一致：固定金额优先，否则 行净额 × 比例（不重算）
         'columns': ('id', 'order_id', 'line_id', 'schedule_no', 'schedule_kind',
-                    'promised_date', 'promised_qty', 'billing_percent', 'status'),
+                    'promised_date', 'promised_qty', 'billing_percent',
+                    'billing_fixed_amount', 'status'),
     },
     'work_orders': {
         'table': 'work_orders',

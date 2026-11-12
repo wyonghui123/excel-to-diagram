@@ -1,3 +1,4 @@
+# ALLOW_RAW_SQL: 本文件含裸 SQL 构造 DB 完整性预检测试数据/DDL，守卫豁免（2026-11-09 恢复覆盖）
 """Fix 2026-06-05: DB 完整性预检单测
 
 测试目标：meta/server.py::_preflight_db_integrity_check

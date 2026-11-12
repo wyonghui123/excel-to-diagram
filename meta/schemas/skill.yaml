@@ -365,7 +365,7 @@ ui_view_config:
         label: 新建技能
         icon: plus
         type: primary
-        permission: skill:skill_create
+        permission: skill:create
     defaultSort:
       field: code
       order: asc
@@ -394,7 +394,7 @@ ui_view_config:
         fields: [code, name, category, parent_id, requires_certification, default_validity_months, status, description]
 
 category_config:
-  create_permission: skill:skill_create
-  update_permission: skill:skill_update
-  delete_permission: skill:skill_delete
+  create_permission: skill:create
+  update_permission: skill:update
+  delete_permission: skill:delete
   owner_auto_permission: false

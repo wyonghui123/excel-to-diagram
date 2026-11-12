@@ -1,3 +1,4 @@
+# ALLOW_RAW_SQL: 本文件含裸 SQL 构造条件树测试数据/DDL，守卫豁免（2026-11-09 恢复覆盖）
 import pytest
 
 pytestmark = pytest.mark.integration
@@ -33,7 +34,15 @@ from meta.tests.test_utils import get_test_db_path
 def _ensure_test_hierarchy_data(ds):
     """v3.18 P1: 修复 S008 数据依赖 skip
     确保 version_id=1 的 domain/sub_domain/business_object 存在
+    [FIX 2026-11-09] 隔离测试库可能没有 version_id=1, 先建 product/version 以满足 FK
     """
+    from datetime import datetime
+    now = datetime.now().isoformat()
+    if ds.execute("SELECT COUNT(*) FROM versions WHERE id=1").fetchone()[0] == 0:
+        if ds.execute("SELECT COUNT(*) FROM products WHERE id=1").fetchone()[0] == 0:
+            ds.execute("INSERT INTO products (id, name, code, created_at) VALUES (1, '测试产品', 'PRD001', ?)", (now,))
+        ds.execute("INSERT INTO versions (id, name, product_id, created_at) VALUES (1, 'V1', 1, ?)", (now,))
+        ds.commit()
     # version_id=1 的 domain
     cursor = ds.execute("SELECT COUNT(*) FROM domains WHERE version_id=1")
     if cursor.fetchone()[0] == 0:

@@ -65,6 +65,14 @@ audit:
       - created_at
       - updated_at
 
+org_scope:
+  mode: chain
+  via: receipt_id
+  host: receipt
+  field: inventory_org_id
+  function: inventory
+  write_check: true
+
 fields:
   - id: id
     name: ID

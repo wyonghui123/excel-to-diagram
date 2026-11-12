@@ -25,17 +25,42 @@ from meta.tests.conftest import get_shared_app
 APP_ROUTE_PREFIX = "/api/v1/apps/"
 
 
+def _create_fresh_app():
+    """绕过 conftest 的 shared-app 单例, 按当前 env 真实构建一个 app。
+
+    同一进程内重复真实 create_app() 会向全局 bo_framework 追加重复拦截器,
+    构建完成后恢复拦截器列表, 避免污染其他用例。
+    """
+    from meta.core.bo_framework import bo_framework
+    before = list(bo_framework._interceptors)
+    with warnings.catch_warnings():
+        warnings.simplefilter("ignore", DeprecationWarning)
+        import meta.server as _server
+        _create = getattr(_server, '_original_create_app', _server.create_app)
+        try:
+            return _create()
+        finally:
+            bo_framework._interceptors[:] = before
+
+
 class TestLegacyModeIntegration:
     """ENABLED_APPS 未设置 → 平台行为与改造前一致"""
 
-    def test_no_app_routes_registered(self):
-        app, _ = get_shared_app()
-        rules = {r.rule for r in app.url_map.iter_rules()}
+    @pytest.fixture(scope="class")
+    def legacy_app(self):
+        """显式按 legacy 模式构建 app, 不受同进程其他用例的 ENABLED_APPS 影响。"""
+        os.environ.pop("ENABLED_APPS", None)
+        app = _create_fresh_app()
+        app.config["TESTING"] = True
+        return app
+
+    def test_no_app_routes_registered(self, legacy_app):
+        rules = {r.rule for r in legacy_app.url_map.iter_rules()}
         app_rules = [r for r in rules if r.startswith(APP_ROUTE_PREFIX)]
         assert app_rules == [], f"legacy 模式不应注册应用路由, 实际: {app_rules}"
 
-    def test_platform_health_ok(self):
-        _, client = get_shared_app()
+    def test_platform_health_ok(self, legacy_app):
+        client = legacy_app.test_client()
         assert client.get("/health").status_code == 200
 
 
@@ -84,10 +109,7 @@ class TestEnabledAppIntegration:
         """
         os.environ["ENABLED_APPS"] = "hello_world"
         try:
-            with warnings.catch_warnings():
-                warnings.simplefilter("ignore", DeprecationWarning)
-                from meta.server import create_app
-                app = create_app()
+            app = _create_fresh_app()
         finally:
             os.environ.pop("ENABLED_APPS", None)
         app.config["TESTING"] = True

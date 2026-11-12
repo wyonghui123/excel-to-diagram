@@ -577,7 +577,7 @@ ui_view_config:
         label: 新建过程指令
         icon: plus
         type: primary
-        permission: process_instruction:process_instruction_create
+        permission: process_instruction:create
     defaultSort:
       field: seq
       order: asc
@@ -615,7 +615,7 @@ ui_view_config:
                  is_required, description]
 
 category_config:
-  create_permission: process_instruction:process_instruction_create
-  update_permission: process_instruction:process_instruction_update
-  delete_permission: process_instruction:process_instruction_delete
+  create_permission: process_instruction:create
+  update_permission: process_instruction:update
+  delete_permission: process_instruction:delete
   owner_auto_permission: false

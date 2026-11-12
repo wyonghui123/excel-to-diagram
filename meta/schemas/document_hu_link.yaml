@@ -18,8 +18,8 @@ display_name_field: doc_type
 authorization:
   check: true
   permissions:
-    read: document_hu_link:document_hu_link_read
-    list: document_hu_link:document_hu_link_list
+    read: document_hu_link:read
+    list: document_hu_link:read
 
 import_export:
   auto_crud: false

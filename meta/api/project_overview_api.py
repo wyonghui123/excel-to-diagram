@@ -17,7 +17,7 @@
 
 口径:
   · 只读投影，金额只从 sales_order / line / schedule 读，不复制、不重算（I1）
-  · 权限复用 `project:project_read`（v172 已落双段式码）
+  · 权限复用 `project:read`（v172 已落双段式码）
 """
 
 import logging

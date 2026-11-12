@@ -290,8 +290,12 @@ class TestDeclaration:
         assert legacy["ui"]["readonly"] is True
         assert legacy["semantics"]["readonly_always"] is True
         assert legacy["description"].startswith("已废弃")
-        # 不新增 work_definition_id（P2b）
-        assert _field(op, "work_definition_id") is None
+        # [FIX 2026-11-08] G12 已新增 work_definition_id（来源作业定义，可空 =
+        # 手填步骤），与 P2b 当时的"不新增"结论相反。
+        wd = _field(op, "work_definition_id")
+        assert wd is not None
+        assert wd["nullable"] is True
+        assert wd["semantics"]["display"]["target_type"] == "work_definition"
 
     def test_work_order_operation_indexes(self):
         names = {i["name"] for i in _load_raw("work_order_operation")["indexes"]}

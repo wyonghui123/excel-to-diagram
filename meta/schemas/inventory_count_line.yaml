@@ -25,11 +25,11 @@ hierarchy:
 authorization:
   check: true
   permissions:
-    read: inventory_count:inventory_count_read
-    list: inventory_count:inventory_count_read
-    create: inventory_count:inventory_count_update
-    update: inventory_count:inventory_count_update
-    delete: inventory_count:inventory_count_update
+    read: inventory_count:read
+    list: inventory_count:read
+    create: inventory_count:update
+    update: inventory_count:update
+    delete: inventory_count:update
 
 import_export:
   auto_crud: false
@@ -58,6 +58,14 @@ audit:
     enabled: true
     fields: business_only
     exclude: [id, created_at, updated_at]
+
+org_scope:
+  mode: chain
+  via: count_id
+  host: inventory_count
+  field: org_id
+  function: inventory
+  write_check: true
 
 fields:
   - id: id
@@ -309,6 +317,42 @@ relations:
     source_field: uom_id
     target_field: id
     cardinality: N:1
+
+# [Rule Model M6a-3 2026-11-10] L0 派生度量：单行公式、单据内求值、不落库。
+# 校验规则 / 审批条件按 code 引用（MetricSession 缓存，多引用结果一致）；
+# 与 analytical_model（fact/measures/aggregates 报表语义层）互不混用。
+metrics:
+  - code: deviation_qty
+    formula: counted_qty - snapshot_qty
+    inputs: [counted_qty, snapshot_qty]
+    unit: 基本单位
+    precision: 2
+  - code: deviation_rate
+    formula: deviation_qty / snapshot_qty
+    inputs: [deviation_qty, snapshot_qty]
+    precision: 4
+
+# [Rule Model M6b 2026-11-10] 盘点行容差判定：全键超限才判超容差（all）。
+# 等价于原 limit = max(tolerance_qty_abs, snapshot_qty × tolerance_qty_pct)：
+#   率键按抬头快照的比例容差，绝对值键按抬头容差数量（实例值，经 overrides 传入，
+#   不落 control_parameter_defs —— 绝对容差是单据头快照而非参数）。
+# disposition=hold：可存不可过，释放动作为审批（inventory_count.approve）。
+rules:
+  - id: inventory_count_line_tolerance
+    name: 盘点数量容差
+    type: constraint
+    scope: object
+    enabled: true
+    combine_mode: all
+    disposition: hold
+    release_action: inventory_count.approve
+    keys:
+      - parameter: inventory_count_default_tolerance_qty_pct
+        metric: deviation_rate
+        severity: warning
+      - parameter: inventory_count_tolerance_qty_abs
+        metric: deviation_qty
+        severity: warning
 
 ui_view_config:
   skip_auto_menu: true

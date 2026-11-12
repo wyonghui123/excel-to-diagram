@@ -869,7 +869,7 @@ relations: []
 actions:
   # [FIX BUG-V052.2 2026-07-10 dev agent] 统一权限 code 为短名
   # 原因: 之前 action.id 用 'audit_log_read' (非标准) → permission code 拼成
-  #       'audit_log:audit_log_read' (双重前缀) → DB 实际存的 code
+  #       'audit_log:read' (双重前缀) → DB 实际存的 code
   # 修复: 改用 _standard_actions.yaml 里的标准 id 'crud_list'/'crud_read'/'crud_delete',
   #       permission code 自动拼成 'audit_log:read'/'audit_log:list'/'audit_log:delete' (短名)
   - id: crud_list

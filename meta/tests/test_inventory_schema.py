@@ -216,11 +216,11 @@ def test_readonly_schemas_loaded_actions_are_read_and_list_only():
 def test_schema_permissions_map_read_and_list():
     expected = {
         'inventory_transaction.yaml': (
-            'inventory_transaction:inventory_transaction_read',
-            'inventory_transaction:inventory_transaction_list'),
+            'inventory_transaction:read',
+            'inventory_transaction:read'),
         'inventory_balance.yaml': (
-            'inventory_balance:inventory_balance_read',
-            'inventory_balance:inventory_balance_list'),
+            'inventory_balance:read',
+            'inventory_balance:read'),
     }
     for name, (read_code, list_code) in expected.items():
         perms = _load(name)['authorization']['permissions']
@@ -229,7 +229,7 @@ def test_schema_permissions_map_read_and_list():
 
 
 def test_permission_gate_uses_declared_read_codes():
-    """crud_read/crud_list 按声明的双段码判定；写动作未授予即拒。"""
+    """crud_read/crud_list 按声明的单段码判定；写动作未授予即拒。"""
     from meta.core.permission_gate import evaluate, resolve_required_permission
     from meta.core.yaml_loader import load_yaml_file
 
@@ -238,7 +238,7 @@ def test_permission_gate_uses_declared_read_codes():
         load_yaml_file(str(SCHEMA_DIR / name))  # 注册进 registry
         read_code, source = resolve_required_permission(obj_id, 'crud_read')
         assert source == 'declared'
-        assert read_code == '%s:%s_read' % (obj_id, obj_id)
+        assert read_code == '%s:read' % obj_id
         reader = {'user_id': 1, 'permissions': [read_code]}
         assert evaluate(reader, obj_id, 'crud_read').allowed is True
         assert evaluate(reader, obj_id, 'crud_list').allowed is True

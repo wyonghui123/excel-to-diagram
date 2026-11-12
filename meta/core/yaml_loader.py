@@ -10,8 +10,11 @@ YAML 元模型加载器
 
 import os
 import re
+import sys
+import pickle
+import hashlib
 import logging
-import yaml
+from meta.core import yaml_compat as yaml
 from typing import List, Dict, Any, Optional
 from pathlib import Path
 from dataclasses import dataclass, field
@@ -946,6 +949,10 @@ def parse_ui_detail_view_config(data: Dict[str, Any]) -> UIDetailViewConfig:
         layout=data.get("layout", "tabs"),
         showChangeHistory=data.get("showChangeHistory", True),
         showRelations=data.get("showRelations", True),
+        rule_trace=data.get("rule_trace", {}) or {},
+        # [2026-11-12] detail.actions：业务动作 / 声明式动作的原样声明。
+        #   前端按 permission / visible_when 门控，含 action 的项派发 BO Action。
+        actions=data.get("actions", []) or [],
     )
 
 
@@ -1207,6 +1214,27 @@ def parse_addability(data: Dict[str, Any]) -> Optional[AddabilityConfig]:
             message=a.get("message", ""),
         )
     return None
+
+
+def parse_line_source_policy(object_id: str,
+                             raw: Any) -> Dict[str, List[str]]:
+    """[S8 Wave D FR-8] 解析行来源策略：document_role → 允许来源种类列表。
+
+    空 = 未声明（内核不校验）；结构非法直接拒绝加载，避免静默失效。
+    """
+    if not raw:
+        return {}
+    if not isinstance(raw, dict):
+        raise ValueError(
+            "[FR-8] {0}: line_source_policy 必须是映射".format(object_id))
+    policy: Dict[str, List[str]] = {}
+    for role, kinds in raw.items():
+        if not isinstance(kinds, (list, tuple)):
+            raise ValueError(
+                "[FR-8] {0}: line_source_policy[{1!r}] 必须是列表".format(
+                    object_id, role))
+        policy[str(role)] = [str(item) for item in kinds if str(item)]
+    return policy
 
 
 def parse_deletion_policy(data: Dict[str, Any]) -> Optional[DeletionPolicy]:
@@ -1949,6 +1977,10 @@ def parse_constraint(data: Dict[str, Any]) -> MetaConstraint:
         description=data.get("description", ""),
         constraint_type=data.get("constraint_type", "check"),
         deferrable=data.get("deferrable", False),
+        # [规则模型 M6b 2026-11-10] 多 key 判定 + hold 释放动作
+        combine_mode=str(data.get("combine_mode") or "").lower(),
+        keys=list(data.get("keys") or []),
+        release_action=str(data.get("release_action") or ""),
         semantics=parse_semantics(data.get("semantics", {})),
     )
 
@@ -2000,6 +2032,7 @@ def parse_state_transition_ui_hints(data: Dict[str, Any]) -> Optional["StateTran
         icon=uh.get("icon", ""),
         confirm_message=uh.get("confirm_message", ""),
         highlight=uh.get("highlight", False),
+        input_fields=uh.get("input_fields", []) or [],
     )
 
 
@@ -2129,6 +2162,18 @@ def parse_rule(data: Dict[str, Any]) -> MetaRule:
         )
     # [G1 修复 2026-10-03] 显式依赖统一在此注入，避免逐个 parse_* 重复。
     rule.depends_on = list(data.get("depends_on", []) or [])
+    # [规则模型 M1 2026-11-10] 处置动作统一注入（组合合法性由
+    # rule_declaration_validator.validate_rule_actions 在加载期校验）。
+    rule.disposition = str(data.get("disposition") or "").lower()
+    # [规则模型 M5 2026-11-10] 命中策略显式声明（合法性由
+    # rule_declaration_validator.validate_hit_policies 在加载期校验）。
+    rule.hit_policy = str(data.get("hit_policy") or "").lower()
+    # [规则模型 M6b 2026-11-10] 判定聚合方式（any / all，默认 all）；
+    # 合法性由 rule_declaration_validator.validate_combine_modes 在加载期校验。
+    rule.combine_mode = str(data.get("combine_mode") or "").lower()
+    # [规则模型 M5 2026-11-10] 治理字段（FR-007），规则中心 validation 页签展示
+    rule.version = str(data.get("version") or "")
+    rule.effective_from = str(data.get("effective_from") or "")
     if unknown_type:
         # [SSOT 2026-10-29] 保留 YAML 原文，便于日志/排障追溯（rule_type 已降级为 VALIDATION）
         rule.custom["raw_rule_type"] = rule_type_str
@@ -2788,7 +2833,11 @@ _KNOWN_OBJECT_KEYS = frozenset({
     # 编号 / 状态机 / 修订 / 单据六件套 / 行级策略
     "key_template", "states", "state_field_policies", "requires_state_machine",
     "revision_policy", "document", "doc_effect",
-    "field_policies", "conditional_required_examples",
+    "field_policies", "conditional_required_examples", "metrics",
+    # 组织口径 / 取号 / 审批 / 来源策略 / 任务运行
+    "org_scope", "numbering", "approval", "line_source_policy",
+    "generic_api_mode", "module", "extra_entity_tables",
+    "dimension_profiles",
 })
 
 
@@ -2800,6 +2849,47 @@ def find_unknown_keys(data: Dict[str, Any]) -> List[str]:
     if not isinstance(data, dict) or "id" not in data:
         return []
     return sorted(str(key) for key in data if str(key) not in _KNOWN_OBJECT_KEYS)
+
+
+def _parse_metric_definitions(object_type: str, raw: Any) -> List[Any]:
+    """解析 ``metrics:`` 段为 ``MetricDefinition`` 列表（M6a-3）。
+
+    结构与 ``rule_metrics.MetricDefinition`` 同口径，非法声明在加载期即报错：
+      · 段必须是列表，每项是映射；
+      · code / formula 必填，同一对象内 code 唯一；
+      · object_type 缺省取所在 BO 的 id，显式 ``'*'`` 表示跨对象共享定义。
+
+    注意：这是 L0 派生度量（单行公式、单据内求值、不落库），
+    与 ``analytical_model`` 的 fact / measures / aggregates 报表语义无关。
+    """
+    if not raw:
+        return []
+    if not isinstance(raw, list):
+        raise ValueError(
+            "[M6a-3] {0}: metrics 必须是列表".format(object_type))
+
+    from meta.core.rule_metrics import MetricDefinition
+
+    definitions: List[Any] = []
+    seen = set()
+    for item in raw:
+        if not isinstance(item, dict):
+            raise ValueError(
+                "[M6a-3] {0}: metrics 每项必须是映射".format(object_type))
+        code = str(item.get("code") or "").strip()
+        if code in seen:
+            raise ValueError(
+                "[M6a-3] {0}: 度量 {1} 重复定义".format(object_type, code))
+        seen.add(code)
+        definitions.append(MetricDefinition(
+            code=code,
+            formula=item.get("formula"),
+            inputs=tuple(item.get("inputs") or ()),
+            unit=item.get("unit", ""),
+            precision=item.get("precision", 2),
+            object_type=str(item.get("object_type") or object_type),
+        ))
+    return definitions
 
 
 def parse_meta_object(data: Dict[str, Any], source_file: str = "") -> MetaObject:
@@ -2871,6 +2961,8 @@ def parse_meta_object(data: Dict[str, Any], source_file: str = "") -> MetaObject
         import_export=parse_import_export_config(data.get("import_export", {})),
         audit=parse_audit_config(data.get("audit", {})),
         analytical_model=data.get("analytical_model", {}),
+        # [Rule Model M6a-3 2026-11-10] 派生度量声明（metrics: 段）
+        metrics=_parse_metric_definitions(data.get("id", ""), data.get("metrics")),
         key_template=parse_key_template(data),
         ui_view_config=ui_view_config,
         ui_view_configs=ui_view_configs,
@@ -2879,9 +2971,23 @@ def parse_meta_object(data: Dict[str, Any], source_file: str = "") -> MetaObject
         addability=parse_addability(data),
         display_name_field=data.get("display_name_field"),
         skip_generic_api=data.get("skip_generic_api", False),
+        # [P3 2026-11-10] 通用 API 档位；skip_generic_api=True 时归一为 disabled
+        generic_api_mode=(
+            "disabled" if data.get("skip_generic_api", False)
+            else (data.get("generic_api_mode") or "full")
+        ),
         state_machine_required=data.get("requires_state_machine", False),
         # [Reversal Platform D1 2026-11-06] 逆向写面声明（规格 §7）
         doc_effect=data.get("doc_effect") or {},
+        # [Spec 24 T1 2026-11-06] 业务对象组织边界声明
+        org_scope=data.get("org_scope") or {},
+        # [Rule Convergence M1 2026-11-07] 单据编号声明
+        numbering=data.get("numbering") or {},
+        # [Rule Convergence M2 2026-11-07] 审批对象注册声明
+        approval=data.get("approval") or {},
+        # [S8 Wave D FR-8 2026-11-10] 行来源策略（document_role → 允许来源种类）
+        line_source_policy=parse_line_source_policy(
+            data.get("id") or "", data.get("line_source_policy")),
     )
     obj._deletion_policy = parse_deletion_policy(data)
     obj.associations = parse_associations(data)
@@ -2947,6 +3053,7 @@ def parse_meta_object(data: Dict[str, Any], source_file: str = "") -> MetaObject
 _yaml_cache = {}
 _shared_mtimes = {}
 _dir_registry_cache = {}
+_dir_registry_ids = {}
 
 def _get_file_cache_key(file_path: str) -> Optional[str]:
     """获取文件缓存键（基于 file_path + mtime），如果文件不存在返回 None
@@ -3093,6 +3200,9 @@ def ensure_crud_actions(obj: 'MetaObject') -> 'MetaObject':
     # [G7 2026-11-02] 平台机制对象：不自动补通用 CRUD actions（写入口归专属服务）。
     if getattr(obj, 'skip_generic_api', False):
         return obj
+
+    # [P3 2026-11-10] 只读对象只补读动作，避免菜单/权限生成出写入口。
+    read_only_api = getattr(obj, 'generic_api_mode', 'full') == 'read_only'
     
     # 检查是否禁用自动添加 CRUD actions
     if hasattr(obj, 'import_export') and obj.import_export:
@@ -3120,6 +3230,8 @@ def ensure_crud_actions(obj: 'MetaObject') -> 'MetaObject':
     missing_actions = []
     
     for suffix, action_template in CRUD_ACTION_TEMPLATES.items():
+        if read_only_api and suffix not in ('_read', '_list'):
+            continue
         action_id = f'{obj.id}{suffix}'
         if action_id not in existing_ids:
             path = action_template["path"].format(object_id=obj.id)
@@ -3141,6 +3253,78 @@ def ensure_crud_actions(obj: 'MetaObject') -> 'MetaObject':
     return obj
 
 
+# [TEST-EFF P1-4] 目录级解析缓存
+# load_yaml_directory 每个进程约 1s（实测 203 个对象 1.05s），pickle 命中路径
+# 约 0.16s（含内容哈希 0.02s + 磁盘读 0.00s + loads 0.14s）。缓存键 =
+# 目录下所有 *.yaml 内容哈希 + Python 版本 + 本文件/models.py mtime：
+#   - YAML 内容变化（含新增/删除文件）→ 重建
+#   - 解析逻辑（本文件）或数据模型（models.py）变化 → 重建
+#   - 缓存损坏 / 跨解释器不兼容 → 异常降级为重建，不影响启动
+# 缓存写 <dir>/.cache/（.gitignore 已忽略 .cache/），临时文件 + os.replace
+# 原子替换，避免并发进程读到半成品。持久化结构变化时 _DIR_CACHE_VERSION +1。
+_DIR_CACHE_VERSION = 1
+
+
+def _dir_dependency_stamp() -> str:
+    """解析逻辑 + 数据模型的变更戳，用于缓存失效。"""
+    try:
+        loader_mtime = str(Path(__file__).stat().st_mtime)
+    except Exception:
+        loader_mtime = 'unknown'
+    try:
+        models_mtime = str((Path(__file__).parent / 'models.py').stat().st_mtime)
+    except Exception:
+        models_mtime = 'unknown'
+    return "py{0}.{1}|loader={2}|models={3}".format(
+        sys.version_info[0], sys.version_info[1], loader_mtime, models_mtime)
+
+
+def _dir_declaration_hash(dir_path: Path) -> str:
+    """目录声明的 sha256：覆盖全部 *.yaml 内容 + 依赖变更戳。"""
+    hasher = hashlib.sha256()
+    hasher.update(("v{0}|".format(_DIR_CACHE_VERSION)
+                   + _dir_dependency_stamp()).encode('utf-8'))
+    for yaml_file in sorted(dir_path.glob("*.yaml"), key=lambda p: p.name):
+        hasher.update(b"\0" + yaml_file.name.encode('utf-8') + b"\0")
+        hasher.update(yaml_file.read_bytes())
+    return hasher.hexdigest()
+
+
+def _dir_cache_path(dir_path: Path) -> Path:
+    return dir_path / ".cache" / "objects_v{0}.pkl".format(_DIR_CACHE_VERSION)
+
+
+def _read_dir_cache(dir_path: Path, decl_hash: str) -> Optional[List[MetaObject]]:
+    try:
+        with _dir_cache_path(dir_path).open('rb') as f:
+            payload = pickle.load(f)
+        if (isinstance(payload, dict)
+                and payload.get('version') == _DIR_CACHE_VERSION
+                and payload.get('declaration_hash') == decl_hash
+                and isinstance(payload.get('objects'), list)):
+            return payload['objects']
+    except Exception:
+        return None
+    return None
+
+
+def _write_dir_cache(dir_path: Path, decl_hash: str,
+                     objects: List[MetaObject]) -> None:
+    try:
+        cache_path = _dir_cache_path(dir_path)
+        cache_path.parent.mkdir(parents=True, exist_ok=True)
+        tmp_path = cache_path.with_name(
+            cache_path.name + ".{0}.tmp".format(os.getpid()))
+        with tmp_path.open('wb') as f:
+            pickle.dump({'version': _DIR_CACHE_VERSION,
+                         'declaration_hash': decl_hash,
+                         'objects': objects}, f,
+                        protocol=pickle.HIGHEST_PROTOCOL)
+        os.replace(str(tmp_path), str(cache_path))
+    except Exception as exc:
+        _info("[YAML Loader] Directory cache write skipped: {0}".format(exc))
+
+
 def load_yaml_directory(dir_path: str) -> List[MetaObject]:
     objects = []
     dir_path = Path(dir_path)
@@ -3151,6 +3335,22 @@ def load_yaml_directory(dir_path: str) -> List[MetaObject]:
     
     shared_path = dir_path / "shared_properties.yaml"
     aspects_path = dir_path / "aspects.yaml"
+
+    # [TEST-EFF P1-4] 目录级缓存命中：跳过 200+ 文件解析
+    decl_hash = None
+    try:
+        decl_hash = _dir_declaration_hash(dir_path)
+    except Exception:
+        decl_hash = None
+    if decl_hash:
+        cached = _read_dir_cache(dir_path, decl_hash)
+        if cached is not None:
+            # 保持与全量解析一致的全局副作用（共享文件失效检查 + _TYPE_SPECS）
+            _check_and_invalidate_shared_cache(shared_path, aspects_path)
+            load_type_specs(str(dir_path))
+            _info("[YAML Loader] Loaded {0} objects from directory cache".format(
+                len(cached)))
+            return cached
 
     _check_and_invalidate_shared_cache(shared_path, aspects_path)
     
@@ -3187,6 +3387,9 @@ def load_yaml_directory(dir_path: str) -> List[MetaObject]:
     # [S7.1] 单据六件套的跨对象校验（line_object / line_parent_field / line_sequence_field）
     validate_document_profiles(objects)
 
+    if decl_hash:
+        _write_dir_cache(dir_path, decl_hash, objects)
+
     return objects
 
 
@@ -3196,6 +3399,26 @@ def register_from_yaml(file_path: str, shared_props: Dict[str, List[Dict[str, An
         registry.register(obj)
         return True
     return False
+
+
+def register_metric_definitions(objects: List[MetaObject]) -> int:
+    """把对象 ``metrics:`` 声明灌入 ``DEFAULT_METRIC_REGISTRY``（M6a-3）。
+
+    按 object_type 整体替换，因此目录重复加载 / reload 幂等；
+    返回本次灌入的度量条数。
+    """
+    groups: Dict[str, List[Any]] = {}
+    for obj in objects:
+        for definition in (getattr(obj, "metrics", None) or []):
+            groups.setdefault(definition.object_type, []).append(definition)
+    if not groups:
+        return 0
+
+    from meta.core.rule_metrics import DEFAULT_METRIC_REGISTRY
+
+    for object_type, definitions in groups.items():
+        DEFAULT_METRIC_REGISTRY.replace_scope(object_type, definitions)
+    return sum(len(items) for items in groups.values())
 
 
 def register_from_directory(dir_path: str, target: Dict = None) -> int:
@@ -3219,7 +3442,10 @@ def register_from_directory(dir_path: str, target: Dict = None) -> int:
     
     # 检查是否强制重新加载
     if target is None and canonical_dir in _dir_registry_cache and not MetaRegistry.__force_reload__:
-        if registry._objects:
+        cached_ids = _dir_registry_ids.get(canonical_dir)
+        # 缓存只在注册表仍保有本目录对象时可信: registry.reload() 会用单个目录
+        # 重建 _objects, 其他目录(如 apps/)的对象被丢弃, 此时必须重新注册。
+        if registry._objects and cached_ids and cached_ids.issubset(registry._objects.keys()):
             cached_count = _dir_registry_cache[canonical_dir]
             _info("[YAML Loader] Using cached registration for directory: {0} ({1} objects)".format(
                 canonical_dir, cached_count))
@@ -3237,7 +3463,11 @@ def register_from_directory(dir_path: str, target: Dict = None) -> int:
             registry.register(obj)
             count += 1
         _dir_registry_cache[canonical_dir] = count
-    
+        _dir_registry_ids[canonical_dir] = {obj.id for obj in objects}
+
+    # [Rule Model M6a-3 2026-11-10] metrics: 段 → DEFAULT_METRIC_REGISTRY
+    register_metric_definitions(objects)
+
     return count
 
 

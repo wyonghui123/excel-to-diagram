@@ -59,6 +59,13 @@ audit:
   dissociate:
     enabled: true
 
+org_scope:
+  mode: chain
+  via: transfer_order_id
+  host: transfer_order
+  function: inventory
+  write_check: true
+
 fields:
   - id: id
     name: ID

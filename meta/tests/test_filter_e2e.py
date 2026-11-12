@@ -1,3 +1,4 @@
+# ALLOW_RAW_SQL: 本文件含裸 SQL 构造过滤链路测试数据/DDL，守卫豁免（2026-11-09 恢复覆盖）
 import pytest
 
 pytestmark = pytest.mark.e2e
@@ -31,6 +32,10 @@ def app_with_db():
     
     import meta.api.filter_variant_api as fva
     fva._db_path = db_path
+    
+    # [夹具补齐 2026-11-09] _init_table 走 bo_framework.transaction → commit 需要 runtime config
+    from meta.core.db_config_detector import detect_runtime_config
+    detect_runtime_config(db_path)
     
     with app.app_context():
         _init_table()

@@ -20,24 +20,32 @@
 """
 from typing import List, Dict, Optional, Any
 
+from meta.core.hierarchy_loader import get_hierarchy_chain, get_parent_info_map
+
+
+def _build_parent_map() -> Dict[str, Dict[str, Optional[str]]]:
+    """[Rule Convergence M3 2026-11-07] 6 层父子关系由 hierarchies.yaml 派生（FR-002）。"""
+    info_map = get_parent_info_map()
+    result: Dict[str, Dict[str, Optional[str]]] = {}
+    for obj, _fk, _table in get_hierarchy_chain():
+        info = info_map.get(obj)
+        result[obj] = (
+            {'object': info[0], 'field': info[2]} if info
+            else {'object': None, 'field': None}
+        )
+    return result
+
 
 class BoYamlCache:
-    """[v1.0.1] BO 元数据缓存 — 轻量版 (v1.1 升级为 yaml-driven)."""
+    """[v1.0.1] BO 元数据缓存 — 层级声明由 hierarchy_loader 派生."""
 
-    # [v1.0.1 硬编码] 6 BO 的 parent 关系 (跟 data_permission_service._get_parent_resource 同步)
-    # chain: child → parent 沿 yaml.parent 反向爬, 自下而上
-    # 例: sub_domain → domain → version → product
-    _PARENT_MAP: Dict[str, Dict[str, str]] = {
-        'product':         {'object': None, 'field': None},  # 顶层, 无父
-        'version':         {'object': 'product', 'field': 'product_id'},
-        'domain':          {'object': 'version', 'field': 'version_id'},
-        'sub_domain':      {'object': 'domain',  'field': 'domain_id'},
-        'service_module':  {'object': 'sub_domain', 'field': 'sub_domain_id'},
-        'business_object': {'object': 'service_module', 'field': 'service_module_id'},
-    }
+    _PARENT_MAP: Dict[str, Dict[str, Optional[str]]] = _build_parent_map()
 
     # 顶层 BO 列表 (chain 起点)
-    _TOP_BOS: List[str] = ['product']
+    _TOP_BOS: List[str] = [
+        obj for obj, _fk, _table in get_hierarchy_chain()
+        if obj not in get_parent_info_map()
+    ]
 
     @classmethod
     def get_parent(cls, object_type: str) -> Optional[Dict[str, str]]:

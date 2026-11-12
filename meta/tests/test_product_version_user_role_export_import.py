@@ -1,4 +1,5 @@
 # -*- coding: utf-8 -*-
+# ALLOW_RAW_SQL: 本文件含裸 SQL 构造导入导出测试数据/DDL，守卫豁免（2026-11-09 恢复覆盖）
 """产品/版本/用户/角色/用户组 导出导入测试
 
 覆盖：
@@ -15,6 +16,11 @@ import os
 def get_test_db_path():
     from meta.tests.test_utils import get_test_db_path
     return get_test_db_path()
+
+
+def _upsert_ok(result) -> bool:
+    """_upsert_record 已改为返回 {"success": bool, "error", "operation"}，兼容旧 True 返回值"""
+    return result is True or (isinstance(result, dict) and result.get('success') is True)
 
 
 class TestProductVersionExportImport:
@@ -119,7 +125,7 @@ class TestProductVersionExportImport:
         }
         config = ImportExportConfig()
         result = self.ie._upsert_record('product', record, config)
-        assert result is True, "upsert 创建产品应成功"
+        assert _upsert_ok(result), f"upsert 创建产品应成功: {result}"
 
         cursor = ds.execute("SELECT name FROM products WHERE code = ?", [new_code])
         row = cursor.fetchone()
@@ -142,16 +148,20 @@ class TestProductVersionExportImport:
         new_code = f"{product_code}_{uuid.uuid4().hex[:4].upper()}"
         record = {
             'code': new_code,
-            'name': f'测试版本_{new_code}',
+            # [FIX 2026-11-09] version.name 校验规则为 ^[A-Za-z0-9][A-Za-z0-9_.\-]*$，中文名会被拒绝
+            'name': f'TestVersion_{new_code}',
             'product_id': product_id,
         }
         config = ImportExportConfig()
         result = self.ie._upsert_record('version', record, config)
-        assert result is True, "upsert 创建版本应成功"
+        assert _upsert_ok(result), f"upsert 创建版本应成功: {result}"
 
-        cursor = ds.execute("SELECT name FROM versions WHERE code = ?", [new_code])
+        # [FIX 2026-11-09] versions.code 已废弃（2026-06-13），唯一业务键改为 name，
+        #   落库后 code 可能为空，因此按 name 回查并校验 product_id。
+        cursor = ds.execute("SELECT name, product_id FROM versions WHERE name = ?", [record['name']])
         row = cursor.fetchone()
-        assert row is not None, f"版本 {new_code} 应存在于数据库"
+        assert row is not None, f"版本 {record['name']} 应存在于数据库"
+        assert row[1] == product_id, f"版本应归属产品 {product_id}，实际: {row[1]}"
 
     def test_06_deep_insert_product_with_version(self):
         """Deep Insert：产品 + 版本级联导入（验证导出结构）"""
@@ -239,8 +249,8 @@ class TestUserRoleUserGroupExportImport:
         from openpyxl import load_workbook
         wb = load_workbook(result.file_path)
 
-        assert '角色' in wb.sheetnames or 'permission_set' in wb.sheetnames, \
-            f"应包含角色 Sheet，实际: {wb.sheetnames}"
+        assert '权限集' in wb.sheetnames or '角色' in wb.sheetnames or 'permission_set' in wb.sheetnames, \
+            f"应包含权限集 Sheet，实际: {wb.sheetnames}"
 
     def test_03_export_user_group_has_correct_structure(self):
         """导出用户组：Sheet 结构正确"""
@@ -258,8 +268,8 @@ class TestUserRoleUserGroupExportImport:
         from openpyxl import load_workbook
         wb = load_workbook(result.file_path)
 
-        assert '用户组' in wb.sheetnames or 'org' in wb.sheetnames, \
-            f"应包含用户组 Sheet，实际: {wb.sheetnames}"
+        assert '组织' in wb.sheetnames or '用户组' in wb.sheetnames or 'org' in wb.sheetnames, \
+            f"应包含组织 Sheet，实际: {wb.sheetnames}"
 
     def test_04_user_cud_upsert_create(self):
         """用户 CUD：upsert 创建新用户"""
@@ -272,10 +282,12 @@ class TestUserRoleUserGroupExportImport:
         record = {
             'username': new_username,
             'email': f'{new_username}@test.com',
+            # [FIX 2026-11-09] user.yaml 要求 display_name 必填
+            'display_name': f'Test User {new_username}',
         }
         config = ImportExportConfig()
         result = self.ie._upsert_record('user', record, config)
-        assert result is True, "upsert 创建用户应成功"
+        assert _upsert_ok(result), f"upsert 创建用户应成功: {result}"
 
         cursor = ds.execute("SELECT email FROM users WHERE username = ?", [new_username])
         row = cursor.fetchone()
@@ -295,7 +307,7 @@ class TestUserRoleUserGroupExportImport:
         }
         config = ImportExportConfig()
         result = self.ie._upsert_record('permission_set', record, config)
-        assert result is True, "upsert 创建角色应成功"
+        assert _upsert_ok(result), f"upsert 创建权限集应成功: {result}"
 
         cursor = ds.execute("SELECT name FROM permission_sets WHERE code = ?", [new_code])
         row = cursor.fetchone()
@@ -315,7 +327,7 @@ class TestUserRoleUserGroupExportImport:
         }
         config = ImportExportConfig()
         result = self.ie._upsert_record('org', record, config)
-        assert result is True, "upsert 创建用户组应成功"
+        assert _upsert_ok(result), f"upsert 创建组织应成功: {result}"
 
         cursor = ds.execute("SELECT name FROM orgs WHERE code = ?", [new_code])
         row = cursor.fetchone()
@@ -382,10 +394,10 @@ class TestBatchAssociation:
 
         cursor = ds.execute("""
             SELECT name FROM sqlite_master
-            WHERE type='table' AND name='user_group_members'
+            WHERE type='table' AND name='org_members'
         """)
         row = cursor.fetchone()
-        assert row is not None, "user_group_members 关联表应存在"
+        assert row is not None, "org_members（组织成员）关联表应存在"
 
     def test_02_user_role_association_supported(self):
         """用户-角色关联：验证关联表存在"""
@@ -394,10 +406,10 @@ class TestBatchAssociation:
 
         cursor = ds.execute("""
             SELECT name FROM sqlite_master
-            WHERE type='table' AND name='user_roles'
+            WHERE type='table' AND name='user_permission_sets'
         """)
         row = cursor.fetchone()
-        assert row is not None, "user_roles 关联表应存在"
+        assert row is not None, "user_permission_sets（用户-权限集）关联表应存在"
 
     def test_03_assign_user_to_group(self):
         """批量关联：将用户添加到用户组"""
@@ -408,23 +420,23 @@ class TestBatchAssociation:
         if not row:
             pytest.skip("数据库中无 user/org 数据")
 
-        user_id, username, group_id, group_code = row
+        user_id, username, org_id, org_code = row
 
         cursor = ds.execute("""
-            SELECT 1 FROM org_members WHERE user_id = ? AND group_id = ?
-        """, [user_id, group_id])
+            SELECT 1 FROM org_members WHERE user_id = ? AND org_id = ?
+        """, [user_id, org_id])
         if cursor.fetchone():
-            pytest.skip("用户已在用户组中")
+            pytest.skip("用户已在组织")
 
         ds.execute("""
-            INSERT INTO org_members (user_id, group_id)
+            INSERT INTO org_members (user_id, org_id)
             VALUES (?, ?)
-        """, [user_id, group_id])
+        """, [user_id, org_id])
 
         cursor = ds.execute("""
-            SELECT 1 FROM org_members WHERE user_id = ? AND group_id = ?
-        """, [user_id, group_id])
-        assert cursor.fetchone() is not None, "用户应被添加到用户组"
+            SELECT 1 FROM org_members WHERE user_id = ? AND org_id = ?
+        """, [user_id, org_id])
+        assert cursor.fetchone() is not None, "用户应被添加到组织"
 
     def test_04_assign_role_to_group(self):
         """批量关联：将角色分配给用户组"""
@@ -435,30 +447,30 @@ class TestBatchAssociation:
         if not row:
             pytest.skip("数据库中无 permission_set/org 数据")
 
-        permission_set_id, role_code, group_id, group_code = row
+        permission_set_id, role_code, org_id, org_code = row
 
         cursor = ds.execute("""
             SELECT name FROM sqlite_master
-            WHERE type='table' AND name='group_roles'
+            WHERE type='table' AND name='org_permission_sets'
         """)
         if not cursor.fetchone():
-            pytest.skip("group_roles 关联表不存在")
+            pytest.skip("org_permission_sets 关联表不存在")
 
         cursor = ds.execute("""
-            SELECT 1 FROM org_permission_sets WHERE permission_set_id = ? AND group_id = ?
-        """, [permission_set_id, group_id])
+            SELECT 1 FROM org_permission_sets WHERE permission_set_id = ? AND org_id = ?
+        """, [permission_set_id, org_id])
         if cursor.fetchone():
-            pytest.skip("角色已分配给用户组")
+            pytest.skip("权限集已分配给组织")
 
         ds.execute("""
-            INSERT INTO org_permission_sets (permission_set_id, group_id)
+            INSERT INTO org_permission_sets (permission_set_id, org_id)
             VALUES (?, ?)
-        """, [permission_set_id, group_id])
+        """, [permission_set_id, org_id])
 
         cursor = ds.execute("""
-            SELECT 1 FROM org_permission_sets WHERE permission_set_id = ? AND group_id = ?
-        """, [permission_set_id, group_id])
-        assert cursor.fetchone() is not None, "角色应被分配给用户组"
+            SELECT 1 FROM org_permission_sets WHERE permission_set_id = ? AND org_id = ?
+        """, [permission_set_id, org_id])
+        assert cursor.fetchone() is not None, "权限集应被分配给组织"
 
     def test_05_export_user_with_group_membership(self):
         """导出用户：包含用户组成员关系"""
@@ -618,23 +630,16 @@ class TestValueHelpForObjects:
             f"version.product_id target_bo 应为 product，实际: {target_bo}"
 
     def test_07_version_owner_id_value_help_bo(self):
-        """version.owner_id: bo value_help (user)"""
+        """version.owner_id: V1.1.4 起降级为隐藏字段，负责人选择只在 product 层"""
         field = self._find_field('version', 'owner_id')
         if not field:
             pytest.skip("找不到 version.owner_id 字段")
 
-        vh = getattr(field, 'value_help', None)
-        assert vh is not None, "version.owner_id 应有 value_help"
-
-        source = getattr(vh, 'source', None)
-        assert source is not None, "version.owner_id value_help 应有 source"
-
-        source_type = getattr(source, 'type', None)
-        assert source_type == 'bo', f"version.owner_id source.type 应为 bo，实际: {source_type}"
-
-        target_bo = getattr(source, 'target_bo', None)
-        assert target_bo == 'user', \
-            f"version.owner_id target_bo 应为 user，实际: {target_bo}"
+        # [V1.1.4 2026-06-11] 删除 version.owner_id 字段定义（DB 列保留向后兼容）；
+        # [BUG-V019 2026-06-26] 重新加入但 export_visible/import_visible=false，
+        # 因此不应再提供 value_help（负责人选择由 product.owner_id 承担，见 test_05）。
+        assert getattr(field, 'value_help', None) is None, \
+            "version.owner_id 已隐藏，不应配置 value_help"
 
     def test_08_user_status_export_has_dv(self):
         """导出用户：status 列应有枚举下拉"""
@@ -802,17 +807,20 @@ class TestRelatedObjectsValueHelp:
         return None
 
     def test_01_version_visibility_enum_values(self):
-        """version.visibility: enum_values (public/draft)"""
-        field = self._find_field('version', 'visibility')
+        """product.visibility: enum_values (private/public)
+
+        [V1.1.2 2026-06-11] visibility 已从 version 上移到 product，version 侧无该字段。
+        """
+        field = self._find_field('product', 'visibility')
         if not field:
-            pytest.skip("找不到 version.visibility 字段")
+            pytest.skip("找不到 product.visibility 字段")
 
         enum_values = getattr(field, 'enum_values', None)
-        assert enum_values is not None, "version.visibility 应有 enum_values"
+        assert enum_values is not None, "product.visibility 应有 enum_values"
 
         values = [ev.get('value') if isinstance(ev, dict) else getattr(ev, 'value', None) for ev in enum_values]
-        assert 'public' in values, f"version.visibility 应包含 public，实际: {values}"
-        assert 'draft' in values, f"version.visibility 应包含 draft，实际: {values}"
+        assert 'public' in values, f"product.visibility 应包含 public，实际: {values}"
+        assert 'private' in values, f"product.visibility 应包含 private，实际: {values}"
 
     def test_02_version_visibility_export_has_dv(self):
         """导出版本：visibility 列应有枚举下拉"""

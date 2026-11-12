@@ -1,0 +1,235 @@
+{
+  "generated_at": "2026-11-10T11:37:18",
+  "db": "D:\\filework\\excel-to-diagram\\test_temp\\startup_breakdown.db",
+  "db_note": "副本",
+  "env": {
+    "SKIP_DB_PREFLIGHT": "1",
+    "GUARD_FORCE": null,
+    "CRON_JOBS_ENABLED": "0",
+    "PYTHONHASHSEED": null,
+    "TESTING": "true"
+  },
+  "runs": [
+    {
+      "run": 0,
+      "mode": "first",
+      "total_s": 1.884,
+      "rules": 487,
+      "sections": {
+        "menu_auto_persist": {
+          "seconds": 1.089,
+          "calls": 1
+        },
+        "register_blueprint": {
+          "seconds": 0.212,
+          "calls": 74
+        },
+        "add_url_rule": {
+          "seconds": 0.208,
+          "calls": 487
+        },
+        "yaml_register_from_directory": {
+          "seconds": 0.12,
+          "calls": 1
+        },
+        "init_menu_permissions": {
+          "seconds": 0.053,
+          "calls": 1
+        },
+        "init_manage_services(schema sync)": {
+          "seconds": 0.035,
+          "calls": 1
+        },
+        "init_task_seed_data": {
+          "seconds": 0.029,
+          "calls": 1
+        },
+        "init_task_menus": {
+          "seconds": 0.02,
+          "calls": 1
+        },
+        "init_region_seed_data": {
+          "seconds": 0.013,
+          "calls": 1
+        },
+        "init_identity_services": {
+          "seconds": 0.003,
+          "calls": 1
+        },
+        "init_enum_services": {
+          "seconds": 0.002,
+          "calls": 1
+        },
+        "init_user_services": {
+          "seconds": 0.001,
+          "calls": 1
+        },
+        "init_org_services": {
+          "seconds": 0.0,
+          "calls": 1
+        },
+        "init_permission_set_services": {
+          "seconds": 0.0,
+          "calls": 1
+        },
+        "preflight_db_check": {
+          "seconds": 0.0,
+          "calls": 1
+        },
+        "init_auth_services": {
+          "seconds": 0.0,
+          "calls": 1
+        },
+        "init_database_services": {
+          "seconds": 0.0,
+          "calls": 1
+        },
+        "init_org_function_services": {
+          "seconds": 0.0,
+          "calls": 1
+        },
+        "init_data_perm_services": {
+          "seconds": 0.0,
+          "calls": 1
+        },
+        "init_audit_services": {
+          "seconds": 0.0,
+          "calls": 1
+        },
+        "init_association_services": {
+          "seconds": 0.0,
+          "calls": 1
+        }
+      }
+    },
+    {
+      "run": 1,
+      "mode": "warm",
+      "total_s": 0.451,
+      "rules": 487,
+      "sections": {
+        "register_blueprint": {
+          "seconds": 0.191,
+          "calls": 74
+        },
+        "add_url_rule": {
+          "seconds": 0.187,
+          "calls": 487
+        },
+        "init_menu_permissions": {
+          "seconds": 0.055,
+          "calls": 1
+        },
+        "init_manage_services(schema sync)": {
+          "seconds": 0.04,
+          "calls": 1
+        },
+        "init_task_seed_data": {
+          "seconds": 0.027,
+          "calls": 1
+        },
+        "init_task_menus": {
+          "seconds": 0.017,
+          "calls": 1
+        },
+        "init_region_seed_data": {
+          "seconds": 0.012,
+          "calls": 1
+        },
+        "menu_auto_persist": {
+          "seconds": 0.006,
+          "calls": 1
+        },
+        "init_identity_services": {
+          "seconds": 0.005,
+          "calls": 1
+        },
+        "init_enum_services": {
+          "seconds": 0.002,
+          "calls": 1
+        },
+        "init_user_services": {
+          "seconds": 0.001,
+          "calls": 1
+        },
+        "init_org_services": {
+          "seconds": 0.0,
+          "calls": 1
+        },
+        "init_permission_set_services": {
+          "seconds": 0.0,
+          "calls": 1
+        },
+        "yaml_register_from_directory": {
+          "seconds": 0.0,
+          "calls": 1
+        },
+        "init_org_function_services": {
+          "seconds": 0.0,
+          "calls": 1
+        },
+        "init_auth_services": {
+          "seconds": 0.0,
+          "calls": 1
+        },
+        "init_database_services": {
+          "seconds": 0.0,
+          "calls": 1
+        },
+        "init_data_perm_services": {
+          "seconds": 0.0,
+          "calls": 1
+        },
+        "preflight_db_check": {
+          "seconds": 0.0,
+          "calls": 1
+        },
+        "init_association_services": {
+          "seconds": 0.0,
+          "calls": 1
+        },
+        "init_audit_services": {
+          "seconds": 0.0,
+          "calls": 1
+        }
+      }
+    }
+  ],
+  "guards": [
+    {
+      "table": "enum_sync_guard",
+      "rows": [
+        {
+          "guard_key": "declaration",
+          "declaration_hash": "78216b182376150aaf75d1b16f63e808c8c64ec4cc87bb483c5f5d09c235743b",
+          "applied_at": "2026-11-09T23:24:05"
+        }
+      ]
+    },
+    {
+      "table": "menu_sync_guard",
+      "rows": [
+        {
+          "guard_key": "menu_declaration",
+          "guard_value": "8a78ac17d237fe23786fa621e76be9192525a35775c6503dda1e1a15838da39e",
+          "updated_at": "2026-11-10 03:29:57"
+        },
+        {
+          "guard_key": "menu_auto_generator",
+          "guard_value": "cea2e3cc8402758a53ae3adbc126bfe934bb797eb3056c664325b2618490364f",
+          "updated_at": "2026-11-10T11:37:17"
+        }
+      ]
+    },
+    {
+      "table": "schema_sync_guard",
+      "rows": [
+        {
+          "scope_key": "87e69061cc6203acb3dc060fa103910e91a1ef54",
+          "declaration_hash": "4422bb4da5fee68deb5fb1521358f8453a20304b43db422e6eb9f482f562df7f",
+          "applied_at": "2026-11-09T23:01:04"
+        }
+      ]
+    }
+  ]
+}

@@ -280,7 +280,7 @@ ui_view_config:
                  lag_minutes, created_at, updated_at]
 
 category_config:
-  create_permission: project:project_task_update
-  update_permission: project:project_task_update
-  delete_permission: project:project_task_update
+  create_permission: project_task:update
+  update_permission: project_task:update
+  delete_permission: project_task:update
   owner_auto_permission: false

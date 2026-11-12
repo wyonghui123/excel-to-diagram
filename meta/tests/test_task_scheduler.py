@@ -16,6 +16,24 @@ from meta.core.task_queue_manager import TaskQueueManager, QueueConfig
 from meta.core.task_handler import TaskHandler, TaskResult, TaskExecutionContext
 
 
+def _wait_db_count(db_path, sql, expected=1, timeout=3.0, interval=0.05):
+    """有界等待: 轮询直到查询结果 >= expected 或超时, 返回最后一次 count。"""
+    deadline = time.monotonic() + timeout
+    count = 0
+    while True:
+        try:
+            conn = sqlite3.connect(db_path)
+            try:
+                count = conn.execute(sql).fetchone()[0]
+            finally:
+                conn.close()
+        except sqlite3.Error:
+            count = 0
+        if count >= expected or time.monotonic() >= deadline:
+            return count
+        time.sleep(interval)
+
+
 class MockTaskHandler(TaskHandler):
     def __init__(self, should_succeed=True, result_data=None):
         self.should_succeed = should_succeed
@@ -380,7 +398,7 @@ class TestTaskSchedulerFailureRetry:
         }
         scheduler._execute_task(1, task)
         
-        time.sleep(0.5)
+        _wait_db_count(db_path, "SELECT COUNT(*) FROM task_executions", expected=1)
         
         conn = sqlite3.connect(db_path)
         cursor = conn.execute("SELECT COUNT(*) FROM task_executions")

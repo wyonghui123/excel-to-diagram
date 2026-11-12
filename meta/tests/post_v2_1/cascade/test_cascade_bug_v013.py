@@ -33,7 +33,7 @@ class TestBugV013SkipCascadeRestrict:
         yaml_path = Path('meta/schemas/product.yaml')
         if not yaml_path.exists():
             pytest.skip("product.yaml not found")
-        with open(yaml_path) as f:
+        with open(yaml_path, encoding='utf-8') as f:
             schema = yaml.safe_load(f)
         associations = schema.get('associations', [])
         cascade_true = [a for a in associations if a.get('cascade_delete')]
@@ -52,7 +52,7 @@ class TestBugV013SkipCascadeRestrict:
         yaml_path = Path('meta/schemas/hierarchies.yaml')
         if not yaml_path.exists():
             pytest.skip("hierarchies.yaml not found")
-        with open(yaml_path) as f:
+        with open(yaml_path, encoding='utf-8') as f:
             schema = yaml.safe_load(f)
         # hierarchies 是 list of dict, 每个含 levels 列表
         hierarchies = schema.get('hierarchies', [])

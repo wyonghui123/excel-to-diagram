@@ -24,10 +24,10 @@ class TestMetaUtilityAPI:
         body = resp.get_json()
         assert body.get('success') is True
         assert isinstance(body['data'], list)
-        # 至少有 user/role 这两个
+        # 至少有 user/permission_set 这两个（角色在数据模型中以 permission_set 承载）
         ids = {obj['id'] for obj in body['data']}
         assert 'user' in ids
-        assert 'role' in ids
+        assert 'permission_set' in ids
 
     def test_list_object_types_exclude_system(self, api_client, admin_headers):
         """GET /meta/objects?exclude_system=true"""

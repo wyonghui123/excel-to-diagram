@@ -1,3 +1,4 @@
+# ALLOW_RAW_SQL: 本文件含裸 SQL 构造批量导航测试数据/DDL，守卫豁免（2026-11-09 恢复覆盖）
 import pytest
 
 pytestmark = pytest.mark.integration
@@ -127,10 +128,10 @@ class TestBatchQueryM2M:
             (group_code, f'Test Group {group_code}'))
         group_id = cursor.lastrowid
         for user_id in user_ids:
-            cursor.execute("INSERT INTO org_members (user_id, group_id) VALUES (?, ?)",
+            cursor.execute("INSERT INTO org_members (user_id, org_id) VALUES (?, ?)",
                 (user_id, group_id))
         for role_id in role_ids:
-            cursor.execute("INSERT INTO org_permission_sets (group_id, role_id) VALUES (?, ?)",
+            cursor.execute("INSERT INTO org_permission_sets (org_id, permission_set_id) VALUES (?, ?)",
                 (group_id, role_id))
         return group_id
 
@@ -139,19 +140,19 @@ class TestBatchQueryM2M:
         from meta.core.association_engine import AssociationEngine
 
         user_id = user_with_role['user']['id']
-        role_id = user_with_role['role']['id']
-        group_id = user_with_role.get('group_id')
+        role_id = user_with_role['permission_set']['id']
+        group_id = user_with_role.get('org_id')
 
         if not group_id:
             pytest.skip("No group association in user_with_role")
 
         assoc_meta = {
-            'name': 'roles',
+            'name': 'permission_sets',
             'type': 'many_to_many',
-            'target_entity': 'role',
-            'through': 'group_roles',
-            'source_key': 'group_id',
-            'target_key': 'role_id',
+            'target_entity': 'permission_set',
+            'through': 'org_permission_sets',
+            'source_key': 'org_id',
+            'target_key': 'permission_set_id',
         }
 
         engine = AssociationEngine()
@@ -160,9 +161,9 @@ class TestBatchQueryM2M:
         with patch.object(engine, '_resolve_assoc_meta', return_value=assoc_meta):
             with patch('meta.core.association_engine.registry') as mock_reg:
                 mock_target = MagicMock()
-                mock_target.table_name = 'roles'
+                mock_target.table_name = 'permission_sets'
                 mock_target.fields = []
-                mock_reg.get.side_effect = lambda x: mock_target if x == 'role' else MagicMock()
+                mock_reg.get.side_effect = lambda x: mock_target if x == 'permission_set' else MagicMock()
 
                 result = engine._batch_query_m2m(context, assoc_meta, [group_id])
 
@@ -183,12 +184,12 @@ class TestBatchQueryM2M:
         db_connection.commit()
 
         assoc_meta = {
-            'name': 'roles',
+            'name': 'permission_sets',
             'type': 'many_to_many',
-            'target_entity': 'role',
-            'through': 'group_roles',
-            'source_key': 'group_id',
-            'target_key': 'role_id',
+            'target_entity': 'permission_set',
+            'through': 'org_permission_sets',
+            'source_key': 'org_id',
+            'target_key': 'permission_set_id',
         }
 
         engine = AssociationEngine()
@@ -197,9 +198,9 @@ class TestBatchQueryM2M:
         with patch.object(engine, '_resolve_assoc_meta', return_value=assoc_meta):
             with patch('meta.core.association_engine.registry') as mock_reg:
                 mock_target = MagicMock()
-                mock_target.table_name = 'roles'
+                mock_target.table_name = 'permission_sets'
                 mock_target.fields = []
-                mock_reg.get.side_effect = lambda x: mock_target if x == 'role' else MagicMock()
+                mock_reg.get.side_effect = lambda x: mock_target if x == 'permission_set' else MagicMock()
 
                 result = engine._batch_query_m2m(context, assoc_meta, [group_id])
 
@@ -220,12 +221,12 @@ class TestBatchQueryM2M:
         db_connection.commit()
 
         assoc_meta = {
-            'name': 'roles',
+            'name': 'permission_sets',
             'type': 'many_to_many',
-            'target_entity': 'role',
-            'through': 'group_roles',
-            'source_key': 'group_id',
-            'target_key': 'role_id',
+            'target_entity': 'permission_set',
+            'through': 'org_permission_sets',
+            'source_key': 'org_id',
+            'target_key': 'permission_set_id',
         }
 
         engine = AssociationEngine()
@@ -234,9 +235,9 @@ class TestBatchQueryM2M:
         with patch.object(engine, '_resolve_assoc_meta', return_value=assoc_meta):
             with patch('meta.core.association_engine.registry') as mock_reg:
                 mock_target = MagicMock()
-                mock_target.table_name = 'roles'
+                mock_target.table_name = 'permission_sets'
                 mock_target.fields = []
-                mock_reg.get.side_effect = lambda x: mock_target if x == 'role' else MagicMock()
+                mock_reg.get.side_effect = lambda x: mock_target if x == 'permission_set' else MagicMock()
 
                 result = engine._batch_query_m2m(context, assoc_meta, [created_user['id']])
 
@@ -261,8 +262,8 @@ class TestBatchQueryM2M:
 
         source_ids = [user0['id'], user1['id']]
         assoc_meta = {
-            'name': 'roles', 'type': 'many_to_many', 'target_entity': 'role',
-            'through': 'group_roles', 'source_key': 'group_id', 'target_key': 'role_id',
+            'name': 'permission_sets', 'type': 'many_to_many', 'target_entity': 'permission_set',
+            'through': 'org_permission_sets', 'source_key': 'org_id', 'target_key': 'permission_set_id',
         }
 
         engine = AssociationEngine()
@@ -271,9 +272,9 @@ class TestBatchQueryM2M:
         with patch.object(engine, '_resolve_assoc_meta', return_value=assoc_meta):
             with patch('meta.core.association_engine.registry') as mock_reg:
                 mock_target = MagicMock()
-                mock_target.table_name = 'roles'
+                mock_target.table_name = 'permission_sets'
                 mock_target.fields = []
-                mock_reg.get.side_effect = lambda x: mock_target if x == 'role' else MagicMock()
+                mock_reg.get.side_effect = lambda x: mock_target if x == 'permission_set' else MagicMock()
 
                 result = engine._batch_query_m2m(context, assoc_meta, source_ids)
 

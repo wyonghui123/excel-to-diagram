@@ -60,6 +60,11 @@ audit:
       - created_at
       - updated_at
 
+org_scope:
+  mode: direct
+  field: org_id
+  write_check: true
+
 fields:
   - id: id
     name: ID
@@ -600,7 +605,7 @@ ui_view_config:
         label: 新建项目
         icon: plus
         type: primary
-        permission: project:project_create
+        permission: project:create
     defaultSort:
       field: project_no
       order: asc
@@ -684,7 +689,7 @@ ui_view_config:
 
 category_config:
   # 双段式权限码，与 permissions 表实际行一致（v172 落库）
-  create_permission: project:project_create
-  update_permission: project:project_update
-  delete_permission: project:project_delete
+  create_permission: project:create
+  update_permission: project:update
+  delete_permission: project:delete
   owner_auto_permission: false

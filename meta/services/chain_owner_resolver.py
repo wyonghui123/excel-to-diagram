@@ -29,23 +29,30 @@ if TYPE_CHECKING:
 
 logger = logging.getLogger(__name__)
 
-# [v1.1.5] 共享 HIERARCHY_CHAIN (从 dimension_scope_engine 复制定义, 避免循环 import)
-# 链顺序: product → version → domain → sub_domain (顶层到底层)
-HIERARCHY_CHAIN = ['product', 'version', 'domain', 'sub_domain']
+from meta.core.hierarchy_loader import (
+    get_parent_info_map,
+    get_scope_chain,
+    get_table_map,
+)
 
-# 子 BO 沿 chain 向上每步走的 FK 字段
+# [Rule Convergence M1 2026-11-07] 统一读 hierarchies.yaml（经 loader）。
+# 链顺序: product → version → domain → sub_domain (授权叶子, TBD-4)
+HIERARCHY_CHAIN = get_scope_chain()
+
+# 子 BO 沿 chain 向上每步走的 FK 字段（仅授权链成员）
+_PARENT_INFO = get_parent_info_map()
 PARENT_FIELD_MAP = {
-    'version': 'product_id',
-    'domain': 'version_id',
-    'sub_domain': 'domain_id',
+    obj: _PARENT_INFO[obj][2]
+    for obj in HIERARCHY_CHAIN
+    if obj in _PARENT_INFO
 }
 
-# BO -> DB 表名
+# BO -> DB 表名（仅授权链成员）
+_TABLE_MAP = get_table_map()
 RESOURCE_TABLE_MAP = {
-    'product': 'products',
-    'version': 'versions',
-    'domain': 'domains',
-    'sub_domain': 'sub_domains',
+    obj: _TABLE_MAP[obj]
+    for obj in HIERARCHY_CHAIN
+    if obj in _TABLE_MAP
 }
 
 

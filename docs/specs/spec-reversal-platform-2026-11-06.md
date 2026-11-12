@@ -158,14 +158,14 @@
 
 **覆盖矩阵（正向 / 逆向）**
 
-| 单据对象               | 正向写面                      | 取消     | 红冲         | 业务退货                |
-| ------------------ | ------------------------- | ------ | ---------- | ------------------- |
-| 交货 `shipment`      | 库存·边·序列号·HU·预留·计划行        | ✅      | ✅ 端到端      | ✅ 正向退货交货            |
-| 收货 `receipt`       | 库存·边·计划行·分配·序列号·HU        | ✅      | ✅ 端到端      | ⚠️ 红字有、业务退货无（§11 补） |
+| 单据对象               | 正向写面                      | 取消     | 红冲           | 业务退货                                         |
+| ------------------ | ------------------------- | ------ | ------------ | -------------------------------------------- |
+| 交货 `shipment`      | 库存·边·序列号·HU·预留·计划行        | ✅      | ✅ 端到端        | ✅ 正向退货交货                                     |
+| 收货 `receipt`       | 库存·边·计划行·分配·序列号·HU        | ✅      | ✅ 端到端        | ⚠️ 红字有、业务退货无（§11 补）                          |
 | 调拨 `transfer`      | 出库事务·边·序列号 ／ 收货侧借 receipt | ✅ 仅发货前 | ✅ 发货侧已接管（D5） | ⚠️ 反向调拨未挂链接（Q3 复用 `reversal_of_transfer_id`） |
-| 库存调整 `adjustment`  | 库存事务                      | ✅      | ✅ 端到端      | n/a                 |
-| 工单 `work_order`    | 完工收货（借 receipt）           | 借道收货   | 借道收货红冲     | n/a                 |
-| 销售订单 `sales_order` | 计划行·履约状态                  | ✅      | n/a（无库存事实） | ✅ 退货订单类型            |
+| 库存调整 `adjustment`  | 库存事务                      | ✅      | ✅ 端到端        | n/a                                          |
+| 工单 `work_order`    | 完工收货（借 receipt）           | 借道收货   | 借道收货红冲       | n/a                                          |
+| 销售订单 `sales_order` | 计划行·履约状态                  | ✅      | n/a（无库存事实）   | ✅ 退货订单类型                                     |
 
 ***
 
@@ -326,25 +326,25 @@ reversal:
 
 ### 8.1 原语注册表（17 个，随 D3 / D4 / D5 扩充）
 
-| primitive id                        | 签名                                                            | 幂等机制                          | 无事实时           |
-| ----------------------------------- | ------------------------------------------------------------- | ----------------------------- | -------------- |
-| `inventory_reverse_by_event`        | `(ds, event_key, new_event_key) -> {txn_ids, source_txn_ids}` | 新事件键唯一                        | 由 `on_missing` |
-| `inventory_reverse_by_txn`          | `(ds, txn_ids, new_event_key) -> {txn_ids}`                   | 同上                            | `skip`         |
-| `serial_reverse_by_txn`             | `(ds, txn_ids) -> {count}`                                    | 事件已撤销即跳过                      | `skip`         |
-| `serial_reverse_completion`         | `(ds, work_order_id, receipt_id) -> {reversed}`               | 完工序列号状态回退                     | `skip`         |
-| `hu_rewind_by_txn`                  | `(ds, txn_ids) -> {count}`                                    | 同                             | `skip`         |
-| `hu_reverse_document`               | `(ds, doc_type, doc_id) -> {count}`                           | 倒序回退整单容器事件                    | `skip`         |
-| `reservation_release_by_demand`     | `(ds, doc_id) -> {count}`                                     | 已释放即跳过                        | `skip`         |
-| `edge_compensate_by_source`         | `(ds, source_bo, rule_ids, ref) -> {created}`                 | `derive_key='rev:<id>:<ref>'` | `skip`         |
-| `recompute_schedule_delivered`      | `(ds, doc_id) -> {updated}`                                   | 纯重算（幂等）                       | n/a            |
-| `recompute_fulfillment`             | `(ds, order_id) -> {}`                                        | 纯重算                           | `skip`         |
-| `recompute_purchase_fulfillment`    | `(ds, order_ids) -> {updated}`                                | 纯重算                           | `skip`         |
-| `reverse_schedule_received`         | `(ds, items) -> {updated}`                                    | 按红字净收量回退                      | `skip`         |
-| `reservation_unfulfill_by_shipment` | `(ds, doc_id) -> {count, unfulfilled}`                        | 按交货行汇总核销                      | `skip`         |
-| `shipment_reverse_lines`            | `(ds, doc_id, now) -> {count}`                                | 不改 cancelled 行                | `skip`         |
-| `inventory_reverse_by_source`       | `(ds, source_doc_type, source_doc_id) -> {created, existing, txn_ids, source_txn_ids}` | 事件键逐一镜像，已红冲跳过 | `skip` |
-| `transfer_reverse_lines`            | `(ds, doc_id, now) -> {count}`                                | 发货/收货量归零，不改 cancelled 行       | `skip`         |
-| `recompute_transfer_fulfillment`    | `(ds, doc_id) -> {updated, fulfillment_status}`               | 纯重算（幂等）                        | `skip`         |
+| primitive id                        | 签名                                                                                     | 幂等机制                          | 无事实时           |
+| ----------------------------------- | -------------------------------------------------------------------------------------- | ----------------------------- | -------------- |
+| `inventory_reverse_by_event`        | `(ds, event_key, new_event_key) -> {txn_ids, source_txn_ids}`                          | 新事件键唯一                        | 由 `on_missing` |
+| `inventory_reverse_by_txn`          | `(ds, txn_ids, new_event_key) -> {txn_ids}`                                            | 同上                            | `skip`         |
+| `serial_reverse_by_txn`             | `(ds, txn_ids) -> {count}`                                                             | 事件已撤销即跳过                      | `skip`         |
+| `serial_reverse_completion`         | `(ds, work_order_id, receipt_id) -> {reversed}`                                        | 完工序列号状态回退                     | `skip`         |
+| `hu_rewind_by_txn`                  | `(ds, txn_ids) -> {count}`                                                             | 同                             | `skip`         |
+| `hu_reverse_document`               | `(ds, doc_type, doc_id) -> {count}`                                                    | 倒序回退整单容器事件                    | `skip`         |
+| `reservation_release_by_demand`     | `(ds, doc_id) -> {count}`                                                              | 已释放即跳过                        | `skip`         |
+| `edge_compensate_by_source`         | `(ds, source_bo, rule_ids, ref) -> {created}`                                          | `derive_key='rev:<id>:<ref>'` | `skip`         |
+| `recompute_schedule_delivered`      | `(ds, doc_id) -> {updated}`                                                            | 纯重算（幂等）                       | n/a            |
+| `recompute_fulfillment`             | `(ds, order_id) -> {}`                                                                 | 纯重算                           | `skip`         |
+| `recompute_purchase_fulfillment`    | `(ds, order_ids) -> {updated}`                                                         | 纯重算                           | `skip`         |
+| `reverse_schedule_received`         | `(ds, items) -> {updated}`                                                             | 按红字净收量回退                      | `skip`         |
+| `reservation_unfulfill_by_shipment` | `(ds, doc_id) -> {count, unfulfilled}`                                                 | 按交货行汇总核销                      | `skip`         |
+| `shipment_reverse_lines`            | `(ds, doc_id, now) -> {count}`                                                         | 不改 cancelled 行                | `skip`         |
+| `inventory_reverse_by_source`       | `(ds, source_doc_type, source_doc_id) -> {created, existing, txn_ids, source_txn_ids}` | 事件键逐一镜像，已红冲跳过                 | `skip`         |
+| `transfer_reverse_lines`            | `(ds, doc_id, now) -> {count}`                                                         | 发货/收货量归零，不改 cancelled 行       | `skip`         |
+| `recompute_transfer_fulfillment`    | `(ds, doc_id) -> {updated, fulfillment_status}`                                        | 纯重算（幂等）                       | `skip`         |
 
 注册表实现：`meta/core/reversal_primitives.py`，`PRIMITIVES: Dict[str, Callable]`。
 所有原语必收 `ReversalContext`（含 `ds`、`schema`、`doc_id`、`ref`、`now`、`reason`、
@@ -639,7 +639,7 @@ Oracle 可借鉴的只有两点，且均已在规格内：原单锚（D16）与�
 
 ## 12. 实施计划
 
-### 阶段 D1：平台骨架（不改任何业务行为）
+### 阶段 D1：平台骨架（不改任何业务行为）—— ✅ 已实施 2026-11-06
 
 1. `reversal_primitives.py`：8 个原语封装为注册表（全部转调既有实现，不重写）。
 2. `reversal_orchestrator.py`：7 步执行 + 错误码。
@@ -827,12 +827,16 @@ python d:\filework\test.py --file meta/tests/test_transfer_ship_reversal.py,meta
 ```
 
 **回归记录（2026-11-06）**
-- `test_transfer_ship_reversal`（3 例）全绿：全链路 / 守卫 / 编排路径。
-- 调拨全套（`service` / `schema` / `tbd` / `from_allocation` / `guard` /
+
+* `test_transfer_ship_reversal`（3 例）全绿：全链路 / 守卫 / 编排路径。
+
+* 调拨全套（`service` / `schema` / `tbd` / `from_allocation` / `guard` /
   `receipt_bridge` + 新增红冲）141 例全绿。
-- `test_reversal_platform`（15）/ `test_reversal_orchestrator`（7）/
+
+* `test_reversal_platform`（15）/ `test_reversal_orchestrator`（7）/
   `test_yaml_loader`（46）全绿。
-- `test_transfer_order_schema.test_header_status_enum` 同步纳入 `reversed`。
+
+* `test_transfer_order_schema.test_header_status_enum` 同步纳入 `reversed`。
 
 ### 阶段 D6：采购退货正向对象（§11）—— ✅ 已实施 2026-11-06
 
@@ -850,40 +854,68 @@ python d:\filework\test.py --file meta/tests/test_transfer_ship_reversal.py,meta
   `RPO` / `RTV` 序列；`RCV_RETURN` 类别改 `red`；`purchase_orders.origin_*` /
   `return_reason`、`purchase_order_schedules.returned_qty`、`receipts.return_to`；
   `RETURN_TO_VENDOR` 库存事务类型 + `receipt_line_to_return_out_txn` 边规则；
-  重建 `v_demand_trace_graph`（signed_qty 退货出库分支）与 `serial_transactions`
+  重建 `v_demand_trace_graph`（signed\_qty 退货出库分支）与 `serial_transactions`
   CHECK（`return_to_vendor`）；种子权限 `receipt:receipt_create_vendor_return`。
+
 * `receipt_service`：`post()` 按 `document_category` 三分流（standard 正向 /
   return 独立出库过账 / red 禁止独立过账）；建单阶段 `_assert_category_consistency`；
   过账前 `_assert_return_limit`（`returned_qty <= received_qty - rejected_qty`）；
   `recompute_schedule_returned` 与逆向原语 `recompute_schedule_returned`（注册表 17→18）。
+
 * `serial_number_service`：新增 `return_to_vendor` 事件、`precheck_receipt_return` /
   `register_receipt_return`（`inventory_transaction_id` 关联库存事务，可被
   `reverse_serial_event` 回退）。
+
 * `document_approval_service`：`_load_record` 注入 `document_category`
   （仅当记录含 `document_type_id`；极简测试替身缺表时静默跳过）。
+
 * 入口：`receipt_actions.create_vendor_return_handler` +
   `bo_action_registrations` 注册 `receipt.create_vendor_return`；
   `receipt.yaml` 新增 `actions` 声明（`from_states: [posted]`）。
 
 **回归记录（2026-11-06）**
 
-- `test_purchase_return`（9 例）全绿：退货出库过账 / 类别不一致 / 拒收拒绝 /
+* `test_purchase_return`（9 例）全绿：退货出库过账 / 类别不一致 / 拒收拒绝 /
   超可退量 / 红字不可独立过账 / 退货红冲回退 `returned_qty` / 原 PO 不重开 /
   审批维度 / 序列号出库 + 红冲回退。
-- `test_receipt_service`（30）/ `test_receipt_reversal`（9）/
+
+* `test_receipt_service`（30）/ `test_receipt_reversal`（9）/
   `test_receipt_schema`（11）/ `test_doc_flow_reconcile`（29）/
   `test_demand_trace_graph`（12）/ `test_purchase_order*`（66）全绿。
-- `test_reversal_platform`（15）/ `test_reversal_orchestrator`（7）/
+
+* `test_reversal_platform`（15）/ `test_reversal_orchestrator`（7）/
   `test_bo_action_*`（45）/ `test_document_approval`（25）全绿。
-- 已知既有失败（与 D6 无关）：`test_serial_tracking_posting` 的发运 4 例
+
+* 已知既有失败（与 D6 无关）：`test_serial_tracking_posting` 的发运 4 例
   因其内联 `shipment_lines` 缺 `project_task_id`；`test_yaml_single_source_of_truth`
   的 10 例仍断言已迁移的 `user_group` / `role_permissions`。
 
-### 阶段 D7：收口
+### 阶段 D7：收口 —— ✅ 已实施 2026-11-06（第 1 项按 M6 保留一版）
 
 1. 删除旧编排代码与错误码映射（保留一版后清理）。
 2. `test_doc_effect_declarations` 纳入常规回归。
 3. 更新单一事实模型规格的实施记录。
+
+**实施记录（2026-11-06）**
+
+* 第 1 项**暂缓**：`doc_flow_reversal.py` / `reversal_profiles.py` 仍被
+  `reversal_orchestrator.py` 与 `doc_flow_attach.py` 引用；Q5（旧错误码映射保留
+  周期）未定，按决策 M6「错误码映射层保留一版」暂不删除，待 Q5 决策后执行。
+
+* 第 2 项完成：新增 `meta/tests/test_doc_effect_declarations.py` 9 例——
+  ① `validate_registry()` 全量零错误；② 4 个逆向对象（receipt / shipment /
+  transfer\_order / inventory\_adjustment）均声明 `reversal`；③ V1-V6 六个
+  `DECL_*` 错误码各有负向用例。已纳入常规回归。
+
+* 第 3 项完成：`spec-doc-flow-single-fact-model-2026-11-05.md` §8 追加
+  「实施记录（2026-11-06，逆向能力平台化 D1-D6 回填）」，含能力映射与 D7 结论。
+
+**回归记录（2026-11-06）**
+
+* `test_doc_effect_declarations` 9 例全绿。
+
+* 关联套件维持绿色：`test_reversal_platform`(15)、`test_reversal_orchestrator`(7)、
+  `test_doc_flow_reconcile`(29)、`test_demand_trace_graph`(12)。
 
 ***
 

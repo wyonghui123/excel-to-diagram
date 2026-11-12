@@ -18,104 +18,64 @@ M1.4 单元测试 — Runtime Dimension Resolver
     python d:\filework\test.py --file d:\filework\excel-to-diagram\tests\unit\test_runtime_dimension_resolver.py
 """
 import sys
-import os
-import json
-import sqlite3
 import unittest
 
 sys.path.insert(0, 'd:/filework/excel-to-diagram')
 
 from meta.core.feature_flags import set_flag, clear_cache
-from meta.core.runtime_dimension_resolver import get_runtime_dimension_resolver, RuntimeDimensionResolver
+from meta.core.perm_cache import get_permission_cache
+from meta.core.runtime_dimension_resolver import RuntimeDimensionResolver
 from meta.core.bo_schema_loader import get_bo_schema_loader
+from meta.tests.factories._dimension_scope_engine_helpers import make_runtime_resolver_ds
 
 
 class TestRuntimeDimensionResolver(unittest.TestCase):
-    """Runtime Dimension Resolver 单元测试"""
+    """Runtime Dimension Resolver 单元测试
+
+    [FIX 2026-11-07] 原用例直连真实 meta/architecture.db 并写入 roles /
+    role_dimension_scopes (v070 已重命名为 permission_sets /
+    permission_set_dimension_scopes), 属迁移遗留 → 全部 error。
+    改为自播种临时库, 表结构对齐当前模型 (含 bo_id), 断言逻辑不变。
+    """
 
     @classmethod
     def setUpClass(cls):
-        """测试前置：准备数据"""
-        cls.resolver = get_runtime_dimension_resolver()
-        cls.db_path = cls.resolver._db_path
-        cls.test_role_id = None
-        cls._setup_test_data()
+        """测试前置：准备临时库 (permission_set 999 / user 1)"""
+        cls._ds_gen = make_runtime_resolver_ds()
+        cls._ds = next(cls._ds_gen)
+        cls.resolver = RuntimeDimensionResolver(db_path=cls._ds.db_path)
+        cls.db_path = cls._ds.db_path
+        cls.test_role_id = 999
 
     @classmethod
     def tearDownClass(cls):
-        """测试后置：清理数据"""
-        cls._cleanup_test_data()
-
-    @classmethod
-    def _setup_test_data(cls):
-        """注入测试数据"""
-        # 找或创建一个非系统角色
-        conn = sqlite3.connect(cls.db_path)
-        cursor = conn.cursor()
-        cursor.execute("SELECT id FROM roles WHERE id = 999 LIMIT 1")
-        if cursor.fetchone() is None:
-            cursor.execute("""
-                INSERT INTO roles (id, name, code, description, is_system)
-                VALUES (999, 'Test Role', 'test_role', 'Test role for resolver', 0)
-            """)
-        cls.test_role_id = 999
-
-        # 清理已有
-        cursor.execute("DELETE FROM role_dimension_scopes WHERE role_id = 999")
-
-        # 插入：domain 维度（公共）
-        cursor.execute("""
-            INSERT INTO role_dimension_scopes
-            (role_id, dimension_code, dimension_values, inherit_children, scope_mode, bo_id)
-            VALUES (?, ?, ?, ?, ?, ?)
-        """, (999, 'domain', json.dumps([1, 2, 3]), 1, 'include', None))
-
-        # 插入：product 维度（公共）
-        cursor.execute("""
-            INSERT INTO role_dimension_scopes
-            (role_id, dimension_code, dimension_values, inherit_children, scope_mode, bo_id)
-            VALUES (?, ?, ?, ?, ?, ?)
-        """, (999, 'product', json.dumps([1]), 1, 'include', None))
-
-        # 插入：domain 维度 BO 级覆盖（仅 domain）
-        cursor.execute("""
-            INSERT INTO role_dimension_scopes
-            (role_id, dimension_code, dimension_values, inherit_children, scope_mode, bo_id)
-            VALUES (?, ?, ?, ?, ?, ?)
-        """, (999, 'sub_domain', json.dumps([100, 200]), 1, 'include', 'sub_domain'))
-
-        conn.commit()
-        conn.close()
-
-    @classmethod
-    def _cleanup_test_data(cls):
-        """清理测试数据"""
-        conn = sqlite3.connect(cls.db_path)
-        cursor = conn.cursor()
-        cursor.execute("DELETE FROM role_dimension_scopes WHERE role_id = 999")
-        cursor.execute("DELETE FROM roles WHERE id = 999")
-        conn.commit()
-        conn.close()
+        """测试后置：关闭并删除临时库"""
+        cls._ds_gen.close()
+        get_permission_cache().clear()
 
     def setUp(self):
         """每个测试前清空缓存"""
         clear_cache()
+        get_permission_cache().clear()
         get_bo_schema_loader().clear_cache()
 
     def test_01_get_user_roles(self):
-        """测试：用户角色查询"""
-        roles = self.resolver._get_user_roles(1)
+        """测试：用户 → permission_set 查询"""
+        roles = self.resolver._get_user_permission_sets(1)
         self.assertIsInstance(roles, list)
-        # admin user 应该至少有 1 个角色
-        self.assertGreater(len(roles), 0)
+        self.assertIn(self.test_role_id, roles)
 
     def test_02_get_role_dim_scopes(self):
         """测试：角色维度范围查询"""
-        scopes = self.resolver._get_role_dim_scopes([999])
+        scopes = self.resolver._get_role_dim_scopes([self.test_role_id])
         self.assertEqual(len(scopes), 3)
-        # 第一个是 domain 公共
-        self.assertEqual(scopes[0]['dimension_code'], 'domain')
-        self.assertIsNone(scopes[0]['bo_id'])
+        # domain 是公共维度 (bo_id=NULL)
+        domain_scopes = [s for s in scopes if s['dimension_code'] == 'domain']
+        self.assertEqual(len(domain_scopes), 1)
+        self.assertIsNone(domain_scopes[0]['bo_id'])
+        # sub_domain 是 BO 级覆盖
+        sd_scopes = [s for s in scopes if s['dimension_code'] == 'sub_domain']
+        self.assertEqual(sd_scopes[0]['bo_id'], 'sub_domain')
 
     def test_03_resolve_basic(self):
         """测试：基本 resolve"""
@@ -245,33 +205,43 @@ class TestRuntimeDimensionResolver(unittest.TestCase):
     # ----------------------------------------------------------------
 
     def test_12_find_redundant_field_business_object(self):
-        """FR-016 AC-1: business_object 的 domain_id 是 virtual，应返回 None
+        """FR-016 AC-1: business_object 的 domain_id 是 stored + db_column，应视为冗余字段
 
-        验证：business_object.yaml 的 domain_id 字段声明为 storage: virtual
-        （没有实际的 db_column），不视为冗余字段。
+        [FIX 2026-11-07] business_object.yaml 已把 domain_id 从 storage: virtual
+        升级为 storage: stored（含 db_column，由 service_module_id 反向推导维护），
+        断言随之改为返回 'domain_id'。
         """
         result = self.resolver._find_redundant_field('business_object', 'domain')
-        self.assertIsNone(
-            result,
-            "business_object.domain_id 是 storage: virtual，不算冗余字段（应返回 None）"
+        self.assertEqual(
+            result, 'domain_id',
+            "business_object.domain_id 已落库（stored + db_column），应视为冗余字段"
         )
 
     def test_13_resolve_field_fallback_main_field(self):
         """FR-016 AC-1: 无冗余字段时使用主字段（向后兼容）
 
         验证：当 BO 没有目标维度的冗余字段时，_resolve_field 返回 binding 的
-        field（主字段），保留 v1.3 行为。
+        field（主字段），保留 v1.3 行为。用 mock schema 隔离 YAML 演进。
         """
-        result = self.resolver._resolve_field(
-            {
-                'dimension': 'domain',
-                'field': 'service_module_id',
-                'through': 'service_module->sub_domain->domain',
-            },
-            'business_object',
-        )
-        # business_object 没有 domain_id db_column 冗余字段
-        # fallback 到主字段 service_module_id
+        from unittest.mock import patch, MagicMock
+
+        mock_loader = MagicMock()
+        mock_loader.get_bo_schema.return_value = {
+            'id': 'test_bo_no_redundant',
+            'fields': [
+                {'id': 'service_module_id', 'db_column': 'service_module_id'},
+            ],
+        }
+        with patch.object(self.resolver, '_schema_loader', mock_loader):
+            result = self.resolver._resolve_field(
+                {
+                    'dimension': 'domain',
+                    'field': 'service_module_id',
+                    'through': 'service_module->sub_domain->domain',
+                },
+                'test_bo_no_redundant',
+            )
+        # 无 domain_id 冗余字段 → fallback 到主字段 service_module_id
         self.assertEqual(result, 'service_module_id')
 
     def test_14_find_redundant_field_nonexistent_bo(self):
@@ -362,17 +332,27 @@ class TestRuntimeDimensionResolver(unittest.TestCase):
 
     def test_19_resolve_field_with_joins_no_redundant(self):
         """FR-016 AC-2: 无冗余字段时 _resolve_field_with_joins 返回 JOIN 路径"""
-        result = self.resolver._resolve_field_with_joins(
-            {
-                'dimension': 'domain',
-                'field': 'service_module_id',
-                'through': 'service_module->sub_domain->domain',
-            },
-            'business_object',
-        )
+        from unittest.mock import patch, MagicMock
+
+        mock_loader = MagicMock()
+        mock_loader.get_bo_schema.return_value = {
+            'id': 'test_bo_no_redundant',
+            'fields': [
+                {'id': 'service_module_id', 'db_column': 'service_module_id'},
+            ],
+        }
+        with patch.object(self.resolver, '_schema_loader', mock_loader):
+            result = self.resolver._resolve_field_with_joins(
+                {
+                    'dimension': 'domain',
+                    'field': 'service_module_id',
+                    'through': 'service_module->sub_domain->domain',
+                },
+                'test_bo_no_redundant',
+            )
         self.assertIsNotNone(result)
         self.assertEqual(result['field'], 'service_module_id')
-        # business_object 没有 domain_id db_column，应返回 JOIN
+        # 无 domain_id db_column 冗余字段 → 返回 JOIN
         self.assertEqual(len(result['joins']), 2)
         self.assertEqual(result['joins'][0]['target_bo'], 'sub_domain')
         self.assertEqual(result['joins'][1]['target_bo'], 'domain')

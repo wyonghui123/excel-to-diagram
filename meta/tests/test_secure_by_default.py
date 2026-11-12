@@ -1,4 +1,5 @@
 # -*- coding: utf-8 -*-
+# ALLOW_RAW_SQL: 本文件含裸 SQL 构造权限测试数据/DDL，守卫豁免（2026-11-09 恢复覆盖）
 """
 [FILE] test_secure_by_default.py
 [DESCRIPTION] Phase 10 Secure by Default — TDD 测试用例
@@ -38,7 +39,7 @@ def db_with_wildcard_user():
     conn.executescript("""
         CREATE TABLE IF NOT EXISTS data_permission_rules (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
-            role_id INTEGER NOT NULL,
+            permission_set_id INTEGER NOT NULL,
             rule_type VARCHAR(50) NOT NULL DEFAULT 'condition',
             resource_type VARCHAR(200),
             dimension_code VARCHAR(200),
@@ -56,11 +57,11 @@ def db_with_wildcard_user():
         CREATE TABLE IF NOT EXISTS user_permission_sets (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
             user_id INTEGER NOT NULL,
-            role_id INTEGER NOT NULL
+            permission_set_id INTEGER NOT NULL
         );
         CREATE TABLE IF NOT EXISTS permission_set_permissions (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
-            role_id INTEGER NOT NULL,
+            permission_set_id INTEGER NOT NULL,
             permission_id INTEGER,
             permission_code VARCHAR(200),
             created_at DATETIME
@@ -83,7 +84,7 @@ def db_with_wildcard_user():
         );
         CREATE TABLE IF NOT EXISTS field_permissions (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
-            role_id INTEGER NOT NULL,
+            permission_set_id INTEGER NOT NULL,
             resource_type VARCHAR(200) NOT NULL,
             field_name VARCHAR(200) NOT NULL,
             permission_level VARCHAR(50) DEFAULT 'read',
@@ -114,15 +115,15 @@ def db_with_wildcard_user():
     conn.execute("INSERT INTO departments (id, name, parent_id) VALUES (20, 'Frontend', 10)")
     conn.execute("INSERT INTO departments (id, name, parent_id) VALUES (30, 'Backend', 10)")
     conn.execute("INSERT INTO departments (id, name, parent_id) VALUES (99, 'Sales', NULL)")
-    # user_roles: alice (id=100) 是部门经理 (role 1)
-    conn.execute("INSERT INTO user_permission_sets (user_id, role_id) VALUES (100, 1)")
-    # role_permissions: role 1 有 '*' (通配符权限)
-    conn.execute("INSERT INTO permission_set_permissions (role_id, permission_code) VALUES (1, '*')")
-    conn.execute("INSERT INTO permission_set_permissions (role_id, permission_code) VALUES (1, 'product.read')")
-    conn.execute("INSERT INTO permission_set_permissions (role_id, permission_code) VALUES (1, 'product.*')")
-    conn.execute("INSERT INTO permission_set_permissions (role_id, permission_code) VALUES (1, 'user.read')")
-    # field_permissions: role 1 没有 user.phone:read 权限 (phone 字段被 mask)
-    conn.execute("INSERT INTO field_permissions (role_id, resource_type, field_name, permission_level, is_masked) "
+    # user_permission_sets: alice (id=100) 是部门经理 (permission_set 1)
+    conn.execute("INSERT INTO user_permission_sets (user_id, permission_set_id) VALUES (100, 1)")
+    # permission_set_permissions: permission_set 1 有 '*' (通配符权限)
+    conn.execute("INSERT INTO permission_set_permissions (permission_set_id, permission_code) VALUES (1, '*')")
+    conn.execute("INSERT INTO permission_set_permissions (permission_set_id, permission_code) VALUES (1, 'product.read')")
+    conn.execute("INSERT INTO permission_set_permissions (permission_set_id, permission_code) VALUES (1, 'product.*')")
+    conn.execute("INSERT INTO permission_set_permissions (permission_set_id, permission_code) VALUES (1, 'user.read')")
+    # field_permissions: permission_set 1 没有 user.phone:read 权限 (phone 字段被 mask)
+    conn.execute("INSERT INTO field_permissions (permission_set_id, resource_type, field_name, permission_level, is_masked) "
                  "VALUES (1, 'user', 'phone', 'read', 1)")
     conn.commit()
 
@@ -423,7 +424,7 @@ class TestP10T4WildcardProhibitionOverride:
         ds = db_with_wildcard_user
         # 插入 prohibition 规则: 禁止读 product
         ds.execute(
-            "INSERT INTO data_permission_rules (role_id, rule_type, resource_type, "
+            "INSERT INTO data_permission_rules (permission_set_id, rule_type, resource_type, "
             "is_denied) VALUES (1, 'prohibition', 'product', 1)"
         )
         from meta.services.permission_resolver import PermissionResolver
@@ -457,7 +458,7 @@ class TestP10T4WildcardProhibitionOverride:
         ds = db_with_wildcard_user
         # prohibition: 禁止读 status='archived' 的 product
         ds.execute(
-            "INSERT INTO data_permission_rules (role_id, rule_type, resource_type, "
+            "INSERT INTO data_permission_rules (permission_set_id, rule_type, resource_type, "
             "condition, is_denied) "
             "VALUES (1, 'prohibition', 'product', \"status = 'archived'\", 1)"
         )
@@ -478,7 +479,7 @@ class TestP10T4WildcardProhibitionOverride:
         """`*` + prohibition + condition 不匹配 → Allow"""
         ds = db_with_wildcard_user
         ds.execute(
-            "INSERT INTO data_permission_rules (role_id, rule_type, resource_type, "
+            "INSERT INTO data_permission_rules (permission_set_id, rule_type, resource_type, "
             "condition, is_denied) "
             "VALUES (1, 'prohibition', 'product', \"status = 'archived'\", 1)"
         )
@@ -508,7 +509,7 @@ class TestP10T5Acceptance:
         ds = db_with_wildcard_user
         # prohibition: status='archived' 禁止
         ds.execute(
-            "INSERT INTO data_permission_rules (role_id, rule_type, resource_type, "
+            "INSERT INTO data_permission_rules (permission_set_id, rule_type, resource_type, "
             "condition, is_denied) "
             "VALUES (1, 'prohibition', 'product', \"status = 'archived'\", 1)"
         )
@@ -547,7 +548,7 @@ class TestP10T5Acceptance:
 
         # Layer 0 (Prohibition)
         ds.execute(
-            "INSERT INTO data_permission_rules (role_id, rule_type, resource_type, "
+            "INSERT INTO data_permission_rules (permission_set_id, rule_type, resource_type, "
             "is_denied) VALUES (1, 'prohibition', 'product', 1)"
         )
         r = resolver.check(

@@ -268,6 +268,14 @@ def test_snapshot_contains_policy_and_conditions(conn, ds):
     assert snapshot['trigger_action'] == 'submit'
     assert snapshot['policy_code'] == 'PO_AMOUNT'
     assert snapshot['conditions']
+    # M2：审批侧 explain 走统一谓词求值器（field / op / expected / actual / passed）
+    assert snapshot['conditions_explain'] == [{
+        'field': 'gross_amount',
+        'op': 'ge',
+        'expected': 10000,
+        'actual': 12000.0,
+        'passed': True,
+    }]
     assert snapshot['steps'][0]['approver_ref'] == 'manager'
     assert snapshot['resolved_at']
 

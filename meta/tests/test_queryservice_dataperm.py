@@ -1,3 +1,4 @@
+# ALLOW_RAW_SQL: 本文件含裸 SQL 构造查询服务数据权限测试数据/DDL，守卫豁免（2026-11-09 恢复覆盖）
 # -*- coding: utf-8 -*-
 """
 QueryService 数据权限统一注入测试
@@ -70,7 +71,7 @@ def create_test_db():
     ds.execute("""
         CREATE TABLE IF NOT EXISTS permission_set_data_permissions (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
-            role_id INTEGER NOT NULL,
+            permission_set_id INTEGER NOT NULL,
             resource_type TEXT NOT NULL,
             resource_id INTEGER NOT NULL,
             permission_level TEXT DEFAULT 'read'
@@ -80,7 +81,7 @@ def create_test_db():
     ds.execute("""
         CREATE TABLE IF NOT EXISTS org_data_permissions (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
-            group_id INTEGER NOT NULL,
+            org_id INTEGER NOT NULL,
             resource_type TEXT NOT NULL,
             resource_id INTEGER NOT NULL,
             permission_level TEXT DEFAULT 'read'
@@ -98,8 +99,8 @@ def create_test_db():
         CREATE TABLE IF NOT EXISTS org_members (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
             user_id INTEGER NOT NULL,
-            group_id INTEGER NOT NULL,
-            UNIQUE(user_id, group_id)
+            org_id INTEGER NOT NULL,
+            UNIQUE(user_id, org_id)
         )
     """)
 
@@ -107,17 +108,17 @@ def create_test_db():
         CREATE TABLE IF NOT EXISTS user_permission_sets (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
             user_id INTEGER NOT NULL,
-            role_id INTEGER NOT NULL,
-            UNIQUE(user_id, role_id)
+            permission_set_id INTEGER NOT NULL,
+            UNIQUE(user_id, permission_set_id)
         )
     """)
 
     ds.execute("""
         CREATE TABLE IF NOT EXISTS org_permission_sets (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
-            group_id INTEGER NOT NULL,
-            role_id INTEGER NOT NULL,
-            UNIQUE(group_id, role_id)
+            org_id INTEGER NOT NULL,
+            permission_set_id INTEGER NOT NULL,
+            UNIQUE(org_id, permission_set_id)
         )
     """)
 
@@ -201,16 +202,16 @@ def create_test_db():
 
     password_hash = hashlib.sha256('test123'.encode('utf-8')).hexdigest()
     ds.execute(
-        "INSERT INTO users (username, password_hash, display_name, permission_sets) VALUES (?, ?, ?, ?)",
-        ['admin', password_hash, 'Admin User', '["admin"]']
+        "INSERT INTO users (username, password_hash, display_name) VALUES (?, ?, ?)",
+        ['admin', password_hash, 'Admin User']
     )
     ds.execute(
-        "INSERT INTO users (username, password_hash, display_name, permission_sets) VALUES (?, ?, ?, ?)",
-        ['demo', password_hash, 'Demo User', '["viewer"]']
+        "INSERT INTO users (username, password_hash, display_name) VALUES (?, ?, ?)",
+        ['demo', password_hash, 'Demo User']
     )
     ds.execute(
-        "INSERT INTO users (username, password_hash, display_name, permission_sets) VALUES (?, ?, ?, ?)",
-        ['noperm', password_hash, 'NoPerm User', '[]']
+        "INSERT INTO users (username, password_hash, display_name) VALUES (?, ?, ?)",
+        ['noperm', password_hash, 'NoPerm User']
     )
 
     for i in range(1, 6):

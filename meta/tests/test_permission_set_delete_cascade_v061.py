@@ -28,12 +28,52 @@ if _admin_token_path not in sys.path:
 
 pytestmark = pytest.mark.integration
 
+# 端口优先级: BO_API_BASE → 本会话端口 (TEST_PORT/AGENT_PORT) → 共享槽 3010
+BO_API_BASE = (os.environ.get('BO_API_BASE')
+               or f"http://localhost:{os.environ.get('TEST_PORT') or os.environ.get('AGENT_PORT') or 3010}")
+
+
+def _live_bo_available() -> bool:
+    """探测 BO API 是否可达（本测试依赖真实服务，无法用 in-process client 代替）."""
+    import requests
+    try:
+        r = requests.get(f'{BO_API_BASE}/api/v1/auth/dev-login?username=admin',
+                         timeout=2)
+        return r.status_code == 200
+    except Exception:
+        return False
+
 
 @pytest.fixture
 def admin_cookie():
     """获取 admin cookie (用于直接调 RoleFactory 等)."""
+    if not _live_bo_available():
+        pytest.skip(f'需 {BO_API_BASE} 后端在跑（存活性级联测试依赖真实 BO API）')
     from admin_token import get_admin_cookie
     return get_admin_cookie()
+
+
+def _assign_permissions(permission_set_id: int, cookie: str, count: int = 2) -> None:
+    """通过 API 给 permission_set 分配权限 (BO create 不再隐式分配)."""
+    import requests
+
+    bo_url = BO_API_BASE
+    resp = requests.get(
+        f'{bo_url}/api/v2/bo/permission?page=1&page_size={count}',
+        headers={'Cookie': cookie}, timeout=15,
+    )
+    items = (resp.json().get('data') or {}).get('items') or []
+    permission_ids = [it['id'] for it in items][:count]
+    assert len(permission_ids) == count, f'not enough permissions: {items}'
+
+    resp = requests.put(
+        f'{bo_url}/api/v1/permission-sets/{permission_set_id}/permissions',
+        json={'permission_ids': permission_ids},
+        headers={'Cookie': cookie, 'Content-Type': 'application/json'},
+        timeout=15,
+    )
+    assert resp.status_code == 200 and resp.json().get('success'), \
+        f'assign permissions failed: {resp.status_code} {resp.text[:200]}'
 
 
 def _count_child_tables(permission_set_id: int) -> dict:
@@ -42,9 +82,9 @@ def _count_child_tables(permission_set_id: int) -> dict:
     try:
         cur = conn.cursor()
         counts = {}
-        for tbl in ('role_permissions', 'role_menu_permissions',
-                    'permission_rules', 'role_data_permissions',
-                    'role_dimension_scopes', 'user_roles'):
+        for tbl in ('permission_set_permissions', 'permission_set_menu_permissions',
+                    'permission_rules', 'permission_set_data_permissions',
+                    'permission_set_dimension_scopes', 'user_permission_sets'):
             try:
                 cur.execute(f'SELECT COUNT(*) FROM {tbl} WHERE permission_set_id=?', (permission_set_id,))
                 counts[tbl] = cur.fetchone()[0]
@@ -60,20 +100,17 @@ class TestRoleDeleteCascadeV061:
 
     def test_tc01_delete_with_refs_cascades(self, admin_cookie):
         """TC-01: 创建角色 + 分配权限 + 菜单 → 删角色 → 子表清零."""
-        # 用 RoleFactory 创建 + 自动分配权限 (RoleFactory 默认带 permissions)
-        # 显式覆盖 permissions
-        permission_set = RoleFactory.create(
-            cookie=admin_cookie,
-            permissions=['product:read', 'product:write'],
-        )
+        # 用 RoleFactory 创建 permission_set, 再通过 API 显式分配权限
+        permission_set = RoleFactory.create(cookie=admin_cookie)
         permission_set_id = permission_set['id']
         assert permission_set_id > 0, f'create permission_set failed: {permission_set}'
+        _assign_permissions(permission_set_id, admin_cookie)
 
         try:
-            # 1. 验证子表确实有引用 (RoleFactory 默认会创建 role_permissions)
+            # 1. 验证子表确实有引用
             counts = _count_child_tables(permission_set_id)
-            assert counts['role_permissions'] >= 2, \
-                f'expected >=2 role_permissions, got: {counts}'
+            assert counts['permission_set_permissions'] >= 2, \
+                f'expected >=2 permission_set_permissions, got: {counts}'
 
             # 2. 删除角色 (走 API, 触发级联)
             RoleFactory.cleanup(permission_set_id, cookie=admin_cookie)
@@ -99,7 +136,7 @@ class TestRoleDeleteCascadeV061:
         """
         import requests
 
-        BO_URL = os.environ.get('BO_API_BASE', 'http://localhost:3010')
+        BO_URL = BO_API_BASE
 
         del_resp = requests.delete(
             f'{BO_URL}/api/v1/permission-sets/1',

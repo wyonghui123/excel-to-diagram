@@ -45,7 +45,7 @@ class AspectLoader:
             self._cache = {}
             return self._cache
         try:
-            import yaml
+            from meta.core import yaml_compat as yaml
             with open(path, 'r', encoding='utf-8') as f:
                 data = yaml.safe_load(f) or {}
             self._cache = data

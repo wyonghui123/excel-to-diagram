@@ -25,6 +25,7 @@ pytestmark = pytest.mark.unit
 
 from meta.services.audit_service import _mask_audit_payload
 from meta.services.field_masking_service import REDACTED
+from meta.tests.shared.db_schema import create_audit_logs
 
 _HASH = 'pbkdf2:sha256:600000$abc123$' + 'd' * 64
 
@@ -43,22 +44,7 @@ def _ensure_schema_registry():
 def audit_ds():
     """最小 audit_logs 库 + DataSource 替身"""
     conn = sqlite3.connect(':memory:', check_same_thread=False)
-    conn.executescript("""
-        CREATE TABLE audit_logs (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            object_type VARCHAR(200), object_id VARCHAR(200), action VARCHAR(200),
-            field_name VARCHAR(200), old_value TEXT, new_value TEXT,
-            user_id VARCHAR(200), user_name VARCHAR(200), ip_address VARCHAR(200),
-            user_agent VARCHAR(500), created_at VARCHAR(200), trace_id VARCHAR(200),
-            transaction_id VARCHAR(200), agent_id VARCHAR(200), agent_session_id VARCHAR(200),
-            tool_call_id VARCHAR(200), agent_reasoning TEXT, status VARCHAR(100),
-            extra_data TEXT, parent_object_type VARCHAR(200), parent_object_id VARCHAR(200),
-            log_category VARCHAR(100), log_level VARCHAR(50), outcome VARCHAR(50),
-            retention_until VARCHAR(200), cascade_root_id VARCHAR(200),
-            cascade_root_action VARCHAR(200), change_set_id VARCHAR(200),
-            reason_code VARCHAR(200)
-        );
-    """)
+    create_audit_logs(conn)
 
     class MockDS:
         in_transaction = False

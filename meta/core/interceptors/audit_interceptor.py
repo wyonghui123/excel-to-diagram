@@ -117,6 +117,12 @@ class AuditInterceptor(Interceptor):
             'batch_assign', 'batch_unassign',
         }
         if not context.is_crud_action and context.action not in _ASSOC_ACTIONS:
+            # [P2 修复] 未知 action 不得静默跳过：白名单漏配曾导致生产长期无审计日志
+            logger.warning(
+                f"[AuditInterceptor] SKIP unknown action: action={context.action!r}, "
+                f"object_type={context.object_type!r}. "
+                f"如该 action 应被审计，请同步 _ASSOC_ACTIONS 白名单。"
+            )
             return
 
         # [FIX 2026-06-12] context.user_name 只是 'admin', 从 g.current_user 提取带 display_name 的格式

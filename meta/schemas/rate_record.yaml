@@ -358,6 +358,54 @@ fields:
     ui:
       widget: number
 
+  - id: distribution_basis
+    name: 分摊基准
+    type: string
+    db_column: distribution_basis
+    required: true
+    default: none
+    max_length: 32
+    description: >
+      抬头级条件（运费/杂费/折扣）向行分摊的基准。仅作用于 rate_class 为
+      freight / discount_surcharge 的抬头条件；price 类条件恒为 none。
+      与 allocation_weight 严格区分：后者是「多来源取价 × 加权累加」，
+      本字段是「单一条件金额 × 行分摊」，二者不得混用。
+    enum_values:
+      - value: none
+        label: 不分摊（独立费用行）
+        color: default
+        category: active
+        is_initial: true
+      - value: quantity
+        label: 按数量
+        color: primary
+        category: active
+      - value: net_amount
+        label: 按净额
+        color: primary
+        category: active
+      - value: weight
+        label: 按重量
+        color: info
+        category: active
+      - value: volume
+        label: 按体积
+        color: info
+        category: active
+      - value: amount
+        label: 按金额
+        color: info
+        category: active
+    semantics:
+      meaning: 抬头条件金额的行分摊基准
+      data_category: code
+      filterable: true
+      filter_type: enum
+      filter_label: 分摊基准
+      filter_scope: local
+    ui:
+      widget: select
+
   - id: priority
     name: 优先级
     type: integer

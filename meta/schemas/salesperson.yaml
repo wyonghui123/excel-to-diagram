@@ -335,7 +335,7 @@ ui_view_config:
         label: 新建销售员
         icon: plus
         type: primary
-        permission: salesperson:salesperson_create
+        permission: salesperson:create
     defaultSort:
       field: code
       order: asc
@@ -378,7 +378,7 @@ ui_view_config:
 
 category_config:
   # 双段式权限码，与 permissions 表实际行一致（v127 落库）
-  create_permission: salesperson:salesperson_create
-  update_permission: salesperson:salesperson_update
-  delete_permission: salesperson:salesperson_delete
+  create_permission: salesperson:create
+  update_permission: salesperson:update
+  delete_permission: salesperson:delete
   owner_auto_permission: false

@@ -280,7 +280,7 @@ fields:
     type: date
     db_column: promised_date
     required: true
-    description: 承诺日期（交货日 / 收款日 / 服务日，语义由 kind 限定）
+    description: 承诺日期（交货日 / 开票日 / 服务日，语义由 kind 限定）
     semantics:
       meaning: 对客户的承诺日期
       filterable: true
@@ -307,43 +307,123 @@ fields:
       widget: number
 
   - id: billing_percent
-    name: 收款比例(%)
+    name: 开票比例(%)
     type: number
     db_column: billing_percent
     required: false
     nullable: true
     description: |
-      仅 schedule_kind = billing 使用。该期应收金额占所属行**分摊后净额**的比例。
+      仅 schedule_kind = billing 使用。该期开票金额占所属行**分摊后净额**的比例。
       不落金额，金额 = billing_percent / 100 × 行净额（派生展示）。
+      与 billing_fixed_amount 二选一（R-SCH-11）：固定金额期次本字段必须为空。
     constraints:
       - type: numeric_range
         gt: 0
         lte: 100
         decimal_places: 2
     semantics:
-      meaning: 收款计划比例（0 < p ≤ 100）
+      meaning: 开票计划比例（0 < p ≤ 100）
+      filterable: false
+    ui:
+      widget: number
+
+  # TBD-11 C：里程碑/固定金额期次（与 billing_percent 互斥；落库，唯一真源）
+  - id: billing_fixed_amount
+    name: 开票固定金额
+    type: number
+    db_column: billing_fixed_amount
+    required: false
+    nullable: true
+    description: |
+      仅 schedule_kind = billing 使用。该期开票的**绝对金额**（单据币种）。
+      与 billing_percent 二选一：两者同时填写或同时为空均被守卫拒绝（R-SCH-11）。
+      固定金额期次不随行净额变动缩放；开票服务按该金额扣减已开票金额。
+    constraints:
+      - type: numeric_range
+        gt: 0
+        decimal_places: 4
+    semantics:
+      meaning: 开票期次固定金额（0 < amount）
       filterable: false
     ui:
       widget: number
 
   - id: billing_amount
-    name: 收款金额(派生)
+    name: 开票金额(派生)
     type: number
     db_column: null
     computed: true
     description: |
-      只读派生展示：仅 schedule_kind = billing 时输出
-      billing_percent / 100 × 所属订单行分摊后净额（sales_order_line.net_amount）。
-      不落库；billing_percent 为空（delivery 行）时输出空，所属行净额缺失时按 0 计。
+      只读派生展示：仅 schedule_kind = billing 时输出。
+      **固定金额优先**（billing_fixed_amount）；否则 billing_percent / 100 ×
+      所属订单行分摊后净额（sales_order_line.net_amount）。
+      不落库；比例与固定金额均为空（delivery 行）时输出空，所属行净额缺失时按 0 计。
     semantics:
-      meaning: 收款计划派生金额
+      meaning: 开票计划派生金额
       virtual: true
     computation:
       type: formula
-      formula: "None if billing_percent is None else ROUND(DIVIDE(billing_percent * COALESCE(ROUND(str(self.sales_order_line.net_amount), 4), 0), 100, 0), 2)"
+      formula: "ROUND(billing_fixed_amount, 2) if billing_fixed_amount is not None else (None if billing_percent is None else ROUND(DIVIDE(billing_percent * COALESCE(ROUND(str(self.sales_order_line.net_amount), 4), 0), 100, 0), 2))"
     ui:
       widget: number
       editable: false
+
+  # S8 Wave B：期次已开票金额（plan 分支唯一累计真源）
+  # 依据 docs/specs/s8-customer-invoice-wave-b/spec.md §3.2 / §5.4
+  - id: billed_amount
+    name: 已开票金额
+    type: number
+    db_column: billed_amount
+    required: true
+    default: 0
+    description: 该期次已过账发票累计净额，过账/红冲由服务层派生，只读
+    constraints:
+      - type: numeric_range
+        decimal_places: 4
+    semantics:
+      meaning: 期次已开票累计金额（plan 分支唯一真源）
+      derived: true
+      readonly: true
+    ui:
+      widget: number
+      editable: false
+
+  - id: billing_status
+    name: 开票状态
+    type: string
+    db_column: billing_status
+    required: true
+    default: none
+    max_length: 16
+    description: 期次开票进度，由 billed_amount 与期金额对比派生，只读
+    enum_values:
+      - value: none
+        label: 未开票
+        color: info
+        category: active
+        is_initial: true
+      - value: partial
+        label: 部分开票
+        color: warning
+        category: active
+      - value: full
+        label: 已开满
+        color: success
+        category: active
+      - value: cancelled
+        label: 已取消
+        color: danger
+        category: inactive
+    semantics:
+      meaning: 期次开票进度（none/partial/full/cancelled）
+      filterable: true
+      filter_type: enum
+      filter_label: 开票状态
+      filter_scope: local
+      derived: true
+      readonly: true
+    ui:
+      widget: select
 
   - id: milestone_code
     name: 里程碑码
@@ -420,6 +500,58 @@ fields:
       meaning: 记录更新时间
       audit_field: true
 
+# [Rule Convergence M2 FR-004 2026-11-07] R-SCH-9 唯一真源。
+# 服务层（sales_order_guard_service）只读本声明做流转校验，保留副作用与跨字段校验；
+# 新增状态 / 流转只改这里。规则 triggers 为空、ui_hints.hidden=true：
+# 不接通用 RuleEngine，也不改变 /state_transitions 的对外输出。
+states:
+  - code: planned
+    label: 计划中
+    category: initial
+    seq: 1
+  - code: confirmed
+    label: 已确认
+    seq: 2
+  - code: completed
+    label: 已完成
+    category: terminal
+    seq: 3
+  - code: cancelled
+    label: 已作废
+    category: terminal
+    seq: 4
+
+rules:
+  - id: confirm_sales_order_schedule
+    name: 确认计划行
+    type: state_transition
+    state_field: status
+    from_states: [planned]
+    to_state: confirmed
+    enabled: false
+    ui_hints:
+      hidden: true
+
+  - id: complete_sales_order_schedule
+    name: 完成计划行
+    type: state_transition
+    state_field: status
+    from_states: [confirmed]
+    to_state: completed
+    enabled: false
+    ui_hints:
+      hidden: true
+
+  - id: cancel_sales_order_schedule
+    name: 作废计划行
+    type: state_transition
+    state_field: status
+    from_states: [planned, confirmed]
+    to_state: cancelled
+    enabled: false
+    ui_hints:
+      hidden: true
+
 indexes:
   # 同一订单行内，同一 kind 的序号唯一
   - fields: [line_id, schedule_kind, schedule_no]
@@ -490,12 +622,14 @@ ui_view_config:
         width: 110
       - field: billing_percent
         width: 120
+      - field: billing_fixed_amount
+        width: 130
       - field: billing_amount
         width: 130
         computed: true
         computation:
           type: formula
-          formula: "None if billing_percent is None else ROUND(DIVIDE(billing_percent * COALESCE(ROUND(str(self.sales_order_line.net_amount), 4), 0), 100, 0), 2)"
+          formula: "ROUND(billing_fixed_amount, 2) if billing_fixed_amount is not None else (None if billing_percent is None else ROUND(DIVIDE(billing_percent * COALESCE(ROUND(str(self.sales_order_line.net_amount), 4), 0), 100, 0), 2))"
       - field: milestone_code
         width: 140
       - field: status
@@ -518,8 +652,30 @@ ui_view_config:
           - fields: [schedule_no, status]
       - title: 计划
         columns:
-          - fields: [promised_date, promised_qty, billing_percent]
+          - fields: [promised_date, promised_qty]
+          - fields: [billing_percent, billing_fixed_amount]
       - title: 发货与标识
         columns:
           - fields: [plant_location_id]
           - fields: [milestone_code, service_visit_no]
+  detail:
+    showChangeHistory: true
+    showRelations: true
+    # 业务 Action：开票计划期次详情页「按期次开票」，
+    # 派发 customer_invoice.create_from_schedule（Wave B spec §7）
+    actions:
+      - id: create_invoice
+        label: 按期次开票
+        icon: plus
+        variant: secondary
+        permission: customer_invoice:create
+        action: customer_invoice.create_from_schedule
+        visible_when: "schedule_kind == 'billing' and status in ['planned', 'confirmed']"
+      # TBD-11 A：服务计划期次「按确认开票」，派发 service_confirmation 动作
+      - id: create_service_invoice
+        label: 按服务确认开票
+        icon: plus
+        variant: secondary
+        permission: customer_invoice:create
+        action: customer_invoice.create_from_service_confirmation
+        visible_when: "schedule_kind == 'service' and status == 'completed'"

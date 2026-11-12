@@ -73,6 +73,12 @@ audit:
   dissociate:
     enabled: true
 
+numbering:
+  no_field: shipment_no
+  date_field: ship_date
+  scope_bo: transfer_shipment
+  fallback_sequence_code: TRS
+
 fields:
   - id: id
     name: ID
@@ -314,7 +320,7 @@ ui_view_config:
         label: 新建发货单
         icon: plus
         type: primary
-        permission: transfer_shipment:transfer_shipment_create
+        permission: transfer_shipment:create
       - id: export
         label: 导出
         icon: download

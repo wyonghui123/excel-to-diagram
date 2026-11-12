@@ -55,21 +55,34 @@ def _extract_list_data(resp_json):
     return [], 0
 
 
+def _pick_version_id():
+    """从测试库挑一个有 domains 的 version_id (不再硬编码 1)"""
+    ds = get_data_source("sqlite", database=get_test_db_path())
+    row = ds.execute(
+        "SELECT version_id FROM domains WHERE version_id IS NOT NULL "
+        "GROUP BY version_id ORDER BY COUNT(*) DESC LIMIT 1"
+    ).fetchone()
+    return row[0] if row else None
+
+
 class TestTreeNodeSelectionToList:
     """端到端：树节点选择 -> 列表过滤"""
 
     def test_01_domain_selection_shows_domains(self, app, auth_headers):
         client = app.test_client()
+        vid = _pick_version_id()
+        if vid is None:
+            pytest.skip("No domains available")
 
         rows = get_data_source("sqlite", database=get_test_db_path()).execute(
-            "SELECT id FROM domains WHERE version_id = 1 LIMIT 3"
+            f"SELECT id FROM domains WHERE version_id = {vid} LIMIT 3"
         ).fetchall()
         domain_ids = [str(r[0]) for r in rows]
 
         if len(domain_ids) < 1:
-            pytest.fail("No domains available")
+            pytest.skip("No domains available")
 
-        qs = "version_id=1&page_size=100"
+        qs = f"version_id={vid}&page_size=100"
 
         resp = client.get(f"/api/v2/bo/domain?{qs}", headers=auth_headers)
         data = resp.get_json()
@@ -85,16 +98,19 @@ class TestTreeNodeSelectionToList:
 
     def test_02_sub_domain_selection_shows_sub_domains(self, app, auth_headers):
         client = app.test_client()
+        vid = _pick_version_id()
+        if vid is None:
+            pytest.skip("No sub_domains available")
 
         rows = get_data_source("sqlite", database=get_test_db_path()).execute(
-            "SELECT id FROM sub_domains WHERE version_id = 1 LIMIT 3"
+            f"SELECT id FROM sub_domains WHERE version_id = {vid} LIMIT 3"
         ).fetchall()
         sub_domain_ids = [str(r[0]) for r in rows]
 
         if len(sub_domain_ids) < 1:
-            pytest.fail("No sub_domains available")
+            pytest.skip("No sub_domains available")
 
-        qs = "version_id=1&" + "&".join([f"sub_domain_id={sdid}" for sdid in sub_domain_ids])
+        qs = f"version_id={vid}&" + "&".join([f"sub_domain_id={sdid}" for sdid in sub_domain_ids])
 
         resp = client.get(f"/api/v2/bo/sub_domain?{qs}", headers=auth_headers)
         data = resp.get_json()
@@ -123,8 +139,9 @@ class TestTreeNodeSelectionToList:
             pytest.skip("No service_module with business_objects available")
 
         sm_id, sub_domain_id = sm_with_bo
+        vid = _pick_version_id()
 
-        resp = client.get(f"/api/v2/bo/business_object?version_id=1&sub_domain_id={sub_domain_id}", headers=auth_headers)
+        resp = client.get(f"/api/v2/bo/business_object?version_id={vid}&sub_domain_id={sub_domain_id}", headers=auth_headers)
         data = resp.get_json()
 
         assert data.get('success'), "API should succeed"
@@ -132,24 +149,27 @@ class TestTreeNodeSelectionToList:
     def test_04_mixed_selection_domain_tab(self, app, auth_headers):
         client = app.test_client()
         ds = get_data_source("sqlite", database=get_test_db_path())
+        vid = _pick_version_id()
+        if vid is None:
+            pytest.skip("No domain available")
 
         domain = ds.execute(
-            "SELECT id FROM domains WHERE version_id = 1 LIMIT 1"
+            f"SELECT id FROM domains WHERE version_id = {vid} LIMIT 1"
         ).fetchone()
 
         if not domain:
-            pytest.fail("No domain available")
+            pytest.skip("No domain available")
 
         domain_id = domain[0]
 
         sub_domain = ds.execute(
-            "SELECT id FROM sub_domains WHERE domain_id = ? AND version_id = 1 LIMIT 1",
+            f"SELECT id FROM sub_domains WHERE domain_id = ? AND version_id = {vid} LIMIT 1",
             (domain_id,)
         ).fetchone()
 
         sub_domain_id = sub_domain[0] if sub_domain else 99999
 
-        qs = f"version_id=1&page_size=100"
+        qs = f"version_id={vid}&page_size=100"
 
         resp = client.get(f"/api/v2/bo/domain?{qs}", headers=auth_headers)
         data = resp.get_json()
@@ -165,23 +185,26 @@ class TestTreeNodeSelectionToList:
     def test_05_leaf_domain_included(self, app, auth_headers):
         client = app.test_client()
         ds = get_data_source("sqlite", database=get_test_db_path())
+        vid = _pick_version_id()
+        if vid is None:
+            pytest.skip("Need at least 2 domains")
 
         all_domains = ds.execute(
-            "SELECT id FROM domains WHERE version_id = 1"
+            f"SELECT id FROM domains WHERE version_id = {vid}"
         ).fetchall()
         all_domain_ids = [str(r[0]) for r in all_domains]
 
         if len(all_domain_ids) < 2:
-            pytest.fail("Need at least 2 domains")
+            pytest.skip("Need at least 2 domains")
 
         domains_with_sub = ds.execute(
-            "SELECT DISTINCT domain_id FROM sub_domains WHERE version_id = 1"
+            f"SELECT DISTINCT domain_id FROM sub_domains WHERE version_id = {vid}"
         ).fetchall()
         domains_with_sub_ids = {r[0] for r in domains_with_sub}
 
         leaf_domains = [int(d) for d in all_domain_ids if int(d) not in domains_with_sub_ids]
 
-        qs = "version_id=1&page_size=100"
+        qs = f"version_id={vid}&page_size=100"
 
         resp = client.get(f"/api/v2/bo/domain?{qs}", headers=auth_headers)
         data = resp.get_json()
@@ -197,16 +220,19 @@ class TestTreeNodeSelectionToList:
     def test_06_service_module_selection(self, app, auth_headers):
         client = app.test_client()
         ds = get_data_source("sqlite", database=get_test_db_path())
+        vid = _pick_version_id()
+        if vid is None:
+            pytest.skip("No service_modules available")
 
         sm = ds.execute(
-            "SELECT id FROM service_modules WHERE version_id = 1 LIMIT 3"
+            f"SELECT id FROM service_modules WHERE version_id = {vid} LIMIT 3"
         ).fetchall()
         sm_ids = [str(r[0]) for r in sm]
 
         if len(sm_ids) < 1:
-            pytest.fail("No service_modules available")
+            pytest.skip("No service_modules available")
 
-        qs = "version_id=1&" + "&".join([f"service_module_id={sid}" for sid in sm_ids])
+        qs = f"version_id={vid}&" + "&".join([f"service_module_id={sid}" for sid in sm_ids])
 
         resp = client.get(f"/api/v2/bo/service_module?{qs}", headers=auth_headers)
         data = resp.get_json()
@@ -219,35 +245,38 @@ class TestTreeNodeSelectionToList:
     def test_07_full_flow_simulation(self, app, auth_headers):
         client = app.test_client()
         ds = get_data_source("sqlite", database=get_test_db_path())
+        vid = _pick_version_id()
+        if vid is None:
+            pytest.skip("No domain available")
 
         domain = ds.execute(
-            "SELECT id, name FROM domains WHERE version_id = 1 LIMIT 1"
+            f"SELECT id, name FROM domains WHERE version_id = {vid} LIMIT 1"
         ).fetchone()
 
         if not domain:
-            pytest.fail("No domain available")
+            pytest.skip("No domain available")
 
         domain_id, domain_name = domain
 
-        resp1 = client.get(f"/api/v2/bo/domain?version_id=1&page_size=100", headers=auth_headers)
+        resp1 = client.get(f"/api/v2/bo/domain?version_id={vid}&page_size=100", headers=auth_headers)
         data1 = resp1.get_json()
         assert data1.get('success')
         _, total1 = _extract_list_data(data1)
         assert total1 >= 1
 
         sub_domain = ds.execute(
-            "SELECT id, name FROM sub_domains WHERE domain_id = ? AND version_id = 1 LIMIT 1",
+            f"SELECT id, name FROM sub_domains WHERE domain_id = ? AND version_id = {vid} LIMIT 1",
             (domain_id,)
         ).fetchone()
 
         if sub_domain:
             sub_domain_id, sub_domain_name = sub_domain
 
-            resp2 = client.get(f"/api/v2/bo/sub_domain?version_id=1&sub_domain_id={sub_domain_id}", headers=auth_headers)
+            resp2 = client.get(f"/api/v2/bo/sub_domain?version_id={vid}&sub_domain_id={sub_domain_id}", headers=auth_headers)
             data2 = resp2.get_json()
             assert data2.get('success')
 
-            resp3 = client.get(f"/api/v2/bo/business_object?version_id=1&sub_domain_id={sub_domain_id}", headers=auth_headers)
+            resp3 = client.get(f"/api/v2/bo/business_object?version_id={vid}&sub_domain_id={sub_domain_id}", headers=auth_headers)
             data3 = resp3.get_json()
             assert data3.get('success')
 

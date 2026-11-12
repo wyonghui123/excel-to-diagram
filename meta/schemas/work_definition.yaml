@@ -54,6 +54,11 @@ audit:
   dissociate:
     enabled: true
 
+org_scope:
+  mode: direct
+  field: org_id
+  write_check: true
+
 fields:
   - id: id
     name: ID
@@ -521,7 +526,7 @@ ui_view_config:
         label: 新建作业定义
         icon: plus
         type: primary
-        permission: work_definition:work_definition_create
+        permission: work_definition:create
     defaultSort:
       field: code
       order: asc
@@ -558,7 +563,7 @@ ui_view_config:
                  org_id, description]
 
 category_config:
-  create_permission: work_definition:work_definition_create
-  update_permission: work_definition:work_definition_update
-  delete_permission: work_definition:work_definition_delete
+  create_permission: work_definition:create
+  update_permission: work_definition:update
+  delete_permission: work_definition:delete
   owner_auto_permission: false

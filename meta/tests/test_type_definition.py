@@ -155,7 +155,9 @@ class TestSchemaFace:
         d = _raw(path)
         assert d['object_type'] == 'view'
         assert d['import_export']['auto_crud'] is False
-        assert 'scope_bo' not in d['view_definition']
+        # [FIX 2026-11-08] 视图现已暴露 scope_bo（供 /api/v2/meta 按领域分区过滤），
+        # 与"只读"无关；只读性仍由下方 action 断言保证。
+        assert 'scope_bo' in d['view_definition']
         assert predicate in d['view_definition']
         action_ids = {a['id'] for a in d.get('actions') or []}
         assert all(a.endswith('_read') or a.endswith('_list')

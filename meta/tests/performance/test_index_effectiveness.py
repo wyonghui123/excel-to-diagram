@@ -1,3 +1,4 @@
+# ALLOW_RAW_SQL: 本文件含裸 SQL 构造索引效果测试数据/DDL，守卫豁免（2026-11-09 恢复覆盖）
 # -*- coding: utf-8 -*-
 """
 索引效果对比测试
@@ -90,8 +91,9 @@ class TestIndexEffectiveness:
         
         ds.execute("INSERT INTO products (id, name, code, created_at) VALUES (1, '测试产品', 'PRD001', ?)", (now,))
         
-        ds.execute("INSERT INTO versions (id, name, code, product_id, created_at) VALUES (1, 'V1', 'V001', 1, ?)", (now,))
-        ds.execute("INSERT INTO versions (id, name, code, product_id, created_at) VALUES (2, 'V2', 'V002', 1, ?)", (now,))
+        # [FIX 2026-11-09] versions.code 已废弃（2026-06-13，name 为唯一业务键）
+        ds.execute("INSERT INTO versions (id, name, product_id, created_at) VALUES (1, 'V1', 1, ?)", (now,))
+        ds.execute("INSERT INTO versions (id, name, product_id, created_at) VALUES (2, 'V2', 1, ?)", (now,))
         
         ds.execute("INSERT INTO domains (id, name, code, version_id, created_at) VALUES (1, '领域1', 'DOM001', 1, ?)", (now,))
         ds.execute("INSERT INTO domains (id, name, code, version_id, created_at) VALUES (2, '领域2', 'DOM002', 1, ?)", (now,))
@@ -331,7 +333,7 @@ class TestIndexBenchmark:
             
             now = int(time.time())
             ds.execute("INSERT INTO products (id, name, code, created_at) VALUES (1, 'P1', 'P01', ?)", (now,))
-            ds.execute("INSERT INTO versions (id, name, code, product_id, created_at) VALUES (1, 'V1', 'V01', 1, ?)", (now,))
+            ds.execute("INSERT INTO versions (id, name, product_id, created_at) VALUES (1, 'V1', 1, ?)", (now,))
             ds.execute("INSERT INTO domains (id, name, code, version_id, created_at) VALUES (1, 'D1', 'D01', 1, ?)", (now,))
             ds.execute("INSERT INTO sub_domains (id, name, code, domain_id, version_id, created_at) VALUES (1, 'SD1', 'SD01', 1, 1, ?)", (now,))
             ds.execute("INSERT INTO service_modules (id, name, code, sub_domain_id, version_id, created_at) VALUES (1, 'SM1', 'SM01', 1, 1, ?)", (now,))

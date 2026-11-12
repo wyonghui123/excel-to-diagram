@@ -83,6 +83,23 @@ audit:
   dissociate:
     enabled: true
 
+org_scope:
+  mode: dual
+  from_field: from_org_id
+  to_field: to_org_id
+  function: inventory
+  write_check: true
+
+numbering:
+  no_field: transfer_order_no
+  date_field: transfer_date
+  type_table: type_definitions
+
+# [Rule Convergence M2 2026-11-07] 审批对象注册（表名 + 金额取值优先级）
+approval:
+  table: transfer_orders
+  amount_fields: []
+
 fields:
   - id: id
     name: ID
@@ -715,7 +732,7 @@ ui_view_config:
         label: 新建调拨单
         icon: plus
         type: primary
-        permission: transfer_order:transfer_order_create
+        permission: transfer_order:create
       - id: export
         label: 导出
         icon: download

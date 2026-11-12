@@ -78,6 +78,15 @@ class UIConfigBuilder:
                 _declared_hub = (config.get('ui_view_config') or {}).get('hub')
                 if _declared_hub:
                     _built_safe['hub'] = _declared_hub
+                # [FIX 2026-11-12] 同理保留 yaml 显式声明的 detail.actions：业务按钮与表单
+                #   推导无关，不能被「form 不可渲染 → 推导一份」顺手抹掉。
+                _declared_actions = (((config.get('ui_view_config') or {}).get('detail')) or {}).get('actions')
+                if _declared_actions:
+                    _detail = _built_safe.get('detail')
+                    if not isinstance(_detail, dict):
+                        _detail = {}
+                        _built_safe['detail'] = _detail
+                    _detail['actions'] = _declared_actions
                 config['ui_view_config'] = _built_safe
 
         fields_info = []

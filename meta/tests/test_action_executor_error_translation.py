@@ -37,7 +37,7 @@ class TestTranslateErrorMessage:
             "UNIQUE constraint failed: user.code", mock_meta_object
         )
         assert "用户" in result  # 业务字段名
-        assert "唯一" in result or "值" in result
+        assert "已存在" in result or "唯一" in result
 
     def test_foreign_key_constraint(self, mock_meta_object):
         """FOREIGN KEY 约束：返回外键消息"""

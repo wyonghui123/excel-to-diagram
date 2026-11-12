@@ -82,6 +82,65 @@ def test_prepare_create_cycle_type_allowed():
     assert data['count_type'] == 'cycle'
 
 
+def test_tolerance_priority_header_over_parameter():
+    """M6a-2：单据头 > 参数行 > def.default_value。"""
+    conn = adj.build_adjustment_db()
+    adj.set_numeric_param(conn, 'inventory_count_default_tolerance_qty_pct', '0.2')
+
+    # 抬头显式填 0.05：不被参数 0.2 覆盖
+    _cid, data, service = _create_count(conn, tolerance_qty_pct=0.05)
+    assert data['tolerance_qty_pct'] == pytest.approx(0.05)
+    assert service.resolve_tolerance(
+        inv.ORG_ID, 0.05)['source']['qty_pct'] == 'header'
+
+    # 抬头留空：回落参数 def.default_value
+    _cid2, data2, service2 = _create_count(conn)
+    assert data2['tolerance_qty_pct'] == pytest.approx(0.2)
+    assert service2.resolve_tolerance(
+        inv.ORG_ID)['source']['qty_pct'] == 'default'
+
+
+def test_tolerance_parameter_row_specificity_beats_default():
+    """参数行（specificity_rank 小者优先）> def.default_value。"""
+    conn = adj.build_adjustment_db()
+    adj.set_numeric_param(conn, 'inventory_count_default_tolerance_qty_pct', '0.1')
+    def_id = conn.execute(
+        'SELECT id FROM control_parameter_defs WHERE code=?',
+        ['inventory_count_default_tolerance_qty_pct']).fetchone()[0]
+    conn.executemany(
+        'INSERT INTO control_parameter_values '
+        '(control_parameter_id, value, org_id, specificity_rank, status) '
+        "VALUES (?, ?, ?, ?, 'active')",
+        [(def_id, '0.3', inv.ORG_ID, 20), (def_id, '0.25', inv.ORG_ID, 10)])
+    conn.commit()
+
+    _cid, data, service = _create_count(conn)
+    assert data['tolerance_qty_pct'] == pytest.approx(0.25)
+    info = service.params.explain(
+        'inventory_count_default_tolerance_qty_pct', {'org_id': inv.ORG_ID})
+    assert info['source']['type'] == 'value'
+    assert info['source']['specificity_rank'] == 10
+
+
+def test_tolerance_snapshot_not_drifted_by_parameter_change():
+    """落库快照：建单后改参数，submit 仍按抬头快照判定。"""
+    conn = adj.build_adjustment_db()
+    adj.set_numeric_param(conn, 'inventory_count_default_tolerance_qty_pct', '0.2')
+    adj.post_balance(conn, 10)
+    count_id, data, service = _create_count(conn)
+    assert data['tolerance_qty_pct'] == pytest.approx(0.2)
+
+    # 参数改为 0；抬头快照仍是 0.2 → 5% 差异在容差内
+    adj.set_numeric_param(conn, 'inventory_count_default_tolerance_qty_pct', '0')
+    service.start(count_id)
+    line = _lines(conn, count_id)[0]
+    _set_counted(conn, line['id'], 10.5)
+
+    result = service.submit(count_id)
+    assert result['status'] == 'approved'
+    assert result['over_tolerance_lines'] == []
+
+
 # ---------------- start 快照 ----------------
 
 def test_start_snapshots_nonzero_balances_with_item_base_uom():

@@ -509,7 +509,7 @@ ui_view_config:
         label: 新建税码
         icon: plus
         type: primary
-        permission: tax_code:tax_code_create
+        permission: tax_code:create
     defaultSort:
       field: code
       order: asc
@@ -563,7 +563,7 @@ ui_view_config:
 
 category_config:
   # 双段式权限码，与 permissions 表实际行一致（v110 落库）
-  create_permission: tax_code:tax_code_create
-  update_permission: tax_code:tax_code_update
-  delete_permission: tax_code:tax_code_delete
+  create_permission: tax_code:create
+  update_permission: tax_code:update
+  delete_permission: tax_code:delete
   owner_auto_permission: false

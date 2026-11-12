@@ -1,3 +1,4 @@
+# ALLOW_RAW_SQL: 本文件含裸 SQL 构造性能基准测试数据/DDL，守卫豁免（2026-11-09 恢复覆盖）
 # -*- coding: utf-8 -*-
 """
 数据库查询性能基准测试
@@ -112,7 +113,7 @@ class TestDatabaseQueryPerformance:
                 version_id,
                 service_module_id,
                 COUNT(*) as count,
-                MAX(updated_at) as last_updated
+                MAX(created_at) as last_updated
             FROM business_objects
             GROUP BY version_id, service_module_id
             ORDER BY count DESC
@@ -139,11 +140,14 @@ class TestDatabaseQueryPerformance:
         now = int(time.time())
         
         ds = perf_db
-        ds.execute("INSERT INTO products (id, name, code, created_at) VALUES (1, 'P1', 'P01', ?)", (now, now))
-        ds.execute("INSERT INTO versions (id, name, code, product_id, created_at) VALUES (1, 'V1', 'V01', 1, ?)", (now, now))
-        ds.execute("INSERT INTO domains (id, name, code, version_id, created_at) VALUES (1, 'D1', 'D01', 1, ?)", (now, now))
-        ds.execute("INSERT INTO sub_domains (id, name, code, domain_id, version_id, created_at) VALUES (1, 'SD1', 'SD01', 1, 1, ?)", (now, now))
-        ds.execute("INSERT INTO service_modules (id, name, code, sub_domain_id, version_id, created_at) VALUES (1, 'SM1', 'SM01', 1, 1, ?)", (now, now))
+        # [FIX 2026-11-09] 占位符 1 个，绑定参数也应为 1 个
+        ds.execute("INSERT INTO products (id, name, code, created_at) VALUES (1, 'P1', 'P01', ?)", (now,))
+        # [FIX 2026-11-09] versions.code 已废弃；占位符 1 个 → 绑定 1 个
+        ds.execute("INSERT INTO versions (id, name, product_id, created_at) VALUES (1, 'V1', 1, ?)", (now,))
+        # [FIX 2026-11-09] 占位符 1 个，绑定参数也应为 1 个
+        ds.execute("INSERT INTO domains (id, name, code, version_id, created_at) VALUES (1, 'D1', 'D01', 1, ?)", (now,))
+        ds.execute("INSERT INTO sub_domains (id, name, code, domain_id, version_id, created_at) VALUES (1, 'SD1', 'SD01', 1, 1, ?)", (now,))
+        ds.execute("INSERT INTO service_modules (id, name, code, sub_domain_id, version_id, created_at) VALUES (1, 'SM1', 'SM01', 1, 1, ?)", (now,))
         ds.commit()
         
         for iteration in range(10):
@@ -176,11 +180,14 @@ class TestDatabaseQueryPerformance:
         now = int(time.time())
         
         ds = perf_db
-        ds.execute("INSERT INTO products (id, name, code, created_at) VALUES (1, 'P1', 'P01', ?)", (now, now))
-        ds.execute("INSERT INTO versions (id, name, code, product_id, created_at) VALUES (1, 'V1', 'V01', 1, ?)", (now, now))
-        ds.execute("INSERT INTO domains (id, name, code, version_id, created_at) VALUES (1, 'D1', 'D01', 1, ?)", (now, now))
-        ds.execute("INSERT INTO sub_domains (id, name, code, domain_id, version_id, created_at) VALUES (1, 'SD1', 'SD01', 1, 1, ?)", (now, now))
-        ds.execute("INSERT INTO service_modules (id, name, code, sub_domain_id, version_id, created_at) VALUES (1, 'SM1', 'SM01', 1, 1, ?)", (now, now))
+        # [FIX 2026-11-09] 占位符 1 个，绑定参数也应为 1 个
+        ds.execute("INSERT INTO products (id, name, code, created_at) VALUES (1, 'P1', 'P01', ?)", (now,))
+        # [FIX 2026-11-09] versions.code 已废弃；占位符 1 个 → 绑定 1 个
+        ds.execute("INSERT INTO versions (id, name, product_id, created_at) VALUES (1, 'V1', 1, ?)", (now,))
+        # [FIX 2026-11-09] 占位符 1 个，绑定参数也应为 1 个
+        ds.execute("INSERT INTO domains (id, name, code, version_id, created_at) VALUES (1, 'D1', 'D01', 1, ?)", (now,))
+        ds.execute("INSERT INTO sub_domains (id, name, code, domain_id, version_id, created_at) VALUES (1, 'SD1', 'SD01', 1, 1, ?)", (now,))
+        ds.execute("INSERT INTO service_modules (id, name, code, sub_domain_id, version_id, created_at) VALUES (1, 'SM1', 'SM01', 1, 1, ?)", (now,))
         ds.commit()
         
         for iteration in range(10):
@@ -240,11 +247,14 @@ class TestDatabaseQueryPerformance:
         now = int(time.time())
         
         ds = perf_db
-        ds.execute("INSERT INTO products (id, name, code, created_at) VALUES (1, 'P1', 'P01', ?)", (now, now))
-        ds.execute("INSERT INTO versions (id, name, code, product_id, created_at) VALUES (1, 'V1', 'V01', 1, ?)", (now, now))
-        ds.execute("INSERT INTO domains (id, name, code, version_id, created_at) VALUES (1, 'D1', 'D01', 1, ?)", (now, now))
-        ds.execute("INSERT INTO sub_domains (id, name, code, domain_id, version_id, created_at) VALUES (1, 'SD1', 'SD01', 1, 1, ?)", (now, now))
-        ds.execute("INSERT INTO service_modules (id, name, code, sub_domain_id, version_id, created_at) VALUES (1, 'SM1', 'SM01', 1, 1, ?)", (now, now))
+        # [FIX 2026-11-09] 占位符 1 个，绑定参数也应为 1 个
+        ds.execute("INSERT INTO products (id, name, code, created_at) VALUES (1, 'P1', 'P01', ?)", (now,))
+        # [FIX 2026-11-09] versions.code 已废弃；占位符 1 个 → 绑定 1 个
+        ds.execute("INSERT INTO versions (id, name, product_id, created_at) VALUES (1, 'V1', 1, ?)", (now,))
+        # [FIX 2026-11-09] 占位符 1 个，绑定参数也应为 1 个
+        ds.execute("INSERT INTO domains (id, name, code, version_id, created_at) VALUES (1, 'D1', 'D01', 1, ?)", (now,))
+        ds.execute("INSERT INTO sub_domains (id, name, code, domain_id, version_id, created_at) VALUES (1, 'SD1', 'SD01', 1, 1, ?)", (now,))
+        ds.execute("INSERT INTO service_modules (id, name, code, sub_domain_id, version_id, created_at) VALUES (1, 'SM1', 'SM01', 1, 1, ?)", (now,))
         ds.commit()
         
         for iteration in range(10):

@@ -29,40 +29,13 @@ from meta.core.sql_adapters import SQLiteAdapter
 from meta.core.table_name_validator import register_table_name
 from meta.core.yaml_loader import load_yaml_file, parse_aspects_yaml
 from meta.tests.factories._raw_sql_bridge import insert
+from meta.tests.shared.db_schema import create_audit_logs
 
 _HERE = os.path.dirname(os.path.abspath(__file__))
 _SCHEMA_DIR = os.path.join(os.path.dirname(_HERE), "schemas")
 _ITEMS_PATH = os.path.join(_SCHEMA_DIR, "items.yaml")
 
 TABLE = "items"
-
-AUDIT_DDL = """
-CREATE TABLE IF NOT EXISTS audit_logs (
-    id INTEGER PRIMARY KEY AUTOINCREMENT,
-    object_type TEXT NOT NULL,
-    object_id INTEGER NOT NULL,
-    action TEXT NOT NULL,
-    field_name TEXT,
-    old_value TEXT,
-    new_value TEXT,
-    user_id INTEGER,
-    user_name TEXT,
-    ip_address TEXT,
-    user_agent TEXT,
-    created_at TEXT,
-    extra_data TEXT,
-    trace_id TEXT,
-    transaction_id TEXT,
-    status TEXT,
-    retry_count INTEGER,
-    agent_id TEXT,
-    agent_session_id TEXT,
-    tool_call_id TEXT,
-    agent_reasoning TEXT,
-    parent_object_type TEXT,
-    parent_object_id TEXT
-)
-"""
 
 
 def _load_items():
@@ -76,7 +49,7 @@ def _prepare(tmp_path):
     ds = SQLiteAdapter()
     ds.connect(path=str(tmp_path / "items_default.db"))
     register_table_name(obj.table_name)
-    ds.execute(AUDIT_DDL)
+    create_audit_logs(ds)
     sync_schema_from_meta(ds, [obj])
     # [FK 2026-10-07] items 新增外键 item_group_id→item_groups.id / base_uom→uoms.id。
     # 本用例库仅同步 items 单表，须补最小父表 + 父行（id=1，对应 _BASE），

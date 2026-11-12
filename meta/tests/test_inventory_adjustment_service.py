@@ -369,10 +369,10 @@ def test_opening_requires_opening_permission():
 
     with pytest.raises(PermissionDenied) as exc:
         service.prepare_create(payload)
-    assert 'inventory_adjustment:inventory_adjustment_opening' in str(exc.value)
+    assert 'inventory_adjustment:opening' in str(exc.value)
 
     allowed = {'username': 'op',
-               'permissions': ['inventory_adjustment:inventory_adjustment_opening']}
+               'permissions': ['inventory_adjustment:opening']}
     header = service.prepare_create(payload, allowed)
     header_id = adj.insert_adjustment(conn, header)
     adj.add_adjustment_line(conn, header_id, qty=7,

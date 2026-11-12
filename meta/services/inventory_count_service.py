@@ -10,9 +10,10 @@
 口径:
   ① 快照只由 start 生成：按 org_id（+ 可选 location_id）抓取 qty_on_hand <> 0
      的余额行冻结 snapshot_qty；已生成的快照行不得删除（只能录入实盘数）。
-  ② submit 固化 variance_qty = counted_qty - snapshot_qty，并按
-     limit = max(tolerance_qty_abs, snapshot_qty × tolerance_qty_pct) 判断超容差；
-     超容差行 variance_reason 必填，全部容差内且参数开启时直接 approved。
+  ② submit 固化 variance_qty = counted_qty - snapshot_qty，超容差判定由 BO
+     inventory_count_line 的 constraint 规则（combine_mode=all：率键 + 绝对值键
+     同时超限）执行；单据头容差作为实例值经 overrides 传入。超容差行
+     variance_reason 必填，全部容差内且参数开启时直接 approved。
   ③ post 在单事务内生成一张 count_difference 调整单 → 调用
      InventoryPostingService 落账 → 回写盘点单 posted；差异为 0 禁止过账。
   ④ 盘点差异分录 source_doc_type='inventory_count'，source_line_id 指向盘点行，
@@ -21,9 +22,13 @@
 """
 
 import logging
+from dataclasses import replace
 from datetime import date, datetime
 from typing import Any, Dict, List, Optional
 
+from meta.core.rule_constraint_evaluator import evaluate_constraint_rule
+from meta.core.rule_metrics import MetricSession
+from meta.services.audit_interceptor import AuditInterceptor
 from meta.services.control_parameter_service import ControlParameterResolver
 from meta.services.inventory_adjustment_service import (
     ADJ_LINE_TABLE, ADJ_TABLE, TYPE_COUNT_DIFFERENCE,
@@ -33,6 +38,7 @@ from meta.services.inventory_guard_service import (
     INV_POSTING_DISABLED, InventoryError, InventoryGuardService,
 )
 from meta.services.inventory_posting_service import InventoryPostingService
+from meta.services.rule_hold_service import RuleHoldService
 
 logger = logging.getLogger(__name__)
 
@@ -54,7 +60,16 @@ STATUS_CANCELLED = 'cancelled'
 
 PARAM_AUTO_APPROVE_IN_TOLERANCE = 'inventory_count_auto_approve_in_tolerance'
 PARAM_DEFAULT_TOLERANCE_QTY_PCT = 'inventory_count_default_tolerance_qty_pct'
+PARAM_TOLERANCE_QTY_ABS = 'inventory_count_tolerance_qty_abs'
 PARAM_POSTING_BLOCK_DEFAULT = 'inventory_count_posting_block_default'
+
+#: 容差判定的事实源（BO yaml）；服务只消费，不在代码里重写口径
+CNT_LINE_OBJECT = 'inventory_count_line'
+TOLERANCE_RULE_ID = 'inventory_count_line_tolerance'
+METRIC_DEVIATION_RATE = 'deviation_rate'
+
+#: 超容差行挂起代码（holds.code）；holds 是挂起状态的唯一事实源
+HOLD_CODE_OVER_TOLERANCE = 'INV_COUNT_TOLERANCE_EXCEEDED'
 
 INV_COUNT_NOT_FOUND = 'INV_COUNT_NOT_FOUND'
 INV_COUNT_TYPE_INVALID = 'INV_COUNT_TYPE_INVALID'
@@ -64,6 +79,7 @@ INV_COUNT_REASON_REQUIRED = 'INV_COUNT_REASON_REQUIRED'
 INV_COUNT_NO_DIFF = 'INV_COUNT_NO_DIFF'
 INV_COUNT_LINE_INVALID = 'INV_COUNT_LINE_INVALID'
 INV_COUNT_LINE_LOCKED = 'INV_COUNT_LINE_LOCKED'
+INV_COUNT_HELD = 'INV_COUNT_HELD'
 INV_DOC_POSTED_LOCKED = 'INV_DOC_POSTED_LOCKED'
 
 _CNT_SEQ_PATTERN = 'CNT-{DATE:yyyymm}-{SEQ:6}'
@@ -113,6 +129,30 @@ def _user_name(user_info: Optional[Dict[str, Any]]) -> Optional[str]:
             or user_info.get('name'))
 
 
+def _tolerance_rule() -> Any:
+    """取盘点行容差规则；BO yaml 是唯一事实源，缺失即配置错误（不代码兜底）。"""
+    from meta.core.models import registry
+    meta_object = registry.get(CNT_LINE_OBJECT)
+    for rule in (getattr(meta_object, 'rules', None) or []):
+        if getattr(rule, 'id', '') == TOLERANCE_RULE_ID:
+            return rule
+    raise RuntimeError(
+        'BO %s 缺少规则 %s，容差判定无事实源' % (CNT_LINE_OBJECT, TOLERANCE_RULE_ID))
+
+
+def _line_tolerance_rule(rule: Any, snapshot: float) -> Any:
+    """快照为 0 的行裁掉 ``deviation_rate`` 键（公式除零）。
+
+    此时 ``snapshot_qty × tolerance_qty_pct = 0``，原 max 口径只剩绝对值容差，
+    只按 ``deviation_qty`` 判定与之等价。
+    """
+    if _float(snapshot) != 0:
+        return rule
+    keys = [key for key in (getattr(rule, 'keys', None) or [])
+            if str(key.get('metric') or '') != METRIC_DEVIATION_RATE]
+    return replace(rule, keys=keys)
+
+
 class InventoryCountService:
     """盘点单动作服务：创建归一 / start / submit / approve / post / cancel + 行守卫。"""
 
@@ -123,6 +163,31 @@ class InventoryCountService:
         self.posting = posting or InventoryPostingService(data_source,
                                                           guard=self.guard)
         self.params = ControlParameterResolver(data_source)
+        self.holds = RuleHoldService(data_source)
+        # 审计基建可选：测试替身无 audit_logs 表时跳过（不污染全局异步写入器）
+        self._audit_ready = self._audit_available()
+        self.audit = AuditInterceptor(data_source) if self._audit_ready else None
+
+    def _audit_available(self) -> bool:
+        try:
+            return bool(self.ds.query(
+                "SELECT 1 FROM sqlite_master WHERE type='table' "
+                "AND name='audit_logs' LIMIT 1"))
+        except Exception:
+            return False
+
+    def _audit_hold(self, line_id: Any, old_data: Dict[str, Any],
+                    new_data: Dict[str, Any],
+                    user_info: Optional[Dict[str, Any]]) -> None:
+        """挂起/释放留痕（FR-007）；审计失败不影响业务动作。"""
+        if not self._audit_ready:
+            return
+        try:
+            self.audit.log_update(CNT_LINE_OBJECT, int(line_id), old_data,
+                                  new_data, user_name=_user_name(user_info))
+        except Exception:
+            logger.warning('[inventory-count] hold audit failed line=%s',
+                           line_id, exc_info=True)
 
     # ------------------------------------------------------------------
     # 创建归一（守卫拦截器调用）
@@ -147,15 +212,11 @@ class InventoryCountService:
         else:
             data['posting_block'] = 1 if _truthy(data.get('posting_block')) else 0
 
-        if _blank(data.get('tolerance_qty_pct')):
-            data['tolerance_qty_pct'] = self._param_float(
-                PARAM_DEFAULT_TOLERANCE_QTY_PCT, 0.0, data.get('org_id'))
-        else:
-            data['tolerance_qty_pct'] = _float(data.get('tolerance_qty_pct'))
-        if _blank(data.get('tolerance_qty_abs')):
-            data['tolerance_qty_abs'] = 0.0
-        else:
-            data['tolerance_qty_abs'] = _float(data.get('tolerance_qty_abs'))
+        tolerance = self.resolve_tolerance(
+            data.get('org_id'), data.get('tolerance_qty_pct'),
+            data.get('tolerance_qty_abs'))
+        data['tolerance_qty_pct'] = tolerance['qty_pct']
+        data['tolerance_qty_abs'] = tolerance['qty_abs']
 
         data['count_no'] = next_document_no(
             self.ds, 'CNT', _today(), _CNT_SEQ_PATTERN)
@@ -164,6 +225,33 @@ class InventoryCountService:
         if _blank(data.get('created_by')):
             data['created_by'] = _user_name(user_info)
         return data
+
+    def resolve_tolerance(self, org_id: Any, header_pct: Any = None,
+                          header_abs: Any = None) -> Dict[str, Any]:
+        """按「单据头 > 参数行 specificity_rank > def.default_value」解析容差（M6a-2）。
+
+        单据头是实例层：创建时把解析结果写入抬头即成为快照，submit 只读抬头，
+        不随参数配置后续变化。绝对值容差不在参数池（spec §11.2.1 M6a-2），
+        抬头未填时取 0.0。``source`` 透出命中来源（header / value / default /
+        missing），便于排查「这个容差值从哪来」。
+        """
+        if _blank(header_pct):
+            info = self.params.explain(
+                PARAM_DEFAULT_TOLERANCE_QTY_PCT, {'org_id': org_id})
+            qty_pct = _float(info.get('value'), 0.0)
+            pct_source = str((info.get('source') or {}).get('type') or 'missing')
+        else:
+            qty_pct = _float(header_pct)
+            pct_source = 'header'
+        if _blank(header_abs):
+            qty_abs, abs_source = 0.0, 'instance_default'
+        else:
+            qty_abs, abs_source = _float(header_abs), 'header'
+        return {
+            'qty_pct': qty_pct,
+            'qty_abs': qty_abs,
+            'source': {'qty_pct': pct_source, 'qty_abs': abs_source},
+        }
 
     # ------------------------------------------------------------------
     # 状态动作
@@ -249,17 +337,29 @@ class InventoryCountService:
 
         tol_pct = _float(header.get('tolerance_qty_pct'))
         tol_abs = _float(header.get('tolerance_qty_abs'))
+        # 单据头容差是实例值：比例走参数 key（快照覆盖），绝对值不在参数池
+        overrides = {PARAM_DEFAULT_TOLERANCE_QTY_PCT: tol_pct,
+                     PARAM_TOLERANCE_QTY_ABS: tol_abs}
+        dims = {'org_id': header.get('org_id')}
+        rule = _tolerance_rule()
         over: List[int] = []
         no_reason: List[int] = []
         variances: Dict[Any, float] = {}
+        held: Dict[Any, Dict[str, Any]] = {}
         for line in lines:
             snapshot = _float(line.get('snapshot_qty'))
             counted = _float(line.get('counted_qty'))
             variance = counted - snapshot
             variances[line['id']] = variance
-            limit = max(tol_abs, snapshot * tol_pct)
-            if abs(variance) > limit + _EPS:
+            metrics = MetricSession(
+                CNT_LINE_OBJECT, line['id'],
+                {'counted_qty': counted, 'snapshot_qty': snapshot})
+            decision = evaluate_constraint_rule(
+                _line_tolerance_rule(rule, snapshot), metrics=metrics,
+                dims=dims, resolver=self.params, overrides=overrides)
+            if decision.matched:
                 over.append(int(line['line_no']))
+                held[line['id']] = line
                 if _blank(line.get('variance_reason')):
                     no_reason.append(int(line['line_no']))
 
@@ -273,7 +373,8 @@ class InventoryCountService:
         target = (STATUS_APPROVED if (auto_approve and not over)
                   else STATUS_SUBMITTED)
         now = _now()
-        approved_by = _user_name(user_info) if target == STATUS_APPROVED else None
+        operator = _user_name(user_info)
+        approved_by = operator if target == STATUS_APPROVED else None
         approved_at = now if target == STATUS_APPROVED else None
 
         with self.ds.transaction():
@@ -282,10 +383,39 @@ class InventoryCountService:
                     'UPDATE %s SET variance_qty = ?, updated_at = ? WHERE id = ?'
                     % CNT_LINE_TABLE,
                     [variances[line['id']], now, line['id']])
+            # 可存不可过：超容差行挂起（holds 唯一事实源），其余行释放旧挂起
+            applied: List[Any] = []
+            released: List[Any] = []
+            for line in lines:
+                if line['id'] in held:
+                    if self.holds.apply(
+                            CNT_LINE_OBJECT, line['id'], TOLERANCE_RULE_ID,
+                            code=HOLD_CODE_OVER_TOLERANCE,
+                            reason=str(line.get('variance_reason') or '').strip(),
+                            applied_by=operator):
+                        applied.append(line['id'])
+                else:
+                    if self.holds.release(
+                            CNT_LINE_OBJECT, line['id'],
+                            rule_key=TOLERANCE_RULE_ID, released_by=operator):
+                        released.append(line['id'])
             self.ds.execute(
                 'UPDATE %s SET status = ?, approved_by = ?, approved_at = ?, '
                 'updated_at = ? WHERE id = ?' % CNT_TABLE,
                 [target, approved_by, approved_at, now, header['id']])
+
+        reasons = {line['id']: str(line.get('variance_reason') or '').strip()
+                   for line in lines}
+        for line_id in applied:
+            self._audit_hold(line_id, {'hold': False},
+                             {'hold': True, 'rule_key': TOLERANCE_RULE_ID,
+                              'code': HOLD_CODE_OVER_TOLERANCE,
+                              'reason': reasons.get(line_id),
+                              'applied_by': operator}, user_info)
+        for line_id in released:
+            self._audit_hold(line_id, {'hold': True, 'rule_key': TOLERANCE_RULE_ID},
+                             {'hold': False, 'released_by': operator},
+                             user_info)
 
         logger.info('[inventory-count] submit id=%s no=%s -> %s over=%s',
                     header['id'], header.get('count_no'), target, len(over))
@@ -302,12 +432,24 @@ class InventoryCountService:
                 '仅已提交盘点单可审批，当前状态: %s' % header['status'],
                 {'count_id': count_id, 'status': header['status']})
         now = _now()
+        operator = _user_name(user_info)
+        released: List[Any] = []
         with self.ds.transaction():
+            # 审批放行：释放本单全部 active holds（不限 rule_key），保证其他规则
+            # 挂起不会在审批后永久悬挂；规则声明 release_action=inventory_count.approve，
+            # 首版由本动作直接释放，通用 release_action 执行器仍延后
+            for line in self._load_lines(count_id):
+                if self.holds.release(CNT_LINE_OBJECT, line['id'],
+                                      released_by=operator):
+                    released.append(line['id'])
             self.ds.execute(
                 'UPDATE %s SET status = ?, approved_by = ?, approved_at = ?, '
                 'updated_at = ? WHERE id = ?' % CNT_TABLE,
-                [STATUS_APPROVED, _user_name(user_info), now, now,
-                 header['id']])
+                [STATUS_APPROVED, operator, now, now, header['id']])
+        for line_id in released:
+            self._audit_hold(line_id, {'hold': True},
+                             {'hold': False, 'released_by': operator,
+                              'reason': 'inventory_count.approve'}, user_info)
         logger.info('[inventory-count] approve id=%s no=%s',
                     header['id'], header.get('count_no'))
         return {'count_id': header['id'], 'count_no': header.get('count_no'),
@@ -333,6 +475,13 @@ class InventoryCountService:
             raise InventoryError(
                 INV_COUNT_INCOMPLETE, '存在未录入实盘数量的盘点行',
                 {'count_id': count_id, 'lines': missing})
+        # 可存不可过：存在 active holds（任何规则）时禁止过账
+        held = [int(line['line_no']) for line in lines
+                if self.holds.is_held(CNT_LINE_OBJECT, line['id'])]
+        if held:
+            raise InventoryError(
+                INV_COUNT_HELD, '存在挂起盘点行（超容差未放行），不能过账',
+                {'count_id': count_id, 'lines': held})
 
         diffs = []
         for line in lines:
@@ -449,16 +598,27 @@ class InventoryCountService:
                 INV_COUNT_STATE_INVALID,
                 '当前状态不可取消: %s' % header['status'],
                 {'count_id': count_id, 'status': header['status']})
+        cancelled_by = _user_name(user_info)
+        released: List[Any] = []
         with self.ds.transaction():
             if self._serial_ready():
                 self.ds.execute(
                     'DELETE FROM document_serial_links '
                     "WHERE doc_type = 'inventory_count' AND doc_id = ?",
                     [header['id']])
+            # 取消后挂起失去意义：释放本单全部 active holds（不删行，保留历史）
+            for line in self._load_lines(count_id):
+                if self.holds.release(CNT_LINE_OBJECT, line['id'],
+                                      released_by=cancelled_by):
+                    released.append(line['id'])
             self.ds.execute(
                 'UPDATE %s SET status = ?, updated_at = ? WHERE id = ?'
                 % CNT_TABLE,
                 [STATUS_CANCELLED, _now(), header['id']])
+        for line_id in released:
+            self._audit_hold(line_id, {'hold': True},
+                             {'hold': False, 'released_by': cancelled_by,
+                              'reason': 'inventory_count.cancel'}, user_info)
         logger.info('[inventory-count] cancel id=%s no=%s',
                     header['id'], header.get('count_no'))
         return {'count_id': header['id'], 'count_no': header.get('count_no'),
@@ -566,6 +726,42 @@ class InventoryCountService:
                 INV_COUNT_LINE_LOCKED, '快照行由 start 生成，不可删除',
                 {'count_id': parent_id, 'line_id': line_id})
         return line
+
+    # ------------------------------------------------------------------
+    # 挂起查询 / 删除级联
+    # ------------------------------------------------------------------
+    def list_holds(self, count_id: Any) -> List[Dict[str, Any]]:
+        """本单各行 active holds（仅含有挂起的行，按 line_no 排序）。
+
+        供查询接口 / 前端挂起提示使用；状态始终由 holds 派生，不读冗余列。
+        """
+        result: List[Dict[str, Any]] = []
+        for line in self._load_lines(count_id):
+            holds = self.holds.active_holds(CNT_LINE_OBJECT, line['id'])
+            if holds:
+                result.append({'line_id': line['id'],
+                               'line_no': line.get('line_no'),
+                               'holds': holds})
+        return result
+
+    def release_holds_for_count(self, count_id: Any,
+                                user_info: Optional[Dict[str, Any]] = None
+                                ) -> int:
+        """删除抬头前释放本单全部行的 active holds（不删行）。
+
+        与删除同事务执行：删除失败回滚时释放动作一并回滚，不会误放行。
+        """
+        released_by = _user_name(user_info)
+        return sum(1 for line in self._load_lines(count_id)
+                   if self.holds.release(CNT_LINE_OBJECT, line['id'],
+                                         released_by=released_by))
+
+    def release_holds_for_line(self, line_id: Any,
+                               user_info: Optional[Dict[str, Any]] = None
+                               ) -> int:
+        """删除行前释放该行的 active holds（不删行，与删除同事务）。"""
+        return self.holds.release(CNT_LINE_OBJECT, line_id,
+                                  released_by=_user_name(user_info))
 
     # ------------------------------------------------------------------
     # 内部

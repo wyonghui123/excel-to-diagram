@@ -307,7 +307,7 @@ ui_view_config:
         label: 新建策略
         icon: plus
         type: primary
-        permission: batch_selection_policy:batch_selection_policy_create
+        permission: batch_selection_policy:create
     defaultSort:
       field: priority
       order: asc
@@ -338,7 +338,7 @@ ui_view_config:
         fields: [rule_json]
 
 category_config:
-  create_permission: batch_selection_policy:batch_selection_policy_create
-  update_permission: batch_selection_policy:batch_selection_policy_update
-  delete_permission: batch_selection_policy:batch_selection_policy_delete
+  create_permission: batch_selection_policy:create
+  update_permission: batch_selection_policy:update
+  delete_permission: batch_selection_policy:delete
   owner_auto_permission: false

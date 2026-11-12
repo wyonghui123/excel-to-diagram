@@ -19,6 +19,9 @@ from meta.core.bo_schema_loader import get_bo_schema_loader
 
 logger = logging.getLogger(__name__)
 
+# [T1] list/query/view 与 read 同义（与 MetaAction.get_permission_code 同口径）
+_READ_ALIASES = {'list': 'read', 'query': 'read', 'view': 'read'}
+
 
 class MenuBOLinker:
     """Menu-BO 权限自动关联（FR-013 实施）
@@ -32,6 +35,12 @@ class MenuBOLinker:
 
     def __init__(self):
         self._schema_loader = get_bo_schema_loader()
+
+    def _permission_code(self, bo_id: str, action_id: str) -> str:
+        """[T1] 动作 id → 单段权限码：剥掉 `{bo_id}_` 前缀并归一 read 同义词。"""
+        prefix = f'{bo_id}_'
+        suffix = action_id[len(prefix):] if action_id.startswith(prefix) else action_id
+        return f'{bo_id}:{_READ_ALIASES.get(suffix, suffix)}'
 
     def get_default_bo_permissions(self, bo_id: str) -> List[str]:
         """获取 BO 的默认权限码列表
@@ -54,7 +63,7 @@ class MenuBOLinker:
             if isinstance(a, dict) and a.get('id')
         ]
         if action_ids:
-            return [f'{bo_id}:{aid}' for aid in action_ids]
+            return [self._permission_code(bo_id, aid) for aid in action_ids]
 
         # fallback：默认 CRUD
         return [f'{bo_id}:{a}' for a in self.DEFAULT_PERMISSION_ACTIONS]

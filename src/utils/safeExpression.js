@@ -9,6 +9,7 @@
  *
  * Design principles:
  *   - Whitelist operators only (===, !==, ==, !=, >, <, >=, <=)
+ *   - Compound conditions: `and` / `or` (top level), `in [..]` membership
  *   - Block prototype chain access (__proto__, constructor, prototype)
  *   - Fail-open: return true on parse errors to avoid hiding UI elements
  *   - Zero external dependencies
@@ -109,6 +110,87 @@ function compare(left, op, right) {
 }
 
 /**
+ * Split an expression by a top-level keyword (e.g. " and " / " or " / " in "),
+ * ignoring occurrences inside quotes or brackets.
+ */
+function splitTopLevel(expr, keyword) {
+  const parts = []
+  let quote = null
+  let depth = 0
+  let start = 0
+  for (let i = 0; i < expr.length; i++) {
+    const ch = expr[i]
+    if (quote) {
+      if (ch === quote) quote = null
+      continue
+    }
+    if (ch === "'" || ch === '"') {
+      quote = ch
+      continue
+    }
+    if (ch === '[' || ch === '(') {
+      depth++
+      continue
+    }
+    if (ch === ']' || ch === ')') {
+      depth--
+      continue
+    }
+    if (depth === 0 && expr.startsWith(keyword, i)) {
+      parts.push(expr.slice(start, i))
+      start = i + keyword.length
+      i = start - 1
+    }
+  }
+  parts.push(expr.slice(start))
+  return parts
+}
+
+/** Parse an array literal like ['planned', 'confirmed'] into resolved values. */
+function parseArrayLiteral(raw) {
+  const text = String(raw).trim()
+  if (!text.startsWith('[') || !text.endsWith(']')) return null
+  const inner = text.slice(1, -1).trim()
+  if (!inner) return []
+  return inner.split(',').map(item => resolveLiteral(item))
+}
+
+function evaluateClause(clause, record, prefix) {
+  let working = clause.trim()
+  let negate = false
+  if (working.startsWith('!')) {
+    negate = true
+    working = working.substring(1).trim()
+  }
+
+  // `field in [a, b]` membership
+  const inParts = splitTopLevel(working, ' in ')
+  if (inParts.length === 2) {
+    const list = parseArrayLiteral(inParts[1])
+    if (list) {
+      const leftValue = resolvePath(inParts[0], record, prefix)
+      const result = list.some(v => v === leftValue || String(v) === String(leftValue))
+      return negate ? !result : result
+    }
+  }
+
+  const opInfo = findComparisonOp(working)
+  if (opInfo) {
+    const leftPath = working.substring(0, opInfo.index).trim()
+    const rightRaw = working.substring(opInfo.index + opInfo.op.length).trim()
+
+    const leftValue = resolvePath(leftPath, record, prefix)
+    const rightValue = resolveLiteral(rightRaw)
+
+    const result = compare(leftValue, opInfo.op, rightValue)
+    return negate ? !result : result
+  }
+
+  const value = resolvePath(working, record, prefix)
+  return negate ? !value : !!value
+}
+
+/**
  * Evaluate a YAML-defined condition expression against a record.
  *
  * @param {string} expr - The condition expression (e.g. "row.is_current !== true")
@@ -126,29 +208,15 @@ export function evaluateCondition(expr, record, prefix) {
   prefix = prefix || 'row'
 
   try {
-    let working = trimmed
-    let negate = false
-
-    if (working.startsWith('!')) {
-      negate = true
-      working = working.substring(1).trim()
+    // or 优先级低于 and：先拆 or，再在子句内拆 and
+    const orParts = splitTopLevel(trimmed, ' or ')
+    if (orParts.length > 1) {
+      return orParts.some(part =>
+        splitTopLevel(part, ' and ').every(clause => evaluateClause(clause, record, prefix))
+      )
     }
-
-    const opInfo = findComparisonOp(working)
-
-    if (opInfo) {
-      const leftPath = working.substring(0, opInfo.index).trim()
-      const rightRaw = working.substring(opInfo.index + opInfo.op.length).trim()
-
-      const leftValue = resolvePath(leftPath, record, prefix)
-      const rightValue = resolveLiteral(rightRaw)
-
-      const result = compare(leftValue, opInfo.op, rightValue)
-      return negate ? !result : result
-    }
-
-    const value = resolvePath(working, record, prefix)
-    return negate ? !value : !!value
+    return splitTopLevel(trimmed, ' and ')
+      .every(clause => evaluateClause(clause, record, prefix))
   } catch (e) {
     console.warn('[safeExpression] Evaluation failed for "' + trimmed + '":', e.message)
     return true

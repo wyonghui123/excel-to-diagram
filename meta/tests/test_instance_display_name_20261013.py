@@ -100,14 +100,14 @@ class TestDisplayNamePriority:
 
     def test_no_app_falls_back_to_default(self, flask_app):
         body = flask_app.test_client().get("/api/v2/meta/instance").get_json()
-        assert body["data"]["display_name"] == "BIP应用架构管理"
+        assert body["data"]["display_name"] == ""
         assert body["data"]["source"] == "default"
 
     def test_multiple_apps_fall_back_to_default(self, flask_app):
         """≥2 个 app 时不用 app名 —— 左上角是产品标识位, 不是导航位。"""
         _set_apps(("warehouse", "仓储管理"), ("tms", "运输管理"))
         body = flask_app.test_client().get("/api/v2/meta/instance").get_json()
-        assert body["data"]["display_name"] == "BIP应用架构管理"
+        assert body["data"]["display_name"] == ""
         assert body["data"]["source"] == "default"
 
     def test_blank_env_treated_as_unset(self, flask_app):

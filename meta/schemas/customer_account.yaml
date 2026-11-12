@@ -466,7 +466,7 @@ actions:
     type: list
     path: /api/v1/customer_accounts
     method: GET
-    permission: customer_account:list
+    permission: customer_account:read
     ui_hints:
       label: 客户档案列表
       icon: list
@@ -545,14 +545,14 @@ ui_view_config:
         width: 170
     searchFields:
       - name
-    # 动作权限用双段式（permissions 表实有 customer_account:customer_account_create；
+    # 动作权限用双段式（permissions 表实有 customer_account:create；
     # 单段式 customer_account:create 命中数为 0，非 admin 会看不到按钮）。
     actions:
       - id: create
         label: 新建客户档案
         icon: plus
         type: primary
-        permission: customer_account:customer_account_create
+        permission: customer_account:create
       - id: export
         label: 导出
         icon: download

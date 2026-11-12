@@ -49,14 +49,14 @@ def menu_test_db():
 
         CREATE TABLE permission_set_menu_permissions (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
-            role_id INTEGER NOT NULL,
+            permission_set_id INTEGER NOT NULL,
             menu_code VARCHAR(200) NOT NULL,
-            UNIQUE (role_id, menu_code)
+            UNIQUE (permission_set_id, menu_code)
         );
 
         CREATE TABLE permission_rules_v2 (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
-            role_id INTEGER NOT NULL,
+            permission_set_id INTEGER NOT NULL,
             resource_type VARCHAR(200) NOT NULL,
             permission_level VARCHAR(50) DEFAULT 'read',
             include_conditions TEXT,
@@ -67,14 +67,16 @@ def menu_test_db():
 
         CREATE TABLE permission_set_effective_intents (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
-            role_id INTEGER NOT NULL,
+            permission_set_id INTEGER NOT NULL,
             bo_id VARCHAR(100) NOT NULL,
             action_name VARCHAR(100) NOT NULL,
             data_scope TEXT,
             derivation_mode VARCHAR(20) DEFAULT 'static',
             source VARCHAR(50) DEFAULT 'derived',
             is_stale INTEGER DEFAULT 0,
-            UNIQUE (role_id, bo_id, action_name)
+            created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+            updated_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+            UNIQUE (permission_set_id, bo_id, action_name)
         );
 
         -- 测试菜单数据
@@ -92,7 +94,7 @@ def menu_test_db():
         UPDATE menus SET is_active = 0 WHERE menu_code = 'inactive_menu';
 
         -- 角色 100 已授权 product_management + sub_domain_management
-        INSERT INTO permission_set_menu_permissions (role_id, menu_code) VALUES
+        INSERT INTO permission_set_menu_permissions (permission_set_id, menu_code) VALUES
             (100, 'product_management'),
             (100, 'sub_domain_management');
     ''')
@@ -312,14 +314,14 @@ class TestDeriveWithMenus:
         # 插入 permission_rule (sub_domain read)
         conn = sqlite3.connect(self.db_path)
         conn.execute(
-            "INSERT INTO permission_rules_v2 (role_id, resource_type, permission_level, include_conditions) "
+            "INSERT INTO permission_rules_v2 (permission_set_id, resource_type, permission_level, include_conditions) "
             "VALUES (200, 'sub_domain', 'read', ?)",
             [json.dumps([])]
         )
         conn.commit()
         conn.close()
 
-        result = self.pipeline.derive(role_id=200)
+        result = self.pipeline.derive(permission_set_id=200)
 
         # derived_menus 应包含绑定 sub_domain 的菜单
         assert 'derived_menus' in result
@@ -330,14 +332,14 @@ class TestDeriveWithMenus:
         """derive() 返回 reverse_suggestions 列表"""
         conn = sqlite3.connect(self.db_path)
         conn.execute(
-            "INSERT INTO permission_rules_v2 (role_id, resource_type, permission_level, include_conditions) "
+            "INSERT INTO permission_rules_v2 (permission_set_id, resource_type, permission_level, include_conditions) "
             "VALUES (201, 'sub_domain', 'read', ?)",
             [json.dumps([])]
         )
         conn.commit()
         conn.close()
 
-        result = self.pipeline.derive(role_id=201)
+        result = self.pipeline.derive(permission_set_id=201)
 
         # reverse_suggestions 应包含未授权但应该有的菜单
         assert 'reverse_suggestions' in result
@@ -348,19 +350,21 @@ class TestDeriveWithMenus:
     def test_derive_menu_intents_added_to_effective(self):
         """derive() 后 effective_intents 含 menu source 的 intents"""
         conn = sqlite3.connect(self.db_path)
+        # 规则配到 sub_domain (read 级会展开到多个 action),
+        # 避免 product 的 action 已被 derived 覆盖从而看不到 source='menu'
         conn.execute(
-            "INSERT INTO permission_rules_v2 (role_id, resource_type, permission_level, include_conditions) "
-            "VALUES (202, 'product', 'read', ?)",
+            "INSERT INTO permission_rules_v2 (permission_set_id, resource_type, permission_level, include_conditions) "
+            "VALUES (202, 'sub_domain', 'read', ?)",
             [json.dumps([])]
         )
         # role 202 已授权 product_management 菜单
         conn.execute(
-            "INSERT INTO permission_set_menu_permissions (role_id, menu_code) VALUES (202, 'product_management')"
+            "INSERT INTO permission_set_menu_permissions (permission_set_id, menu_code) VALUES (202, 'product_management')"
         )
         conn.commit()
         conn.close()
 
-        self.pipeline.derive(role_id=202)
+        self.pipeline.derive(permission_set_id=202)
 
         intents = self.dao.list_for_role(202)
         # 应含 menu source 的 product intents

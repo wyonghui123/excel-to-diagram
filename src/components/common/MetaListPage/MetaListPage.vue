@@ -62,7 +62,7 @@
             </el-dropdown>
           </template>
 
-          <template v-if="batchActions.length > 0 && totalSelectedCount > 0 && !hideToolbar">
+          <template v-if="visibleBatchActions.length > 0 && totalSelectedCount > 0 && !hideToolbar">
             <el-divider direction="vertical" />
             <div class="selection-info-wrapper">
               <span class="selection-info">
@@ -78,7 +78,7 @@
               </el-button>
             </div>
             <el-button
-              v-for="action in batchActions"
+              v-for="action in visibleBatchActions"
               :key="action.key"
               :type="action.variant || 'default'"
               size="small"
@@ -842,6 +842,10 @@ const props = defineProps({
     type: Array,
     default: null
   },
+  extraBatchActions: {
+    type: Array,
+    default: () => []
+  },
   hideAssociationNavigation: {
     type: Boolean,
     default: true
@@ -970,6 +974,12 @@ const {
   inlineEdit: props.options.inlineEdit,
   initialFilters: props.initialFilters
 })
+
+// 内置批量动作 + 父组件注入的外部动作（如单据流派生）
+const visibleBatchActions = computed(() => [
+  ...(batchActions.value || []),
+  ...(props.extraBatchActions || []),
+])
 
 // [DECORATIVE] [NEW] v1.3 / FR-6.4: 读取 display_value（优先后端注入）
 // getCellValue 已处理 display_values，此处薄封装供模板用
@@ -1789,7 +1799,17 @@ function onToolbarAction(action) {
 
 function onBatchAction(action) {
   console.log('[MetaListPage] onBatchAction 被调用, action.key:', action.key, 'selectedIds:', selectedIds.value)
-  
+
+  // 外部批量动作（如单据流派生）：emit 后由父组件负责弹窗，不进入内置处理
+  if (action.key === 'doc_flow_derive') {
+    emit('batch-action', {
+      action,
+      selectedIds: selectedIds.value,
+      selectedRows: selectedRows.value
+    })
+    return
+  }
+
   // emit batch-action 事件，让父组件处理
   // 对于 batch_unassign 等自定义批量操作，由父组件完全处理
   emit('batch-action', {
@@ -2247,6 +2267,8 @@ defineExpose({
   tableRef,
   // [FIX 2026-06-29] 暴露 onRowAction 让 MOMP/GenericObjectList 等父组件可在 dblclick 时触发 action
   onRowAction,
+  // [单据流 2026-11-08] 派生完成后父组件刷新列表
+  refresh,
   metaConfig,
   data,
   loading,

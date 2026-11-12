@@ -396,7 +396,7 @@ ui_view_config:
         label: 新建日历班次
         icon: plus
         type: primary
-        permission: calendar_shift:calendar_shift_create
+        permission: calendar_shift:create
     defaultSort:
       field: seq
       order: asc
@@ -427,7 +427,7 @@ ui_view_config:
                  capacity_factor, valid_from, valid_to]
 
 category_config:
-  create_permission: calendar_shift:calendar_shift_create
-  update_permission: calendar_shift:calendar_shift_update
-  delete_permission: calendar_shift:calendar_shift_delete
+  create_permission: calendar_shift:create
+  update_permission: calendar_shift:update
+  delete_permission: calendar_shift:delete
   owner_auto_permission: false

@@ -409,7 +409,7 @@ ui_view_config:
         label: 新建产出
         icon: plus
         type: primary
-        permission: work_definition_operation_output:work_definition_operation_output_create
+        permission: work_definition_operation_output:create
     defaultSort:
       field: output_type
       order: asc
@@ -439,7 +439,7 @@ ui_view_config:
                  is_primary, cost_allocation_pct, description]
 
 category_config:
-  create_permission: work_definition_operation_output:work_definition_operation_output_create
-  update_permission: work_definition_operation_output:work_definition_operation_output_update
-  delete_permission: work_definition_operation_output:work_definition_operation_output_delete
+  create_permission: work_definition_operation_output:create
+  update_permission: work_definition_operation_output:update
+  delete_permission: work_definition_operation_output:delete
   owner_auto_permission: false

@@ -25,6 +25,8 @@ import pytest
 import os
 import tempfile
 
+from meta.tests.shared.db_schema import create_audit_logs
+
 
 class TestOrgCRUD:
     """Org 基本 CRUD 测试"""
@@ -87,20 +89,7 @@ class TestOrgCRUD:
         ds.commit()
 
         # org 启用了 audit_aspect
-        ds.execute('''CREATE TABLE IF NOT EXISTS audit_logs (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            object_type VARCHAR(100) NOT NULL,
-            object_id INTEGER NOT NULL,
-            action VARCHAR(50) NOT NULL,
-            actor_id INTEGER,
-            actor_name VARCHAR(200),
-            changes TEXT,
-            ip_address VARCHAR(50),
-            user_agent TEXT,
-            trace_id VARCHAR(100),
-            created_at DATETIME DEFAULT CURRENT_TIMESTAMP
-        )''')
-        ds.commit()
+        create_audit_logs(ds)
 
         # [夹具补齐] 查询路径按 updated_at 派生时会读 v_audit_all；
         #   生产库由迁移 v007_50 创建该视图，临时库需等价补齐。

@@ -520,6 +520,56 @@ def transfer_reverse_lines(ds, args, ctx) -> Dict[str, Any]:
 
 
 # ─────────────────────────────────────────────────────────────────────────────
+# 销售发票（S8 Wave D）
+# ─────────────────────────────────────────────────────────────────────────────
+
+def invoice_billed_release(ds, args, ctx) -> Dict[str, Any]:
+    """按红字发票行冲减开票进度（发货行 / 订单行 / 计划期次累计）。"""
+    from meta.services.customer_invoice_service import CustomerInvoiceService
+
+    invoice_id = args.get("doc_id", ctx.doc_id)
+    sign = int(args.get("sign") or -1)
+    return CustomerInvoiceService(ds).release_billed_for_invoice(
+        invoice_id, sign=sign)
+
+
+def invoice_schedule_cancel(ds, args, ctx) -> Dict[str, Any]:
+    """取消原发票的应收期次（红冲后不再计划收款）。"""
+    from meta.services.customer_invoice_service import CustomerInvoiceService
+
+    invoice_id = args.get("doc_id", ctx.doc_id)
+    return CustomerInvoiceService(ds).cancel_schedules_for_invoice(invoice_id)
+
+
+def invoice_doc_flow_red_edge(ds, args, ctx) -> Dict[str, Any]:
+    """写红字行 → 原发票行的反向事实边（B7，幂等）。"""
+    from meta.services.customer_invoice_service import CustomerInvoiceService
+
+    invoice_id = args.get("doc_id", ctx.doc_id)
+    return CustomerInvoiceService(ds).write_doc_flow_for_invoice(invoice_id)
+
+
+def recompute_customer_billing_status(ds, args, ctx) -> Dict[str, Any]:
+    """按发票行重算关联销售订单的派生开票状态（投影，幂等）。"""
+    from meta.services.customer_invoice_service import CustomerInvoiceService
+
+    invoice_id = args.get("doc_id", ctx.doc_id)
+    return CustomerInvoiceService(ds).recompute_billing_for_invoice(invoice_id)
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# 采购发票（W6）
+# ─────────────────────────────────────────────────────────────────────────────
+
+def vendor_invoice_doc_flow_red_edge(ds, args, ctx) -> Dict[str, Any]:
+    """按红字采购贷项凭证行写红字消耗边（回写原票行锚点，幂等）。"""
+    from meta.services.vendor_invoice_match_service import VendorInvoiceMatchService
+
+    invoice_id = args.get("doc_id", ctx.doc_id)
+    return VendorInvoiceMatchService(ds).write_red_edges_for_red_doc(invoice_id)
+
+
+# ─────────────────────────────────────────────────────────────────────────────
 # 注册表
 # ─────────────────────────────────────────────────────────────────────────────
 
@@ -544,6 +594,11 @@ PRIMITIVES: Dict[str, Primitive] = {
     "recompute_schedule_returned": recompute_schedule_returned,
     "shipment_reverse_lines": shipment_reverse_lines,
     "transfer_reverse_lines": transfer_reverse_lines,
+    "invoice_billed_release": invoice_billed_release,
+    "invoice_schedule_cancel": invoice_schedule_cancel,
+    "invoice_doc_flow_red_edge": invoice_doc_flow_red_edge,
+    "recompute_customer_billing_status": recompute_customer_billing_status,
+    "vendor_invoice_doc_flow_red_edge": vendor_invoice_doc_flow_red_edge,
 }
 
 
@@ -578,11 +633,37 @@ def receipt_red_letter(ds, ctx) -> Dict[str, Any]:
         remark=params.get("remark"))
 
 
+def customer_invoice_red_letter(ds, ctx) -> Dict[str, Any]:
+    """销售发票：创建红字发票（单号 / 业务日期由调用方事务外预分配后透传）。"""
+    from meta.services.customer_invoice_service import CustomerInvoiceService
+
+    params = ctx.params or {}
+    return CustomerInvoiceService(ds).create_red_document(
+        ctx.doc_id,
+        invoice_no=params.get("invoice_no"),
+        invoice_date=params.get("invoice_date") or ctx.now[:10],
+        reason=ctx.reason)
+
+
+def vendor_invoice_red_letter(ds, ctx) -> Dict[str, Any]:
+    """采购发票：创建红字采购贷项凭证（单号 / 业务日期由调用方预分配后透传）。"""
+    from meta.services.vendor_invoice_match_service import VendorInvoiceMatchService
+
+    params = ctx.params or {}
+    return VendorInvoiceMatchService(ds).create_red_document(
+        ctx.doc_id,
+        invoice_no=params.get("invoice_no"),
+        invoice_date=params.get("invoice_date"),
+        reason=ctx.reason)
+
+
 DocCreator = Callable[[Any, ReversalContext], Dict[str, Any]]
 
 DOC_CREATORS: Dict[str, DocCreator] = {
     "inventory_adjustment_red_letter": inventory_adjustment_red_letter,
     "receipt_red_letter": receipt_red_letter,
+    "customer_invoice_red_letter": customer_invoice_red_letter,
+    "vendor_invoice_red_letter": vendor_invoice_red_letter,
 }
 
 

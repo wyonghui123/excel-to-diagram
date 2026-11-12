@@ -195,7 +195,7 @@ def test_auto_crud_disabled_and_crud_actions_are_read_only_sets():
         assert not any(action.id.endswith(('_delete', '_batch'))
                        for action in obj.actions)
         assert obj.authorization['permissions']['delete'] == \
-            '%s:%s_update' % (obj.id, obj.id)
+            '%s:update' % obj.id
 
     # 行对象：YAML 不声明任何裸动作，删除 / 编辑复用父对象 update 权限
     for name, obj in (('inventory_adjustment_line.yaml', adjustment_line),
@@ -204,9 +204,9 @@ def test_auto_crud_disabled_and_crud_actions_are_read_only_sets():
             (SCHEMA_DIR / name).read_text(encoding='utf-8'))
         assert raw.get('actions') in (None, [])
         assert obj.authorization['permissions']['delete'] == \
-            '%s:%s_update' % (obj.parent_object, obj.parent_object)
+            '%s:update' % obj.parent_object
         assert obj.authorization['permissions']['create'] == \
-            '%s:%s_update' % (obj.parent_object, obj.parent_object)
+            '%s:update' % obj.parent_object
 
 
 def test_state_transition_rules_match_spec():
@@ -231,7 +231,7 @@ def test_state_transition_rules_match_spec():
     for rule in rules.values():
         assert rule.action_ref
     assert rules['post_inventory_adjustment'].action_ref == \
-        'inventory_adjustment:inventory_adjustment_post'
+        'inventory_adjustment:post'
 
     count = _load('inventory_count.yaml')
     count_rules = {rule.id: rule for rule in count.get_state_transitions()}

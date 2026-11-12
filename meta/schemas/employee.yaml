@@ -73,6 +73,11 @@ audit:
   dissociate:
     enabled: true
 
+org_scope:
+  mode: direct
+  field: org_id
+  write_check: true
+
 fields:
   - id: id
     name: ID
@@ -656,7 +661,7 @@ ui_view_config:
         label: 新建员工
         icon: plus
         type: primary
-        permission: employee:employee_create
+        permission: employee:create
     defaultSort:
       field: hire_date
       order: desc
@@ -691,7 +696,7 @@ ui_view_config:
                  manager_employee_id]
 
 category_config:
-  create_permission: employee:employee_create
-  update_permission: employee:employee_update
-  delete_permission: employee:employee_delete
+  create_permission: employee:create
+  update_permission: employee:update
+  delete_permission: employee:delete
   owner_auto_permission: false

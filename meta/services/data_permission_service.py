@@ -11,6 +11,7 @@
 from typing import List, Dict, Any, Optional, Set, Tuple
 import logging
 from meta.services.cascade_service import HierarchyConfigLoader
+from meta.core.hierarchy_loader import get_parent_info_map
 from meta.core.models import registry
 # [A1 补漏 2026-10-06] 本模块 _get_resource_detail 内的 8 键表名映射与
 #   permission_dimension_engine.RESOURCE_TABLE_MAP **逐字相同**（二次审查扫描发现，
@@ -203,12 +204,10 @@ class DataPermissionService:
 
     def _get_parent_resource(self, resource_type: str, resource_id: int) -> tuple:
         """获取父级资源 (parent_type, parent_id)"""
+        # [Rule Convergence M3 2026-11-07] 父级映射由 hierarchies.yaml 派生（FR-002）
         parent_map = {
-            'version': ('product', 'product_id'),
-            'domain': ('version', 'version_id'),
-            'sub_domain': ('domain', 'domain_id'),
-            'service_module': ('sub_domain', 'sub_domain_id'),
-            'business_object': ('service_module', 'service_module_id'),
+            child: (info[0], info[2])
+            for child, info in get_parent_info_map().items()
         }
         
         if resource_type not in parent_map:

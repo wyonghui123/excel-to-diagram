@@ -99,6 +99,17 @@ audit:
   dissociate:
     enabled: true
 
+org_scope:
+  mode: direct
+  field: sales_org_id
+  function: sales
+  write_check: true
+
+numbering:
+  no_field: order_no
+  date_field: order_date
+  type_table: type_definitions
+
 fields:
   - id: id
     name: ID
@@ -1407,6 +1418,51 @@ fields:
       meaning: 派生确认时间，非人工维护
       audit_field: true
 
+  # S8 Wave B：订单级开票状态（delivery 发货开票 + plan 计划开票联合派生）
+  # 依据 docs/specs/s8-customer-invoice-wave-b/spec.md §3.2 / §5.6
+  - id: billing_status
+    name: 开票状态
+    type: string
+    db_column: billing_status
+    required: true
+    default: none
+    max_length: 16
+    description: 订单级开票进度（delivery 与 plan 联合派生），只读
+    enum_values:
+      - value: none
+        label: 未开票
+        color: info
+        category: active
+        is_initial: true
+      - value: partial
+        label: 部分开票
+        color: warning
+        category: active
+      - value: full
+        label: 已开满
+        color: success
+        category: active
+    semantics:
+      meaning: 订单级开票进度（none/partial/full）
+      filterable: true
+      filter_type: enum
+      filter_label: 开票状态
+      filter_scope: local
+      derived: true
+      readonly: true
+    ui:
+      readonly: true
+
+  - id: billing_derived_at
+    name: 开票派生时间
+    type: datetime
+    db_column: billing_derived_at
+    nullable: true
+    description: 最近一次开票状态派生确认时间（UTC），只读，不可见
+    semantics:
+      meaning: 派生确认时间，非人工维护
+      audit_field: true
+
   # M2 文档版本（FR-003）：内容变更计数，平台写入，界面不可编辑
   - id: revision_no
     name: 版本号
@@ -1679,7 +1735,7 @@ ui_view_config:
         label: 新建订单
         icon: plus
         type: primary
-        permission: sales_order:sales_order_create
+        permission: sales_order:create
       - id: export
         label: 导出
         icon: download
@@ -1740,6 +1796,16 @@ ui_view_config:
   #   ⇒ 跨单据数据泄漏。故用 customFetcher=target_change_requests 按 target 精确取数。
   #   只读：审批处理仍走任务收件箱（/api/v1/tasks/{id}/decision），不在详情页重复造审批 UI。
   detail:
+    # [S8 Wave C T43] 手工补跑开票计划（确认时自动生成；历史单据或生成失败后可在此重试）
+    #   幂等：已开票金额不会被重算；未完全开票时才显示。
+    actions:
+      - id: generate_billing_plan
+        label: 生成开票计划
+        icon: calendar
+        variant: secondary
+        permission: sales_order:update
+        action: sales_order.generate_billing_plan
+        visible_when: "billing_status != 'full'"
     facets:
       - title: 变更申请
         id: change_request_section
@@ -1748,6 +1814,16 @@ ui_view_config:
         customFetcher: target_change_requests
         readonly: true
         pageSize: 10
+    # [v1.7 2026-11-07] 规则推导分区（A 入口）：展示本单据的规则因子快照与命中结论。
+    #   权限：rule_center:trace（无权限时分区不显示）；
+    #   scenarios 缺省 5 个（default / control_parameter / line_type / approval / doc_flow），
+    #   codes 为控制参数维度的预置编码（可在分区内改）。
+    rule_trace:
+      enabled: true
+      label: 规则推导
+      permission: rule_center:trace
+      scenarios: [default, control_parameter, line_type, approval, doc_flow]
+      codes: [qty_required, price_required, default_incoterm]
 
   # 订单行子表：父字段由 sales_order_line.order_id 的 ui.relation=sales_order 推断
   child_sections:

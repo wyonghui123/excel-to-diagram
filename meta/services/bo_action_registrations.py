@@ -84,6 +84,11 @@ def register_all_bo_actions(registry=None):
         sales_order_recalc_header_discount_handler,
     )
 
+    # Wave C T38: 开票计划补跑（订单确认已自动生成，此 Action 供历史单补建）
+    from meta.services.billing_plan_actions import (
+        generate_billing_plan_handler,
+    )
+
     # M3 变更申请: 审批决策 + 生效（docs/superpowers/specs/2026-10-29-m3-change-request §5.3/§6.3）
     from meta.services.change_request_decision import (
         change_request_approve_handler,
@@ -116,6 +121,36 @@ def register_all_bo_actions(registry=None):
         post_handler as receipt_post_handler,
         reverse_handler as receipt_reverse_handler,
         cancel_handler as receipt_cancel_handler,
+    )
+
+    # S8 Wave A: 销售发票由发货单生成（spec-s8-customer-invoice-wave-a §13）
+    from meta.services.customer_invoice_actions import (
+        create_from_shipment_handler as customer_invoice_from_shipment_handler,
+        create_from_schedule_handler as customer_invoice_from_schedule_handler,
+        create_from_service_confirmation_handler as
+        customer_invoice_from_service_handler,
+        create_credit_from_invoice_handler as customer_invoice_credit_handler,
+        create_credit_from_return_shipment_handler as
+        customer_invoice_return_credit_handler,
+        create_credit_on_account_handler as
+        customer_invoice_on_account_handler,
+        create_debit_memo_handler as customer_invoice_debit_memo_handler,
+        list_due_schedules_handler as customer_invoice_due_list_handler,
+        submit_handler as customer_invoice_submit_handler,
+        post_handler as customer_invoice_post_handler,
+        reverse_handler as customer_invoice_reverse_handler,
+    )
+
+    # W5 采购发票三单匹配（spec-vendor-invoice-object-model §12 / §13）
+    from meta.services.vendor_invoice_actions import (
+        match_handler as vendor_invoice_match_handler,
+        override_match_handler as vendor_invoice_override_match_handler,
+        override_duplicate_handler as vendor_invoice_override_duplicate_handler,
+        submit_handler as vendor_invoice_submit_handler,
+        post_handler as vendor_invoice_post_handler,
+        cancel_handler as vendor_invoice_cancel_handler,
+        reverse_handler as vendor_invoice_reverse_handler,
+        create_adjustment_handler as vendor_invoice_create_adjustment_handler,
     )
 
     # M4 调拨单: 下达 / 发货 / 收货 / 取消 / 关闭（spec-transfer-order-object-model §6/§7）
@@ -151,10 +186,17 @@ def register_all_bo_actions(registry=None):
         refresh_handler as project_structure_baseline_refresh_handler,
     )
 
+    # S1/S3 接缝: 单据流建单 / E6 三档冲销（spec 2026-11-09 §9.3.13）
+    from meta.services.doc_flow_action import (
+        doc_flow_derive_handler,
+        doc_flow_reverse_handler,
+    )
+
     # ==================== 1-5: 用户认证 (auth) ====================
     registry.register(
         'user.authenticate',
         user_authenticate_handler,
+        governance='none',
         description='用户登录认证',
         object_type='user',
         category='auth',
@@ -179,6 +221,7 @@ def register_all_bo_actions(registry=None):
     registry.register(
         'user.logout',
         user_logout_handler,
+        governance='none',
         description='用户登出（token 加入黑名单）',
         object_type='user',
         category='auth',
@@ -188,6 +231,7 @@ def register_all_bo_actions(registry=None):
     registry.register(
         'user.get_current',
         user_get_current_handler,
+        governance='none',
         description='获取当前登录用户信息',
         object_type='user',
         category='auth',
@@ -197,6 +241,7 @@ def register_all_bo_actions(registry=None):
     registry.register(
         'user.change_password',
         user_change_password_handler,
+        governance='audit',
         description='修改当前用户密码',
         object_type='user',
         category='auth',
@@ -214,6 +259,7 @@ def register_all_bo_actions(registry=None):
     registry.register(
         'user.update_profile',
         user_update_profile_handler,
+        governance='audit',
         description='更新当前用户个人信息（display_name/email/locale/timezone 等）',
         object_type='user',
         category='profile',
@@ -237,6 +283,7 @@ def register_all_bo_actions(registry=None):
     registry.register(
         'batch_save',  # 命名建议: 后续可改为 'draft.batch_save' (v3.2)
         batch_save_handler,
+        governance='audit',
         description='草稿批量保存（支持 is_new/create+update）',
         object_type='*',
         category='crud',
@@ -264,6 +311,7 @@ def register_all_bo_actions(registry=None):
     registry.register(
         'batch_delete',
         batch_delete_handler,
+        governance='audit',
         description='批量删除（任意 object_type, 与 batch_save 对称）',
         object_type='*',
         category='crud',
@@ -284,6 +332,7 @@ def register_all_bo_actions(registry=None):
     registry.register(
         'user.reset_password',
         user_reset_password_handler,
+        governance='audit',
         description='管理员重置指定用户密码（强制 must_change_password=1）',
         object_type='user',
         category='auth',
@@ -310,6 +359,7 @@ def register_all_bo_actions(registry=None):
     registry.register(
         'audit.retry',
         audit_retry_handler,
+        governance='none',
         description='重试失败的审计日志记录（管理员）',
         object_type='audit_log',
         category='ops',
@@ -327,6 +377,7 @@ def register_all_bo_actions(registry=None):
     registry.register(
         'audit.export',
         audit_export_handler,
+        governance='none',
         description='导出审计日志为 xlsx/csv 文件（管理员, [DECORATIVE] v3.1 文件流）',
         object_type='audit_log',
         category='ops',
@@ -350,6 +401,7 @@ def register_all_bo_actions(registry=None):
     registry.register(
         'subscription.create',
         subscription_create_handler,
+        governance='audit',
         description='创建对象变更通知订阅（websocket/webhook）',
         object_type='change_subscription',
         category='notification',
@@ -376,6 +428,7 @@ def register_all_bo_actions(registry=None):
     registry.register(
         'version.clear_other_current',
         clear_other_current_versions_handler,
+        governance='audit',
         description='清除同产品下其他版本的 is_current 标志 (set_current action 的 trigger)',
         object_type='version',
         category='business',
@@ -388,6 +441,7 @@ def register_all_bo_actions(registry=None):
     registry.register(
         'function.value_help.resolve',
         function_value_help_resolve_handler,
+        governance='none',
         description='[Function] 解析 value_help 值的显示信息 (display/code)',
         object_type='*',
         category='value_help',
@@ -412,6 +466,7 @@ def register_all_bo_actions(registry=None):
     registry.register(
         'function.aggregate.query',
         function_aggregate_query_handler,
+        governance='none',
         description='[Function] 查询聚合表数据',
         object_type='aggregate',
         category='stats',
@@ -434,6 +489,7 @@ def register_all_bo_actions(registry=None):
     registry.register(
         'function.aggregate.refresh',
         function_aggregate_refresh_handler,
+        governance='audit',
         description='[Function] 刷新聚合表 (admin 限定, 注意: 实际是写操作, 标为 function 仅因 aggregate 域)',
         object_type='aggregate',
         category='stats',
@@ -454,6 +510,7 @@ def register_all_bo_actions(registry=None):
     registry.register(
         'function.subscription.list',
         function_subscription_list_handler,
+        governance='none',
         description='[Function] 列出当前用户的订阅 (可选 object_type 过滤)',
         object_type='change_subscription',
         category='notification',
@@ -473,6 +530,7 @@ def register_all_bo_actions(registry=None):
     registry.register(
         'enum_type.create',
         enum_type_create_handler,
+        governance='audit',
         description='创建业务枚举类型 (admin 限定, 不允许 system 类别)',
         object_type='enum_type',
         category='metadata',
@@ -495,6 +553,7 @@ def register_all_bo_actions(registry=None):
     registry.register(
         'enum_type.update',
         enum_type_update_handler,
+        governance='audit',
         description='更新业务枚举类型 (admin 限定, system 不可改)',
         object_type='enum_type',
         category='metadata',
@@ -516,6 +575,7 @@ def register_all_bo_actions(registry=None):
     registry.register(
         'enum_type.delete',
         enum_type_delete_handler,
+        governance='audit',
         description='删除业务枚举类型 (admin 限定, 仅当无 enum_values 时)',
         object_type='enum_type',
         category='metadata',
@@ -535,6 +595,7 @@ def register_all_bo_actions(registry=None):
     registry.register(
         'allocation.apply',
         allocation_apply_handler,
+        governance='audit',
         description='把父行的量按权重守恒地分摊到已有 N 个子行 (Σ子行=父行)',
         object_type='*',
         category='allocation',
@@ -575,6 +636,7 @@ def register_all_bo_actions(registry=None):
     registry.register(
         'allocation.split',
         allocation_split_handler,
+        governance='audit',
         description='把父行的量守恒地拆分成 N 个新建子行 (Σ新行=父行)',
         object_type='*',
         category='allocation',
@@ -603,6 +665,7 @@ def register_all_bo_actions(registry=None):
     registry.register(
         'sales_order.recalc_header_discount',
         sales_order_recalc_header_discount_handler,
+        governance='audit',
         description='按当前行基额重摊抬头折扣 / 附加费（非草稿也允许手动重算）',
         object_type='sales_order',
         category='allocation',
@@ -625,6 +688,42 @@ def register_all_bo_actions(registry=None):
         idempotent=True,
     )
 
+    # ==================== 22b: 开票计划补跑 (sales_order) ====================
+    registry.register(
+        'sales_order.generate_billing_plan',
+        generate_billing_plan_handler,
+        governance='audit',
+        description='为已确认订单补生成 billing 开票计划期次（幂等，不重算已开票金额）',
+        object_type='sales_order',
+        category='business',
+        permission_required='sales_order:update',
+        input_schema={
+            'type': 'object',
+            'properties': {
+                'order_id': {'type': 'integer'},
+                'triggered_by': {'type': 'string'},
+            },
+        },
+        output_schema={
+            'type': 'object',
+            'properties': {
+                'success': {'type': 'boolean'},
+                'data': {
+                    'type': 'object',
+                    'properties': {
+                        'order_id': {'type': 'integer'},
+                        'created': {'type': 'array',
+                                    'items': {'type': 'integer'}},
+                        'skipped': {'type': 'boolean'},
+                    },
+                },
+                'message': {'type': 'string'},
+            },
+        },
+        requires_auth=True,
+        idempotent=True,
+    )
+
     # ==================== 23-25: 变更申请（M3 T5） ====================
     # 决策-生效协议（decision_effect）按 executor_config.decision_actions 调 approve/reject；
     # apply 由 POST /bo/change_request/{id}/actions/change_request.apply 触发。
@@ -639,6 +738,7 @@ def register_all_bo_actions(registry=None):
     registry.register(
         'change_request.approve',
         change_request_approve_handler,
+        governance='audit',
         description='变更申请审批通过（submitted → approved，回执 new_status=approved）',
         object_type='change_request',
         category='business',
@@ -658,6 +758,7 @@ def register_all_bo_actions(registry=None):
     registry.register(
         'change_request.reject',
         change_request_reject_handler,
+        governance='audit',
         description='变更申请审批驳回（submitted → rejected，回执 new_status=rejected）',
         object_type='change_request',
         category='business',
@@ -677,6 +778,7 @@ def register_all_bo_actions(registry=None):
     registry.register(
         'change_request.apply',
         change_request_apply_handler,
+        governance='audit',
         description='变更申请生效（approved → applied，经唯一写漏斗写目标单据）',
         object_type='change_request',
         category='business',
@@ -720,6 +822,7 @@ def register_all_bo_actions(registry=None):
         registry.register(
             '{0}.approve'.format(object_type),
             _demand_handlers[approve_name],
+            governance='audit',
             description='{0}审批通过（submitted → approved，回执 new_status=approved）'.format(label),
             object_type=object_type,
             category='business',
@@ -735,6 +838,7 @@ def register_all_bo_actions(registry=None):
         registry.register(
             '{0}.reject'.format(object_type),
             _demand_handlers[reject_name],
+            governance='audit',
             description='{0}驳回（submitted → rejected，回执 new_status=rejected）'.format(label),
             object_type=object_type,
             category='business',
@@ -754,10 +858,11 @@ def register_all_bo_actions(registry=None):
     registry.register(
         'purchase_order.approve',
         purchase_order_approve_handler,
+        governance='audit',
         description='采购订单审批通过（submitted → confirmed，approval_status=approved）',
         object_type='purchase_order',
         category='business',
-        permission_required='purchase_order:purchase_order_approve',
+        permission_required='purchase_order:approve',
         input_schema={
             'type': 'object',
             'properties': {
@@ -773,10 +878,11 @@ def register_all_bo_actions(registry=None):
     registry.register(
         'purchase_order.reject',
         purchase_order_reject_handler,
+        governance='audit',
         description='采购订单审批驳回（submitted → draft，approval_status=rejected）',
         object_type='purchase_order',
         category='business',
-        permission_required='purchase_order:purchase_order_reject',
+        permission_required='purchase_order:reject',
         input_schema={
             'type': 'object',
             'properties': {
@@ -794,10 +900,12 @@ def register_all_bo_actions(registry=None):
     registry.register(
         'purchase_order.create_from_requisition',
         create_from_requisition_handler,
+        governance='audit_scope',
+        org_scope={'param_field': 'org_id'},
         description='采购申请转采购订单（approved 申请 → 草稿 PO + 需求分配）',
         object_type='purchase_order',
         category='business',
-        permission_required='purchase_order:purchase_order_create',
+        permission_required='purchase_order:create',
         input_schema={
             'type': 'object',
             'required': ['requisition_id'],
@@ -838,10 +946,12 @@ def register_all_bo_actions(registry=None):
     registry.register(
         'receipt.create_from_schedule',
         create_from_schedule_handler,
+        governance='audit_scope',
+        org_scope={'param_field': 'org_id'},
         description='由采购订单计划行批量生成草稿收货单（取号 + 收货行冗余列反查）',
         object_type='receipt',
         category='business',
-        permission_required='receipt:receipt_create',
+        permission_required='receipt:create',
         input_schema={
             'type': 'object',
             'properties': {
@@ -868,10 +978,11 @@ def register_all_bo_actions(registry=None):
     registry.register(
         'receipt.create_vendor_return',
         receipt_create_vendor_return_handler,
+        governance='audit',
         description='由已过账收货单生成退货采购单 + 采购退货出库草稿（D6）',
         object_type='receipt',
         category='business',
-        permission_required='receipt:receipt_create_vendor_return',
+        permission_required='receipt:create_vendor_return',
         input_schema={
             'type': 'object',
             'properties': {
@@ -898,10 +1009,11 @@ def register_all_bo_actions(registry=None):
     registry.register(
         'receipt.post',
         receipt_post_handler,
+        governance='audit',
         description='收货单过账（draft → posted：分配 / 计划行回写 / 履约派生）',
         object_type='receipt',
         category='business',
-        permission_required='receipt:receipt_post',
+        permission_required='receipt:post',
         input_schema={
             'type': 'object',
             'properties': {
@@ -917,10 +1029,11 @@ def register_all_bo_actions(registry=None):
     registry.register(
         'receipt.reverse',
         receipt_reverse_handler,
+        governance='audit',
         description='收货单整单红冲（posted → reversed，新建红字单并过账）',
         object_type='receipt',
         category='business',
-        permission_required='receipt:receipt_reverse',
+        permission_required='receipt:reverse',
         input_schema={
             'type': 'object',
             'properties': {
@@ -937,10 +1050,11 @@ def register_all_bo_actions(registry=None):
     registry.register(
         'receipt.cancel',
         receipt_cancel_handler,
+        governance='audit',
         description='收货单取消（draft → cancelled，行一并取消）',
         object_type='receipt',
         category='business',
-        permission_required='receipt:receipt_cancel',
+        permission_required='receipt:cancel',
         input_schema={
             'type': 'object',
             'properties': {
@@ -976,10 +1090,11 @@ def register_all_bo_actions(registry=None):
     registry.register(
         'transfer_order.release',
         transfer_order_release_handler,
+        governance='audit',
         description='调拨单下达（draft → released，校验组织 / 法人 / 行完整性）',
         object_type='transfer_order',
         category='business',
-        permission_required='transfer_order:transfer_order_release',
+        permission_required='transfer_order:release',
         input_schema={
             'type': 'object',
             'required': ['transfer_order_id'],
@@ -995,10 +1110,11 @@ def register_all_bo_actions(registry=None):
     registry.register(
         'transfer_order.ship',
         transfer_order_ship_handler,
+        governance='audit',
         description='调拨单发货（released 下累加行 qty_shipped，不建发货单 / 不碰库存）',
         object_type='transfer_order',
         category='business',
-        permission_required='transfer_order:transfer_order_ship',
+        permission_required='transfer_order:ship',
         input_schema={
             'type': 'object',
             'required': ['transfer_order_id', 'lines'],
@@ -1028,10 +1144,11 @@ def register_all_bo_actions(registry=None):
     registry.register(
         'transfer_order.receive',
         transfer_order_receive_handler,
+        governance='audit',
         description='调拨单收货（按发运余量生成 TO 来源草稿收货单）',
         object_type='transfer_order',
         category='business',
-        permission_required='transfer_order:transfer_order_receive',
+        permission_required='transfer_order:receive',
         input_schema={
             'type': 'object',
             'required': ['transfer_order_id'],
@@ -1048,10 +1165,11 @@ def register_all_bo_actions(registry=None):
     registry.register(
         'transfer_order.cancel',
         transfer_order_cancel_handler,
+        governance='audit',
         description='调拨单取消（draft / released → cancelled，已发货拒绝取消）',
         object_type='transfer_order',
         category='business',
-        permission_required='transfer_order:transfer_order_cancel',
+        permission_required='transfer_order:cancel',
         input_schema={
             'type': 'object',
             'required': ['transfer_order_id'],
@@ -1067,10 +1185,11 @@ def register_all_bo_actions(registry=None):
     registry.register(
         'transfer_order.close',
         transfer_order_close_handler,
+        governance='audit',
         description='调拨单关闭（released → closed，在途量为 0 且已收货）',
         object_type='transfer_order',
         category='business',
-        permission_required='transfer_order:transfer_order_close',
+        permission_required='transfer_order:close',
         input_schema={
             'type': 'object',
             'required': ['transfer_order_id'],
@@ -1086,10 +1205,11 @@ def register_all_bo_actions(registry=None):
     registry.register(
         'transfer_order.reverse_shipment',
         transfer_order_reverse_shipment_handler,
+        governance='audit',
         description='调拨发货红冲（released → reversed，原地回退库存/序列号/容器/边）',
         object_type='transfer_order',
         category='business',
-        permission_required='transfer_order:transfer_order_reverse_shipment',
+        permission_required='transfer_order:reverse_shipment',
         input_schema={
             'type': 'object',
             'required': ['transfer_order_id'],
@@ -1107,10 +1227,11 @@ def register_all_bo_actions(registry=None):
     registry.register(
         'transfer_order.submit',
         transfer_order_submit_handler,
+        governance='audit',
         description='调拨单提交审批（草稿态；按策略落 pending 并建审批任务）',
         object_type='transfer_order',
         category='business',
-        permission_required='transfer_order:transfer_order_submit',
+        permission_required='transfer_order:submit',
         input_schema={
             'type': 'object',
             'required': ['transfer_order_id'],
@@ -1126,10 +1247,11 @@ def register_all_bo_actions(registry=None):
     registry.register(
         'transfer_order.withdraw',
         transfer_order_withdraw_handler,
+        governance='audit',
         description='调拨单撤回审批（pending → not_required，关闭在途审批任务）',
         object_type='transfer_order',
         category='business',
-        permission_required='transfer_order:transfer_order_withdraw',
+        permission_required='transfer_order:withdraw',
         input_schema={
             'type': 'object',
             'required': ['transfer_order_id'],
@@ -1145,10 +1267,11 @@ def register_all_bo_actions(registry=None):
     registry.register(
         'transfer_order.approve',
         transfer_order_approve_handler,
+        governance='audit',
         description='调拨单审批通过（pending → approved，任务归位 done）',
         object_type='transfer_order',
         category='business',
-        permission_required='transfer_order:transfer_order_approve',
+        permission_required='transfer_order:approve',
         input_schema={
             'type': 'object',
             'required': ['transfer_order_id'],
@@ -1164,10 +1287,11 @@ def register_all_bo_actions(registry=None):
     registry.register(
         'transfer_order.reject',
         transfer_order_reject_handler,
+        governance='audit',
         description='调拨单审批驳回（pending → rejected，任务归位 failed）',
         object_type='transfer_order',
         category='business',
-        permission_required='transfer_order:transfer_order_reject',
+        permission_required='transfer_order:reject',
         input_schema={
             'type': 'object',
             'required': ['transfer_order_id'],
@@ -1182,7 +1306,7 @@ def register_all_bo_actions(registry=None):
     )
 
     # ==================== 42: 调拨单需求转单（M4 / TBD-4） ====================
-    # 复用创建权限 `transfer_order:transfer_order_create`；不写库存台账 / 在途。
+    # 复用创建权限 `transfer_order:create`；不写库存台账 / 在途。
     _transfer_order_from_allocation_output_schema = {
         'type': 'object',
         'properties': {
@@ -1204,10 +1328,12 @@ def register_all_bo_actions(registry=None):
     registry.register(
         'transfer_order.create_from_allocation',
         transfer_order_from_allocation_handler,
+        governance='audit_scope',
+        org_scope={'param_field': 'from_org_id'},
         description='需求分配转调拨单（active 分配 → 草稿 TO + 分配回写）',
         object_type='transfer_order',
         category='business',
-        permission_required='transfer_order:transfer_order_create',
+        permission_required='transfer_order:create',
         input_schema={
             'type': 'object',
             'required': ['allocation_ids', 'from_org_id', 'to_org_id',
@@ -1248,10 +1374,11 @@ def register_all_bo_actions(registry=None):
     registry.register(
         'transfer_shipment.create',
         transfer_shipment_create_handler,
+        governance='audit',
         description='调拨发货单建单（released 调拨单下建草稿发货单，取号 + 行校验）',
         object_type='transfer_shipment',
         category='business',
-        permission_required='transfer_shipment:transfer_shipment_create',
+        permission_required='transfer_shipment:create',
         input_schema={
             'type': 'object',
             'required': ['transfer_order_id', 'ship_date', 'lines'],
@@ -1281,10 +1408,11 @@ def register_all_bo_actions(registry=None):
     registry.register(
         'transfer_shipment.post',
         transfer_shipment_post_handler,
+        governance='audit',
         description='调拨发货单过账（调 TO ship 累加调拨行 qty_shipped，失败保持草稿）',
         object_type='transfer_shipment',
         category='business',
-        permission_required='transfer_shipment:transfer_shipment_post',
+        permission_required='transfer_shipment:post',
         input_schema={
             'type': 'object',
             'required': ['shipment_id'],
@@ -1301,10 +1429,11 @@ def register_all_bo_actions(registry=None):
     registry.register(
         'transfer_shipment.cancel',
         transfer_shipment_cancel_handler,
+        governance='audit',
         description='调拨发货单取消（draft → cancelled，不触碰调拨单数量）',
         object_type='transfer_shipment',
         category='business',
-        permission_required='transfer_shipment:transfer_shipment_cancel',
+        permission_required='transfer_shipment:cancel',
         input_schema={
             'type': 'object',
             'required': ['shipment_id'],
@@ -1335,6 +1464,7 @@ def register_all_bo_actions(registry=None):
     registry.register(
         'project_structure_baseline.check_drift',
         project_structure_baseline_check_drift_handler,
+        governance='none',
         description='项目结构基线漂移检查（OK / DRIFT / STRUCTURE_MISSING）',
         object_type='project_structure_baseline',
         category='business',
@@ -1354,6 +1484,7 @@ def register_all_bo_actions(registry=None):
     registry.register(
         'project_structure_baseline.refresh',
         project_structure_baseline_refresh_handler,
+        governance='audit',
         description='项目结构基线刷新（按当前结构重算哈希，幂等）',
         object_type='project_structure_baseline',
         category='business',
@@ -1370,6 +1501,563 @@ def register_all_bo_actions(registry=None):
         output_schema=_project_structure_baseline_output_schema,
         requires_auth=True,
         idempotent=True,
+    )
+
+    # ==================== 39: 销售发票（S8 Wave A / B2） ====================
+    _customer_invoice_output_schema = {
+        'type': 'object',
+        'properties': {
+            'id': {'type': 'integer'},
+            'invoice_no': {'type': 'string'},
+            'status': {'type': 'string'},
+            'shipment_id': {'type': 'integer'},
+            'line_ids': {'type': 'array', 'items': {'type': 'integer'}},
+            'amounts': {'type': 'object'},
+        },
+    }
+    registry.register(
+        'customer_invoice.create_from_shipment',
+        customer_invoice_from_shipment_handler,
+        governance='audit',
+        description='由已发运/已签收发货单生成草稿销售发票（可按行部分开票）',
+        object_type='customer_invoice',
+        category='business',
+        permission_required='customer_invoice:create',
+        input_schema={
+            'type': 'object',
+            'properties': {
+                'shipment_id': {'type': 'integer'},
+                'source_doc_id': {'type': 'integer'},
+                'invoice_date': {'type': 'string'},
+                'posting_date': {'type': 'string'},
+                'document_type_id': {'type': 'integer'},
+                'payment_term_id': {'type': 'integer'},
+                'incoterm_code': {'type': 'string'},
+                'remark': {'type': 'string'},
+                'lines': {'type': 'array', 'items': {'type': 'object'}},
+            },
+        },
+        output_schema=_customer_invoice_output_schema,
+        requires_auth=True,
+        idempotent=False,
+    )
+    registry.register(
+        'customer_invoice.create_from_schedule',
+        customer_invoice_from_schedule_handler,
+        governance='audit',
+        description='按开票计划期次生成草稿销售发票（支持一期分次 / 多期合并）',
+        object_type='customer_invoice',
+        category='business',
+        permission_required='customer_invoice:create',
+        input_schema={
+            'type': 'object',
+            'properties': {
+                'schedule_ids': {'type': 'array',
+                                 'items': {'type': 'integer'}},
+                'source_doc_id': {'type': 'integer'},
+                'lines': {'type': 'array', 'items': {'type': 'object'}},
+                'invoice_date': {'type': 'string'},
+                'posting_date': {'type': 'string'},
+                'document_type_id': {'type': 'integer'},
+                'payment_term_id': {'type': 'integer'},
+                'incoterm_code': {'type': 'string'},
+                'remark': {'type': 'string'},
+            },
+        },
+        output_schema=_customer_invoice_output_schema,
+        requires_auth=True,
+        idempotent=False,
+    )
+    registry.register(
+        'customer_invoice.create_from_service_confirmation',
+        customer_invoice_from_service_handler,
+        governance='audit',
+        description='按已兑现服务计划期次生成草稿销售发票（服务确认）',
+        object_type='customer_invoice',
+        category='business',
+        permission_required='customer_invoice:create',
+        input_schema={
+            'type': 'object',
+            'properties': {
+                'schedule_ids': {'type': 'array',
+                                 'items': {'type': 'integer'}},
+                'source_doc_id': {'type': 'integer'},
+                'lines': {'type': 'array', 'items': {'type': 'object'}},
+                'invoice_date': {'type': 'string'},
+                'posting_date': {'type': 'string'},
+                'document_type_id': {'type': 'integer'},
+                'payment_term_id': {'type': 'integer'},
+                'incoterm_code': {'type': 'string'},
+                'remark': {'type': 'string'},
+            },
+        },
+        output_schema=_customer_invoice_output_schema,
+        requires_auth=True,
+        idempotent=False,
+    )
+    registry.register(
+        'customer_invoice.list_due_schedules',
+        customer_invoice_due_list_handler,
+        governance='none',
+        description='查询到期开票计划期次（只读，不产生写操作）',
+        object_type='customer_invoice',
+        category='query',
+        permission_required='customer_invoice:read',
+        input_schema={
+            'type': 'object',
+            'properties': {
+                'as_of': {'type': 'string'},
+                'order_id': {'type': 'integer'},
+                'page': {'type': 'integer'},
+                'page_size': {'type': 'integer'},
+            },
+        },
+        output_schema={
+            'type': 'object',
+            'properties': {
+                'items': {'type': 'array', 'items': {'type': 'object'}},
+                'total': {'type': 'integer'},
+                'page': {'type': 'integer'},
+                'page_size': {'type': 'integer'},
+                'as_of': {'type': 'string'},
+            },
+        },
+        requires_auth=True,
+        idempotent=True,
+    )
+    registry.register(
+        'customer_invoice.create_credit_from_invoice',
+        customer_invoice_credit_handler,
+        governance='audit',
+        description='按已过账发票生成独立贷项草稿（引用原单，可按行/数量/金额部分冲销）',
+        object_type='customer_invoice',
+        category='business',
+        permission_required='customer_invoice:credit_memo',
+        input_schema={
+            'type': 'object',
+            'properties': {
+                'source_invoice_id': {'type': 'integer'},
+                'source_doc_id': {'type': 'integer'},
+                'invoice_date': {'type': 'string'},
+                'reason': {'type': 'string'},
+                'remark': {'type': 'string'},
+                'line_ids': {'type': 'array', 'items': {'type': 'integer'}},
+                'lines': {'type': 'array', 'items': {'type': 'object'}},
+            },
+        },
+        output_schema=_customer_invoice_output_schema,
+        requires_auth=True,
+        idempotent=False,
+    )
+    # S8 Wave C C4: on-account 贷项（spec-s8-customer-invoice-wave-c §6.4.2）
+    registry.register(
+        'customer_invoice.create_credit_on_account',
+        customer_invoice_on_account_handler,
+        governance='audit_scope',
+        org_scope={'param_field': 'org_id'},
+        description='生成不引用来源单据的 on-account 贷项草稿（负数行）',
+        object_type='customer_invoice',
+        category='business',
+        permission_required='customer_invoice:credit_memo',
+        input_schema={
+            'type': 'object',
+            'properties': {
+                'customer_id': {'type': 'integer'},
+                'customer_account_id': {'type': 'integer'},
+                'currency_id': {'type': 'integer'},
+                'org_id': {'type': 'integer'},
+                'invoice_date': {'type': 'string'},
+                'reason': {'type': 'string'},
+                'remark': {'type': 'string'},
+                'lines': {'type': 'array', 'items': {'type': 'object'}},
+            },
+            'required': ['lines'],
+        },
+        output_schema=_customer_invoice_output_schema,
+        requires_auth=True,
+        idempotent=False,
+    )
+    # S8 Wave D D2: 手工借项通知单（spec-s8-customer-invoice-wave-d §6.2）
+    registry.register(
+        'customer_invoice.create_debit_memo',
+        customer_invoice_debit_memo_handler,
+        governance='audit_scope',
+        org_scope={'param_field': 'org_id'},
+        description='生成手工借项通知单草稿（正数行，订单行只读引用）',
+        object_type='customer_invoice',
+        category='business',
+        permission_required='customer_invoice:debit_memo',
+        input_schema={
+            'type': 'object',
+            'properties': {
+                'customer_id': {'type': 'integer'},
+                'customer_account_id': {'type': 'integer'},
+                'currency_id': {'type': 'integer'},
+                'org_id': {'type': 'integer'},
+                'invoice_date': {'type': 'string'},
+                'reason': {'type': 'string'},
+                'remark': {'type': 'string'},
+                'source_invoice_id': {'type': 'integer'},
+                'lines': {'type': 'array', 'items': {'type': 'object'}},
+            },
+            'required': ['lines'],
+        },
+        output_schema=_customer_invoice_output_schema,
+        requires_auth=True,
+        idempotent=False,
+    )
+    # S8 Wave C C3: 退货发货单 → 贷项通知单（spec-s8-customer-invoice-wave-c §6.3）
+    registry.register(
+        'customer_invoice.create_credit_from_return_shipment',
+        customer_invoice_return_credit_handler,
+        governance='audit',
+        description='退货发货单追溯原发票行生成贷项草稿（FIFO 分配，负数行）',
+        object_type='customer_invoice',
+        category='business',
+        permission_required='customer_invoice:credit_memo',
+        input_schema={
+            'type': 'object',
+            'properties': {
+                'shipment_id': {'type': 'integer'},
+                'return_shipment_id': {'type': 'integer'},
+                'source_doc_id': {'type': 'integer'},
+                'invoice_date': {'type': 'string'},
+                'reason': {'type': 'string'},
+                'remark': {'type': 'string'},
+                'return_line_ids': {'type': 'array',
+                                     'items': {'type': 'integer'}},
+                'source_invoice_id': {'type': 'integer'},
+                'invoice_line_ids': {'type': 'array',
+                                     'items': {'type': 'integer'}},
+                'auto_allocate': {'type': 'string'},
+            },
+        },
+        output_schema=_customer_invoice_output_schema,
+        requires_auth=True,
+        idempotent=False,
+    )
+    registry.register(
+        'customer_invoice.submit',
+        customer_invoice_submit_handler,
+        governance='audit',
+        description='提交销售发票（draft → submitted；幂等）',
+        object_type='customer_invoice',
+        category='business',
+        permission_required='customer_invoice:submit',
+        input_schema={
+            'type': 'object',
+            'properties': {
+                'invoice_id': {'type': 'integer'},
+                'source_doc_id': {'type': 'integer'},
+            },
+        },
+        output_schema=_customer_invoice_output_schema,
+        requires_auth=True,
+        idempotent=True,
+    )
+    registry.register(
+        'customer_invoice.post',
+        customer_invoice_post_handler,
+        governance='audit',
+        description='过账销售发票（submitted → posted；幂等）',
+        object_type='customer_invoice',
+        category='business',
+        permission_required='customer_invoice:post',
+        input_schema={
+            'type': 'object',
+            'properties': {
+                'invoice_id': {'type': 'integer'},
+                'source_doc_id': {'type': 'integer'},
+                'posting_date': {'type': 'string'},
+            },
+        },
+        output_schema=_customer_invoice_output_schema,
+        requires_auth=True,
+        idempotent=True,
+    )
+    registry.register(
+        'customer_invoice.reverse',
+        customer_invoice_reverse_handler,
+        governance='audit',
+        description='红冲已过账销售发票（posted → 红字 posted；幂等）',
+        object_type='customer_invoice',
+        category='business',
+        permission_required='customer_invoice:reverse',
+        input_schema={
+            'type': 'object',
+            'required': ['reason'],
+            'properties': {
+                'invoice_id': {'type': 'integer'},
+                'source_doc_id': {'type': 'integer'},
+                'reason': {'type': 'string'},
+                'reversal_date': {'type': 'string'},
+            },
+        },
+        output_schema=_customer_invoice_output_schema,
+        requires_auth=True,
+        idempotent=True,
+    )
+
+    # ==================== 40: 采购发票三单匹配（W5） ====================
+    _vendor_invoice_output_schema = {
+        'type': 'object',
+        'properties': {
+            'id': {'type': 'integer'},
+            'invoice_no': {'type': 'string'},
+            'status': {'type': 'string'},
+            'match_status': {'type': 'string'},
+            'match_mode': {'type': 'string'},
+            'duplicate_of': {'type': 'integer'},
+            'lines': {'type': 'array', 'items': {'type': 'object'}},
+            'amounts': {'type': 'object'},
+        },
+    }
+    registry.register(
+        'vendor_invoice.match',
+        vendor_invoice_match_handler,
+        governance='audit',
+        description='执行采购发票三单匹配（PO 计划行 / 收货行 → 发票行，只算不落库）',
+        object_type='vendor_invoice',
+        category='business',
+        permission_required='vendor_invoice:match',
+        input_schema={
+            'type': 'object',
+            'properties': {
+                'invoice_id': {'type': 'integer'},
+                'id': {'type': 'integer'},
+                'persist': {'type': 'boolean'},
+            },
+        },
+        output_schema=_vendor_invoice_output_schema,
+        requires_auth=True,
+        idempotent=True,
+    )
+    registry.register(
+        'vendor_invoice.override_match',
+        vendor_invoice_override_match_handler,
+        governance='audit',
+        description='匹配差异例外放行（须填写原因，留痕后再提交/过账）',
+        object_type='vendor_invoice',
+        category='business',
+        permission_required='vendor_invoice:override_match',
+        input_schema={
+            'type': 'object',
+            'required': ['reason'],
+            'properties': {
+                'invoice_id': {'type': 'integer'},
+                'id': {'type': 'integer'},
+                'reason': {'type': 'string'},
+                'override_reason': {'type': 'string'},
+                'line_ids': {'type': 'array', 'items': {'type': 'integer'}},
+            },
+        },
+        output_schema=_vendor_invoice_output_schema,
+        requires_auth=True,
+        idempotent=True,
+    )
+    registry.register(
+        'vendor_invoice.override_duplicate',
+        vendor_invoice_override_duplicate_handler,
+        governance='audit',
+        description='重复发票例外放行（同一供应商发票号重复，须填写原因并留痕）',
+        object_type='vendor_invoice',
+        category='business',
+        permission_required='vendor_invoice:override_duplicate',
+        input_schema={
+            'type': 'object',
+            'required': ['reason'],
+            'properties': {
+                'invoice_id': {'type': 'integer'},
+                'id': {'type': 'integer'},
+                'reason': {'type': 'string'},
+                'override_reason': {'type': 'string'},
+                'duplicate_override_reason': {'type': 'string'},
+            },
+        },
+        output_schema=_vendor_invoice_output_schema,
+        requires_auth=True,
+        idempotent=False,
+    )
+    registry.register(
+        'vendor_invoice.submit',
+        vendor_invoice_submit_handler,
+        governance='audit',
+        description='提交采购发票（草稿 → 已提交；匹配必须无 exception）',
+        object_type='vendor_invoice',
+        category='business',
+        permission_required='vendor_invoice:submit',
+        input_schema={
+            'type': 'object',
+            'properties': {
+                'invoice_id': {'type': 'integer'},
+                'id': {'type': 'integer'},
+            },
+        },
+        output_schema=_vendor_invoice_output_schema,
+        requires_auth=True,
+        idempotent=True,
+    )
+    registry.register(
+        'vendor_invoice.post',
+        vendor_invoice_post_handler,
+        governance='audit',
+        description='过账采购发票（已提交 → 已过账；写 billing / ap_match 单据流边）',
+        object_type='vendor_invoice',
+        category='business',
+        permission_required='vendor_invoice:post',
+        input_schema={
+            'type': 'object',
+            'properties': {
+                'invoice_id': {'type': 'integer'},
+                'id': {'type': 'integer'},
+                'posting_date': {'type': 'string'},
+            },
+        },
+        output_schema=_vendor_invoice_output_schema,
+        requires_auth=True,
+        idempotent=True,
+    )
+    registry.register(
+        'vendor_invoice.cancel',
+        vendor_invoice_cancel_handler,
+        governance='audit',
+        description='取消采购发票（草稿/已提交 → 已取消；已过账须走冲销）',
+        object_type='vendor_invoice',
+        category='business',
+        permission_required='vendor_invoice:cancel',
+        input_schema={
+            'type': 'object',
+            'required': ['reason'],
+            'properties': {
+                'invoice_id': {'type': 'integer'},
+                'id': {'type': 'integer'},
+                'reason': {'type': 'string'},
+            },
+        },
+        output_schema=_vendor_invoice_output_schema,
+        requires_auth=True,
+        idempotent=True,
+    )
+    registry.register(
+        'vendor_invoice.reverse',
+        vendor_invoice_reverse_handler,
+        governance='audit',
+        description='红冲已过账采购发票（posted → reversed；生成红字采购贷项凭证并写红字单据流边）',
+        object_type='vendor_invoice',
+        category='business',
+        permission_required='vendor_invoice:reverse',
+        input_schema={
+            'type': 'object',
+            'properties': {
+                'invoice_id': {'type': 'integer'},
+                'id': {'type': 'integer'},
+                'reason': {'type': 'string'},
+                'reversal_reason': {'type': 'string'},
+                'invoice_date': {'type': 'string'},
+            },
+        },
+        output_schema=_vendor_invoice_output_schema,
+        requires_auth=True,
+        idempotent=True,
+    )
+    registry.register(
+        'vendor_invoice.create_adjustment',
+        vendor_invoice_create_adjustment_handler,
+        governance='audit',
+        description='基于已过账采购发票创建正向调整单（increase 追加 / decrease 冲减；原票保持 posted）',
+        object_type='vendor_invoice',
+        category='business',
+        permission_required='vendor_invoice:create',
+        input_schema={
+            'type': 'object',
+            'required': ['direction'],
+            'properties': {
+                'invoice_id': {'type': 'integer'},
+                'id': {'type': 'integer'},
+                'direction': {'type': 'string', 'enum': ['increase', 'decrease']},
+                'adjustment_direction': {'type': 'string', 'enum': ['increase', 'decrease']},
+                'reason': {'type': 'string'},
+                'adjustment_reason': {'type': 'string'},
+                'invoice_date': {'type': 'string'},
+                'lines': {
+                    'type': 'array',
+                    'description': '可选；为空表示整单全额调整。元素: invoice_line_id / qty / unit_price / net_amount / tax_amount',
+                },
+            },
+        },
+        output_schema=_vendor_invoice_output_schema,
+        requires_auth=True,
+        idempotent=False,
+    )
+
+    # ==================== 单据流 derive / reverse（§9.3.13 S1/S3） ====================
+    registry.register(
+        'doc_flow.derive',
+        doc_flow_derive_handler,
+        governance='audit',
+        description='按单据流规则批量派生下游单据（幂等：重复执行返回 replayed）',
+        object_type='*',
+        category='doc_flow',
+        permission_required=None,
+        input_schema={
+            'type': 'object',
+            'required': ['rule_id', 'sources'],
+            'properties': {
+                'rule_id': {'type': 'string'},
+                'sources': {'type': 'array', 'description': '源单 id 列表或 {source_id, source_item, quantity} 列表'},
+                'target': {'type': 'object', 'description': 'mode=create|append；append 时 data 为抬头覆写'},
+                'head_overrides': {'type': 'object'},
+            },
+        },
+        output_schema={
+            'type': 'object',
+            'properties': {
+                'created': {'type': 'array'},
+                'replayed': {'type': 'array'},
+                'target_ids': {'type': 'array'},
+                'edge_ids': {'type': 'array'},
+                'totals': {'type': 'object'},
+            },
+        },
+        requires_auth=False,
+        idempotent=True,
+        operation_type='action',
+    )
+    registry.register(
+        'doc_flow.reverse',
+        doc_flow_reverse_handler,
+        governance='audit',
+        description='补偿任务执行 E6 三档冲销 / 追加补偿（cancel|partial|update|compensate）',
+        object_type='*',
+        category='doc_flow',
+        permission_required=None,
+        input_schema={
+            'type': 'object',
+            'required': ['mode'],
+            'properties': {
+                'mode': {'type': 'string',
+                         'enum': ['cancel', 'partial', 'update', 'compensate', 'none']},
+                'edge_ids': {'type': 'array'},
+                'ref_id': {'type': 'string'},
+                'quantity': {'type': 'number'},
+                'return_rule_id': {'type': 'string'},
+                'target_data': {'type': 'object'},
+            },
+        },
+        output_schema={
+            'type': 'object',
+            'properties': {
+                'mode': {'type': 'string'},
+                'reversed_edge_ids': {'type': 'array'},
+                'created_edge_ids': {'type': 'array'},
+                'edge_ids': {'type': 'array'},
+                'replayed': {'type': 'array'},
+                'replay': {'type': 'boolean'},
+            },
+        },
+        requires_auth=False,
+        idempotent=True,
+        operation_type='action',
     )
 
     logger.info(f"[BO Action] Registered {len(registry.list_ids())} business action(s)")

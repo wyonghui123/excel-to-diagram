@@ -75,6 +75,11 @@ audit:
   dissociate:
     enabled: true
 
+org_scope:
+  mode: direct
+  field: org_id
+  write_check: true
+
 fields:
   - id: id
     name: ID
@@ -707,7 +712,7 @@ ui_view_config:
         label: 新建资源组
         icon: plus
         type: primary
-        permission: resource_group:resource_group_create
+        permission: resource_group:create
     defaultSort:
       field: code
       order: asc
@@ -745,7 +750,7 @@ ui_view_config:
                  description]
 
 category_config:
-  create_permission: resource_group:resource_group_create
-  update_permission: resource_group:resource_group_update
-  delete_permission: resource_group:resource_group_delete
+  create_permission: resource_group:create
+  update_permission: resource_group:update
+  delete_permission: resource_group:delete
   owner_auto_permission: false

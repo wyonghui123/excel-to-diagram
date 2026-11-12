@@ -58,7 +58,8 @@ class TestAnnotationRoutesAPI:
         })
 
     def test_update_annotation_invalid_category(self, api_client):
-        expect(api_client, 'put', '/api/v1/annotations/1', VALIDATION_500, json={'category': 'invalid'})
+        # [FIX 2026-11-07] 本文件其余用例均为匿名调用, PUT 在认证前即返回 401, 故放行 401
+        expect(api_client, 'put', '/api/v1/annotations/1', (400, 401, 500), json={'category': 'invalid'})
 
     def test_category_stats(self, api_client):
         expect(api_client, 'get', '/api/v1/annotations/category-stats?target_type=domain',

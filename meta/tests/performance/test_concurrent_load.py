@@ -1,3 +1,4 @@
+# ALLOW_RAW_SQL: 本文件含裸 SQL 构造并发压力测试数据/DDL，守卫豁免（2026-11-09 恢复覆盖）
 # -*- coding: utf-8 -*-
 """
 并发压力测试
@@ -52,7 +53,8 @@ class TestConcurrentPerformance:
             
             now = int(time.time())
             ds.execute("INSERT INTO products (id, name, code, created_at) VALUES (1, 'P1', 'P01', ?)", (now,))
-            ds.execute("INSERT INTO versions (id, name, code, product_id, created_at) VALUES (1, 'V1', 'V01', 1, ?)", (now,))
+            # [FIX 2026-11-09] versions.code 已废弃（2026-06-13，name 为唯一业务键）
+            ds.execute("INSERT INTO versions (id, name, product_id, created_at) VALUES (1, 'V1', 1, ?)", (now,))
             ds.execute("INSERT INTO domains (id, name, code, version_id, created_at) VALUES (1, 'D1', 'D01', 1, ?)", (now,))
             ds.execute("INSERT INTO sub_domains (id, name, code, domain_id, version_id, created_at) VALUES (1, 'SD1', 'SD01', 1, 1, ?)", (now,))
             ds.execute("INSERT INTO service_modules (id, name, code, sub_domain_id, version_id, created_at) VALUES (1, 'SM1', 'SM01', 1, 1, ?)", (now,))
@@ -102,7 +104,11 @@ class TestConcurrentPerformance:
                     elapsed = (time.perf_counter() - start) * 1000
                     results_queue.put(elapsed)
                 finally:
-                    ds.disconnect()
+                    # [FIX 2026-11-09] get_data_source 按 db_path 缓存共享实例（V007.24），
+                    # 工作线程 disconnect 会 shutdown 共享连接池，与其它线程写入竞争
+                    # 触发 sqlite3 C 层 access violation；线程内不得 disconnect，
+                    # 由 concurrent_db fixture 在用例结束时统一释放。
+                    pass
             except Exception as e:
                 errors.append(str(e))
         
@@ -160,7 +166,11 @@ class TestConcurrentPerformance:
                     elapsed = (time.perf_counter() - start) * 1000
                     results_queue.put(elapsed)
                 finally:
-                    ds.disconnect()
+                    # [FIX 2026-11-09] get_data_source 按 db_path 缓存共享实例（V007.24），
+                    # 工作线程 disconnect 会 shutdown 共享连接池，与其它线程写入竞争
+                    # 触发 sqlite3 C 层 access violation；线程内不得 disconnect，
+                    # 由 concurrent_db fixture 在用例结束时统一释放。
+                    pass
             except Exception as e:
                 errors.append(str(e))
         
@@ -213,7 +223,11 @@ class TestConcurrentPerformance:
                     elapsed = (time.perf_counter() - start) * 1000
                     read_results.put(elapsed)
                 finally:
-                    ds.disconnect()
+                    # [FIX 2026-11-09] get_data_source 按 db_path 缓存共享实例（V007.24），
+                    # 工作线程 disconnect 会 shutdown 共享连接池，与其它线程写入竞争
+                    # 触发 sqlite3 C 层 access violation；线程内不得 disconnect，
+                    # 由 concurrent_db fixture 在用例结束时统一释放。
+                    pass
             except Exception as e:
                 errors.append("读错误: {0}".format(str(e)))
         
@@ -235,7 +249,11 @@ class TestConcurrentPerformance:
                     elapsed = (time.perf_counter() - start) * 1000
                     write_results.put(elapsed)
                 finally:
-                    ds.disconnect()
+                    # [FIX 2026-11-09] get_data_source 按 db_path 缓存共享实例（V007.24），
+                    # 工作线程 disconnect 会 shutdown 共享连接池，与其它线程写入竞争
+                    # 触发 sqlite3 C 层 access violation；线程内不得 disconnect，
+                    # 由 concurrent_db fixture 在用例结束时统一释放。
+                    pass
             except Exception as e:
                 errors.append("写错误: {0}".format(str(e)))
         
@@ -289,7 +307,8 @@ class TestThreadPoolBenchmark:
             
             now = int(time.time())
             ds.execute("INSERT INTO products (id, name, code, created_at) VALUES (1, 'P1', 'P01', ?)", (now,))
-            ds.execute("INSERT INTO versions (id, name, code, product_id, created_at) VALUES (1, 'V1', 'V01', 1, ?)", (now,))
+            # [FIX 2026-11-09] versions.code 已废弃（2026-06-13，name 为唯一业务键）
+            ds.execute("INSERT INTO versions (id, name, product_id, created_at) VALUES (1, 'V1', 1, ?)", (now,))
             ds.execute("INSERT INTO domains (id, name, code, version_id, created_at) VALUES (1, 'D1', 'D01', 1, ?)", (now,))
             ds.execute("INSERT INTO sub_domains (id, name, code, domain_id, version_id, created_at) VALUES (1, 'SD1', 'SD01', 1, 1, ?)", (now,))
             ds.execute("INSERT INTO service_modules (id, name, code, sub_domain_id, version_id, created_at) VALUES (1, 'SM1', 'SM01', 1, 1, ?)", (now,))
@@ -336,7 +355,8 @@ class TestThreadPoolBenchmark:
                         result = ds.query("SELECT * FROM business_objects WHERE version_id = 1 LIMIT 100")
                         return len(result)
                     finally:
-                        ds.disconnect()
+                        # [FIX 2026-11-09] 同 test_concurrent_write：线程内不得 disconnect 共享缓存实例
+                        pass
 
                 with ThreadPoolExecutor(max_workers=size) as executor:
                     futures = [executor.submit(query_task, i) for i in range(50)]

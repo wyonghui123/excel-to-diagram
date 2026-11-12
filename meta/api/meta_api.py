@@ -38,6 +38,10 @@ def _ensure_fresh_meta():
         if schema_dir:
             registry._schema_dir = schema_dir
             registry.reload(schema_dir)
+            # reload 只用平台目录重建 _objects，必须重放应用 schema，
+            # 否则 /api/v2/bo/<app_bo> 会报 Unknown object type（multi-app 模式）
+            from meta.core.app_registry import reapply_app_schemas
+            reapply_app_schemas()
             _last_version = registry.get_version()
         _last_reload_time = now
     return _last_version
@@ -393,6 +397,9 @@ def reload_meta():
         validate_schema_dir_side_effects(schema_dir)
         registry._schema_dir = schema_dir
         count = registry.reload(schema_dir)
+        # 同上：单目录 reload 会丢弃 apps/* 的 BO，需重放应用 schema
+        from meta.core.app_registry import reapply_app_schemas
+        reapply_app_schemas()
         view_config_service.invalidate_cache()
 
         return ok_message(f'Reloaded {count} meta objects')

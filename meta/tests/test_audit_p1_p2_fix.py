@@ -106,13 +106,13 @@ class TestAuditInterceptorCodeChange(unittest.TestCase):
         ), 'r', encoding='utf-8') as f:
             content = f.read()
 
-        # log_create 应包含 P2 v1 注释
-        self.assertIn('P2 v1', content)
+        # log_create 应包含 P2 auto-gen 注释
+        self.assertIn('[FIX P2 2026-06-20]', content)
         # 包含 uuid.uuid4 调用
         self.assertIn('uuid4', content)
-        # 至少 3 处 P2 注入 (log_create, log_update, log_delete 各一处)
-        p2_count = content.count('[FIX 2026-06-20 P2 v1]')
-        self.assertGreaterEqual(p2_count, 6, f"Expected >= 6 P2 fixes, found {p2_count}")
+        # 至少 4 处 P2 注入 (helper 文档 + log_create, log_update, log_delete 各一处)
+        p2_count = content.count('[FIX P2 2026-06-20]')
+        self.assertGreaterEqual(p2_count, 4, f"Expected >= 4 P2 fixes, found {p2_count}")
 
 
 class TestActionHandlersCodeChange(unittest.TestCase):

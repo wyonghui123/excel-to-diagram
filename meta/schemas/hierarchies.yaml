@@ -35,10 +35,16 @@ hierarchies:
       - level: 0
         object: product
         kind: entity
+        level_type: entity
+        parent_level: null
+        owner_field: owner_id
         display_name: 产品
         table_name: products
         parent_object: null
         foreign_key_field: null
+        display_field: name
+        code_field: code
+        scope_anchor: true
         filter_field: id
         filter_param: null
         cardinality: 1:N
@@ -58,10 +64,17 @@ hierarchies:
       - level: 1
         object: version
         kind: entity
+        level_type: entity
+        parent_level: 0
+        owner_field: owner_id
         display_name: 版本
         table_name: versions
         parent_object: product
         foreign_key_field: product_id
+        display_field: name
+        parent_display_field: name
+        code_field: code
+        scope_anchor: true
         filter_field: id
         filter_param: product_id
         cardinality: N:1
@@ -81,10 +94,17 @@ hierarchies:
       - level: 2
         object: domain
         kind: entity
+        level_type: entity
+        parent_level: 1
+        owner_field: owner_id
         display_name: 领域
         table_name: domains
         parent_object: version
         foreign_key_field: version_id
+        display_field: domain_name
+        parent_display_field: name
+        code_field: code
+        scope_anchor: true
         filter_field: id
         filter_param: version_id
         cardinality: N:1
@@ -119,10 +139,17 @@ hierarchies:
       - level: 3
         object: sub_domain
         kind: entity
+        level_type: entity
+        parent_level: 2
+        owner_field: owner_id
         display_name: 子领域
         table_name: sub_domains
         parent_object: domain
         foreign_key_field: domain_id
+        display_field: sub_domain_name
+        parent_display_field: name
+        code_field: code
+        scope_anchor: true
         filter_field: id
         filter_param: domain_id
         cardinality: N:1
@@ -156,10 +183,16 @@ hierarchies:
       - level: 4
         object: service_module
         kind: entity
+        level_type: entity
+        parent_level: 3
+        owner_field: owner_id
         display_name: 服务模块
         table_name: service_modules
         parent_object: sub_domain
         foreign_key_field: sub_domain_id
+        display_field: name
+        parent_display_field: name
+        code_field: code
         filter_field: id
         filter_param: sub_domain_id
         cardinality: N:1
@@ -193,10 +226,16 @@ hierarchies:
       - level: 5
         object: business_object
         kind: entity
+        level_type: entity
+        parent_level: 4
+        owner_field: owner_id
         display_name: 业务对象
         table_name: business_objects
         parent_object: service_module
         foreign_key_field: service_module_id
+        display_field: name
+        parent_display_field: name
+        code_field: code
         filter_field: id
         filter_param: service_module_id
         cardinality: N:1
@@ -225,6 +264,9 @@ hierarchies:
       - level: 6
         object: relationship
         kind: association
+        level_type: association
+        parent_level: 5
+        owner_field: null
         display_name: 关系列表
         source_entity: business_object
         target_entity: business_object
@@ -276,6 +318,31 @@ hierarchies:
         ui:
           icon: link
           color: "#E91E63"
+
+# ────────────────────────────────────────────
+# 维度 profile（FR-002）
+# 只决定默认深度，不改变授权语义；授权只认 scope_anchor=true 的层。
+# ────────────────────────────────────────────
+dimension_profiles:
+  default: 4      # product → sub_domain
+  full: 6         # product → business_object
+
+# ────────────────────────────────────────────
+# 非维度链实体（FR-002）
+# 用于替代散落在 Python 中的 relationship / annotation / org / user 表名映射。
+# 这些实体不属于产品版本维度链，不参与 scope_anchor 授权。
+# ────────────────────────────────────────────
+extra_entity_tables:
+  - object: relationship
+    table_name: relationships
+  - object: annotation
+    table_name: annotations
+  - object: org
+    table_name: orgs
+    parent_field: parent_id
+    self_parent: true
+  - object: user
+    table_name: users
 
 # ────────────────────────────────────────────
 # 上下文层级定义

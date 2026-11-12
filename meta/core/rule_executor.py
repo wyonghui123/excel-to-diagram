@@ -118,6 +118,8 @@ class DefaultLogEntry:
     source_type: str = ""
     overwritten: bool = False
     factor_snapshot: Dict[str, Any] = field(default_factory=dict)
+    #: [spec 2026-11-09 FR-008] condition/formula 实际读取的字段与扩展属性
+    inputs: Dict[str, Any] = field(default_factory=dict)
     elapsed_ms: float = 0.0
 
     def to_dict(self) -> Dict[str, Any]:
@@ -133,6 +135,7 @@ class DefaultLogEntry:
             "source_type": self.source_type,
             "overwritten": self.overwritten,
             "factor_snapshot": self.factor_snapshot,
+            "inputs": self.inputs,
             "elapsed_ms": self.elapsed_ms,
         }
 
@@ -156,6 +159,14 @@ class RuleContext:
         self.last_default_log: Optional[DefaultLogEntry] = None
         self.default_logs: List[DefaultLogEntry] = []
         self._field_map = {f.id: f for f in meta_object.fields}
+
+        # [spec 2026-11-09 FR-007/FR-008] 表达式输入采集：只记录真正被读取的
+        # 字段与扩展属性，未引用的变量不进入 trace.inputs 快照。
+        self.field_accesses: Dict[str, Dict[str, Any]] = {}
+        self.attr_accesses: Dict[str, Dict[str, Any]] = {}
+        self.relation_accesses: Dict[str, Dict[str, Any]] = {}
+        self._attrs_proxy = None
+        self._item_attrs_proxy = None
         
         if original_data:
             for key in set(list(data.keys()) + list(original_data.keys())):
@@ -184,6 +195,103 @@ class RuleContext:
         """获取字段类型"""
         field = self._field_map.get(field_id)
         return field.field_type if field else None
+
+    # ---------- 扩展属性（spec 2026-11-09 FR-007）----------
+
+    @property
+    def attrs(self):
+        """根对象扩展属性代理（惰性读取，访问即记录）。"""
+        if self._attrs_proxy is None:
+            from meta.core.attribute_provider import (
+                AttributeProvider,
+                AttributeProxy,
+            )
+            provider = (AttributeProvider(self.data_source)
+                        if self.data_source is not None else None)
+            self._attrs_proxy = AttributeProxy(
+                provider, self.meta_object.id, self.data.get('id'),
+                collector=self, path_prefix='attrs')
+        return self._attrs_proxy
+
+    @property
+    def item_attrs(self):
+        """单据行引用的物料扩展属性代理（``item.attrs``）。"""
+        if self._item_attrs_proxy is None:
+            from meta.core.attribute_provider import (
+                AttributeProvider,
+                AttributeProxy,
+            )
+            provider = (AttributeProvider(self.data_source)
+                        if self.data_source is not None else None)
+            self._item_attrs_proxy = AttributeProxy(
+                provider, 'item', self.data.get('item_id'),
+                collector=self, path_prefix='item.attrs')
+        return self._item_attrs_proxy
+
+    def record_field_access(self, name: str, value: Any) -> None:
+        """记录表达式读取的单据字段（仅 data / original_data 内的键）。"""
+        if callable(value):
+            return
+        if name in self.data:
+            source = 'data'
+        elif name in self.original_data:
+            source = 'original'
+        else:
+            return
+        if name not in self.field_accesses:
+            self.field_accesses[name] = {
+                'path': name, 'value': value, 'source': source,
+            }
+
+    def record_attribute_access(self, path: str,
+                                entry: Dict[str, Any]) -> None:
+        """记录表达式读取的扩展属性；同路径只留首次读取。"""
+        if path in self.attr_accesses:
+            return
+        status = entry.get('status')
+        if entry.get('source') == 'missing':
+            reason = ('attribute_inactive'
+                      if status not in (None, 'active', 'missing')
+                      else 'attribute_missing')
+        else:
+            reason = None
+        self.attr_accesses[path] = {
+            'path': path,
+            'code': entry.get('code'),
+            'value': entry.get('value'),
+            'source': entry.get('source'),
+            'status': status,
+            'definition_id': entry.get('definition_id'),
+            'definition_version': entry.get('definition_version'),
+            'reason': reason,
+        }
+
+    def inputs_snapshot(self) -> Dict[str, Any]:
+        """本次求值实际读取的输入（trace.inputs 的 fields/attrs/relations）。"""
+        return {
+            'fields': [dict(item) for item in self.field_accesses.values()],
+            'attrs': [dict(item) for item in self.attr_accesses.values()],
+            'relations': [dict(item) for item in self.relation_accesses.values()],
+        }
+
+
+class _TrackedLocals(dict):
+    """记录字段读取的 locals 视图（读取行为与普通 dict 一致）。"""
+
+    def __init__(self, data: Dict[str, Any], context: RuleContext):
+        super().__init__(data)
+        self._context = context
+
+    def __getitem__(self, key):
+        value = dict.__getitem__(self, key)
+        if isinstance(key, str):
+            self._context.record_field_access(key, value)
+        return value
+
+    def get(self, key, default=None):
+        if dict.__contains__(self, key):
+            return self[key]
+        return default
 
 
 class SafeExpressionEvaluator:
@@ -229,7 +337,12 @@ class SafeExpressionEvaluator:
         
         formula_locals = FormulaFunctionRegistry.build_locals()
         locals_dict.update(formula_locals)
-        
+
+        # [spec 2026-11-09 FR-007] 扩展属性入口：根对象 attrs + 单据行 item.attrs
+        locals_dict["attrs"] = self.context.attrs
+        if "item" not in locals_dict:
+            locals_dict["item"] = {"attrs": self.context.item_attrs}
+
         if self.context.data_source is not None:
             cross_locals = build_cross_object_locals(
                 self.context.data_source,
@@ -237,8 +350,8 @@ class SafeExpressionEvaluator:
                 self.context.data,
             )
             locals_dict.update(cross_locals)
-        
-        return locals_dict
+
+        return _TrackedLocals(locals_dict, self.context)
     
     def _get_builtin_func(self, name: str) -> Optional[Callable]:
         func = FormulaFunctionRegistry.get(name)
@@ -760,6 +873,7 @@ class DefaultExecutor(RuleExecutor):
         )
 
         outcome = self._apply(rule, context, entry)
+        entry.inputs = context.inputs_snapshot()
         entry.elapsed_ms = round((datetime.now() - started).total_seconds() * 1000, 3)
         context.last_default_log = entry
 

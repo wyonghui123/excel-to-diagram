@@ -113,7 +113,14 @@ def bo_action_server_or_start():
 
 @pytest.fixture(scope='session')
 def admin_cookie():
-    """获取 admin 登录 cookie (session scope, 1 次登录即可)"""
+    """获取 admin 登录 cookie (session scope, 1 次登录即可)
+
+    session fixture 会先于 function 级 autouse 的 _bo_action_server_autouse 初始化,
+    server 不在时直接 skip, 否则会以 ConnectionError 变成 ERROR。
+    """
+    if not _check_server():
+        pytest.skip(f'BO Action 测试需 server 在 localhost:{DEFAULT_PORT} 跑, '
+                    f'请用 service_manager.ps1 start -Port {DEFAULT_PORT}')
     from admin_token import get_admin_cookie
     return get_admin_cookie()
 

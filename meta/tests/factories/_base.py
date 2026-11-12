@@ -19,6 +19,7 @@ import os
 import time
 import random
 import string
+import itertools
 import logging
 from typing import Optional, Dict, Any, List
 
@@ -37,12 +38,18 @@ _BO_API_BASE = os.environ.get('BO_API_BASE', 'http://localhost:3010')
 # 唯一性 Helper (TBD-4: counter+random 人类可读)
 # ============================================================
 
+_ID_COUNTER = itertools.count()
+
+
 def unique_id() -> int:
     """
     生成全局唯一 ID (含 PID + 时间戳 + counter)
     用于取代测试中的 int(time.time())
     """
-    return int(time.time() * 1000) + os.getpid()
+    # 同一毫秒内连续调用时, 仅靠 time+PID 会重复 → 拼上 PID 低 3 位 + 进程内自增 counter
+    return (int(time.time() * 1000) * 1_000_000
+            + (os.getpid() % 1000) * 1000
+            + next(_ID_COUNTER) % 1000)
 
 
 def unique_str(n: int = 8) -> str:

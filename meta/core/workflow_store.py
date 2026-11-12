@@ -252,6 +252,25 @@ def load_definition(data_source, workflow_key: str,
 # 发布（版本化）
 # ─────────────────────────────────────────────────────────────────────────────
 
+def _assert_actions_registered(node_contents: Sequence[Dict[str, Any]]) -> None:
+    """S1 闸门：节点 `executor_config.action_id` 必须已注册（ACTION_NOT_REGISTERED）。
+
+    仅校验显式声明了 action_id 的节点；未声明（人工任务 / 无 Action 的 system
+    任务）不受影响。定义发布即拦截，避免运行期才暴露未注册 Action。
+    """
+    from meta.core.bo_action_registry import bo_action_registry
+
+    for node in node_contents:
+        config = node.get("executor_config")
+        if not isinstance(config, dict):
+            continue
+        action_id = config.get("action_id")
+        if action_id and not bo_action_registry.has(str(action_id)):
+            raise WorkflowStoreError(
+                f"ACTION_NOT_REGISTERED: 节点 {node['node_id']} 引用的 Action "
+                f"{action_id!r} 未注册")
+
+
 def publish_workflow(
     data_source,
     *,
@@ -290,6 +309,7 @@ def publish_workflow(
 
     node_contents = sorted((_node_content(n) for n in nodes),
                            key=lambda c: c["node_id"])
+    _assert_actions_registered(node_contents)
     content = _workflow_content(
         workflow_key=workflow_key, name=name, description=description, owner=owner,
         trigger_kind=trigger_kind, trigger_expr=trigger_expr,

@@ -105,6 +105,10 @@ CREATE TABLE control_parameter_values (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     control_parameter_id INTEGER,
     value TEXT,
+    org_id INTEGER,
+    document_type_id INTEGER,
+    item_group_id INTEGER,
+    specificity_rank INTEGER,
     status TEXT DEFAULT 'active'
 );
 """
