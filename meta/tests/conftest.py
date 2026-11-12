@@ -50,6 +50,9 @@ collect_ignore = [
     'post_v2_1/cascade/test_cascade_e2e.py',
     'post_v2_1/integration/test_e2e_v2_1_integration_audit.py',
     'post_v2_1/integration/test_e2e_v2_1_integration_force.py',
+    # test_utils.py 是纯工具库（0 个 def test_*），被生产迁移脚本 import，
+    # 只因其名以 test_ 开头才被 pytest 收集，白付一次 import 成本。
+    'test_utils.py',
 ]
 
 logger = logging.getLogger(__name__)
