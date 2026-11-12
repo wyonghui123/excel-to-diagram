@@ -8,6 +8,9 @@ description: 编排定义层（版本化；定义层无状态——节点/边只
 skip_auto_menu: true
 skip_generic_api: true
 
+semantics:
+  category: business_config
+
 fields:
   - id: id
     name: ID

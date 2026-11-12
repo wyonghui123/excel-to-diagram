@@ -196,6 +196,80 @@ from meta.core.models import (
     RevisionLineDefaultPolicy,
     RevisionLineTypePolicy,
 )
+from meta.core.models_enums import (
+    BusinessObjectCategory,
+    BoSubCategory,
+    ObjectSemanticsCategory,
+    SEMANTICS_CATEGORY_ALIASES,
+    ARCHETYPE_TO_BO_CATEGORY,
+    BO_CATEGORY_VALUE_MAP,
+)
+
+
+def _derive_object_category(data: Dict[str, Any], source_file: str = "") -> tuple:
+    """按 Spec §12.4 R24-R26 派生对象级 bo_category，并归一名义 category。
+
+    优先级（R26）：显式 bo_category（override）
+                 > ARCHETYPE_TO_BO_CATEGORY（template）
+                 > 默认 MASTER_DATA（absent，由 MetaObject 默认值兜底）
+
+    返回 (bo_category, bo_sub_category, normalized_archetype)；
+    normalized_archetype 为 None 表示未声明或不在受控枚举内（不臆造）。
+    """
+    obj_id = data.get("id", "") or "<unknown>"
+    where = source_file or "<memory>"
+
+    _sem = data.get("semantics")
+    raw_category = ""
+    if isinstance(_sem, dict):
+        raw_category = str(_sem.get("category") or "").strip()
+
+    archetype: Optional[ObjectSemanticsCategory] = None
+    if raw_category:
+        if raw_category in SEMANTICS_CATEGORY_ALIASES:
+            # R25：别名先于成员校验归一（读取层），YAML 零改动
+            archetype = SEMANTICS_CATEGORY_ALIASES[raw_category]
+        else:
+            try:
+                archetype = ObjectSemanticsCategory(raw_category)
+            except ValueError:
+                logger.warning(
+                    "[R24] %s (%s) semantics.category=%r 不在受控枚举内，"
+                    "按未分类处理（bo_category 回落默认值）",
+                    obj_id, where, raw_category,
+                )
+
+    bo_category: Optional[BusinessObjectCategory] = None
+    raw_bo = data.get("bo_category")
+    if raw_bo:
+        if isinstance(raw_bo, BusinessObjectCategory):
+            bo_category = raw_bo
+        else:
+            bo_category = BO_CATEGORY_VALUE_MAP.get(str(raw_bo).strip())
+            if bo_category is None:
+                logger.warning(
+                    "[R26] %s (%s) bo_category=%r 不是合法取值，"
+                    "忽略该声明并回落 archetype 映射",
+                    obj_id, where, raw_bo,
+                )
+    if bo_category is None and archetype is not None:
+        bo_category = ARCHETYPE_TO_BO_CATEGORY.get(archetype)
+
+    bo_sub_category: Optional[BoSubCategory] = None
+    raw_sub = data.get("bo_sub_category")
+    if raw_sub:
+        if isinstance(raw_sub, BoSubCategory):
+            bo_sub_category = raw_sub
+        else:
+            try:
+                bo_sub_category = BoSubCategory(str(raw_sub).strip())
+            except ValueError:
+                logger.warning(
+                    "[R24] %s (%s) bo_sub_category=%r 不是合法取值，已忽略",
+                    obj_id, where, raw_sub,
+                )
+
+    return bo_category, bo_sub_category, archetype
 
 
 FIELD_TYPE_MAP = {
@@ -2930,6 +3004,9 @@ def parse_meta_object(data: Dict[str, Any], source_file: str = "") -> MetaObject
     if not aspects and includes:
         aspects = includes
 
+    # [Spec §12.4 R26 2026-11-12] 对象 archetype 派生：显式 bo_category > 映射 > 默认
+    _bo_category, _bo_sub_category, _archetype = _derive_object_category(data, source_file)
+
     obj = MetaObject(
         id=data.get("id", ""),
         name=data.get("name", ""),
@@ -2989,6 +3066,17 @@ def parse_meta_object(data: Dict[str, Any], source_file: str = "") -> MetaObject
         line_source_policy=parse_line_source_policy(
             data.get("id") or "", data.get("line_source_policy")),
     )
+    # [Spec §12.4 R26 2026-11-12] 派生值只用于展示 / 序列化 / 生成物，
+    # 不参与运行期判定：category_config 仍取构造期默认模板，
+    # 避免把状态机等守卫隐式打开（requires_state_machine 只认显式声明）。
+    if _bo_category is not None:
+        obj.bo_category = _bo_category
+    if _bo_sub_category is not None:
+        obj.bo_sub_category = _bo_sub_category
+    if _archetype is not None and getattr(obj.semantics, "category", "") != _archetype.value:
+        # [Spec §12.4 R25 2026-11-12] 读取层归一（别名 → 规范值），YAML 零改动；
+        # 保持 str 类型，避免破坏下游序列化。
+        obj.semantics.category = _archetype.value
     obj._deletion_policy = parse_deletion_policy(data)
     obj.associations = parse_associations(data)
     obj.deletion_policy = parse_deletion_policy(data)

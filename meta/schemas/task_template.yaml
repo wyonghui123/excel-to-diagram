@@ -8,6 +8,9 @@ description: Workflow 静态节点定义（定义层无状态；Run 启动时按
 skip_auto_menu: true
 skip_generic_api: true
 
+semantics:
+  category: business_config
+
 fields:
   - id: id
     name: ID

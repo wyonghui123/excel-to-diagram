@@ -64,6 +64,9 @@ actions:
 org_scope:
   mode: global
 
+semantics:
+  category: auxiliary
+
 fields:
   - id: id
     name: ID

@@ -89,6 +89,9 @@ actions:
     path: "/api/v1/demand_trace_graphs"
     description: 查询追溯关系列表
 
+semantics:
+  category: auxiliary
+
 fields:
   - id: id
     name: 追溯关系ID

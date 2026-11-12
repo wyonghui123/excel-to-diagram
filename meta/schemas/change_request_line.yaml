@@ -18,6 +18,9 @@ hierarchy:
   enabled: true
   parent_field: change_request_id
 
+semantics:
+  category: business_document_line
+
 fields:
   - id: id
     name: ID

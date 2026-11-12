@@ -10,6 +10,9 @@ skip_auto_menu: true
 skip_generic_api: true
 requires_state_machine: true
 
+semantics:
+  category: business_object
+
 fields:
   - id: id
     name: ID

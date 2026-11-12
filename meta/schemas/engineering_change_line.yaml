@@ -29,6 +29,9 @@ deletion_policy:
   restrict_on: []
   cascade_delete: []
 
+semantics:
+  category: business_document_line
+
 fields:
   - id: id
     name: ID

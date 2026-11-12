@@ -15,6 +15,9 @@ hierarchy:
   enabled: true
   parent_field: org_id
 
+semantics:
+  category: security_entity
+
 fields:
   - id: id
     name: ID

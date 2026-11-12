@@ -75,6 +75,9 @@ org_scope:
   function: sales
   write_check: true
 
+semantics:
+  category: business_document_line
+
 fields:
   - id: id
     name: ID

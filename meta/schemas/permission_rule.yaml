@@ -3,6 +3,9 @@ name: 条件权限规则
 table_name: permission_rules
 description: 基于条件的动态权限规则，支持维度过滤和条件匹配
 
+semantics:
+  category: security_entity
+
 fields:
   # [P2-11 2026-08-29] Spec 16: role_id → permission_set_id
   - id: permission_set_id

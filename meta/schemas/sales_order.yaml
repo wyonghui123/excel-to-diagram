@@ -110,6 +110,17 @@ numbering:
   date_field: order_date
   type_table: type_definitions
 
+# [S7.2 2026-11-12] 角色 × 字段策略：when 中的角色名必须是 permission_sets.code（admin/editor/viewer）
+field_policies:
+  exchange_rate:
+    editable:
+      - when: "'viewer' in user.roles"
+        value: false
+  gross_amount:
+    visible:
+      - when: "'viewer' in user.roles"
+        value: false
+
 fields:
   - id: id
     name: ID

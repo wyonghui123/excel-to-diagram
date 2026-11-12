@@ -3,6 +3,9 @@ name: 数据权限
 table_name: data_permissions
 description: 控制用户对特定资源实例的访问权限
 
+semantics:
+  category: security_entity
+
 fields:
   - id: user_id
     name: 用户ID

@@ -31,6 +31,9 @@ hierarchy:
 #        updated_at 为 virtual（从 audit_logs 实时派生，不落物理表）
 aspects: [audit_aspect]
 
+semantics:
+  category: core_entity
+
 fields:
   - id: id
     name: ID

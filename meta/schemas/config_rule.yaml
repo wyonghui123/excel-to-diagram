@@ -54,6 +54,9 @@ audit:
   dissociate:
     enabled: true
 
+semantics:
+  category: business_config
+
 fields:
   - id: id
     name: ID

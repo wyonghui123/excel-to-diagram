@@ -66,6 +66,9 @@ org_scope:
   function: inventory
   write_check: true
 
+semantics:
+  category: business_document_line
+
 fields:
   - id: id
     name: ID

@@ -60,6 +60,9 @@ actions:
     path: "/api/v1/org_legal_entities"
     description: 查询法人主体列表
 
+semantics:
+  category: security_entity
+
 fields:
   - id: id
     name: ID

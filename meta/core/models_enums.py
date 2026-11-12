@@ -236,6 +236,60 @@ class BoSubCategory(Enum):
     CUSTOMIZING = "customizing"
 
 
+class ObjectSemanticsCategory(Enum):
+    """对象级 semantics.category 受控枚举（Spec §12.4 R24）。
+
+    取值来自 meta/schemas 下 150 个 YAML 的实际声明（2026-11-12 取证），不重命名
+    —— 改名会波及全部声明文件，并丢失 system_entity / meta_object / relationship /
+    test / security_entity 的语义。同义分裂由 SEMANTICS_CATEGORY_ALIASES 在读取层
+    归一，YAML 零改动（R25）。
+    """
+    CORE_ENTITY = "core_entity"
+    SYSTEM_ENTITY = "system_entity"
+    BUSINESS_DOCUMENT = "business_document"
+    BUSINESS_DOCUMENT_LINE = "business_document_line"
+    BUSINESS_OBJECT = "business_object"
+    BUSINESS_CONFIG = "business_config"
+    MASTER_DATA = "master_data"
+    SECURITY_ENTITY = "security_entity"
+    META_OBJECT = "meta_object"
+    RELATIONSHIP = "relationship"
+    AUXILIARY = "auxiliary"
+    TEST = "test"
+    TRANSACTIONAL = "transactional"
+    CONFIGURATION = "configuration"
+
+
+#: R25 别名归一：读取层完成，不改任何 YAML。判定顺序必须先于成员校验，
+#: 保证归一后的取值不会残留 transactional / configuration。
+SEMANTICS_CATEGORY_ALIASES = {
+    "transactional": ObjectSemanticsCategory.BUSINESS_DOCUMENT,
+    "configuration": ObjectSemanticsCategory.BUSINESS_CONFIG,
+}
+
+#: 显式 bo_category 的 YAML 取值 → 枚举（R26 第一优先级 override）。
+BO_CATEGORY_VALUE_MAP = {c.value: c for c in BusinessObjectCategory}
+
+#: R26 archetype → bo_category 的单一模板映射（第二优先级）。
+#: 只用于派生与序列化，不参与运行期判定。
+ARCHETYPE_TO_BO_CATEGORY = {
+    ObjectSemanticsCategory.BUSINESS_DOCUMENT: BusinessObjectCategory.TRANSACTIONAL,
+    ObjectSemanticsCategory.BUSINESS_DOCUMENT_LINE: BusinessObjectCategory.TRANSACTIONAL,
+    ObjectSemanticsCategory.TRANSACTIONAL: BusinessObjectCategory.TRANSACTIONAL,
+    ObjectSemanticsCategory.BUSINESS_CONFIG: BusinessObjectCategory.CONFIGURATION,
+    ObjectSemanticsCategory.CONFIGURATION: BusinessObjectCategory.CONFIGURATION,
+    ObjectSemanticsCategory.META_OBJECT: BusinessObjectCategory.CONFIGURATION,
+    ObjectSemanticsCategory.SYSTEM_ENTITY: BusinessObjectCategory.CONFIGURATION,
+    ObjectSemanticsCategory.CORE_ENTITY: BusinessObjectCategory.MASTER_DATA,
+    ObjectSemanticsCategory.MASTER_DATA: BusinessObjectCategory.MASTER_DATA,
+    ObjectSemanticsCategory.BUSINESS_OBJECT: BusinessObjectCategory.MASTER_DATA,
+    ObjectSemanticsCategory.RELATIONSHIP: BusinessObjectCategory.MASTER_DATA,
+    ObjectSemanticsCategory.SECURITY_ENTITY: BusinessObjectCategory.MASTER_DATA,
+    ObjectSemanticsCategory.AUXILIARY: BusinessObjectCategory.MASTER_DATA,
+    ObjectSemanticsCategory.TEST: BusinessObjectCategory.MASTER_DATA,
+}
+
+
 class EnumBindingStrength(Enum):
     STRICT = "strict"
     LOOSE = "loose"

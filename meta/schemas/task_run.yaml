@@ -9,6 +9,9 @@ description: 后台作业每次执行尝试的账本（claim/lease/结果/重试
 module: task
 generic_api_mode: read_only
 
+semantics:
+  category: auxiliary
+
 fields:
   - id: id
     name: ID

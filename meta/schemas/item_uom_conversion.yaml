@@ -19,6 +19,9 @@ hierarchy:
 org_scope:
   mode: global
 
+semantics:
+  category: core_entity
+
 fields:
   - id: id
     name: ID

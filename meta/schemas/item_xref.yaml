@@ -22,6 +22,9 @@ hierarchy:
 org_scope:
   mode: global
 
+semantics:
+  category: relationship
+
 fields:
   - id: id
     name: ID

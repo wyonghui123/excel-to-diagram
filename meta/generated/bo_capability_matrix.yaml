@@ -1,0 +1,1792 @@
+# 由 meta/tools/gen_capability_matrix.py 生成，请勿手工编辑（Spec §12.4 R27）。
+# 只读生成物，不是运行期判定源；重新生成请执行 --check 之外的默认模式。
+version: 9718137e9dc5
+generated_at: '2026-11-12T05:51:10Z'
+scan:
+  schemas_dir: meta/schemas
+  yaml_scanned: 211
+  classified: 211
+  unclassified: 0
+  errors: 0
+  basis: 装载后对象属性；不读 category_config 模板（避免隐式能力扩散）
+capability_rules:
+  audit: audit.enabled（缺省 true = 平台基线审计）
+  numbering: numbering 段非空
+  state_machine: requires_state_machine 或 states 非空
+  posting: doc_effect 段非空
+  soft_delete: deletion_policy.soft_delete.enabled
+  revision: revision_policy 已声明
+archetypes:
+  auxiliary:
+    bo_category: master_data
+    bo_category_breakdown:
+      master_data: 9
+    objects:
+    - annotation
+    - demand_trace_graph
+    - document_hu_link_view
+    - hierarchies
+    - party_archive
+    - party_internal
+    - task_event
+    - task_run
+    - task_worklog
+    capabilities:
+      audit:
+        enabled: 9
+        declared: 1
+        total: 9
+        coverage: 9/9
+      numbering:
+        enabled: 0
+        declared: 0
+        total: 9
+        coverage: 0/9
+      state_machine:
+        enabled: 0
+        declared: 0
+        total: 9
+        coverage: 0/9
+      posting:
+        enabled: 0
+        declared: 0
+        total: 9
+        coverage: 0/9
+      soft_delete:
+        enabled: 0
+        declared: 0
+        total: 9
+        coverage: 0/9
+      revision:
+        enabled: 0
+        declared: 0
+        total: 9
+        coverage: 0/9
+    gaps:
+      numbering:
+      - annotation
+      - demand_trace_graph
+      - document_hu_link_view
+      - hierarchies
+      - party_archive
+      - party_internal
+      - task_event
+      - task_run
+      - task_worklog
+      state_machine:
+      - annotation
+      - demand_trace_graph
+      - document_hu_link_view
+      - hierarchies
+      - party_archive
+      - party_internal
+      - task_event
+      - task_run
+      - task_worklog
+      posting:
+      - annotation
+      - demand_trace_graph
+      - document_hu_link_view
+      - hierarchies
+      - party_archive
+      - party_internal
+      - task_event
+      - task_run
+      - task_worklog
+      soft_delete:
+      - annotation
+      - demand_trace_graph
+      - document_hu_link_view
+      - hierarchies
+      - party_archive
+      - party_internal
+      - task_event
+      - task_run
+      - task_worklog
+      revision:
+      - annotation
+      - demand_trace_graph
+      - document_hu_link_view
+      - hierarchies
+      - party_archive
+      - party_internal
+      - task_event
+      - task_run
+      - task_worklog
+    not_applicable: {}
+  business_config:
+    bo_category: configuration
+    bo_category_breakdown:
+      configuration: 10
+    objects:
+    - batch_selection_policy
+    - config_rule
+    - config_rule_term
+    - configuration
+    - configuration_component
+    - configuration_value
+    - control_parameter_value
+    - fulfillment_routing_rule
+    - task_template
+    - workflow
+    capabilities:
+      audit:
+        enabled: 10
+        declared: 8
+        total: 10
+        coverage: 10/10
+      numbering:
+        enabled: 0
+        declared: 0
+        total: 10
+        coverage: 0/10
+      state_machine:
+        enabled: 0
+        declared: 0
+        total: 10
+        coverage: 0/10
+      posting:
+        enabled: 0
+        declared: 0
+        total: 10
+        coverage: 0/10
+      soft_delete:
+        enabled: 0
+        declared: 8
+        total: 10
+        coverage: 0/10
+      revision:
+        enabled: 0
+        declared: 0
+        total: 10
+        coverage: 0/10
+    gaps:
+      numbering:
+      - batch_selection_policy
+      - config_rule
+      - config_rule_term
+      - configuration
+      - configuration_component
+      - configuration_value
+      - control_parameter_value
+      - fulfillment_routing_rule
+      - task_template
+      - workflow
+      state_machine:
+      - batch_selection_policy
+      - config_rule
+      - config_rule_term
+      - configuration
+      - configuration_component
+      - configuration_value
+      - control_parameter_value
+      - fulfillment_routing_rule
+      - task_template
+      - workflow
+      posting:
+      - batch_selection_policy
+      - config_rule
+      - config_rule_term
+      - configuration
+      - configuration_component
+      - configuration_value
+      - control_parameter_value
+      - fulfillment_routing_rule
+      - task_template
+      - workflow
+      soft_delete:
+      - batch_selection_policy
+      - config_rule
+      - config_rule_term
+      - configuration
+      - configuration_component
+      - configuration_value
+      - control_parameter_value
+      - fulfillment_routing_rule
+      - task_template
+      - workflow
+      revision:
+      - batch_selection_policy
+      - config_rule
+      - config_rule_term
+      - configuration
+      - configuration_component
+      - configuration_value
+      - control_parameter_value
+      - fulfillment_routing_rule
+      - task_template
+      - workflow
+    not_applicable: {}
+  business_document:
+    bo_category: transactional
+    bo_category_breakdown:
+      transactional: 26
+    objects:
+    - adjustment
+    - allocation_result
+    - calc_detail
+    - calc_result
+    - change_request
+    - cumulative_usage
+    - customer_invoice
+    - demand_allocation
+    - engineering_change
+    - fulfillment_order
+    - hu_transaction
+    - inventory_adjustment
+    - inventory_count
+    - inventory_reservation
+    - project_structure_baseline
+    - purchase_order
+    - receipt
+    - requisition
+    - sales_order
+    - service_request
+    - shipment
+    - transfer_order
+    - transfer_shipment
+    - vendor_invoice
+    - work_order
+    - workflow_run
+    capabilities:
+      audit:
+        enabled: 26
+        declared: 20
+        total: 26
+        coverage: 26/26
+      numbering:
+        enabled: 7
+        declared: 7
+        total: 26
+        coverage: 7/26
+      state_machine:
+        enabled: 2
+        declared: 2
+        total: 26
+        coverage: 2/26
+      posting:
+        enabled: 6
+        declared: 6
+        total: 26
+        coverage: 6/26
+      soft_delete:
+        enabled: 0
+        declared: 23
+        total: 26
+        coverage: 0/26
+      revision:
+        enabled: 1
+        declared: 1
+        total: 26
+        coverage: 1/26
+    gaps:
+      numbering:
+      - adjustment
+      - allocation_result
+      - calc_detail
+      - calc_result
+      - change_request
+      - cumulative_usage
+      - demand_allocation
+      - engineering_change
+      - fulfillment_order
+      - hu_transaction
+      - inventory_adjustment
+      - inventory_count
+      - inventory_reservation
+      - project_structure_baseline
+      - requisition
+      - service_request
+      - shipment
+      - work_order
+      - workflow_run
+      state_machine:
+      - adjustment
+      - allocation_result
+      - calc_detail
+      - calc_result
+      - change_request
+      - cumulative_usage
+      - customer_invoice
+      - demand_allocation
+      - fulfillment_order
+      - hu_transaction
+      - inventory_adjustment
+      - inventory_count
+      - inventory_reservation
+      - project_structure_baseline
+      - receipt
+      - requisition
+      - sales_order
+      - service_request
+      - shipment
+      - transfer_order
+      - transfer_shipment
+      - vendor_invoice
+      - work_order
+      - workflow_run
+      posting:
+      - adjustment
+      - allocation_result
+      - calc_detail
+      - calc_result
+      - change_request
+      - cumulative_usage
+      - demand_allocation
+      - engineering_change
+      - fulfillment_order
+      - inventory_count
+      - inventory_reservation
+      - project_structure_baseline
+      - purchase_order
+      - requisition
+      - sales_order
+      - service_request
+      - transfer_shipment
+      - work_order
+      - workflow_run
+      soft_delete:
+      - adjustment
+      - allocation_result
+      - calc_detail
+      - calc_result
+      - change_request
+      - cumulative_usage
+      - customer_invoice
+      - demand_allocation
+      - engineering_change
+      - fulfillment_order
+      - hu_transaction
+      - inventory_adjustment
+      - inventory_count
+      - inventory_reservation
+      - project_structure_baseline
+      - purchase_order
+      - receipt
+      - requisition
+      - sales_order
+      - service_request
+      - shipment
+      - transfer_order
+      - transfer_shipment
+      - vendor_invoice
+      - work_order
+      - workflow_run
+      revision:
+      - adjustment
+      - allocation_result
+      - calc_detail
+      - calc_result
+      - change_request
+      - cumulative_usage
+      - customer_invoice
+      - demand_allocation
+      - engineering_change
+      - fulfillment_order
+      - hu_transaction
+      - inventory_adjustment
+      - inventory_count
+      - inventory_reservation
+      - project_structure_baseline
+      - purchase_order
+      - receipt
+      - requisition
+      - service_request
+      - shipment
+      - transfer_order
+      - transfer_shipment
+      - vendor_invoice
+      - work_order
+      - workflow_run
+    not_applicable:
+      posting:
+        hu_transaction: 包装单元台账行：过账随父单据执行
+  business_document_line:
+    bo_category: transactional
+    bo_category_breakdown:
+      transactional: 34
+    objects:
+    - change_request_line
+    - customer_invoice_line
+    - customer_invoice_schedule
+    - demand_trace_link
+    - document_hu_link
+    - document_serial_link
+    - engineering_change_line
+    - handling_unit_item
+    - inventory_adjustment_line
+    - inventory_count_line
+    - inventory_transaction
+    - operation_resource_requirement
+    - payment_term_line
+    - process_instruction
+    - purchase_order_line
+    - purchase_order_schedule
+    - receipt_line
+    - requisition_line
+    - resource_assignment
+    - resource_availability
+    - sales_order_line
+    - sales_order_schedule
+    - serial_transaction
+    - service_request_line
+    - shipment_line
+    - time_entry
+    - transfer_order_line
+    - transfer_shipment_line
+    - vendor_invoice_line
+    - work_definition_operation
+    - work_definition_operation_output
+    - work_definition_sequence
+    - work_order_component
+    - work_order_operation
+    capabilities:
+      audit:
+        enabled: 34
+        declared: 26
+        total: 34
+        coverage: 34/34
+      numbering:
+        enabled: 0
+        declared: 0
+        total: 34
+        coverage: 0/34
+      state_machine:
+        enabled: 2
+        declared: 2
+        total: 34
+        coverage: 2/34
+      posting:
+        enabled: 0
+        declared: 0
+        total: 34
+        coverage: 0/34
+      soft_delete:
+        enabled: 0
+        declared: 27
+        total: 34
+        coverage: 0/34
+      revision:
+        enabled: 0
+        declared: 0
+        total: 34
+        coverage: 0/34
+    gaps:
+      numbering:
+      - change_request_line
+      - customer_invoice_line
+      - customer_invoice_schedule
+      - demand_trace_link
+      - document_hu_link
+      - document_serial_link
+      - engineering_change_line
+      - handling_unit_item
+      - inventory_adjustment_line
+      - inventory_count_line
+      - inventory_transaction
+      - operation_resource_requirement
+      - payment_term_line
+      - process_instruction
+      - purchase_order_line
+      - purchase_order_schedule
+      - receipt_line
+      - requisition_line
+      - resource_assignment
+      - resource_availability
+      - sales_order_line
+      - sales_order_schedule
+      - serial_transaction
+      - service_request_line
+      - shipment_line
+      - time_entry
+      - transfer_order_line
+      - transfer_shipment_line
+      - vendor_invoice_line
+      - work_definition_operation
+      - work_definition_operation_output
+      - work_definition_sequence
+      - work_order_component
+      - work_order_operation
+      state_machine:
+      - change_request_line
+      - customer_invoice_line
+      - customer_invoice_schedule
+      - demand_trace_link
+      - document_hu_link
+      - document_serial_link
+      - handling_unit_item
+      - inventory_adjustment_line
+      - inventory_count_line
+      - inventory_transaction
+      - operation_resource_requirement
+      - payment_term_line
+      - process_instruction
+      - purchase_order_line
+      - purchase_order_schedule
+      - receipt_line
+      - requisition_line
+      - resource_assignment
+      - resource_availability
+      - sales_order_line
+      - serial_transaction
+      - service_request_line
+      - shipment_line
+      - time_entry
+      - transfer_order_line
+      - transfer_shipment_line
+      - vendor_invoice_line
+      - work_definition_operation
+      - work_definition_operation_output
+      - work_definition_sequence
+      - work_order_component
+      - work_order_operation
+      posting:
+      - change_request_line
+      - customer_invoice_line
+      - customer_invoice_schedule
+      - demand_trace_link
+      - document_hu_link
+      - document_serial_link
+      - engineering_change_line
+      - handling_unit_item
+      - inventory_adjustment_line
+      - inventory_count_line
+      - operation_resource_requirement
+      - payment_term_line
+      - process_instruction
+      - purchase_order_line
+      - purchase_order_schedule
+      - receipt_line
+      - requisition_line
+      - resource_assignment
+      - resource_availability
+      - sales_order_line
+      - sales_order_schedule
+      - service_request_line
+      - shipment_line
+      - time_entry
+      - transfer_order_line
+      - transfer_shipment_line
+      - vendor_invoice_line
+      - work_definition_operation
+      - work_definition_operation_output
+      - work_definition_sequence
+      - work_order_component
+      - work_order_operation
+      soft_delete:
+      - change_request_line
+      - customer_invoice_line
+      - customer_invoice_schedule
+      - demand_trace_link
+      - document_hu_link
+      - document_serial_link
+      - engineering_change_line
+      - handling_unit_item
+      - inventory_adjustment_line
+      - inventory_count_line
+      - inventory_transaction
+      - operation_resource_requirement
+      - payment_term_line
+      - process_instruction
+      - purchase_order_line
+      - purchase_order_schedule
+      - receipt_line
+      - requisition_line
+      - resource_assignment
+      - resource_availability
+      - sales_order_line
+      - sales_order_schedule
+      - serial_transaction
+      - service_request_line
+      - shipment_line
+      - time_entry
+      - transfer_order_line
+      - transfer_shipment_line
+      - vendor_invoice_line
+      - work_definition_operation
+      - work_definition_operation_output
+      - work_definition_sequence
+      - work_order_component
+      - work_order_operation
+      revision:
+      - change_request_line
+      - customer_invoice_line
+      - customer_invoice_schedule
+      - demand_trace_link
+      - document_hu_link
+      - document_serial_link
+      - engineering_change_line
+      - handling_unit_item
+      - inventory_adjustment_line
+      - inventory_count_line
+      - inventory_transaction
+      - operation_resource_requirement
+      - payment_term_line
+      - process_instruction
+      - purchase_order_line
+      - purchase_order_schedule
+      - receipt_line
+      - requisition_line
+      - resource_assignment
+      - resource_availability
+      - sales_order_line
+      - sales_order_schedule
+      - serial_transaction
+      - service_request_line
+      - shipment_line
+      - time_entry
+      - transfer_order_line
+      - transfer_shipment_line
+      - vendor_invoice_line
+      - work_definition_operation
+      - work_definition_operation_output
+      - work_definition_sequence
+      - work_order_component
+      - work_order_operation
+    not_applicable:
+      posting:
+        inventory_transaction: 库存台账行：过账由 inventory_adjustment / receipt / shipment
+          的 doc_effect 执行
+        serial_transaction: 序列号台账行：过账随父单据执行
+  business_object:
+    bo_category: master_data
+    bo_category_breakdown:
+      master_data: 4
+    objects:
+    - project
+    - project_task
+    - project_task_dependency
+    - task
+    capabilities:
+      audit:
+        enabled: 4
+        declared: 3
+        total: 4
+        coverage: 4/4
+      numbering:
+        enabled: 0
+        declared: 0
+        total: 4
+        coverage: 0/4
+      state_machine:
+        enabled: 1
+        declared: 1
+        total: 4
+        coverage: 1/4
+      posting:
+        enabled: 0
+        declared: 0
+        total: 4
+        coverage: 0/4
+      soft_delete:
+        enabled: 0
+        declared: 3
+        total: 4
+        coverage: 0/4
+      revision:
+        enabled: 0
+        declared: 0
+        total: 4
+        coverage: 0/4
+    gaps:
+      numbering:
+      - project
+      - project_task
+      - project_task_dependency
+      - task
+      state_machine:
+      - project
+      - project_task
+      - project_task_dependency
+      posting:
+      - project
+      - project_task
+      - project_task_dependency
+      - task
+      soft_delete:
+      - project
+      - project_task
+      - project_task_dependency
+      - task
+      revision:
+      - project
+      - project_task
+      - project_task_dependency
+      - task
+    not_applicable: {}
+  core_entity:
+    bo_category: master_data
+    bo_category_breakdown:
+      master_data: 71
+    objects:
+    - address
+    - attribute_definition
+    - attribute_scope
+    - batch
+    - batch_attribute_value
+    - business_object
+    - calendar
+    - calendar_day
+    - calendar_shift
+    - control_parameter_def
+    - currency
+    - currency_rate
+    - customer_account
+    - customer_sales_org
+    - customer_salesperson_assignment
+    - division
+    - document_type
+    - domain
+    - employee
+    - handling_unit
+    - incoterm
+    - item
+    - item_attribute_value
+    - item_group
+    - item_structure
+    - item_structure_attribute
+    - item_structure_line
+    - item_uom_conversion
+    - line_type
+    - location
+    - number_sequence
+    - party
+    - party_address
+    - party_attribute_value
+    - party_group
+    - party_tax_registration
+    - payment_term
+    - person_profile
+    - product
+    - production_version
+    - region
+    - resource
+    - resource_capability
+    - resource_capacity
+    - resource_group
+    - resource_group_member
+    - resource_rate
+    - resource_territory_assignment
+    - salesperson
+    - salesperson_territory_assignment
+    - serial_number
+    - service_catalog_item
+    - service_module
+    - shift
+    - skill
+    - sla_coverage
+    - sla_coverage_rule
+    - sla_milestone
+    - sub_domain
+    - tax_classification
+    - tax_code
+    - tax_rate
+    - territory
+    - territory_account_assignment
+    - type_definition
+    - uom
+    - uom_conversion
+    - uom_group
+    - vendor_account
+    - version
+    - work_definition
+    capabilities:
+      audit:
+        enabled: 71
+        declared: 64
+        total: 71
+        coverage: 71/71
+      numbering:
+        enabled: 0
+        declared: 0
+        total: 71
+        coverage: 0/71
+      state_machine:
+        enabled: 1
+        declared: 1
+        total: 71
+        coverage: 1/71
+      posting:
+        enabled: 0
+        declared: 0
+        total: 71
+        coverage: 0/71
+      soft_delete:
+        enabled: 0
+        declared: 60
+        total: 71
+        coverage: 0/71
+      revision:
+        enabled: 1
+        declared: 1
+        total: 71
+        coverage: 1/71
+    gaps:
+      numbering:
+      - address
+      - attribute_definition
+      - attribute_scope
+      - batch
+      - batch_attribute_value
+      - business_object
+      - calendar
+      - calendar_day
+      - calendar_shift
+      - control_parameter_def
+      - currency
+      - currency_rate
+      - customer_account
+      - customer_sales_org
+      - customer_salesperson_assignment
+      - division
+      - document_type
+      - domain
+      - employee
+      - handling_unit
+      - incoterm
+      - item
+      - item_attribute_value
+      - item_group
+      - item_structure
+      - item_structure_attribute
+      - item_structure_line
+      - item_uom_conversion
+      - line_type
+      - location
+      - number_sequence
+      - party
+      - party_address
+      - party_attribute_value
+      - party_group
+      - party_tax_registration
+      - payment_term
+      - person_profile
+      - product
+      - production_version
+      - region
+      - resource
+      - resource_capability
+      - resource_capacity
+      - resource_group
+      - resource_group_member
+      - resource_rate
+      - resource_territory_assignment
+      - salesperson
+      - salesperson_territory_assignment
+      - serial_number
+      - service_catalog_item
+      - service_module
+      - shift
+      - skill
+      - sla_coverage
+      - sla_coverage_rule
+      - sla_milestone
+      - sub_domain
+      - tax_classification
+      - tax_code
+      - tax_rate
+      - territory
+      - territory_account_assignment
+      - type_definition
+      - uom
+      - uom_conversion
+      - uom_group
+      - vendor_account
+      - version
+      - work_definition
+      state_machine:
+      - address
+      - attribute_definition
+      - attribute_scope
+      - batch
+      - batch_attribute_value
+      - business_object
+      - calendar
+      - calendar_day
+      - calendar_shift
+      - control_parameter_def
+      - currency
+      - currency_rate
+      - customer_account
+      - customer_sales_org
+      - customer_salesperson_assignment
+      - division
+      - document_type
+      - domain
+      - employee
+      - handling_unit
+      - incoterm
+      - item
+      - item_attribute_value
+      - item_group
+      - item_structure
+      - item_structure_attribute
+      - item_structure_line
+      - item_uom_conversion
+      - line_type
+      - location
+      - number_sequence
+      - party
+      - party_address
+      - party_attribute_value
+      - party_group
+      - party_tax_registration
+      - payment_term
+      - person_profile
+      - product
+      - production_version
+      - region
+      - resource
+      - resource_capability
+      - resource_capacity
+      - resource_group
+      - resource_group_member
+      - resource_rate
+      - resource_territory_assignment
+      - salesperson
+      - salesperson_territory_assignment
+      - service_catalog_item
+      - service_module
+      - shift
+      - skill
+      - sla_coverage
+      - sla_coverage_rule
+      - sla_milestone
+      - sub_domain
+      - tax_classification
+      - tax_code
+      - tax_rate
+      - territory
+      - territory_account_assignment
+      - type_definition
+      - uom
+      - uom_conversion
+      - uom_group
+      - vendor_account
+      - version
+      - work_definition
+      posting:
+      - address
+      - attribute_definition
+      - attribute_scope
+      - batch
+      - batch_attribute_value
+      - business_object
+      - calendar
+      - calendar_day
+      - calendar_shift
+      - control_parameter_def
+      - currency
+      - currency_rate
+      - customer_account
+      - customer_sales_org
+      - customer_salesperson_assignment
+      - division
+      - document_type
+      - domain
+      - employee
+      - handling_unit
+      - incoterm
+      - item
+      - item_attribute_value
+      - item_group
+      - item_structure
+      - item_structure_attribute
+      - item_structure_line
+      - item_uom_conversion
+      - line_type
+      - location
+      - number_sequence
+      - party
+      - party_address
+      - party_attribute_value
+      - party_group
+      - party_tax_registration
+      - payment_term
+      - person_profile
+      - product
+      - production_version
+      - region
+      - resource
+      - resource_capability
+      - resource_capacity
+      - resource_group
+      - resource_group_member
+      - resource_rate
+      - resource_territory_assignment
+      - salesperson
+      - salesperson_territory_assignment
+      - serial_number
+      - service_catalog_item
+      - service_module
+      - shift
+      - skill
+      - sla_coverage
+      - sla_coverage_rule
+      - sla_milestone
+      - sub_domain
+      - tax_classification
+      - tax_code
+      - tax_rate
+      - territory
+      - territory_account_assignment
+      - type_definition
+      - uom
+      - uom_conversion
+      - uom_group
+      - vendor_account
+      - version
+      - work_definition
+      soft_delete:
+      - address
+      - attribute_definition
+      - attribute_scope
+      - batch
+      - batch_attribute_value
+      - business_object
+      - calendar
+      - calendar_day
+      - calendar_shift
+      - control_parameter_def
+      - currency
+      - currency_rate
+      - customer_account
+      - customer_sales_org
+      - customer_salesperson_assignment
+      - division
+      - document_type
+      - domain
+      - employee
+      - handling_unit
+      - incoterm
+      - item
+      - item_attribute_value
+      - item_group
+      - item_structure
+      - item_structure_attribute
+      - item_structure_line
+      - item_uom_conversion
+      - line_type
+      - location
+      - number_sequence
+      - party
+      - party_address
+      - party_attribute_value
+      - party_group
+      - party_tax_registration
+      - payment_term
+      - person_profile
+      - product
+      - production_version
+      - region
+      - resource
+      - resource_capability
+      - resource_capacity
+      - resource_group
+      - resource_group_member
+      - resource_rate
+      - resource_territory_assignment
+      - salesperson
+      - salesperson_territory_assignment
+      - serial_number
+      - service_catalog_item
+      - service_module
+      - shift
+      - skill
+      - sla_coverage
+      - sla_coverage_rule
+      - sla_milestone
+      - sub_domain
+      - tax_classification
+      - tax_code
+      - tax_rate
+      - territory
+      - territory_account_assignment
+      - type_definition
+      - uom
+      - uom_conversion
+      - uom_group
+      - vendor_account
+      - version
+      - work_definition
+      revision:
+      - address
+      - attribute_definition
+      - attribute_scope
+      - batch
+      - batch_attribute_value
+      - business_object
+      - calendar
+      - calendar_day
+      - calendar_shift
+      - control_parameter_def
+      - currency
+      - currency_rate
+      - customer_account
+      - customer_sales_org
+      - customer_salesperson_assignment
+      - division
+      - document_type
+      - domain
+      - employee
+      - handling_unit
+      - incoterm
+      - item_attribute_value
+      - item_group
+      - item_structure
+      - item_structure_attribute
+      - item_structure_line
+      - item_uom_conversion
+      - line_type
+      - location
+      - number_sequence
+      - party
+      - party_address
+      - party_attribute_value
+      - party_group
+      - party_tax_registration
+      - payment_term
+      - person_profile
+      - product
+      - production_version
+      - region
+      - resource
+      - resource_capability
+      - resource_capacity
+      - resource_group
+      - resource_group_member
+      - resource_rate
+      - resource_territory_assignment
+      - salesperson
+      - salesperson_territory_assignment
+      - serial_number
+      - service_catalog_item
+      - service_module
+      - shift
+      - skill
+      - sla_coverage
+      - sla_coverage_rule
+      - sla_milestone
+      - sub_domain
+      - tax_classification
+      - tax_code
+      - tax_rate
+      - territory
+      - territory_account_assignment
+      - type_definition
+      - uom
+      - uom_conversion
+      - uom_group
+      - vendor_account
+      - version
+      - work_definition
+    not_applicable: {}
+  master_data:
+    bo_category: master_data
+    bo_category_breakdown:
+      master_data: 1
+    objects:
+    - inventory_balance
+    capabilities:
+      audit:
+        enabled: 1
+        declared: 0
+        total: 1
+        coverage: 1/1
+      numbering:
+        enabled: 0
+        declared: 0
+        total: 1
+        coverage: 0/1
+      state_machine:
+        enabled: 0
+        declared: 0
+        total: 1
+        coverage: 0/1
+      posting:
+        enabled: 0
+        declared: 0
+        total: 1
+        coverage: 0/1
+      soft_delete:
+        enabled: 0
+        declared: 0
+        total: 1
+        coverage: 0/1
+      revision:
+        enabled: 0
+        declared: 0
+        total: 1
+        coverage: 0/1
+    gaps:
+      numbering:
+      - inventory_balance
+      state_machine:
+      - inventory_balance
+      posting:
+      - inventory_balance
+      soft_delete:
+      - inventory_balance
+      revision:
+      - inventory_balance
+    not_applicable: {}
+  meta_object:
+    bo_category: configuration
+    bo_category_breakdown:
+      configuration: 2
+    objects:
+    - enum_type
+    - enum_value
+    capabilities:
+      audit:
+        enabled: 2
+        declared: 2
+        total: 2
+        coverage: 2/2
+      numbering:
+        enabled: 0
+        declared: 0
+        total: 2
+        coverage: 0/2
+      state_machine:
+        enabled: 0
+        declared: 0
+        total: 2
+        coverage: 0/2
+      posting:
+        enabled: 0
+        declared: 0
+        total: 2
+        coverage: 0/2
+      soft_delete:
+        enabled: 0
+        declared: 0
+        total: 2
+        coverage: 0/2
+      revision:
+        enabled: 0
+        declared: 0
+        total: 2
+        coverage: 0/2
+    gaps:
+      numbering:
+      - enum_type
+      - enum_value
+      state_machine:
+      - enum_type
+      - enum_value
+      posting:
+      - enum_type
+      - enum_value
+      soft_delete:
+      - enum_type
+      - enum_value
+      revision:
+      - enum_type
+      - enum_value
+    not_applicable: {}
+  relationship:
+    bo_category: master_data
+    bo_category_breakdown:
+      master_data: 4
+    objects:
+    - employee_shift_assignment
+    - item_xref
+    - party_relation
+    - relationship
+    capabilities:
+      audit:
+        enabled: 4
+        declared: 2
+        total: 4
+        coverage: 4/4
+      numbering:
+        enabled: 0
+        declared: 0
+        total: 4
+        coverage: 0/4
+      state_machine:
+        enabled: 0
+        declared: 0
+        total: 4
+        coverage: 0/4
+      posting:
+        enabled: 0
+        declared: 0
+        total: 4
+        coverage: 0/4
+      soft_delete:
+        enabled: 0
+        declared: 2
+        total: 4
+        coverage: 0/4
+      revision:
+        enabled: 0
+        declared: 0
+        total: 4
+        coverage: 0/4
+    gaps:
+      numbering:
+      - employee_shift_assignment
+      - item_xref
+      - party_relation
+      - relationship
+      state_machine:
+      - employee_shift_assignment
+      - item_xref
+      - party_relation
+      - relationship
+      posting:
+      - employee_shift_assignment
+      - item_xref
+      - party_relation
+      - relationship
+      soft_delete:
+      - employee_shift_assignment
+      - item_xref
+      - party_relation
+      - relationship
+      revision:
+      - employee_shift_assignment
+      - item_xref
+      - party_relation
+      - relationship
+    not_applicable: {}
+  security_entity:
+    bo_category: master_data
+    bo_category_breakdown:
+      master_data: 14
+      configuration: 5
+    objects:
+    - data_permission
+    - dimension_object_mapping
+    - group_data_permission
+    - line_type_assignment
+    - menu
+    - menu_permission
+    - org
+    - org_data_permission
+    - org_legal_entity
+    - org_member
+    - org_sales_org
+    - permission
+    - permission_bundle
+    - permission_resource
+    - permission_resource_inheritance
+    - permission_rule
+    - permission_set_data_permission
+    - permission_set_dimension_scope
+    - permission_set_dimension_scopes
+    capabilities:
+      audit:
+        enabled: 16
+        declared: 10
+        total: 19
+        coverage: 16/19
+      numbering:
+        enabled: 0
+        declared: 0
+        total: 19
+        coverage: 0/19
+      state_machine:
+        enabled: 0
+        declared: 0
+        total: 19
+        coverage: 0/19
+      posting:
+        enabled: 0
+        declared: 0
+        total: 19
+        coverage: 0/19
+      soft_delete:
+        enabled: 0
+        declared: 2
+        total: 19
+        coverage: 0/19
+      revision:
+        enabled: 0
+        declared: 0
+        total: 19
+        coverage: 0/19
+    gaps:
+      audit:
+      - permission_resource
+      - permission_resource_inheritance
+      - permission_set_dimension_scopes
+      numbering:
+      - data_permission
+      - dimension_object_mapping
+      - group_data_permission
+      - line_type_assignment
+      - menu
+      - menu_permission
+      - org
+      - org_data_permission
+      - org_legal_entity
+      - org_member
+      - org_sales_org
+      - permission
+      - permission_bundle
+      - permission_resource
+      - permission_resource_inheritance
+      - permission_rule
+      - permission_set_data_permission
+      - permission_set_dimension_scope
+      - permission_set_dimension_scopes
+      state_machine:
+      - data_permission
+      - dimension_object_mapping
+      - group_data_permission
+      - line_type_assignment
+      - menu
+      - menu_permission
+      - org
+      - org_data_permission
+      - org_legal_entity
+      - org_member
+      - org_sales_org
+      - permission
+      - permission_bundle
+      - permission_resource
+      - permission_resource_inheritance
+      - permission_rule
+      - permission_set_data_permission
+      - permission_set_dimension_scope
+      - permission_set_dimension_scopes
+      posting:
+      - data_permission
+      - dimension_object_mapping
+      - group_data_permission
+      - line_type_assignment
+      - menu
+      - menu_permission
+      - org
+      - org_data_permission
+      - org_legal_entity
+      - org_member
+      - org_sales_org
+      - permission
+      - permission_bundle
+      - permission_resource
+      - permission_resource_inheritance
+      - permission_rule
+      - permission_set_data_permission
+      - permission_set_dimension_scope
+      - permission_set_dimension_scopes
+      soft_delete:
+      - data_permission
+      - dimension_object_mapping
+      - group_data_permission
+      - line_type_assignment
+      - menu
+      - menu_permission
+      - org
+      - org_data_permission
+      - org_legal_entity
+      - org_member
+      - org_sales_org
+      - permission
+      - permission_bundle
+      - permission_resource
+      - permission_resource_inheritance
+      - permission_rule
+      - permission_set_data_permission
+      - permission_set_dimension_scope
+      - permission_set_dimension_scopes
+      revision:
+      - data_permission
+      - dimension_object_mapping
+      - group_data_permission
+      - line_type_assignment
+      - menu
+      - menu_permission
+      - org
+      - org_data_permission
+      - org_legal_entity
+      - org_member
+      - org_sales_org
+      - permission
+      - permission_bundle
+      - permission_resource
+      - permission_resource_inheritance
+      - permission_rule
+      - permission_set_data_permission
+      - permission_set_dimension_scope
+      - permission_set_dimension_scopes
+    not_applicable: {}
+  system_entity:
+    bo_category: configuration
+    bo_category_breakdown:
+      configuration: 29
+    objects:
+    - allocation_rule
+    - audit_log
+    - calc_procedure
+    - calc_procedure_step
+    - change_event
+    - change_subscription
+    - employee_data_scope
+    - exclusion_group
+    - external_rate_source
+    - factor_catalog
+    - filter_variant
+    - key_schema
+    - lookup_sequence
+    - new_object
+    - permission_set
+    - permission_set_permission
+    - pricing_determination
+    - pricing_period
+    - rate_record
+    - rate_table
+    - rate_type
+    - rule_hold
+    - service_event
+    - sourcing_mode_policy
+    - sourcing_rule
+    - sourcing_rule_assignment
+    - sourcing_rule_line
+    - usage_group
+    - user
+    capabilities:
+      audit:
+        enabled: 29
+        declared: 22
+        total: 29
+        coverage: 29/29
+      numbering:
+        enabled: 0
+        declared: 0
+        total: 29
+        coverage: 0/29
+      state_machine:
+        enabled: 0
+        declared: 0
+        total: 29
+        coverage: 0/29
+      posting:
+        enabled: 0
+        declared: 0
+        total: 29
+        coverage: 0/29
+      soft_delete:
+        enabled: 0
+        declared: 22
+        total: 29
+        coverage: 0/29
+      revision:
+        enabled: 0
+        declared: 0
+        total: 29
+        coverage: 0/29
+    gaps:
+      numbering:
+      - allocation_rule
+      - audit_log
+      - calc_procedure
+      - calc_procedure_step
+      - change_event
+      - change_subscription
+      - employee_data_scope
+      - exclusion_group
+      - external_rate_source
+      - factor_catalog
+      - filter_variant
+      - key_schema
+      - lookup_sequence
+      - new_object
+      - permission_set
+      - permission_set_permission
+      - pricing_determination
+      - pricing_period
+      - rate_record
+      - rate_table
+      - rate_type
+      - rule_hold
+      - service_event
+      - sourcing_mode_policy
+      - sourcing_rule
+      - sourcing_rule_assignment
+      - sourcing_rule_line
+      - usage_group
+      - user
+      state_machine:
+      - allocation_rule
+      - audit_log
+      - calc_procedure
+      - calc_procedure_step
+      - change_event
+      - change_subscription
+      - employee_data_scope
+      - exclusion_group
+      - external_rate_source
+      - factor_catalog
+      - filter_variant
+      - key_schema
+      - lookup_sequence
+      - new_object
+      - permission_set
+      - permission_set_permission
+      - pricing_determination
+      - pricing_period
+      - rate_record
+      - rate_table
+      - rate_type
+      - rule_hold
+      - service_event
+      - sourcing_mode_policy
+      - sourcing_rule
+      - sourcing_rule_assignment
+      - sourcing_rule_line
+      - usage_group
+      - user
+      posting:
+      - allocation_rule
+      - audit_log
+      - calc_procedure
+      - calc_procedure_step
+      - change_event
+      - change_subscription
+      - employee_data_scope
+      - exclusion_group
+      - external_rate_source
+      - factor_catalog
+      - filter_variant
+      - key_schema
+      - lookup_sequence
+      - new_object
+      - permission_set
+      - permission_set_permission
+      - pricing_determination
+      - pricing_period
+      - rate_record
+      - rate_table
+      - rate_type
+      - rule_hold
+      - service_event
+      - sourcing_mode_policy
+      - sourcing_rule
+      - sourcing_rule_assignment
+      - sourcing_rule_line
+      - usage_group
+      - user
+      soft_delete:
+      - allocation_rule
+      - audit_log
+      - calc_procedure
+      - calc_procedure_step
+      - change_event
+      - change_subscription
+      - employee_data_scope
+      - exclusion_group
+      - external_rate_source
+      - factor_catalog
+      - filter_variant
+      - key_schema
+      - lookup_sequence
+      - new_object
+      - permission_set
+      - permission_set_permission
+      - pricing_determination
+      - pricing_period
+      - rate_record
+      - rate_table
+      - rate_type
+      - rule_hold
+      - service_event
+      - sourcing_mode_policy
+      - sourcing_rule
+      - sourcing_rule_assignment
+      - sourcing_rule_line
+      - usage_group
+      - user
+      revision:
+      - allocation_rule
+      - audit_log
+      - calc_procedure
+      - calc_procedure_step
+      - change_event
+      - change_subscription
+      - employee_data_scope
+      - exclusion_group
+      - external_rate_source
+      - factor_catalog
+      - filter_variant
+      - key_schema
+      - lookup_sequence
+      - new_object
+      - permission_set
+      - permission_set_permission
+      - pricing_determination
+      - pricing_period
+      - rate_record
+      - rate_table
+      - rate_type
+      - rule_hold
+      - service_event
+      - sourcing_mode_policy
+      - sourcing_rule
+      - sourcing_rule_assignment
+      - sourcing_rule_line
+      - usage_group
+      - user
+    not_applicable: {}
+  test:
+    bo_category: master_data
+    bo_category_breakdown:
+      master_data: 2
+    objects:
+    - test_objects
+    - test_table
+    capabilities:
+      audit:
+        enabled: 1
+        declared: 2
+        total: 2
+        coverage: 1/2
+      numbering:
+        enabled: 0
+        declared: 0
+        total: 2
+        coverage: 0/2
+      state_machine:
+        enabled: 0
+        declared: 0
+        total: 2
+        coverage: 0/2
+      posting:
+        enabled: 0
+        declared: 0
+        total: 2
+        coverage: 0/2
+      soft_delete:
+        enabled: 0
+        declared: 0
+        total: 2
+        coverage: 0/2
+      revision:
+        enabled: 0
+        declared: 0
+        total: 2
+        coverage: 0/2
+    gaps:
+      audit:
+      - test_table
+      numbering:
+      - test_objects
+      - test_table
+      state_machine:
+      - test_objects
+      - test_table
+      posting:
+      - test_objects
+      - test_table
+      soft_delete:
+      - test_objects
+      - test_table
+      revision:
+      - test_objects
+      - test_table
+    not_applicable: {}
+unclassified_objects: []
+errors: []

@@ -220,3 +220,7 @@ combination_policy:
 
   # owner 例外: 用户对自己 owner 的资源始终可见（与 visibility 无关）
   owner_always_visible: true
+
+semantics:
+  category: security_entity
+

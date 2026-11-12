@@ -8,6 +8,9 @@ description: 任务执行记录 / 审计日志（append-only，不可删；每�
 skip_auto_menu: true
 skip_generic_api: true
 
+semantics:
+  category: auxiliary
+
 fields:
   - id: id
     name: ID

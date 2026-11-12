@@ -58,6 +58,9 @@ name: 业务伙伴关系
 table_name: party_relations
 description: 客户 / 供应商关系实例（party₁ 我方 — party₂ 对手；单表 + role，一实例一角色）
 
+semantics:
+  category: relationship
+
 fields:
   - id: id
     name: ID

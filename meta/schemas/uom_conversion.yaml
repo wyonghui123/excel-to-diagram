@@ -46,6 +46,9 @@ audit:
   dissociate:
     enabled: true
 
+semantics:
+  category: core_entity
+
 fields:
   - id: id
     name: ID

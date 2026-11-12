@@ -8,6 +8,9 @@ description: 任务生命周期事件账（append-only，不可删；≈ OCED �
 skip_auto_menu: true
 skip_generic_api: true
 
+semantics:
+  category: auxiliary
+
 fields:
   - id: id
     name: ID

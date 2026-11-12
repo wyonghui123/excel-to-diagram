@@ -98,6 +98,9 @@ deletion_policy:
       message: 该个人档案仍被员工主数据引用，请先处理员工记录后再删除
   cascade_delete: []
 
+semantics:
+  category: core_entity
+
 fields:
   - id: id
     name: ID

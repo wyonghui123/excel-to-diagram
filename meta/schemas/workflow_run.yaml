@@ -9,6 +9,9 @@ description: 编排实例层（无独立状态列；进度由子任务状态派�
 skip_auto_menu: true
 skip_generic_api: true
 
+semantics:
+  category: business_document
+
 fields:
   - id: id
     name: ID

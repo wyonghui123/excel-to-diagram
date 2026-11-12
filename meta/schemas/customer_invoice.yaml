@@ -897,6 +897,17 @@ state_field_policies:
 
 # 状态机：提交 / 过账 / 取消 / 红冲均由 customer_invoice_guard_interceptor
 # 委托 customer_invoice_service 执行（跨表副作用唯一写入口）。
+# [S7.2 2026-11-12] 角色 × 字段策略：when 中的角色名必须是 permission_sets.code（admin/editor/viewer）
+field_policies:
+  exchange_rate:
+    editable:
+      - when: "'viewer' in user.roles"
+        value: false
+  gross_amount:
+    visible:
+      - when: "'viewer' in user.roles"
+        value: false
+
 rules:
   - id: submit_customer_invoice
     name: 提交发票

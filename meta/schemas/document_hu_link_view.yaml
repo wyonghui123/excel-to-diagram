@@ -68,6 +68,9 @@ actions:
     path: "/api/v1/document_hu_link_views"
     description: "按容器 / 单据 / 行号过滤"
 
+semantics:
+  category: auxiliary
+
 fields:
   - id: id
     name: 关系ID

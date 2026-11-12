@@ -21,6 +21,9 @@ description: 通用单据内容变更申请（审批通过后经统一写漏斗�
 display_name_field: id
 aspects: [audit_aspect]
 
+semantics:
+  category: business_document
+
 fields:
   - id: id
     name: ID

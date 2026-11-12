@@ -35,6 +35,9 @@ deletion_policy:
   cascade_delete:
     - engineering_change_lines
 
+semantics:
+  category: business_document
+
 fields:
   - id: id
     name: ID

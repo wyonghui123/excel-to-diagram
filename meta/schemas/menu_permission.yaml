@@ -3,6 +3,9 @@ name: 菜单权限
 table_name: menu_permissions
 description: 菜单访问权限配置，控制用户可见的菜单项
 
+semantics:
+  category: security_entity
+
 fields:
   - id: menu_code
     name: 菜单编码

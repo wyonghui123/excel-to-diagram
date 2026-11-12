@@ -50,6 +50,9 @@ actions:
     path: "/api/v1/org_sales_orgs"
     description: 查询销售组织列表
 
+semantics:
+  category: security_entity
+
 fields:
   - id: id
     name: ID

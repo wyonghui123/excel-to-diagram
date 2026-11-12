@@ -98,6 +98,16 @@ org_scope:
   field: org_id
   write_check: true
 
+# [S7.2 2026-11-12] 角色 × 字段策略：when 中的角色名必须是 permission_sets.code（admin/editor/viewer）
+field_policies:
+  planned_qty:
+    editable:
+      - when: "'viewer' in user.roles"
+        value: false
+    required:
+      - when: "'editor' in user.roles"
+        value: true
+
 fields:
   - id: id
     name: ID

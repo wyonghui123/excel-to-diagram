@@ -51,6 +51,9 @@ audit:
 org_scope:
   mode: global
 
+semantics:
+  category: business_config
+
 fields:
   - id: id
     name: ID
