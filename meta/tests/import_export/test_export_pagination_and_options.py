@@ -301,7 +301,11 @@ class TestEnumDropdownFix:
             json={
                 'object_type': 'relationship',
                 'scope': 'single',
-                'options': {'include_operation_mode': True}
+                'options': {'include_operation_mode': True},
+                # [TEST-EFF] 只取 5 行：枚举下拉与空白行填充均为列级行为，与行数无关；
+                # 全量导出（relationship 已 10000 行）单用例约 20s
+                'page': 1,
+                'page_size': 5
             },
             headers=headers
         )
@@ -393,7 +397,11 @@ class TestEnumDropdownFix:
             json={
                 'object_type': 'relationship',
                 'scope': 'single',
-                'options': {'include_operation_mode': True}
+                'options': {'include_operation_mode': True},
+                # [TEST-EFF] 只取 5 行：枚举下拉与空白行填充均为列级行为，与行数无关；
+                # 全量导出（relationship 已 10000 行）单用例约 20s
+                'page': 1,
+                'page_size': 5
             },
             headers=headers
         )
