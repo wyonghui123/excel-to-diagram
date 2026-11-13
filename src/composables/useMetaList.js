@@ -222,6 +222,8 @@ export function useMetaList(objectTypeOrRef, options = {}) {
    * 后端不可用时为 null → 行级动作按 fail-closed 处理。
    */
   const actionAvailability = shallowRef(null)
+  // [B1-2 2026-11-13] 批量判定整体失败标记：失败时不得回退本地判定（fail-closed）
+  const actionEvalFailed = shallowRef(false)
   
   /** 加载状态 */
   const loading = ref(false)
@@ -1067,6 +1069,8 @@ export function useMetaList(objectTypeOrRef, options = {}) {
    * 仅无 id 的新行（后端无法判定）才走本地兜底，兜底同样 fail-closed。
    */
   function getRowActions(row) {
+    // [B1-2 2026-11-13] 批量判定失败 → 一律不渲染行级动作（fail-closed，不回退本地判定）
+    if (actionEvalFailed.value) return []
     const rowId = row && row.id !== undefined && row.id !== null ? String(row.id) : null
     const availability = rowId ? actionAvailability.value?.[rowId] || null : null
     const resolveVerdict = (action) => {
@@ -1121,6 +1125,7 @@ export function useMetaList(objectTypeOrRef, options = {}) {
       .filter(id => id !== undefined && id !== null)
     if (!objectType || !ids.length || !actions.length) {
       actionAvailability.value = null
+      actionEvalFailed.value = false
       return
     }
     try {
@@ -1128,12 +1133,14 @@ export function useMetaList(objectTypeOrRef, options = {}) {
       if (version !== _loadVersion) return
       if (res?.success && res.data && typeof res.data === 'object') {
         actionAvailability.value = res.data
+        actionEvalFailed.value = false
       } else {
         if (!_actionEvalErrorReported) {
           _actionEvalErrorReported = true
           console.error('[useMetaList] actions/evaluate 返回失败, 行级动作 fail-closed:', res?.message)
         }
         actionAvailability.value = null
+        actionEvalFailed.value = true
       }
     } catch (e) {
       if (!_actionEvalErrorReported) {
@@ -1141,6 +1148,7 @@ export function useMetaList(objectTypeOrRef, options = {}) {
         console.error('[useMetaList] actions/evaluate 请求异常, 行级动作 fail-closed:', e)
       }
       actionAvailability.value = null
+      actionEvalFailed.value = true
     }
   }
 
