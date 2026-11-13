@@ -273,16 +273,7 @@ export default {
     const loadChatList = async () => {
       loadingChats.value = true
       try {
-        const savedConfig = localStorage.getItem('archWorkspaceConfig')
-        if (!savedConfig) return
-
-        const config = JSON.parse(savedConfig)
-        feishuService.init({
-          appId: config.feishuAppId,
-          appSecret: config.feishuAppSecret,
-          accessToken: config.feishuAccessToken
-        })
-
+        // [P0-1] 凭证由后端托管，前端无需初始化
         const chats = await feishuService.getChatList()
         chatList.value = chats
       } catch (error) {
@@ -297,16 +288,7 @@ export default {
     const loadPreview = async () => {
       loadingPreview.value = true
       try {
-        const savedConfig = localStorage.getItem('archWorkspaceConfig')
-        if (!savedConfig) return
-
-        const config = JSON.parse(savedConfig)
-        feishuService.init({
-          appId: config.feishuAppId,
-          appSecret: config.feishuAppSecret,
-          accessToken: config.feishuAccessToken
-        })
-
+        // [P0-1] 凭证由后端托管，前端无需初始化
         if (selectedSource.value === 'spreadsheet') {
           const data = await feishuService.getSpreadsheetData(
             spreadsheetToken.value,

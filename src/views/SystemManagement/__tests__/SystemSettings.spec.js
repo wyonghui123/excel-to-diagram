@@ -3,6 +3,7 @@ import { mount } from '@vue/test-utils'
 import { nextTick } from 'vue'
 import { setActivePinia, createPinia } from 'pinia'
 import SystemSettings from '@/views/SystemManagement/SystemSettings.vue'
+import { useInstanceInfo } from '@/composables/useInstanceInfo'
 
 const _origFetch = globalThis.fetch
 const _origResizeObserver = globalThis.ResizeObserver
@@ -14,6 +15,9 @@ describe('SystemSettings', () => {
   beforeEach(() => {
     setActivePinia(createPinia())
     vi.clearAllMocks()
+    // [2026-11-13] useInstanceInfo 为模块级单例，初始 displayName 为空串（无前端兜底）。
+    // 测试环境无后端，直接预置「后端已返回展示名」场景，避免依赖 fetch 时序。
+    useInstanceInfo().displayName.value = 'BIP应用架构管理'
     // 修复 PR-TestFix-16: 在 ESM 严格模式下 global.* 是 readonly，
     // 必须用 Object.defineProperty 重新定义
     Object.defineProperty(global, 'localStorage', {
@@ -119,60 +123,47 @@ describe('SystemSettings', () => {
       const menuItems = wrapper.findAll('.ss-nav-item')
       await menuItems[5].trigger('click')
 
-      // [FIX 2026-10-13] 关于面板改为取部署级实例展示名（useInstanceInfo），
-      // 测试环境下回落其 FALLBACK_NAME，不再是硬编码的 ArchWorkspace。
+      // 关于面板取部署级实例展示名（useInstanceInfo），测试环境在 beforeEach 预置该值。
       expect(wrapper.find('.about-content h3').text()).toBe('BIP应用架构管理')
     })
   })
 
   describe('AI 配置', () => {
-    it('应该显示 AI 服务提供商选项', () => {
+    it('应该只展示后端托管的提供商与密钥状态，不再有可编辑密钥输入', () => {
       const wrapper = mount(SystemSettings)
-      const radioOptions = wrapper.findAll('.radio-option')
-      expect(radioOptions.length).toBe(2)
+
+      // [P0-1] 密钥只由后端环境变量持有，前端不再提供 API Key 输入框
+      expect(wrapper.find('input[placeholder="请输入智谱 API Key"]').exists()).toBe(false)
+      expect(wrapper.find('input[placeholder="请输入 DeepSeek API Key"]').exists()).toBe(false)
+      expect(wrapper.findAll('.radio-option').length).toBe(0)
+
+      const hints = wrapper.findAll('.form-hint').map(h => h.text()).join(' | ')
+      expect(hints).toContain('AI_PROVIDER')
+      expect(wrapper.find('.credential-missing').exists()).toBe(true)
     })
 
-    it('应该默认选择智谱 AI', () => {
+    it('应该显示 AI 校验模型选择', () => {
       const wrapper = mount(SystemSettings)
-      const zhipuRadio = wrapper.find('input[value="zhipu"]')
-      expect(zhipuRadio.element.checked).toBe(true)
-    })
-
-    it('切换到 DeepSeek 应该更新选择', async () => {
-      const wrapper = mount(SystemSettings)
-
-      const deepseekRadio = wrapper.find('input[value="deepseek"]')
-      await deepseekRadio.setChecked()
-
-      const zhipuRadio = wrapper.find('input[value="zhipu"]')
-      expect(zhipuRadio.element.checked).toBe(false)
-    })
-
-    it('应该显示智谱 API Key 输入框', () => {
-      const wrapper = mount(SystemSettings)
-      expect(wrapper.find('input[placeholder="请输入智谱 API Key"]').exists()).toBe(true)
-    })
-
-    it('应该显示 DeepSeek API Key 输入框', () => {
-      const wrapper = mount(SystemSettings)
-      expect(wrapper.find('input[placeholder="请输入 DeepSeek API Key"]').exists()).toBe(true)
-    })
-
-    it('应该显示 AI 模型选择', () => {
-      const wrapper = mount(SystemSettings)
-      expect(wrapper.find('.form-select').exists()).toBe(true)
+      expect(wrapper.find('#aiModel').exists()).toBe(true)
+      expect(wrapper.findAll('#aiModel option').length).toBe(4)
     })
   })
 
   describe('飞书集成配置', () => {
-    it('应该显示飞书配置表单', async () => {
+    it('应该显示后端托管的飞书凭据（只读脱敏）', async () => {
       const wrapper = mount(SystemSettings)
 
       const menuItems = wrapper.findAll('.ss-nav-item')
       await menuItems[1].trigger('click')
 
-      expect(wrapper.find('input[placeholder="请输入飞书 App ID"]').exists()).toBe(true)
-      expect(wrapper.find('input[placeholder="请输入飞书 App Secret"]').exists()).toBe(true)
+      const appId = wrapper.find('#feishuAppId')
+      const appSecret = wrapper.find('#feishuAppSecret')
+      expect(appId.exists()).toBe(true)
+      expect(appId.attributes()).toHaveProperty('readonly')
+      expect(appSecret.exists()).toBe(true)
+      expect(appSecret.attributes()).toHaveProperty('readonly')
+      expect(wrapper.find('input[placeholder="请输入飞书 App ID"]').exists()).toBe(false)
+      expect(wrapper.find('input[placeholder="请输入飞书 App Secret"]').exists()).toBe(false)
       expect(wrapper.find('input[placeholder="请输入群ID或用户ID"]').exists()).toBe(true)
     })
 

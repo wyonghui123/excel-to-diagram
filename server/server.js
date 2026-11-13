@@ -15,8 +15,9 @@ const PORT = 3001
 app.use(cors())
 app.use(express.json())
 
-const DEEPSEEK_API_KEY = process.env.VITE_DEEPSEEK_API_KEY
-const ZHIPU_API_KEY = process.env.VITE_ZHIPU_API_KEY
+// [P0-1] 密钥命名与后端统一，禁止 VITE_ 前缀（会被注入前端产物）
+const DEEPSEEK_API_KEY = process.env.DEEPSEEK_API_KEY
+const ZHIPU_API_KEY = process.env.ZHIPU_API_KEY
 
 app.post('/api/deepseek', async (req, res) => {
   const { messages, model = 'deepseek-chat' } = req.body

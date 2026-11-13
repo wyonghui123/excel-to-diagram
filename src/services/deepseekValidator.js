@@ -4,10 +4,10 @@
  */
 
 import { ValidationLevel, ValidationType } from './dataValidator.js';
+import { apiV2 } from '@/utils/httpClient';
 
-// DeepSeek API配置
-const DEEPSEEK_API_URL = 'https://api.deepseek.com/v1/chat/completions';
-const DEEPSEEK_API_KEY = import.meta.env.VITE_DEEPSEEK_API_KEY || '';
+// [P0-1] 密钥只保留在后端，前端通过集成代理调用，产物中不再出现 sk-/Bearer
+const DEEPSEEK_MODEL = 'deepseek-chat';
 
 /**
  * 批量校验关系说明
@@ -133,39 +133,33 @@ ${relationsText}
  * @returns {Promise<string>} API响应内容
  */
 async function callDeepSeekAPI(prompt) {
-  if (!DEEPSEEK_API_KEY) {
-    throw new Error('DeepSeek API密钥未配置');
-  }
-
-  const response = await fetch(DEEPSEEK_API_URL, {
-    method: 'POST',
-    headers: {
-      'Content-Type': 'application/json',
-      'Authorization': `Bearer ${DEEPSEEK_API_KEY}`
-    },
-    body: JSON.stringify({
-      model: 'deepseek-chat',
-      messages: [
-        {
-          role: 'system',
-          content: '你是一位专业的业务架构顾问，擅长评估业务文档的可读性和清晰度。'
-        },
-        {
-          role: 'user',
-          content: prompt
-        }
-      ],
-      temperature: 0.3,
-      max_tokens: 2000
-    })
+  const result = await apiV2.post('/integrations/ai/validate', {
+    provider: 'deepseek',
+    model: DEEPSEEK_MODEL,
+    max_tokens: 2000,
+    messages: [
+      {
+        role: 'system',
+        content: '你是一位专业的业务架构顾问，擅长评估业务文档的可读性和清晰度。'
+      },
+      {
+        role: 'user',
+        content: prompt
+      }
+    ]
   });
 
-  if (!response.ok) {
-    throw new Error(`API请求失败: ${response.status}`);
+  if (!result.success) {
+    throw new Error(result.message || 'AI校验请求失败');
   }
 
-  const data = await response.json();
-  return data.choices[0].message.content;
+  const data = result.data || {};
+  if (!data.valid) {
+    const issue = (data.issues || [])[0];
+    throw new Error(issue?.message || 'AI校验服务暂时不可用');
+  }
+
+  return data.content;
 }
 
 /**

@@ -4,71 +4,10 @@
  */
 
 import { ValidationLevel, ValidationType } from './dataValidator.js';
+import { apiV2 } from '@/utils/httpClient';
 
-// 智谱AI API配置
-const ZHIPU_API_URL = 'https://open.bigmodel.cn/api/paas/v4/chat/completions';
-const ZHIPU_API_KEY = import.meta.env.VITE_ZHIPU_API_KEY || '';
-
-/**
- * 生成JWT Token
- * @param {string} apiKey - API Key (格式: id.secret)
- * @returns {string} JWT Token
- */
-function generateToken(apiKey) {
-  const [id, secret] = apiKey.split('.');
-  if (!id || !secret) {
-    throw new Error('智谱API Key格式错误，应为: id.secret');
-  }
-
-  const header = {
-    alg: 'HS256',
-    typ: 'JWT',
-    sign_type: 'SIGN'
-  };
-
-  const timestamp = Math.floor(Date.now() / 1000);
-  const payload = {
-    api_key: id,
-    exp: timestamp + 3600, // 1小时过期
-    timestamp: timestamp
-  };
-
-  // Base64编码
-  const encodeBase64 = (obj) => {
-    return btoa(JSON.stringify(obj)).replace(/=/g, '');
-  };
-
-  const headerStr = encodeBase64(header);
-  const payloadStr = encodeBase64(payload);
-
-  // 使用Web Crypto API进行HMAC-SHA256签名
-  const sign = async (message, secret) => {
-    const encoder = new TextEncoder();
-    const keyData = encoder.encode(secret);
-    const messageData = encoder.encode(message);
-
-    const cryptoKey = await crypto.subtle.importKey(
-      'raw',
-      keyData,
-      { name: 'HMAC', hash: 'SHA-256' },
-      false,
-      ['sign']
-    );
-
-    const signature = await crypto.subtle.sign('HMAC', cryptoKey, messageData);
-    return btoa(String.fromCharCode(...new Uint8Array(signature))).replace(/=/g, '');
-  };
-
-  // 同步方式生成token（简化版，实际使用时需要异步）
-  // 这里返回一个Promise
-  return new Promise((resolve, reject) => {
-    sign(`${headerStr}.${payloadStr}`, secret)
-      .then(signature => {
-        resolve(`${headerStr}.${payloadStr}.${signature}`);
-      })
-      .catch(reject);
-  });
-}
+// [P0-1] 密钥与 JWT 签名全部下沉后端，前端产物中不再出现智谱 key / Bearer
+const ZHIPU_MODEL = 'glm-4-flash';
 
 /**
  * 批量校验关系说明
@@ -194,43 +133,33 @@ ${relationsText}
  * @returns {Promise<string>} API响应内容
  */
 async function callZhipuAPI(prompt) {
-  if (!ZHIPU_API_KEY) {
-    throw new Error('智谱AI API密钥未配置');
-  }
-
-  // 生成JWT Token
-  const token = await generateToken(ZHIPU_API_KEY);
-
-  const response = await fetch(ZHIPU_API_URL, {
-    method: 'POST',
-    headers: {
-      'Content-Type': 'application/json',
-      'Authorization': `Bearer ${token}`
-    },
-    body: JSON.stringify({
-      model: 'glm-4-flash', // 使用免费版模型
-      messages: [
-        {
-          role: 'system',
-          content: '你是一位专业的业务架构顾问，擅长评估业务文档的可读性和清晰度。'
-        },
-        {
-          role: 'user',
-          content: prompt
-        }
-      ],
-      temperature: 0.3,
-      max_tokens: 2000
-    })
+  const result = await apiV2.post('/integrations/ai/validate', {
+    provider: 'zhipu',
+    model: ZHIPU_MODEL,
+    max_tokens: 2000,
+    messages: [
+      {
+        role: 'system',
+        content: '你是一位专业的业务架构顾问，擅长评估业务文档的可读性和清晰度。'
+      },
+      {
+        role: 'user',
+        content: prompt
+      }
+    ]
   });
 
-  if (!response.ok) {
-    const errorData = await response.json().catch(() => ({}));
-    throw new Error(`API请求失败: ${response.status} - ${errorData.error?.message || '未知错误'}`);
+  if (!result.success) {
+    throw new Error(result.message || 'AI校验请求失败');
   }
 
-  const data = await response.json();
-  return data.choices[0].message.content;
+  const data = result.data || {};
+  if (!data.valid) {
+    const issue = (data.issues || [])[0];
+    throw new Error(issue?.message || 'AI校验服务暂时不可用');
+  }
+
+  return data.content;
 }
 
 /**

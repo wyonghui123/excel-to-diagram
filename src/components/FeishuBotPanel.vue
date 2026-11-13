@@ -137,12 +137,8 @@ export default {
           return
         }
 
-        // 初始化服务
-        feishuService.init({
-          appId: config.feishuAppId,
-          appSecret: config.feishuAppSecret,
-          accessToken: config.feishuAccessToken
-        })
+        // 初始化服务（[P0-1] 凭证由后端托管，init 仅保留兼容）
+        feishuService.init()
 
         // 获取机器人信息测试连接
         const botInfo = await feishuService.getBotInfo()
@@ -227,7 +223,7 @@ export default {
       const savedConfig = localStorage.getItem('archWorkspaceConfig')
       if (savedConfig) {
         const config = JSON.parse(savedConfig)
-        if (config.feishuEnabled && config.feishuAccessToken) {
+        if (config.feishuEnabled) {
           connectBot()
         }
       }

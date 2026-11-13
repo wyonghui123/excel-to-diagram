@@ -24,27 +24,15 @@
           <p class="section-desc">配置 AI 服务提供商和 API 密钥</p>
           <div class="ss-form">
             <div class="form-group">
-              <label class="form-label">默认 AI 服务提供商</label>
-              <div class="radio-group" role="radiogroup" aria-label="AI服务提供商选择">
-                <label class="radio-option">
-                  <input type="radio" v-model="config.aiProvider" value="zhipu" />
-                  <span class="radio-text">智谱 AI</span>
-                </label>
-                <label class="radio-option">
-                  <input type="radio" v-model="config.aiProvider" value="deepseek" />
-                  <span class="radio-text">DeepSeek</span>
-                </label>
-              </div>
+              <label class="form-label">AI 服务提供商</label>
+              <span class="form-hint">{{ aiProviderLabel }}</span>
+              <span class="form-hint">由后端环境变量 AI_PROVIDER / DEEPSEEK_API_KEY / ZHIPU_API_KEY 决定</span>
             </div>
             <div class="form-group">
-              <label for="zhipuApiKey" class="form-label">智谱 API Key</label>
-              <input id="zhipuApiKey" type="password" v-model="config.zhipuApiKey" class="form-input" placeholder="请输入智谱 API Key" />
-              <span class="form-hint">用于关系说明的智能检查</span>
-            </div>
-            <div class="form-group">
-              <label for="deepseekApiKey" class="form-label">DeepSeek API Key</label>
-              <input id="deepseekApiKey" type="password" v-model="config.deepseekApiKey" class="form-input" placeholder="请输入 DeepSeek API Key" />
-              <span class="form-hint">备用 AI 服务</span>
+              <label class="form-label">API 密钥状态</label>
+              <span :class="['form-hint', integrationSettings.ai.has_key ? 'credential-ok' : 'credential-missing']">
+                {{ integrationSettings.ai.has_key ? '已在后端配置' : '未配置（请联系管理员在后端环境变量设置）' }}
+              </span>
             </div>
             <div class="form-group">
               <label for="aiModel" class="form-label">AI 校验模型</label>
@@ -65,15 +53,12 @@
           <div class="ss-form">
             <div class="form-group">
               <label for="feishuAppId" class="form-label">飞书 App ID</label>
-              <input id="feishuAppId" type="text" v-model="config.feishuAppId" class="form-input" placeholder="请输入飞书 App ID" />
+              <input id="feishuAppId" type="text" :value="integrationSettings.feishu.app_id" class="form-input" readonly placeholder="未配置（后端环境变量 FEISHU_APP_ID）" />
             </div>
             <div class="form-group">
               <label for="feishuAppSecret" class="form-label">飞书 App Secret</label>
-              <input id="feishuAppSecret" type="password" v-model="config.feishuAppSecret" class="form-input" placeholder="请输入飞书 App Secret" />
-            </div>
-            <div class="form-group">
-              <label for="feishuAccessToken" class="form-label">飞书 Access Token</label>
-              <input id="feishuAccessToken" type="password" v-model="config.feishuAccessToken" class="form-input" placeholder="请输入飞书 Access Token" />
+              <input id="feishuAppSecret" type="text" :value="integrationSettings.feishu.app_secret_masked" class="form-input" readonly placeholder="未配置（后端环境变量 FEISHU_APP_SECRET）" />
+              <span class="form-hint">密钥仅保存在后端环境变量，前端不可见、不可编辑</span>
             </div>
             <div class="form-group">
               <label for="feishuDefaultChatId" class="form-label">默认发送目标</label>
@@ -241,9 +226,10 @@
 </template>
 
 <script setup>
-import { ref, reactive, onMounted } from 'vue'
+import { ref, reactive, computed, onMounted } from 'vue'
 import AppIcon from '@/components/common/AppIcon/AppIcon.vue'
 import AppButton from '@/components/common/AppButton/AppButton.vue'
+import { apiV2 } from '@/utils/httpClient'
 import { useInstanceInfo } from '@/composables/useInstanceInfo'
 
 // [FIX 2026-10-13] 「关于」面板原硬编码 ArchWorkspace，部署改名后会与
@@ -273,12 +259,7 @@ const textColors = [
 
 const config = reactive({
   aiProvider: 'zhipu',
-  zhipuApiKey: '',
-  deepseekApiKey: '',
   aiModel: 'glm-4-flash',
-  feishuAppId: '',
-  feishuAppSecret: '',
-  feishuAccessToken: '',
   feishuDefaultChatId: '',
   feishuEnabled: false,
   defaultColorScheme: 'vibrant',
@@ -298,10 +279,27 @@ const config = reactive({
   }
 })
 
+// [P0-1] 三方密钥只由后端环境变量提供，前端仅展示脱敏状态
+const integrationSettings = reactive({
+  ai: { provider: '', has_key: false },
+  feishu: { app_id: '', has_secret: false, app_secret_masked: '' }
+})
+
+// 旧版本把密钥写进 localStorage，加载/保存时统一清理
+const LEGACY_SECRET_KEYS = ['zhipuApiKey', 'deepseekApiKey', 'feishuAppSecret', 'feishuAccessToken']
+
+const aiProviderLabel = computed(() => {
+  const provider = integrationSettings.ai.provider
+  if (provider === 'deepseek') return 'DeepSeek'
+  if (provider === 'zhipu') return '智谱 AI'
+  return '未配置'
+})
+
 const defaultConfig = { ...config, validation: { ...config.validation }, export: { ...config.export } }
 
 onMounted(() => {
   loadConfig()
+  loadIntegrations()
 })
 
 function loadConfig() {
@@ -309,6 +307,7 @@ function loadConfig() {
   if (savedConfig) {
     try {
       const parsed = JSON.parse(savedConfig)
+      LEGACY_SECRET_KEYS.forEach((key) => delete parsed[key])
       Object.assign(config, parsed)
     } catch (e) {
       console.error('加载配置失败:', e)
@@ -316,9 +315,25 @@ function loadConfig() {
   }
 }
 
+/**
+ * [P0-1] 从后端读取集成配置脱敏视图（secret 只返回 masked 状态）
+ */
+async function loadIntegrations() {
+  try {
+    const result = await apiV2.get('/system/settings/integrations')
+    if (!result.success) return
+    const data = result.data || {}
+    Object.assign(integrationSettings.ai, data.ai || {})
+    Object.assign(integrationSettings.feishu, data.feishu || {})
+  } catch (e) {
+    console.error('加载集成配置失败:', e)
+  }
+}
+
 function saveConfig() {
   saving.value = true
   setTimeout(() => {
+    // 只持久化前端偏好，密钥一律不落 localStorage
     localStorage.setItem('archWorkspaceConfig', JSON.stringify(config))
     saving.value = false
     showSuccess.value = true
@@ -334,12 +349,7 @@ async function resetConfig() {
   
   Object.assign(config, {
       aiProvider: 'zhipu',
-      zhipuApiKey: '',
-      deepseekApiKey: '',
       aiModel: 'glm-4-flash',
-      feishuAppId: '',
-      feishuAppSecret: '',
-      feishuAccessToken: '',
       feishuDefaultChatId: '',
       feishuEnabled: false,
       defaultColorScheme: 'vibrant',
@@ -366,29 +376,16 @@ async function testFeishuConnection() {
   feishuTestResult.value = null
 
   try {
-    const appId = config.feishuAppId || import.meta.env.VITE_FEISHU_APP_ID || ''
-    const appSecret = config.feishuAppSecret || import.meta.env.VITE_FEISHU_APP_SECRET || ''
-
-    if (!appId || !appSecret) {
-      feishuTestResult.value = { success: false, message: '请先配置 App ID 和 App Secret' }
+    // [P0-1] 凭证由后端环境变量托管，前端只触发后端连通性自检
+    const result = await apiV2.post('/integrations/feishu/test', {})
+    if (!result.success) {
+      feishuTestResult.value = { success: false, message: result.message || '连接失败' }
       return
     }
-
-    // eslint-disable-next-line no-restricted-globals -- 外部 API，不走 httpClient
-    const response = await fetch('https://open.feishu.cn/open-apis/auth/v3/tenant_access_token/internal', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ app_id: appId, app_secret: appSecret })
-    })
-
-    const data = await response.json()
-
-    if (data.code === 0 && data.tenant_access_token) {
-      feishuTestResult.value = { success: true, message: '连接成功！Token 已获取' }
-      config.feishuAccessToken = data.tenant_access_token
-    } else {
-      feishuTestResult.value = { success: false, message: `连接失败: ${data.msg || '未知错误'}` }
-    }
+    const data = result.data || {}
+    feishuTestResult.value = data.valid
+      ? { success: true, message: data.message || '连接成功' }
+      : { success: false, message: data.message || '连接失败：飞书凭证无效' }
   } catch (error) {
     feishuTestResult.value = { success: false, message: `请求失败: ${error.message}` }
   } finally {
@@ -532,6 +529,14 @@ async function testFeishuConnection() {
 .form-hint {
   font-size: var(--font-size-xs);
   color: var(--color-text-tertiary);
+}
+
+.credential-ok {
+  color: var(--color-success, #16a34a);
+}
+
+.credential-missing {
+  color: var(--color-warning, #d97706);
 }
 
 .form-color-picker {
