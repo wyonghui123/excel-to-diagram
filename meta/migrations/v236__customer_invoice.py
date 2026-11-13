@@ -726,6 +726,9 @@ def verify(db_path: Path) -> bool:
                     ok = False
             if _table_exists(conn, 'permission_sets') \
                     and _table_exists(conn, 'permission_set_permissions'):
+                # permission_code 在权限码规范化迁移后被移除，按实际列选择校验方式
+                grant_cols = {row[1] for row in conn.execute(
+                    'PRAGMA table_info(permission_set_permissions)')}
                 for set_code in GRANT_TO_SETS:
                     row = conn.execute(
                         'SELECT id FROM permission_sets WHERE code=? AND is_active=1',
@@ -733,10 +736,18 @@ def verify(db_path: Path) -> bool:
                     if not row:
                         continue
                     for code, _name, _rtype, _action in PERMISSIONS:
-                        if not conn.execute(
+                        if 'permission_code' in grant_cols:
+                            granted = conn.execute(
                                 'SELECT 1 FROM permission_set_permissions '
                                 'WHERE permission_set_id=? AND permission_code=?',
-                                (row[0], code)).fetchone():
+                                (row[0], code)).fetchone()
+                        else:
+                            granted = conn.execute(
+                                'SELECT 1 FROM permission_set_permissions psp '
+                                'JOIN permissions p ON p.id = psp.permission_id '
+                                'WHERE psp.permission_set_id=? AND p.code=?',
+                                (row[0], code)).fetchone()
+                        if not granted:
                             print('[v236 verify] FAIL: 权限 %s 未授予 %s'
                                   % (code, set_code))
                             ok = False
