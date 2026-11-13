@@ -63,7 +63,7 @@ HEADER_TYPES = (
 LINE_TYPES = (
     ('INV_ITEM', '物料行', 'material', 1, '按发货行 / 订单行开票的标准物料行'),
     ('INV_SERVICE', '服务行', 'service', 0, '服务类开票行（item_id 可空）'),
-    ('INV_DISCOUNT', '折扣行', 'discount', 0, '折扣 / 让价行（允许负金额）'),
+    ('INV_DISCOUNT', '折扣行', 'misc', 0, '折扣 / 让价行（允许负金额）'),
 )
 
 #: 编号序列 (code, name, pattern, date_field, start_value, on_exhaust, description)
