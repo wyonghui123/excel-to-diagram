@@ -5,6 +5,7 @@
  * 消除 7 个 Vue 组件中的 30 处 fetch() 调用和 8 类重复业务逻辑
  */
 
+import { reactive } from 'vue'
 import { apiV1, apiV2 } from '@/utils/httpClient'
 import { logger } from '@/utils/logger'
 
@@ -21,67 +22,10 @@ export const PERMISSION_LEVELS = {
   manage: { label: '管理', type: 'success' },
 }
 
-/**
- * 资源类型标签（统一来源，消除 4 处重复定义）
- */
-// [P2-Matrix-02 / Phase 6 2026-08-25] 业务对象（受权限控制的数据资源）中文标签
-// 注意: 角色/权限主体 (role/org_member) 不在此列表 —— 其权限分配走专用路径
-// [Spec 19 M2-8 2026-09-05] user/org 已作为「委托授权行」加入列表（FR-001）
-export const RESOURCE_LABELS = {
-  domain: '领域',
-  sub_domain: '子领域',
-  service_module: '服务模块',
-  business_object: '业务对象',
-  product: '产品',
-  version: '版本',
-  relationship: '关系',
-  annotation: '标注',
-  audit_log: '审计日志',
-  // [Spec 19 M2-8 2026-09-05 FR-001] 委托授权行（后端 meta 优先，此为兜底）
-  org: '组织',
-  user: '用户',
-}
-
-// [Phase 6 2026-08-25] 权限主体白名单（与后端 _IDENTITY_RESOURCE_TYPES 同步）
-//   这些 rt 不参与功能权限矩阵资源列表
-// [Spec 19 M2-8 2026-09-05 FR-001] org/user 移出主体白名单，作为「委托授权行」进矩阵
-//   （与后端 permission_dimension_api.py 2026-09-05 修改同步）；org_member 同为主体
-export const IDENTITY_RESOURCE_TYPES = new Set(['role', 'org_member'])
-
-/**
- * 维度父子映射
- *
- * 静态 fallback，优先使用 buildDimensionMapsFromConfig() 从 YAML 动态生成。
- */
-export const DIMENSION_PARENT_MAP = {
-  product: null,
-  version: 'product',
-  domain: 'version',
-  sub_domain: 'domain',
-}
-
-/**
- * 维度层级
- *
- * 静态 fallback，优先使用 buildDimensionMapsFromConfig() 从 YAML 动态生成。
- */
-export const DIMENSION_LEVEL_MAP = {
-  product: 0,
-  version: 1,
-  domain: 2,
-  sub_domain: 3,
-}
-
-/**
- * 父字段映射
- *
- * 静态 fallback，优先使用 buildDimensionMapsFromConfig() 从 YAML 动态生成。
- */
-export const PARENT_FIELD_MAP = {
-  version: 'product_id',
-  domain: 'version_id',
-  sub_domain: 'domain_id',
-}
+// [B2-2 2026-11-13] RESOURCE_LABELS / IDENTITY_RESOURCE_TYPES / DIMENSION_PARENT_MAP /
+// DIMENSION_LEVEL_MAP / PARENT_FIELD_MAP 已删除：唯一来源改为后端
+// GET /api/v2/bo/permission_dimension/meta（resource_type_labels / resource_hierarchy /
+// normalizedForTreePicker），前端通过下方 getter 读取。
 
 /**
  * 从 hierarchies.yaml 配置动态生成维度映射常量
@@ -118,25 +62,8 @@ export function buildDimensionMapsFromConfig(hierarchyConfig) {
   return { parentMap, levelMap, fieldMap, labelMap }
 }
 
-/**
- * 隐藏维度列表
- */
-export const HIDDEN_DIMENSIONS = [
-  'domain_type', 'organization', 'department', 'employee',
-  'created_by', 'created_at', 'owner_id',
-]
-
-/**
- * 操作标签
- */
-export const ACTION_LABELS = {
-  create: '创建',
-  read: '查看',
-  update: '编辑',
-  delete: '删除',
-  export: '导出',
-  manage: '管理',
-}
+// [B2-2 2026-11-13] HIDDEN_DIMENSIONS / ACTION_LABELS 已删除：隐藏维度与动作标签
+// 由后端 meta（action_labels）与 ConditionRuleEditor 的 dimensions 过滤规则统一提供。
 
 // ==================== 权限配置元数据缓存（[P1-Base-03] /meta） ====================
 
@@ -145,8 +72,20 @@ const META_CACHE_TTL_MS = 5 * 60 * 1000 // 5min
 
 /** @type {Object|null} /permission_dimension/meta 返回的 data（内存缓存） */
 let metaCache = null
+/**
+ * 响应式镜像：模板中通过 getResourceLabel/getActionLabel 读取时会追踪 metaState.data，
+ * 异步加载完成后自动触发重渲染（避免首帧显示原始 code 且永不刷新）。
+ */
+const metaState = reactive({ data: null })
 /** @type {Promise|null} 并发去重中的加载 Promise */
 let metaCachePromise = null
+/** 标签 getter 触发的后台加载是否已发起（避免重复请求） */
+let metaLoadKicked = false
+
+function setMetaCache(data) {
+  metaCache = data
+  metaState.data = data
+}
 
 function readLocalMetaCache() {
   try {
@@ -182,20 +121,20 @@ export async function loadPermissionMeta() {
   metaCachePromise = (async () => {
     const local = readLocalMetaCache()
     if (local) {
-      metaCache = local
+      setMetaCache(local)
       return local
     }
     try {
       const r = await apiV2.get('/bo/permission_dimension/meta')
       if (r.success && r.data) {
-        metaCache = r.data
+        setMetaCache(r.data)
         writeLocalMetaCache(r.data)
         return r.data
       }
-      logger?.warn?.('[permissionService] loadPermissionMeta 失败，labels 走常量 fallback')
+      logger?.warn?.('[permissionService] loadPermissionMeta 失败，labels 显示原始 code')
       return null
     } catch (e) {
-      logger?.warn?.('[permissionService] loadPermissionMeta 异常，labels 走常量 fallback', e)
+      logger?.warn?.('[permissionService] loadPermissionMeta 异常，labels 显示原始 code', e)
       return null
     }
   })().finally(() => { metaCachePromise = null })
@@ -204,10 +143,26 @@ export async function loadPermissionMeta() {
 }
 
 /**
+ * 标签 getter 的惰性加载入口（fire-and-forget）
+ *
+ * metaState 为响应式，加载完成后模板自动刷新；失败/未登录时静默，getter 返回原始 code。
+ */
+function ensureMetaLoaded() {
+  if (metaState.data || metaLoadKicked) return
+  const local = readLocalMetaCache()
+  if (local) {
+    setMetaCache(local)
+    return
+  }
+  metaLoadKicked = true
+  loadPermissionMeta().catch(() => { /* getter 侧静默 */ }).finally(() => { metaLoadKicked = false })
+}
+
+/**
  * 清除权限配置元数据缓存（改 yaml 后调试用）
  */
 export function invalidatePermissionMetaCache() {
-  metaCache = null
+  setMetaCache(null)
   try { localStorage.removeItem(META_CACHE_KEY) } catch (_) { /* ignore */ }
 }
 
@@ -264,33 +219,42 @@ export function getPermissionLevelType(level) {
  * @returns {string}
  */
 export function getPermissionLevelLabel(level) {
-  const levels = metaCache?.permission_level_labels
+  ensureMetaLoaded()
+  const levels = metaState.data?.permission_level_labels
   if (levels && levels[level]?.label) return levels[level].label
   return PERMISSION_LEVELS[level]?.label ?? level
 }
 
 /**
  * 资源类型 -> 中文标签
- * [P1-Base-03] metaCache（/permission_dimension/meta）优先，fallback 常量
+ * [B2-2] 唯一来源：后端 meta.resource_type_labels（缺失时返回原始 code）
  * @param {string} resourceType
  * @returns {string}
  */
 export function getResourceLabel(resourceType) {
-  const labels = metaCache?.resource_type_labels
-  if (labels && labels[resourceType]) return labels[resourceType]
-  return RESOURCE_LABELS[resourceType] ?? resourceType
+  ensureMetaLoaded()
+  return metaState.data?.resource_type_labels?.[resourceType] ?? resourceType
 }
 
 /**
  * 动作 -> 中文标签
- * [P1-Base-03] metaCache（/permission_dimension/meta）优先，fallback 常量
+ * [B2-2] 唯一来源：后端 meta.action_labels（缺失时返回原始 code）
  * @param {string} action - 'create'|'read'|'update'|'delete'|'export'|'manage'
  * @returns {string}
  */
 export function getActionLabel(action) {
-  const labels = metaCache?.action_labels
-  if (labels && labels[action]) return labels[action]
-  return ACTION_LABELS[action] ?? action
+  ensureMetaLoaded()
+  return metaState.data?.action_labels?.[action] ?? action
+}
+
+/**
+ * 资源类型标签映射（响应式，供 select options 等服务层无 props 场景使用）
+ * [B2-2] 唯一来源：后端 meta.resource_type_labels
+ * @returns {Record<string, string>}
+ */
+export function getResourceTypeLabels() {
+  ensureMetaLoaded()
+  return metaState.data?.resource_type_labels || {}
 }
 
 /**
@@ -648,6 +612,16 @@ export async function resolveDimensionScopePreview(roleId, scopes) {
 }
 
 /**
+ * [B2-5 / P1-12] 维度范围覆盖预览（已保存范围）
+ * 由后端 DimensionScopeEngine 推导数据权限条件并统计可见行数。
+ * @param {number} roleId
+ * @returns {Promise<object>} data: { permission_set_id, scope_count, objects[], total }
+ */
+export async function previewDimensionScopeCoverage(roleId) {
+  return await apiV1.get(`/permission-sets/${roleId}/dimension-scopes/scope-preview`)
+}
+
+/**
  * 自动推导权限
  * @param {number} roleId
  * @returns {Promise<object>}
@@ -759,14 +733,6 @@ export async function loadResources(resourceType, params = {}) {
 export default {
   // 常量
   PERMISSION_LEVELS,
-  RESOURCE_LABELS,
-  DIMENSION_PARENT_MAP,
-  DIMENSION_LEVEL_MAP,
-  PARENT_FIELD_MAP,
-  HIDDEN_DIMENSIONS,
-  ACTION_LABELS,
-  RESOURCE_LABELS,
-  IDENTITY_RESOURCE_TYPES,
   // 动态映射生成（从 hierarchies.yaml 配置）
   buildDimensionMapsFromConfig,
   // 纯函数

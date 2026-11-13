@@ -126,7 +126,7 @@ const message = useMessage()
 const objectTypesMap = ref({})
 const resourceTypes = computed(() => {
   if (!objectTypesMap.value || Object.keys(objectTypesMap.value).length === 0) {
-    return Object.entries(permService.RESOURCE_LABELS).map(([value, label]) => ({ value, label }))
+    return Object.entries(permService.getResourceTypeLabels()).map(([value, label]) => ({ value, label }))
   }
   const list = []
   for (const [id, obj] of Object.entries(objectTypesMap.value)) {

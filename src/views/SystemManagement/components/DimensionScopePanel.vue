@@ -96,6 +96,14 @@
         {{ autoDeriving ? '推导中...' : '自动推导并应用' }}
       </button>
       <div class="actions-spacer"></div>
+      <span
+        v-if="coverage"
+        class="scope-coverage"
+        data-test="scope-coverage"
+        style="font-size: 12px; color: var(--color-text-secondary); margin-right: 12px;"
+      >
+        预计可见 {{ coverage.total }} 行 / {{ coverage.objects.length }} 个对象
+      </span>
       <button
         class="btn btn-primary"
         @click="saveDimensionScopes"
@@ -122,6 +130,38 @@ import { AppButton, AppIcon } from '@/components/common'
 import SearchHelpDialog from '@/components/common/SearchHelpDialog.vue'
 import * as permService from '@/services/permissionService'
 import { useCrudMessage } from '@/composables/useCrudMessage'
+
+// [B2-2 2026-11-13] 维度层级/父子/父字段唯一来源 = 后端 meta：
+//   resource_hierarchy（level/parent）+ normalizedForTreePicker（filter_param）。
+//   前端不再维护 DIMENSION_LEVEL_MAP / DIMENSION_PARENT_MAP / PARENT_FIELD_MAP。
+const dimensionMaps = reactive({
+  levelMap: {},
+  parentMap: {},
+  fieldMap: {},
+})
+
+async function loadDimensionMaps() {
+  try {
+    const meta = await permService.loadPermissionMeta()
+    if (!meta) return
+    const hierarchy = meta.resource_hierarchy || {}
+    for (const [code, cfg] of Object.entries(hierarchy)) {
+      dimensionMaps.levelMap[code] = cfg?.level
+      dimensionMaps.parentMap[code] = cfg?.parent || null
+    }
+    const walk = (nodes) => {
+      for (const node of nodes || []) {
+        if (node?.object && node?.filter_param) {
+          dimensionMaps.fieldMap[node.object] = node.filter_param
+        }
+        if (node?.children?.length) walk(node.children)
+      }
+    }
+    walk(meta.normalizedForTreePicker || [])
+  } catch (e) {
+    console.error('[DimensionScopePanel] load dimension meta failed:', e)
+  }
+}
 
 const props = defineProps({
   permissionSetId: {
@@ -155,6 +195,8 @@ const inheritFlags = reactive({})
 const scopeAllFlags = reactive({})  // [P1-T5] scope_mode='all' 标记
 const saving = ref(false)
 const refreshTrigger = ref(0)
+// [B2-5 / P1-12] 覆盖行数由后端 scope-preview 计算，前端不再推导范围规则
+const coverage = ref(null)
 const readyFlag = ref(0)
 const autoDeriving = ref(false)
 
@@ -266,8 +308,8 @@ async function warmupNameCache(dimId, valueIds) {
 
 const sortedDimensions = computed(() => {
   return [...dimensions.value].sort((a, b) => {
-    const levelA = permService.DIMENSION_LEVEL_MAP[a.id] ?? 99
-    const levelB = permService.DIMENSION_LEVEL_MAP[b.id] ?? 99
+    const levelA = dimensionMaps.levelMap[a.id] ?? 99
+    const levelB = dimensionMaps.levelMap[b.id] ?? 99
     return levelA - levelB
   })
 })
@@ -277,24 +319,24 @@ const configuredCount = computed(() =>
 )
 
 function getParentDim(dimId) {
-  const parentId = permService.DIMENSION_PARENT_MAP[dimId]
+  const parentId = dimensionMaps.parentMap[dimId]
   if (!parentId) return null
   return dimensions.value.find(d => d.id === parentId) || null
 }
 
 function hasParentValues(dimId) {
-  const parentId = permService.DIMENSION_PARENT_MAP[dimId]
+  const parentId = dimensionMaps.parentMap[dimId]
   if (!parentId) return true
   const vals = selectedValues[parentId] || []
   return vals.length > 0
 }
 
 function getParentFilterParams(dimId) {
-  const parentId = permService.DIMENSION_PARENT_MAP[dimId]
+  const parentId = dimensionMaps.parentMap[dimId]
   if (!parentId) return {}
   const parentValues = selectedValues[parentId] || []
   if (parentValues.length === 0) return {}
-  const parentField = permService.PARENT_FIELD_MAP[dimId]
+  const parentField = dimensionMaps.fieldMap[dimId]
   if (!parentField) return {}
   return { [`filter_${parentField}`]: parentValues.map(v => v.id) }
 }
@@ -303,8 +345,8 @@ function cascadeClearDownstream(dimId) {
   const queue = [dimId]
   while (queue.length > 0) {
     const currentId = queue.shift()
-    for (const childId of Object.keys(permService.DIMENSION_PARENT_MAP)) {
-      if (permService.DIMENSION_PARENT_MAP[childId] === currentId) {
+    for (const childId of Object.keys(dimensionMaps.parentMap)) {
+      if (dimensionMaps.parentMap[childId] === currentId) {
         selectedValues[childId] = []
         queue.push(childId)
       }
@@ -315,8 +357,8 @@ function cascadeClearDownstream(dimId) {
 const parentValueSnapshots = reactive({})
 
 function snapshotParentValues() {
-  for (const childId of Object.keys(permService.DIMENSION_PARENT_MAP)) {
-    const parentId = permService.DIMENSION_PARENT_MAP[childId]
+  for (const childId of Object.keys(dimensionMaps.parentMap)) {
+    const parentId = dimensionMaps.parentMap[childId]
     if (parentId) {
       parentValueSnapshots[childId] = [...(selectedValues[parentId] || [])].map(v => v.id).sort().join(',')
     }
@@ -325,8 +367,8 @@ function snapshotParentValues() {
 
 watch(() => {
   const result = {}
-  for (const childId of Object.keys(permService.DIMENSION_PARENT_MAP)) {
-    const parentId = permService.DIMENSION_PARENT_MAP[childId]
+  for (const childId of Object.keys(dimensionMaps.parentMap)) {
+    const parentId = dimensionMaps.parentMap[childId]
     if (parentId) {
       result[childId] = [...(selectedValues[parentId] || [])].map(v => v.id).sort().join(',')
     }
@@ -337,7 +379,7 @@ watch(() => {
     const oldSnapshot = parentValueSnapshots[childId]
     const newSnapshot = newSnapshots[childId]
     if (oldSnapshot !== undefined && oldSnapshot !== newSnapshot) {
-      cascadeClearDownstream(permService.DIMENSION_PARENT_MAP[childId])
+      cascadeClearDownstream(dimensionMaps.parentMap[childId])
     }
   }
   snapshotParentValues()
@@ -422,6 +464,7 @@ async function loadDimensionScopes() {
   if (!props.permissionSetId) return
   // [GUARD 2026-06-14] 'new' 是创建态 (role 尚未保存), 后端期望 int permission_set_id
   if (!/^\d+$/.test(String(props.permissionSetId))) return
+  loadScopeCoverage()
   try {
     const result = await permService.loadDimensionScopes(props.permissionSetId)
     if (result.success && result.data) {
@@ -604,12 +647,24 @@ async function saveDimensionScopesInternal() {
   return result
 }
 
+// [B2-5 / P1-12] 覆盖行数预览：后端按已保存范围推导数据权限条件并统计
+async function loadScopeCoverage() {
+  if (!/^\d+$/.test(String(props.permissionSetId))) return
+  try {
+    const result = await permService.previewDimensionScopeCoverage(props.permissionSetId)
+    coverage.value = result?.success ? (result.data || null) : null
+  } catch (e) {
+    coverage.value = null
+  }
+}
+
 async function saveDimensionScopes() {
   saving.value = true
   try {
     await saveDimensionScopesInternal()
     message.saved('维度范围')
     emit('dimension-scopes-saved')
+    loadScopeCoverage()
   } catch (e) {
     console.error('Save dimension scopes failed:', e)
     message.error('保存维度范围失败：' + (e?.message || '请稍后重试'), e)
@@ -619,6 +674,7 @@ async function saveDimensionScopes() {
 }
 
 onMounted(async () => {
+  await loadDimensionMaps()
   await loadDimensions()
   await loadDimensionScopes()
   initParentSnapshots()

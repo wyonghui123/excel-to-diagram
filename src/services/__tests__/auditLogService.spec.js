@@ -4,7 +4,7 @@
  * 覆盖核心纯函数 + API 函数:
  * 1. buildLogFilter - URL filter 参数构建 (含 parent_object)
  * 2. getLogsByObject - 含 parentObjectType/parentObjectId 的 API 调用
- * 3. formatLogAction / formatLogLevel / formatLogCategory / getFieldDisplayName
+ * 3. getFieldDisplayName
  * 4. parseTargetDisplay
  *
  * [FIX 2026-06-12] 父对象查询支持 - RoleDetailDrawer 同时拉子对象日志
@@ -140,26 +140,6 @@ describe('auditLogService', () => {
         success: true,
         data: { items: [{ id: 1 }], total: 1 },
       })
-    })
-  })
-
-  describe('formatLogAction / formatLogLevel / formatLogCategory', () => {
-    it('formatLogAction 映射常见 action', () => {
-      expect(auditLogService.formatLogAction('CREATE')).toBe('创建')
-      expect(auditLogService.formatLogAction('UPDATE')).toBe('更新')
-      expect(auditLogService.formatLogAction('DELETE')).toBe('删除')
-      expect(auditLogService.formatLogAction('UNKNOWN')).toBe('UNKNOWN')
-      expect(auditLogService.formatLogAction('')).toBe('')
-    })
-
-    it('formatLogLevel 映射 level', () => {
-      expect(auditLogService.formatLogLevel('INFO')).toBe('信息')
-      expect(auditLogService.formatLogLevel('ERROR')).toBe('错误')
-    })
-
-    it('formatLogCategory 映射 category', () => {
-      expect(auditLogService.formatLogCategory('permission')).toBe('权限')
-      expect(auditLogService.formatLogCategory('security')).toBe('安全')
     })
   })
 

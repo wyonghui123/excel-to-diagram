@@ -654,6 +654,48 @@ def resolve_dim_scope_preview(permission_set_id):
         return error_response(str(e), status=500)
 
 
+@role_dim_bp.route('/<int:permission_set_id>/dimension-scopes/scope-preview',
+                   methods=['GET'])
+@login_required
+def preview_dimension_scope_coverage(permission_set_id):
+    """[B2-5 / P1-12] 维度范围覆盖预览（已保存范围）
+
+    复用 DimensionScopeEngine.derive_data_conditions 生成各 BO 的数据权限条件，
+    由后端统计"该范围能看到多少行"，前端不再本地推导规则。
+
+    返回: {permission_set_id, scope_count, objects: [{table, condition, count}], total}
+    """
+    try:
+        ds = _ds()
+        from meta.services.dimension_scope_engine import DimensionScopeEngine
+        eng = DimensionScopeEngine(ds)
+        conditions = eng.derive_data_conditions(permission_set_id) or {}
+        objects = []
+        total = 0
+        for table, condition in conditions.items():
+            if not condition:
+                continue
+            try:
+                row = ds.execute(
+                    f"SELECT COUNT(*) FROM {table} WHERE {condition}"
+                ).fetchone()
+                count = int(row[0]) if row else 0
+            except Exception:
+                count = None
+            objects.append({'table': table, 'condition': condition, 'count': count})
+            if count:
+                total += count
+        scope_count = len(_load_scopes_raw(ds, permission_set_id))
+        return ok({
+            'permission_set_id': permission_set_id,
+            'scope_count': scope_count,
+            'objects': objects,
+            'total': total,
+        })
+    except Exception as e:  # noqa: BLE001
+        return error_response(str(e), status=500)
+
+
 @role_dim_bp.route('/<int:permission_set_id>/derived-permissions', methods=['GET'])
 @login_required
 def get_derived_permissions(permission_set_id):

@@ -1056,6 +1056,52 @@ def evaluate_bo_actions(object_type):
     return ok(result)
 
 
+@bo_bp.route('/<object_type>/validate', methods=['POST'])
+@login_required
+def validate_bo_payload(object_type):
+    """[B2-4] 字段策略校验下沉。
+
+    body: {"data": {...}, "object_id": 可选, "mode": "create"|"update"}
+    resp: {"valid": bool, "errors": [{field_id, field_name, message, error_code}]}
+    """
+    meta_obj = registry.get(object_type)
+    if meta_obj is None:
+        return error_response(f'Object type not found: {object_type}', status=404)
+
+    body = request.get_json(silent=True) or {}
+    data = body.get('data')
+    if not isinstance(data, dict):
+        return error_response('data 必须是对象', error_code='INVALID_ARGUMENT', status=400)
+
+    object_id = body.get('object_id')
+    mode = body.get('mode')
+    if mode not in ('create', 'update'):
+        mode = 'update' if object_id is not None else 'create'
+
+    from meta.services.field_policy_validation import create_validation_interceptor
+
+    user = _get_current_user_safe() or {}
+    user_context = {'user_id': user.get('user_id') or user.get('id'), 'roles': _current_user_roles()}
+    interceptor = create_validation_interceptor(meta_obj, _get_data_source())
+    if mode == 'update' and object_id is not None:
+        result = interceptor.validate_update(object_id, data, user_context)
+    else:
+        result = interceptor.validate_create(data, user_context)
+
+    return ok({
+        'valid': result.valid,
+        'errors': [
+            {
+                'field_id': err.field_id,
+                'field_name': err.field_name,
+                'message': err.message,
+                'error_code': err.error_code,
+            }
+            for err in result.errors
+        ],
+    })
+
+
 @bo_bp.route('/<object_type>/conditions/evaluate', methods=['POST'])
 @login_required
 def evaluate_bo_conditions(object_type):

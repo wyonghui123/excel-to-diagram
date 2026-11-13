@@ -75,6 +75,16 @@ async function mountReady(props = {}) {
     props: {
       matrix: MOCK_MATRIX,
       supportedActions: MOCK_SUPPORTED,
+      // [B2-2 2026-11-13] 动作标签唯一来源 = 后端 meta.action_labels（props）
+      actionLabels: {
+        read: '查看',
+        list: '列表',
+        create: '创建',
+        update: '编辑',
+        delete: '删除',
+        export: '导出',
+        manage: '管理',
+      },
       ...props,
     },
     attachTo: document.body,

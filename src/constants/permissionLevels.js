@@ -5,6 +5,9 @@
  * 与后端 permission_rule 表的 permission_level 字段保持一致
  */
 
+// TODO-1 [2026-11-13] D-1 决策：manage 权限等级的归一本轮不处理。
+// 后端 meta_enum_api.PERMISSION_LEVELS 为 none/read/write/admin，本文件保留 manage
+// 以兼容历史数据；后续统一时再删除本文件并全部改读 /api/v2/meta/enums/permission_level。
 export const PERMISSION_LEVELS = [
   { value: 'none', label: '无权限' },
   { value: 'read', label: '只读' },

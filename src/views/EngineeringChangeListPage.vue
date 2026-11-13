@@ -22,7 +22,7 @@
           @change="handleSearch"
         >
           <el-option
-            v-for="option in STATUS_OPTIONS"
+            v-for="option in statusOptions"
             :key="option.value"
             :label="option.label"
             :value="option.value"
@@ -116,30 +116,18 @@ import { reactive, ref, onMounted } from 'vue'
 import { useRouter } from 'vue-router'
 import { PageShell, AppButton } from '@/components/common'
 import { listChanges } from '@/services/engineeringChangeService'
+import { getEnum } from '@/services/metaEnumService'
 
 defineOptions({ name: 'EngineeringChangeListPage' })
 
-const STATUS_OPTIONS = [
-  { value: 'draft', label: '草稿' },
-  { value: 'in_review', label: '评审中' },
-  { value: 'approved', label: '已批准' },
-  { value: 'applied', label: '已应用' },
-  { value: 'rejected', label: '已驳回' },
-  { value: 'cancelled', label: '已取消' }
-]
-
-const STATUS_TAG_TYPES = {
-  draft: 'info',
-  in_review: 'primary',
-  approved: 'success',
-  applied: 'success',
-  rejected: 'danger',
-  cancelled: 'warning'
-}
-
+// [B2-3 2026-11-13] 状态枚举由后端 /api/v2/meta/enums/engineering_change_status 下发，
+// 前端不再维护 label/color 副本。
 const router = useRouter()
 
 const filters = reactive({ status: '' })
+const statusOptions = ref([])
+const statusLabelMap = ref({})
+const statusTagMap = ref({})
 const rows = ref([])
 const total = ref(0)
 const page = ref(1)
@@ -148,11 +136,11 @@ const loading = ref(false)
 const error = ref('')
 
 function statusLabel(status) {
-  return STATUS_OPTIONS.find(option => option.value === status)?.label || status || '—'
+  return statusLabelMap.value[status] || status || '—'
 }
 
 function statusTagType(status) {
-  return STATUS_TAG_TYPES[status] || 'info'
+  return statusTagMap.value[status] || 'info'
 }
 
 function itemLabel(row) {
@@ -226,7 +214,23 @@ async function load() {
   }
 }
 
-onMounted(load)
+async function loadStatusEnum() {
+  try {
+    const items = await getEnum('engineering_change_status')
+    statusOptions.value = items.map(item => ({ value: item.value, label: item.label }))
+    statusLabelMap.value = Object.fromEntries(items.map(item => [item.value, item.label]))
+    statusTagMap.value = Object.fromEntries(
+      items.filter(item => item.color).map(item => [item.value, item.color])
+    )
+  } catch (e) {
+    statusOptions.value = []
+  }
+}
+
+onMounted(async () => {
+  await loadStatusEnum()
+  load()
+})
 </script>
 
 <style scoped lang="scss">

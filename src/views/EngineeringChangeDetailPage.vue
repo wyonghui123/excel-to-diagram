@@ -252,6 +252,7 @@ import { ElMessageBox } from 'element-plus'
 import { PageShell, AppCard, AppButton } from '@/components/common'
 import { useAuthStore } from '@/stores/authStore'
 import { can } from '@/services/permissionService'
+import { getEnum } from '@/services/metaEnumService'
 import {
   getChange,
   getImpact,
@@ -264,23 +265,10 @@ import {
 
 defineOptions({ name: 'EngineeringChangeDetailPage' })
 
-const STATUS_LABELS = {
-  draft: '草稿',
-  in_review: '评审中',
-  approved: '已批准',
-  applied: '已应用',
-  rejected: '已驳回',
-  cancelled: '已取消'
-}
-
-const STATUS_TAG_TYPES = {
-  draft: 'info',
-  in_review: 'primary',
-  approved: 'success',
-  applied: 'success',
-  rejected: 'danger',
-  cancelled: 'warning'
-}
+// [B2-3 2026-11-13] 状态枚举由后端 /api/v2/meta/enums/engineering_change_status 下发，
+// 前端不再维护 label/color 副本。
+const statusLabelMap = ref({})
+const statusTagMap = ref({})
 
 const CHANGE_TYPE_LABELS = {
   new: '首次工程 BOM',
@@ -335,11 +323,11 @@ const canCancel = computed(
 const canApply = computed(() => status.value === 'approved' && hasApply.value)
 
 function statusLabel(value) {
-  return STATUS_LABELS[value] || value || '—'
+  return statusLabelMap.value[value] || value || '—'
 }
 
 function statusTagType(value) {
-  return STATUS_TAG_TYPES[value] || 'info'
+  return statusTagMap.value[value] || 'info'
 }
 
 function changeTypeLabel(value) {
@@ -500,7 +488,21 @@ async function handleApply() {
   runAction('apply', () => applyChange(changeId.value), '已应用到生产 BOM')
 }
 
-onMounted(() => {
+async function loadStatusEnum() {
+  try {
+    const items = await getEnum('engineering_change_status')
+    statusLabelMap.value = Object.fromEntries(items.map(item => [item.value, item.label]))
+    statusTagMap.value = Object.fromEntries(
+      items.filter(item => item.color).map(item => [item.value, item.color])
+    )
+  } catch (e) {
+    statusLabelMap.value = {}
+    statusTagMap.value = {}
+  }
+}
+
+onMounted(async () => {
+  await loadStatusEnum()
   loadChange()
   loadImpact()
 })

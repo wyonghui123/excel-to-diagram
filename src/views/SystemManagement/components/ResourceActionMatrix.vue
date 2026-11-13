@@ -659,27 +659,8 @@ function instanceScopeTag(action) {
   return INSTANCE_SCOPE_LABEL[scope] || INSTANCE_SCOPE_LABEL.instance
 }
 
-/** 动作中文兜底（优先 props.actionLabels） */
-const DEFAULT_ACTION_LABELS = {
-  create: '创建',
-  read: '查看',
-  list: '列表',
-  update: '编辑',
-  delete: '删除',
-  export: '导出',
-  manage: '管理',
-  // [Spec 22 FR-005 2026-09-13] state_transition 通用 action 标签（与后端 _ACTION_LABELS 同步）
-  // 兜底：万一后端 actionLabels 未下发，前端也能显示中文
-  import: '导入',
-  activate: '启用', deactivate: '停用',
-  lock: '锁定', unlock: '解锁',
-  freeze: '冻结', unfreeze: '解冻',
-  reset_password: '重置密码',
-  approve: '审批', search: '搜索',
-  assign: '分配', unassign: '取消分配',
-  associate: '关联', dissociate: '取消关联',
-  grant: '授权', revoke: '撤销',
-}
+// [B2-2 2026-11-13] DEFAULT_ACTION_LABELS 副本已删除：
+// 动作标签唯一来源 = props.actionLabels（后端 meta.action_labels），缺失时显示原始 action code。
 
 // [T-P1-3-C 2026-09-16] TS defineProps 替代原 defineProps({...}) 运行时声明
 //   14 个 props 类型化 + 4 个 emits 类型化，类型定义收敛到 ../constants/permissionConstants.ts
@@ -1042,7 +1023,7 @@ function resourceLabel(row) {
 }
 
 function actionLabel(action) {
-  return props.actionLabels[action] || DEFAULT_ACTION_LABELS[action] || action
+  return props.actionLabels?.[action] || action
 }
 
 function sourceLabel(source) {

@@ -48,40 +48,60 @@ export function useBoActionForm(actionId, options = {}) {
     }
   }
 
-  // 校验
-  function validate() {
+  // 校验（[B2-4 2026-11-13] 字段策略校验由后端 POST /bo/<code>/validate 承担）
+  function validateField(fieldName, fieldSchema) {
+    const value = formData[fieldName]
+    if (schema.value.required?.includes(fieldName)
+      && (value === undefined || value === null || value === '')) {
+      errors[fieldName] = `${fieldName} 必填`
+      return false
+    }
+    if (value !== undefined && value !== null && fieldSchema.type) {
+      if ((fieldSchema.type === 'integer' || fieldSchema.type === 'number') && isNaN(Number(value))) {
+        errors[fieldName] = `${fieldName} 必须是数字`
+        return false
+      }
+      if (fieldSchema.type === 'string' && fieldSchema.minLength
+        && String(value).length < fieldSchema.minLength) {
+        errors[fieldName] = `${fieldName} 长度不能少于 ${fieldSchema.minLength}`
+        return false
+      }
+    }
+    if (fieldSchema.enum && !fieldSchema.enum.includes(value)) {
+      errors[fieldName] = `${fieldName} 必须是 ${fieldSchema.enum.join('/')}`
+      return false
+    }
+    return true
+  }
+
+  // 字段策略（必填/只读/条件）由后端唯一判定
+  async function validateByBackend() {
+    const objectType = actionId.split('.')[0]
+    try {
+      const res = await apiV2.post(`/bo/${objectType}/validate`, { data: buildPayload() })
+      if (!res.success) return false
+      const payload = res.data || {}
+      for (const err of payload.errors || []) {
+        const key = err.field_name || err.field_id || '_form'
+        errors[key] = err.message || err.error_code || '字段校验失败'
+      }
+      return payload.valid !== false
+    } catch (e) {
+      // fail-closed：后端不可用时不允许提交
+      errors._form = e?.message || '字段校验服务不可用'
+      return false
+    }
+  }
+
+  async function validate() {
     Object.keys(errors).forEach(k => delete errors[k])
     if (!schema.value || !schema.value.properties) return true
     let valid = true
     for (const [fieldName, fieldSchema] of Object.entries(schema.value.properties)) {
-      const value = formData[fieldName]
-      // required 校验
-      if (schema.value.required?.includes(fieldName)) {
-        if (value === undefined || value === null || value === '') {
-          errors[fieldName] = `${fieldName} 必填`
-          valid = false
-        }
-      }
-      // type 校验
-      if (value !== undefined && value !== null && fieldSchema.type) {
-        if (fieldSchema.type === 'integer' || fieldSchema.type === 'number') {
-          if (isNaN(Number(value))) {
-            errors[fieldName] = `${fieldName} 必须是数字`
-            valid = false
-          }
-        }
-        if (fieldSchema.type === 'string' && fieldSchema.minLength && String(value).length < fieldSchema.minLength) {
-          errors[fieldName] = `${fieldName} 长度不能少于 ${fieldSchema.minLength}`
-          valid = false
-        }
-      }
-      // enum 校验
-      if (fieldSchema.enum && !fieldSchema.enum.includes(value)) {
-        errors[fieldName] = `${fieldName} 必须是 ${fieldSchema.enum.join('/')}`
-        valid = false
-      }
+      if (!validateField(fieldName, fieldSchema)) valid = false
     }
-    return valid
+    if (!valid) return false
+    return await validateByBackend()
   }
 
   // 构造 payload (只含 schema 中声明的字段)
@@ -97,7 +117,7 @@ export function useBoActionForm(actionId, options = {}) {
   }
 
   async function submit() {
-    if (!validate()) {
+    if (!(await validate())) {
       return { success: false, message: '表单校验失败' }
     }
     submitting.value = true

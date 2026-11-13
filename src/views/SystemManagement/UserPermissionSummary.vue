@@ -45,7 +45,7 @@
         <div v-for="(actions, resource) in groupedPermissions" :key="resource" class="perm-resource-item">
           <span class="perm-resource-name">{{ getResourceLabel(resource) }}</span>
           <div class="perm-resource-actions">
-            <span v-for="action in actions" :key="action" class="sm-tag sm-tag-success">{{ ACTION_LABELS[action] || action }}</span>
+            <span v-for="action in actions" :key="action" class="sm-tag sm-tag-success">{{ permService.getActionLabel(action) }}</span>
           </div>
         </div>
       </div>
@@ -66,7 +66,7 @@
         <div v-for="perm in user.data_permissions" :key="perm.id" class="perm-data-item">
           <div class="perm-data-header">
             <span class="perm-data-resource">{{ getResourceLabel(perm.resource_type) }}</span>
-            <span class="sm-tag" :class="'level-' + (perm.permission_level || 'read')">{{ LEVEL_LABELS[perm.permission_level] || perm.permission_level }}</span>
+            <span class="sm-tag" :class="'level-' + (perm.permission_level || 'read')">{{ getPermLevelLabel(perm.permission_level) }}</span>
           </div>
           <div class="perm-data-detail">
             <span class="perm-data-id">ID: {{ perm.resource_id }}</span>
@@ -91,11 +91,9 @@ function getResourceLabel(resource) {
   return permService.getResourceLabel(resource)
 }
 
-const ACTION_LABELS = permService.ACTION_LABELS
-
-const LEVEL_LABELS = Object.fromEntries(
-  Object.entries(permService.PERMISSION_LEVELS).map(([key, val]) => [key, val.label])
-)
+function getPermLevelLabel(level) {
+  return permService.getPermissionLevelLabel(level) || level || '—'
+}
 
 const groupedPermissions = computed(() => {
   const groups = {}

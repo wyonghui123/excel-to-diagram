@@ -8,8 +8,8 @@
  *
  * [P1-A 2026-07-25] action 翻译/颜色单一事实源迁移到后端 /audit/meta/actions
  *   - 启动时 auditMetaStore.loadActions() 拉取 enum_values 并缓存
- *   - getActionLabel / getActionTagType 优先读 store, 本地 ACTION_LABELS /
- *     ACTION_TAG_TYPES 仅作为降级 fallback (网络失败/启动未完成时)
+ *   - getActionLabel / getActionTagType 优先读 store，本地 ACTION_TAG_TYPES
+ *     仅作为降级 fallback (网络失败/启动未完成时)；ACTION_LABELS 副本已移除
  *   - 详见 stores/auditMetaStore.js + services/auditLogService.js#getMetaActions
  */
 
@@ -86,71 +86,9 @@ export const OBJECT_TYPE_LABELS = {
 }
 
 /**
- * action → 业务动作 翻译表
- *
- * 列表 + 详情都依赖此翻译
- * 优先级: 业务动作 > 系统动作 (运维类归为系统)
+ * action 标签来源已统一为后端 /audit/meta/actions（auditMetaStore），
+ * 本地副本表已于 B2-3 移除，见 getActionLabel 降级逻辑。
  */
-export const ACTION_LABELS = {
-  // 业务 CRUD
-  CREATE: '创建',
-  UPDATE: '更新',
-  DELETE: '删除',
-  DELETE_BLOCKED: '删除已阻止',
-  READ: '查看',
-  RESTORE: '恢复',
-  EXECUTE: '执行',
-
-  // 业务关联
-  ASSOCIATE: '添加关联',
-  DISSOCIATE: '移除关联',
-  ASSIGN: '分配',
-  UNASSIGN: '取消分配',
-  REVOKE: '撤销',
-
-  // 批量
-  BATCH_CREATE: '批量创建',
-  BATCH_UPDATE: '批量更新',
-  BATCH_DELETE: '批量删除',
-  BATCH_IMPORT: '批量导入',
-
-  // 工作流 / 任务
-  SUBFLOW: '执行子流程',
-  METRIC_RECORD: '性能指标记录',  // [FIX 2026-07-22] log_performance 占位，metric_name 在 extra_data
-  SYNC: '数据同步',
-  DATA_SYNC: '数据同步',
-  EXPORT: '导出',
-  IMPORT: '导入',
-
-  // 认证 + 安全
-  LOGIN: '登录',
-  LOGOUT: '登出',
-  LOGIN_FAILED: '登录失败',
-  PASSWORD_CHANGE: '密码修改',
-  RESET_PASSWORD: '重置密码',
-  PERMISSION_DENIED: '权限拒绝',
-  SQL_INJECTION_ATTEMPT: 'SQL 注入拦截',
-  unlock: '解锁',
-
-  // 系统 + 配置
-  STARTUP: '系统启动',
-  SHUTDOWN: '系统关闭',
-  CONFIG_CHANGE: '配置变更',
-  CONFIG_ERROR: '配置错误',
-  TEST: '测试操作',
-
-  // 审计系统 (业务视图隐藏, 仅审计员可见)
-  AUDIT_WRITE_FAILED: '审计写入失败',
-  AUDIT_RETRY_SUCCESS: '审计重试成功',
-  AUDIT_RETRY_FAILED: '审计重试失败',
-  CASCADE_DELETE: '级联删除',
-
-  // 性能监控 (业务视图隐藏)
-  PERF_THRESHOLD: '性能阈值',
-
-  // 通用占位
-  READONLY: '查看',
-}
 
 /**
  * 业务隐藏的 action 集合 (审计员视图才能看到)
@@ -175,8 +113,7 @@ const HIDDEN_ACTIONS = new Set([
  * [P1-A 2026-07-25] 优先级调整:
  *   1. log.action_label (后端 per-log 注入, 最权威)
  *   2. auditMetaStore.actionMap.get(action).label (后端 enum_values 单一事实源)
- *   3. ACTION_LABELS[action] (本地硬编码 fallback, 网络失败/启动未完成时)
- *   4. action 原值
+ *   3. action 原值 (后端 meta 未加载时的降级)
  */
 export function getActionLabel(action, log) {
   if (!action) return ''
@@ -188,8 +125,8 @@ export function getActionLabel(action, log) {
     const item = store.actionMap.get(action)
     if (item && item.label) return item.label
   }
-  // 优先级 3: 本地翻译表 (降级, 保证后端缺失时仍可显示)
-  return ACTION_LABELS[action] || action
+  // 优先级 3: 原始 action 值（本地副本表已移除，后端为唯一标签源）
+  return action
 }
 
 /**

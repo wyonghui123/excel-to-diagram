@@ -21,41 +21,8 @@ import { extractItems } from '@/services/associationService'
 // 1. 纯函数 — 标签格式化
 // ============================================================================
 
-const ACTION_LABELS = {
-  CREATE: '创建',
-  UPDATE: '更新',
-  DELETE: '删除',
-  READ: '读取',
-  LOGIN: '登录',
-  LOGOUT: '登出',
-  EXPORT: '导出',
-  IMPORT: '导入',
-  ASSIGN: '分配',
-  UNASSIGN: '取消分配',
-  ASSOCIATE: '关联',
-  DISSOCIATE: '取消关联',
-  GRANT: '授权',
-  REVOKE: '撤销',
-  EXECUTE: '执行',
-  RESTORE: '恢复'
-}
-
-const LEVEL_LABELS = {
-  DEBUG: '调试',
-  INFO: '信息',
-  WARNING: '警告',
-  ERROR: '错误',
-  CRITICAL: '严重'
-}
-
-const CATEGORY_LABELS = {
-  business: '业务',
-  security: '安全',
-  system: '系统',
-  data: '数据',
-  permission: '权限',
-  auth: '认证'
-}
+// [B2-3 2026-11-13] action/level/category 标签统一由 @/utils/auditLogFormat + 后端
+// /audit/meta/actions 提供，前端服务层不再维护副本标签表。
 
 const COMMON_FIELD_NAMES = {
   id: 'ID',
@@ -68,36 +35,6 @@ const COMMON_FIELD_NAMES = {
   created_by: '创建人',
   updated_by: '更新人',
   description: '描述'
-}
-
-/**
- * 格式化操作类型为中文标签
- * @param {string} action
- * @returns {string}
- */
-export function formatLogAction(action) {
-  if (!action) return ''
-  return ACTION_LABELS[action] || action
-}
-
-/**
- * 格式化日志级别
- * @param {string} level
- * @returns {string}
- */
-export function formatLogLevel(level) {
-  if (!level) return ''
-  return LEVEL_LABELS[level] || level
-}
-
-/**
- * 格式化日志分类
- * @param {string} category
- * @returns {string}
- */
-export function formatLogCategory(category) {
-  if (!category) return ''
-  return CATEGORY_LABELS[category] || category
 }
 
 /**
@@ -425,9 +362,6 @@ export async function getByTransactionId(transactionId) {
 
 export default {
   // 纯函数 - 标签
-  formatLogAction,
-  formatLogLevel,
-  formatLogCategory,
   getFieldDisplayName,
   // 纯函数 - 解析
   parseTargetDisplay,
@@ -437,9 +371,6 @@ export default {
   // 纯函数 - 参数
   buildLogFilter,
   // 常量
-  ACTION_LABELS,
-  LEVEL_LABELS,
-  CATEGORY_LABELS,
   COMMON_FIELD_NAMES,
   // API - v1
   getOverview,

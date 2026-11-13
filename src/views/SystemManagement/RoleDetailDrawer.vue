@@ -252,22 +252,8 @@ const emit = defineEmits(['close', 'updated'])
 
 const message = useMessage()
 
-const FALLBACK_RESOURCE_TYPES = Object.entries(permService.RESOURCE_LABELS)
-  .map(([value, label]) => ({ value, label }))
-  .sort((a, b) => a.label.localeCompare(b.label))
-
-const resourceTypes = ref(FALLBACK_RESOURCE_TYPES)
-
-const permissionLevels = [
-  { value: 'none', label: '无权限' },
-  { value: 'read', label: '只读' },
-  { value: 'write', label: '可编辑' },
-  { value: 'manage', label: '完全管理' },
-]
-
-const LEVEL_LABELS = Object.fromEntries(
-  Object.entries(permService.PERMISSION_LEVELS).map(([k, v]) => [k, v.label])
-)
+// [B2-2 2026-11-13] 资源类型列表由后端 loadResources() 下发，不再维护前端副本
+const resourceTypes = ref([])
 
 const tabs = [
   { key: 'groups', label: '关联用户组' },

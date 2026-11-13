@@ -119,7 +119,7 @@ const filterFields = computed(() => [
     placeholder: '全部类型',
     options: [
       { value: '', label: '全部类型' },
-      ...Object.entries(permService.RESOURCE_LABELS).map(([value, label]) => ({ value, label }))
+      ...Object.entries(permService.getResourceTypeLabels()).map(([value, label]) => ({ value, label }))
     ]
   },
   {
