@@ -1,5 +1,5 @@
 -- 自动生成的 Schema
--- 生成时间: 2026-11-12 10:56:34.325028
+-- 生成时间: 2026-11-13 14:04:28.136388
 
 -- 地址: 结构化地址库（支持对象）：国家 / 省 / 市 / 区 / 街道 / 门牌 / 邮编分列 + 格式化全文；只被引用，不承载用途 / 角色
 CREATE TABLE IF NOT EXISTS addresses (
@@ -590,7 +590,7 @@ CREATE TABLE IF NOT EXISTS control_parameter_defs (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     code VARCHAR(60) UNIQUE NOT NULL,
     name VARCHAR(100) NOT NULL,
-    domain VARCHAR(200) NOT NULL DEFAULT 'sales' CHECK (domain IN ('sales', 'procurement', 'inventory', 'tolerance', 'platform', 'demand')),
+    domain VARCHAR(200) NOT NULL DEFAULT 'sales' CHECK (domain IN ('sales', 'procurement', 'inventory', 'tolerance', 'platform', 'demand', 'billing')),
     value_type VARCHAR(200) NOT NULL DEFAULT 'string' CHECK (value_type IN ('bool', 'enum', 'int', 'decimal', 'number', 'string', 'ref')),
     enum_type_id INTEGER,
     target_bo VARCHAR(60),
@@ -3931,7 +3931,7 @@ CREATE TABLE IF NOT EXISTS type_definitions (
     name VARCHAR(50) NOT NULL,
     scope_bo VARCHAR(40) NOT NULL,
     level VARCHAR(200) NOT NULL CHECK (level IN ('header', 'line')),
-    document_category VARCHAR(200) DEFAULT 'standard' CHECK (document_category IN ('standard', 'rush', 'return', 'credit_memo', 'debit_memo', 'consignment', 'loan', 'invoice', 'cancellation')),
+    document_category VARCHAR(200) NOT NULL DEFAULT 'standard' CHECK (document_category IN ('standard', 'rush', 'return', 'credit_memo', 'debit_memo', 'consignment', 'loan', 'invoice', 'cancellation')),
     document_role VARCHAR(32),
     direction INTEGER NOT NULL DEFAULT 1,
     reversal_type_id INTEGER,
@@ -4052,7 +4052,7 @@ CREATE TABLE IF NOT EXISTS vendor_invoices (
     posting_date DATETIME,
     status VARCHAR(20) NOT NULL DEFAULT 'draft' CHECK (status IN ('draft', 'submitted', 'posted', 'cancelled', 'reversed')),
     match_status VARCHAR(20) NOT NULL DEFAULT 'unmatched' CHECK (match_status IN ('unmatched', 'matched', 'exception', 'overridden')),
-    match_mode VARCHAR(20) NOT NULL DEFAULT 'gr_based' CHECK (match_mode IN ('po_based', 'gr_based')),
+    match_mode VARCHAR(20) NOT NULL DEFAULT 'po_based' CHECK (match_mode IN ('po_based', 'gr_based')),
     supplier_account_id INTEGER NOT NULL,
     supplier_party_id INTEGER NOT NULL,
     supplier_site_text VARCHAR(512),
@@ -4068,8 +4068,9 @@ CREATE TABLE IF NOT EXISTS vendor_invoices (
     tax_amount REAL NOT NULL DEFAULT 0,
     gross_amount REAL NOT NULL DEFAULT 0,
     rounding_diff REAL DEFAULT 0,
+    supplier_gross_amount REAL,
     match_pricing_mode VARCHAR(20) NOT NULL DEFAULT 'po_price' CHECK (match_pricing_mode IN ('po_price', 'receipt_price', 'manual')),
-    match_exception_reason VARCHAR(200) CHECK (match_exception_reason IN ('price_over_tolerance', 'qty_over_receipt_tolerance', 'qty_over_order_tolerance', 'no_receipt', 'currency_mismatch', 'supplier_mismatch', 'manual_pricing_required', 'receipt_price_mode')),
+    match_exception_reason VARCHAR(200) CHECK (match_exception_reason IN ('price_over_tolerance', 'qty_over_receipt_tolerance', 'qty_over_order_tolerance', 'no_receipt', 'currency_mismatch', 'supplier_mismatch', 'manual_pricing_required', 'receipt_price_mode', 'price_source_inconsistent')),
     match_matched_at DATETIME,
     match_matched_by VARCHAR(200),
     settlement_mode VARCHAR(20) NOT NULL DEFAULT 'supplier_invoice' CHECK (settlement_mode IN ('supplier_invoice', 'ers')),
@@ -4111,10 +4112,13 @@ CREATE TABLE IF NOT EXISTS vendor_invoice_lines (
     uom_id INTEGER,
     unit_price REAL NOT NULL DEFAULT 0,
     price_includes_tax INTEGER NOT NULL DEFAULT 0,
+    tax_rate_percent REAL,
     net_amount REAL NOT NULL DEFAULT 0,
     tax_amount REAL NOT NULL DEFAULT 0,
     gross_amount REAL NOT NULL DEFAULT 0,
     po_unit_price REAL,
+    price_source VARCHAR(20) CHECK (price_source IN ('po', 'manual', 'adjustment')),
+    price_trace TEXT,
     price_diff_amount REAL,
     price_diff_percent REAL,
     qty_over_receipt REAL,

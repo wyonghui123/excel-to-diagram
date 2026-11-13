@@ -3520,7 +3520,9 @@ def ensure_crud_actions(obj: 'MetaObject') -> 'MetaObject':
 #   - 缓存损坏 / 跨解释器不兼容 → 异常降级为重建，不影响启动
 # 缓存写 <dir>/.cache/（.gitignore 已忽略 .cache/），临时文件 + os.replace
 # 原子替换，避免并发进程读到半成品。持久化结构变化时 _DIR_CACHE_VERSION +1。
-_DIR_CACHE_VERSION = 1
+# v2 (2026-11-13): UIDetailViewConfig 新增 rule_trace / amount_trace，
+#   v1 pickle 反序列化出的旧实例缺这两个属性 ⇒ asdict 抛 AttributeError。
+_DIR_CACHE_VERSION = 2
 
 
 def _dir_dependency_stamp() -> str:

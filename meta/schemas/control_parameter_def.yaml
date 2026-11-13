@@ -129,6 +129,9 @@ fields:
       - value: demand
         label: 需求
         color: info
+      - value: billing
+        label: 开票
+        color: primary
     semantics:
       meaning: 参数字典的作用域
       filterable: true
