@@ -1545,6 +1545,13 @@ ui_view_config:
         columns:
           - fields: [description]
 
+  # [金额回溯 2026-11-13] 统一只读金额分解分区，共用后端 amount-trace 契约
+  detail:
+    amount_trace:
+      enabled: true
+      label: 金额回溯
+      permission: amount:trace
+
   # 行 / 计划行子表：父字段由 ui.relation=purchase_order 推断
   # demand_allocation 是多态分配表（target_id 指向任意载体），
   # 无单一父字段，故不放入 child_sections（M3 通过服务 / API 维护）。

@@ -348,6 +348,20 @@ fields:
     ui:
       widget: switch
 
+  - id: tax_rate_percent
+    name: 税率(%)
+    type: number
+    db_column: tax_rate_percent
+    nullable: true
+    constraints:
+      - type: numeric_range
+        decimal_places: 4
+    description: 行税率快照（含税价倒算 / 税额重算；W6 起优先于税码查询）
+    semantics:
+      meaning: 行税率
+    ui:
+      widget: number
+
   - id: net_amount
     name: 净额
     type: number
@@ -409,6 +423,46 @@ fields:
       immutable: true
     ui:
       widget: number
+      editable: false
+
+  - id: price_source
+    name: 价格来源
+    type: string
+    db_column: price_source
+    nullable: true
+    max_length: 20
+    description: 行价格来源快照（po 取采购订单价 / manual 手工 / adjustment 调整单），只写不改
+    enum_values:
+      - value: po
+        label: 采购订单价
+        color: primary
+        category: active
+      - value: manual
+        label: 手工价
+        color: warning
+        category: active
+      - value: adjustment
+        label: 调整单
+        color: info
+        category: active
+    semantics:
+      meaning: 价格来源
+      immutable: true
+    ui:
+      widget: select
+      editable: false
+
+  - id: price_trace
+    name: 价格轨迹
+    type: text
+    db_column: price_trace
+    nullable: true
+    description: 价格来源快照 JSON（po_id / order_line_id / schedule_id / po_unit_price / price_source / snapshot_at），只写不改
+    semantics:
+      meaning: 价格轨迹
+      immutable: true
+    ui:
+      widget: textarea
       editable: false
 
   - id: price_diff_amount
@@ -709,6 +763,8 @@ ui_view_config:
         width: 110
       - field: po_unit_price
         width: 110
+      - field: price_source
+        width: 120
       - field: price_diff_amount
         width: 120
       - field: net_amount
@@ -741,5 +797,7 @@ ui_view_config:
         columns:
           - fields: [po_unit_price, price_diff_amount]
           - fields: [price_diff_percent, qty_over_receipt]
-          - fields: [match_status, match_exception_reason]
+          - fields: [price_source, match_status]
+          - fields: [price_trace]
+          - fields: [match_exception_reason]
           - fields: [override_reason]

@@ -1835,6 +1835,11 @@ ui_view_config:
       permission: rule_center:trace
       scenarios: [default, control_parameter, line_type, approval, doc_flow]
       codes: [qty_required, price_required, default_incoterm]
+    # [金额回溯 2026-11-13] 统一只读金额分解分区，共用后端 amount-trace 契约
+    amount_trace:
+      enabled: true
+      label: 金额回溯
+      permission: amount:trace
 
   # 订单行子表：父字段由 sales_order_line.order_id 的 ui.relation=sales_order 推断
   child_sections:

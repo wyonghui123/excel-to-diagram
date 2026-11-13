@@ -84,6 +84,9 @@ def register_all_bo_actions(registry=None):
         sales_order_recalc_header_discount_handler,
     )
 
+    # 通用金额重算（四类单据共用，草稿态）
+    from meta.services.amount_recalc_service import amount_recalc_handler
+
     # Wave C T38: 开票计划补跑（订单确认已自动生成，此 Action 供历史单补建）
     from meta.services.billing_plan_actions import (
         generate_billing_plan_handler,
@@ -673,6 +676,38 @@ def register_all_bo_actions(registry=None):
             'type': 'object',
             'properties': {
                 'order_id': {'type': 'integer'},
+                'id': {'type': 'integer'},
+            }
+        },
+        output_schema={
+            'type': 'object',
+            'properties': {
+                'success': {'type': 'boolean'},
+                'data': {'type': 'object'},
+                'message': {'type': 'string'},
+            }
+        },
+        requires_auth=True,
+        idempotent=True,
+    )
+
+    # ==================== 22c: 通用金额重算（四类单据共用） ====================
+    # 与 `amount-trace`（GET /api/v2/bo/<obj>/<id>/amount-trace）共用同一内核口径：
+    # 展示的 recomputed 值 = 本 Action 落库后的值。仅草稿（CI 含 submitted）。
+    registry.register(
+        'amount.recalc',
+        amount_recalc_handler,
+        governance='audit',
+        description='按当前数据重算单据金额并落库（销售订单 / 采购订单 / 采购发票 / 销售发票）',
+        object_type='*',
+        category='amount',
+        input_schema={
+            'type': 'object',
+            'required': ['object_type', 'id'],
+            'properties': {
+                'object_type': {'type': 'string',
+                                'enum': ['sales_order', 'purchase_order',
+                                         'vendor_invoice', 'customer_invoice']},
                 'id': {'type': 'integer'},
             }
         },

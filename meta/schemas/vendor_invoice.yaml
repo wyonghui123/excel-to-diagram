@@ -341,18 +341,18 @@ fields:
     db_column: match_mode
     required: true
     max_length: 20
-    default: gr_based
+    default: po_based
     description: 创建时从 vi_match_mode 参数解析的快照（po_based / gr_based）
     enum_values:
       - value: po_based
         label: 按订单匹配
         color: info
         category: active
+        is_initial: true
       - value: gr_based
         label: 按收货匹配
         color: primary
         category: active
-        is_initial: true
     semantics:
       meaning: 匹配模式快照
       filterable: true
@@ -603,6 +603,20 @@ fields:
     ui:
       widget: number
 
+  - id: supplier_gross_amount
+    name: 供应商票面总额
+    type: number
+    db_column: supplier_gross_amount
+    nullable: true
+    constraints:
+      - type: numeric_range
+        decimal_places: 4
+    description: 供应商发票票面总额（非空时作为头 gross，并据此计算 rounding_diff）
+    semantics:
+      meaning: 供应商票面总额
+    ui:
+      widget: number
+
   - id: match_pricing_mode
     name: 匹配计价模式
     type: string
@@ -673,6 +687,10 @@ fields:
       - value: receipt_price_mode
         label: 收货价计价模式
         color: warning
+        category: active
+      - value: price_source_inconsistent
+        label: 价格来源混用
+        color: danger
         category: active
     semantics:
       meaning: 匹配异常原因
@@ -1172,6 +1190,11 @@ ui_view_config:
   detail:
     showChangeHistory: true
     showRelations: true
+    # [金额回溯 2026-11-13] 统一只读金额分解分区（含独立调整单 / 取价来源 / 定价步骤）
+    amount_trace:
+      enabled: true
+      label: 金额回溯
+      permission: amount:trace
     actions:
       - id: match
         label: 执行匹配

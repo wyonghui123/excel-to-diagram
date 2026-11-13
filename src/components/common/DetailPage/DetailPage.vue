@@ -71,6 +71,12 @@
               :scenarios="ruleTraceConfig.scenarios || []"
               :codes="ruleTraceConfig.codes || []"
             />
+            <AmountBreakdownPanel
+              v-else-if="section.key === 'amount_trace'"
+              :object-type="objectType"
+              :record-id="id"
+              @recalculated="handleRefresh()"
+            />
             <slot v-else :name="`section-${section.key}`" :data="data" />
           </template>
         </ObjectPage>
@@ -153,6 +159,12 @@
             :record-id="id"
             :scenarios="ruleTraceConfig.scenarios || []"
             :codes="ruleTraceConfig.codes || []"
+          />
+          <AmountBreakdownPanel
+            v-else-if="section.key === 'amount_trace'"
+            :object-type="objectType"
+            :record-id="id"
+            @recalculated="handleRefresh()"
           />
           <!-- Always render slot if provided by parent -->
           <slot v-else :name="`section-${section.key}`" :data="data" />
@@ -252,6 +264,7 @@ import { ObjectPage } from '@/components/common/ObjectPage'
 import PermissionAuditDialog from '@/views/SystemManagement/components/PermissionAuditDialog.vue'
 import SalesOrderExpandDialog from '@/components/business/SalesOrderExpandDialog.vue'
 import RuleTracePanel from '@/components/common/RuleTrace/RuleTracePanel.vue'
+import AmountBreakdownPanel from '@/components/common/AmountTrace/AmountBreakdownPanel.vue'
 import DocFlowTracePanel from '@/components/business/DocFlow/DocFlowTracePanel.vue'
 import { listRules } from '@/services/docFlowService'
 import { useAuthStore } from '@/stores/authStore'
@@ -1233,6 +1246,22 @@ const computedSections = computed(() => {
         key: 'rule_trace',
         label: traceSection.label || '规则推导',
         icon: 'rule',
+        type: 'custom',
+        display: 'always'
+      })
+    }
+  }
+
+  // [金额回溯 2026-11-13] 金额分解分区：由 BO YAML 的 ui_view_config.detail.amount_trace 声明；
+  //   与 rule_trace 同构，无权限不渲染（权限码缺省 amount:trace）。
+  const amountSection = detailConfig?.amount_trace
+  if (amountSection?.enabled && !isAddMode) {
+    const amountPermission = amountSection.permission || 'amount:trace'
+    if (authStore.hasPermission(amountPermission)) {
+      sections.push({
+        key: 'amount_trace',
+        label: amountSection.label || '金额回溯',
+        icon: 'money',
         type: 'custom',
         display: 'always'
       })
