@@ -26,7 +26,9 @@ from dataclasses import replace
 from datetime import date, datetime
 from typing import Any, Dict, List, Optional
 
+from meta.core.rule_action_matrix import HOLD
 from meta.core.rule_constraint_evaluator import evaluate_constraint_rule
+from meta.core.rule_dispatcher import RELEASE, dispatch
 from meta.core.rule_metrics import MetricSession
 from meta.services.audit_interceptor import AuditInterceptor
 from meta.services.control_parameter_service import ControlParameterResolver
@@ -345,7 +347,7 @@ class InventoryCountService:
         over: List[int] = []
         no_reason: List[int] = []
         variances: Dict[Any, float] = {}
-        held: Dict[Any, Dict[str, Any]] = {}
+        decisions: Dict[Any, Any] = {}
         for line in lines:
             snapshot = _float(line.get('snapshot_qty'))
             counted = _float(line.get('counted_qty'))
@@ -357,9 +359,9 @@ class InventoryCountService:
             decision = evaluate_constraint_rule(
                 _line_tolerance_rule(rule, snapshot), metrics=metrics,
                 dims=dims, resolver=self.params, overrides=overrides)
+            decisions[line['id']] = decision
             if decision.matched:
                 over.append(int(line['line_no']))
-                held[line['id']] = line
                 if _blank(line.get('variance_reason')):
                     no_reason.append(int(line['line_no']))
 
@@ -383,22 +385,23 @@ class InventoryCountService:
                     'UPDATE %s SET variance_qty = ?, updated_at = ? WHERE id = ?'
                     % CNT_LINE_TABLE,
                     [variances[line['id']], now, line['id']])
-            # 可存不可过：超容差行挂起（holds 唯一事实源），其余行释放旧挂起
+            # 可存不可过：处置动作统一交规则分发器（M7-3），本服务不再硬编码 hold
             applied: List[Any] = []
             released: List[Any] = []
             for line in lines:
-                if line['id'] in held:
-                    if self.holds.apply(
-                            CNT_LINE_OBJECT, line['id'], TOLERANCE_RULE_ID,
-                            code=HOLD_CODE_OVER_TOLERANCE,
-                            reason=str(line.get('variance_reason') or '').strip(),
-                            applied_by=operator):
-                        applied.append(line['id'])
-                else:
-                    if self.holds.release(
-                            CNT_LINE_OBJECT, line['id'],
-                            rule_key=TOLERANCE_RULE_ID, released_by=operator):
-                        released.append(line['id'])
+                result = dispatch(decisions[line['id']], {
+                    'data_source': self.ds, 'holds': self.holds,
+                    'object_type': CNT_LINE_OBJECT, 'record_id': line['id'],
+                    'rule_key': TOLERANCE_RULE_ID,
+                    'code': HOLD_CODE_OVER_TOLERANCE,
+                    'reason': str(line.get('variance_reason') or '').strip(),
+                    'applied_by': operator,
+                    'release_unmatched': True,
+                })
+                if any(item.get('action') == HOLD for item in result.applied):
+                    applied.append(line['id'])
+                elif any(item.get('action') == RELEASE for item in result.applied):
+                    released.append(line['id'])
             self.ds.execute(
                 'UPDATE %s SET status = ?, approved_by = ?, approved_at = ?, '
                 'updated_at = ? WHERE id = ?' % CNT_TABLE,

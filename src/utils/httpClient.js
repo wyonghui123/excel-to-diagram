@@ -496,6 +496,8 @@ function createNamespace(baseUrl) {
 
 export const apiV1 = createNamespace(API_BASE)
 export const apiV2 = createNamespace(API_BASE_V2)
+// [规则模型 M7-3] 少数端点直接挂在 /api 下（如 /api/holds），无版本前缀
+export const apiRoot = createNamespace('')
 
 // ---------------------------------------------------------------------------
 // In-flight 缓存管理 (FR-017)

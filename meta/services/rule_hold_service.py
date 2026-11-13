@@ -94,3 +94,18 @@ class RuleHoldService:
             'SELECT id, object_type, record_id, rule_key, code, reason, '
             'applied_by, applied_at FROM %s WHERE %s ORDER BY applied_at, id'
             % (TABLE, where), params)
+
+    def get(self, hold_id: Any) -> Optional[Dict[str, Any]]:
+        """按 id 读取挂起行（含已释放），供按 id 释放时取定位键。"""
+        rows = self.ds.query(
+            'SELECT id, object_type, record_id, rule_key, code, reason, '
+            'applied_by, applied_at, released_by, released_at FROM %s '
+            'WHERE id = ?' % TABLE, [hold_id])
+        return rows[0] if rows else None
+
+
+def get_rule_hold_service() -> RuleHoldService:
+    """API 层入口：默认连 meta 库。"""
+    from meta.core.datasource import get_data_source
+    from meta.core.db_path import get_meta_db_path
+    return RuleHoldService(get_data_source('sqlite', database=get_meta_db_path()))

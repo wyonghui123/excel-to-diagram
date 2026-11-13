@@ -531,6 +531,7 @@ class ApplicationBuilder:
         from meta.api.inventory_aging_api import inventory_aging_bp
         from meta.api.rule_center_api import rule_center_bp, rule_trace_bp
         from meta.api.amount_trace_api import amount_trace_bp
+        from meta.api.rule_hold_api import rule_hold_bp
         from meta.api.schema_api import schema_dashboard_bp
         from meta.graphql import graphql_bp
         from telemetry import telemetry_bp
@@ -622,6 +623,7 @@ class ApplicationBuilder:
         app.register_blueprint(rule_trace_bp)
         # [金额回溯 2026-11-13] 四类单据统一只读金额回溯。
         app.register_blueprint(amount_trace_bp)
+        app.register_blueprint(rule_hold_bp)
         app.register_blueprint(schema_dashboard_bp)
         app.register_blueprint(graphql_bp)
         # [多产品平台 §11 Q5 S2 / 2026-09-24] 原 mcp_bp 注册已移除（/mcp 三路由无鉴权，
