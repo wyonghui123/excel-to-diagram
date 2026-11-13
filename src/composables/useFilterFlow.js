@@ -21,7 +21,7 @@
  * // 获取聚合后的过滤条件
  * console.log(filterFlow.combinedFilters.value)
  */
-import { computed, ref, watch, unref, nextTick, isRef } from 'vue'
+import { computed, ref, shallowRef, triggerRef, watch, unref, nextTick, isRef } from 'vue'
 
 function deepUnwrap(obj) {
   if (obj === null || obj === undefined) return obj
@@ -48,7 +48,9 @@ export function useFilterFlow(config = {}) {
     refreshDebounce = 300
   } = config
 
-  const registeredSources = ref(new Map())
+  // [PR-1.3] shallowRef 保存 Map：避免 source 对象被 reactive 代理（getSource 需返回原对象），
+  // Map 内部变更无法被深度追踪，故每次 set/delete 后显式 triggerRef。
+  const registeredSources = shallowRef(new Map())
   const registeredTarget = ref(target)
 
   let debounceTimer = null
@@ -199,6 +201,7 @@ export function useFilterFlow(config = {}) {
     }
 
     registeredSources.value.set(source.id, source)
+    triggerRef(registeredSources)
 
     const graph = dependencyGraph.value
     if (graph.hasCycle) {
@@ -212,6 +215,7 @@ export function useFilterFlow(config = {}) {
 
   function unregisterSource(sourceId) {
     registeredSources.value.delete(sourceId)
+    triggerRef(registeredSources)
   }
 
   function getSource(sourceId) {

@@ -302,7 +302,8 @@ describe('useCrudMessage', () => {
         httpStatus: 500,
       }
       m.stateChangeFailed('启用', err)
-      expect(mockUseMessage.error).toHaveBeenLastCalledWith('启用失败', err)
+      // [FIX 2026-10-28 T4.4-B] 非 403 透出后端业务原因（此前只显示「启用失败」）
+      expect(mockUseMessage.error).toHaveBeenLastCalledWith('启用失败：数据库连接超时', err)
     })
   })
 })

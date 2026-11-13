@@ -55,7 +55,10 @@ describe('6 Fetcher 模式契约守卫（PR 9）', () => {
 
     it('F1.3: queryAssociations 返回值是 fetcher 模式', () => {
       // L196: return (params) => boService.queryAssociations(...)
-      const fetcherMatch = associationSectionSource.match(/return\s*\(params\)\s*=>\s*boService\.queryAssociations/)
+      // 实现存在 hasRealObjectId 守卫（GUARD 2026-06-14），fetcher 体内再调用 queryAssociations
+      const fetcherMatch = associationSectionSource.match(
+        /return\s*\(params\)\s*=>\s*\{[\s\S]{0,400}?boService\.queryAssociations/
+      )
       expect(fetcherMatch).not.toBeNull()
     })
   })
@@ -68,8 +71,10 @@ describe('6 Fetcher 模式契约守卫（PR 9）', () => {
     })
 
     it('F2.2: annotationFetcher 调用 apiV1("/annotations")', () => {
-      // L314: apiV1(`/annotations?target_type=...`)
-      const apiAnnotationsMatch = associationSectionSource.match(/apiV1\([^)]*annotations[^)]*\)/)
+      // FR-GAP-005 后经 annotationService 收口（内部 apiV1.get('/annotations')）
+      const apiAnnotationsMatch = associationSectionSource.match(
+        /annotationService\.queryAnnotations|apiV1\([^)]*annotations[^)]*\)/
+      )
       expect(apiAnnotationsMatch).not.toBeNull()
     })
 
