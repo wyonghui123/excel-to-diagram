@@ -47,7 +47,8 @@ NOT_INSTRUMENTED = NOT_INSTRUMENTED_SOURCES
 # 视图元数据中允许引用的动作 / widget 类型（封闭枚举，YAML 不能引入新类型）
 ACTIONS = ('detail', 'edit', 'view_source', 'simulate', 'copy_key', 'publish', 'rollback', 'rerun')
 WIDGETS = ('code', 'factor_matrix', 'source_snippet', 'audit_log')
-TAB_KINDS = ('table', 'simulate', 'health', 'rule_trace')
+# [规则模型 M7-3 2026-11-12] holds：挂起列表页签（数据来自 /api/holds，不进 list_rules）
+TAB_KINDS = ('table', 'simulate', 'health', 'rule_trace', 'holds')
 FILTER_KEYS = (
     'keyword', 'domain', 'rule_type', 'source', 'configurable', 'status',
     'document_type', 'line_type', 'item_group', 'source_bo', 'target_bo',
@@ -114,6 +115,11 @@ def _descriptor(
     effective_from: str = '',
     severity: str = '',
     enabled: Optional[bool] = None,
+    # [规则模型 M7-2 2026-11-12] 治理字段（M1 处置动作 / FR-006 命中策略与排序口径 / 时效档）
+    disposition: str = '',
+    hit_policy: str = '',
+    order_by: Optional[List[str]] = None,
+    effective_to: str = '',
     source_tags: Optional[Iterable[str]] = None,
     detail: Optional[Dict[str, Any]] = None,
     layer: str = 'L2',
@@ -139,6 +145,11 @@ def _descriptor(
         # FR-007：validation 页签需要 severity / enabled（来源未提供时如实留空）
         'severity': severity or '',
         'enabled': enabled,
+        # [规则模型 M7-2 2026-11-12] 治理字段如实透出；来源未声明时留空，不臆造默认值。
+        'disposition': disposition or '',
+        'hit_policy': hit_policy or '',
+        'order_by': list(order_by or []),
+        'effective_to': effective_to or '',
         'detail': detail or {},
     }
     if links:
@@ -179,6 +190,11 @@ def _bo_yaml_descriptors(*, include_draft: bool = False) -> List[Dict[str, Any]]
                 # FR-007：validation 页签列 severity / enabled
                 severity=str(_enum(getattr(rule, 'severity', '')) or ''),
                 enabled=bool(getattr(rule, 'enabled', True)),
+                # [规则模型 M7-2 2026-11-12] 治理字段如实传值（未声明留空，不臆造默认）
+                disposition=str(_enum(getattr(rule, 'action', '')) or ''),
+                hit_policy=str(getattr(rule, 'hit_policy', '') or ''),
+                order_by=list(getattr(rule, 'order_by', []) or []),
+                effective_to=str(getattr(rule, 'effective_to', '') or ''),
                 source_tags=tags,
                 layer='L1',
                 detail={
@@ -734,11 +750,14 @@ class RuleCatalogService:
         domain: Optional[str] = None,
         bo: Optional[str] = None,
         layer: Optional[str] = None,
+        # [规则模型 M7-2 2026-11-12] 治理字段筛选（FILTER_KEYS 已声明但未落地）
+        severity: Optional[str] = None,
+        enabled: Optional[bool] = None,
         include_draft: bool = False,
         limit: int = 50,
         offset: int = 0,
     ) -> Dict[str, Any]:
-        self._validate_filters(sources, rule_type, status, layer)
+        self._validate_filters(sources, rule_type, status, layer, severity)
         items, source_status = self._collect(include_draft=include_draft)
 
         if sources:
@@ -762,6 +781,18 @@ class RuleCatalogService:
             items = [item for item in items if item['scope_bo'] == bo]
         if layer:
             items = [item for item in items if item['layer'] == layer]
+        # [规则模型 M7-2 2026-11-12] severity 为空的行不匹配任何非空筛选值
+        # （未声明 ≠ 任何具体严重度，不能凭筛选值把它捞出来）。
+        if severity:
+            items = [
+                item for item in items
+                if str(item.get('severity') or '') == severity
+            ]
+        if enabled is not None:
+            items = [
+                item for item in items
+                if item.get('enabled') is enabled
+            ]
         if keyword:
             needle = keyword.lower()
             items = [
@@ -787,12 +818,66 @@ class RuleCatalogService:
                 str(value).startswith('error') for value in source_status.values()),
         }
 
+    # -- 健康检查 ------------------------------------------------------
+
+    def list_health(self) -> Dict[str, Any]:
+        """聚合规则声明校验结果（health 页签，R-A10）。
+
+        口径：``validate_all()`` 实时结果 + yaml_loader 加载期缓存，
+        按 (code, object_type, message) 去重后聚合为「检查项 × 对象」行。
+        """
+        from meta.core.rule_declaration_validator import validate_all
+        from meta.core.yaml_loader import get_declaration_errors
+
+        errors: List[Any] = list(validate_all())
+        for cached in (get_declaration_errors() or {}).values():
+            errors.extend(cached or [])
+
+        # 加载期默认只告警；严格模式下同一批问题即为错误
+        severity = (
+            'error'
+            if os.environ.get('RULE_DECLARATION_STRICT', '0').strip() == '1'
+            else 'warning'
+        )
+        grouped: Dict[Tuple[str, str], Dict[str, Any]] = {}
+        seen = set()
+        for error in errors:
+            code = str(getattr(error, 'code', '') or 'UNKNOWN')
+            object_type = str(getattr(error, 'object_type', '') or '')
+            message = str(getattr(error, 'message', '') or '')
+            signature = (code, object_type, message)
+            if signature in seen:
+                continue
+            seen.add(signature)
+            item = grouped.get((code, object_type))
+            if item is None:
+                item = {
+                    'check_key': code,
+                    'label': object_type or '-',
+                    'severity': severity,
+                    'finding_count': 0,
+                    'sample': message,
+                    'message': message,
+                }
+                grouped[(code, object_type)] = item
+            item['finding_count'] += 1
+
+        items = sorted(grouped.values(),
+                       key=lambda entry: (entry['check_key'], entry['label']))
+        return {
+            'items': items,
+            'total': len(items),
+            'finding_total': len(errors),
+            'severity': severity,
+        }
+
     @staticmethod
     def _validate_filters(
         sources: Optional[List[str]],
         rule_type: Optional[str],
         status: Optional[str],
         layer: Optional[str],
+        severity: Optional[str] = None,
     ) -> None:
         """请求期筛选值必须落在声明值域内，非法值报错而不是静默返回空列表。"""
         if sources:
@@ -808,6 +893,11 @@ class RuleCatalogService:
                 f'可选 {list(STATIC_FILTER_OPTIONS["status"])}')
         if layer and layer not in ('L1', 'L2', 'L3'):
             raise RuleFilterError(f'未知 layer 取值: {layer!r}；可选 L1 / L2 / L3')
+        # [规则模型 M7-2 2026-11-12] severity 值域与 STATIC_FILTER_OPTIONS 同源
+        if severity and severity not in STATIC_FILTER_OPTIONS['severity']:
+            raise RuleFilterError(
+                f'未知 severity 取值: {severity!r}；'
+                f'可选 {list(STATIC_FILTER_OPTIONS["severity"])}')
 
     def get_rule(self, rule_key: str) -> Optional[Dict[str, Any]]:
         # 详情/发布流需要能看到草稿行

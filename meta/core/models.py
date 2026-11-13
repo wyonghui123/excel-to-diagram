@@ -42,6 +42,8 @@ from meta.core.models_ui_config import (
     UIReportConfig, UIReportFilterConfig, UIReportKpiConfig,
     UIReportChartConfig, UIReportTableConfig, UIReportDrilldownConfig,
 )
+# [规则模型 M7-2 2026-11-12] 排序口径与规则集排序共用同一常量，避免两处漂移。
+from meta.core.rule_hit_policy import ORDER_BY
 
 
 @dataclass
@@ -176,6 +178,14 @@ class MetaRule:
     # 存量规则未声明时留空，不做臆造默认值。
     version: str = ""
     effective_from: str = ""
+    # [规则模型 M7-2 2026-11-12] 治理字段补全（FR-006 / FR-007）：
+    # order_by 仅作治理口径声明（规则中心展示「该规则集的排序口径」），
+    # 不改变运行期排序（approval 走全局 order_by_sql()，DEFAULT 域走
+    # (priority, id) 升序）。
+    order_by: List[str] = field(default_factory=lambda: list(ORDER_BY))
+    effective_to: str = ""
+    # 只读派生：bo_yaml_key(bo_id, id)，由 yaml_loader.parse_rule 注入。
+    rule_key: str = ""
     priority: int = 100              # 优先级，数字越小越先执行
     enabled: bool = True             # 是否启用
     message: str = ""                # 错误/提示信息

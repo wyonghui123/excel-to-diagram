@@ -37,6 +37,20 @@ def target_for_source(source: str) -> Optional[str]:
     return None
 
 
+def target_for_rule_key(rule_key: str) -> Optional[str]:
+    """目录 rule_key 前缀 → 可写目标（数据驱动反查，避免前端维护映射）。
+
+    未知来源（含 ``doc_flow``）返回 None：``doc_flow_rule.rule_id`` 是主键且
+    ``status`` 仅取 ``active`` / ``deprecated``，零 DDL 约束下没有草稿承载位，
+    因此单据流规则不开放配置写操作。
+    """
+    prefix = str(rule_key or '').split(':', 1)[0]
+    for target, spec in RULE_TARGETS.items():
+        if spec.get('source') == prefix:
+            return target
+    return None
+
+
 def links_for(source: str,
               status: str = 'active') -> Optional[Dict[str, Dict[str, str]]]:
     """可编辑来源：``edit`` 恒下发；草稿态额外下发 ``publish`` / ``rollback``。"""

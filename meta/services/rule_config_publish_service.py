@@ -23,7 +23,7 @@ from meta.core.rule_keys import (
     line_type_assignment_key,
     split_key,
 )
-from meta.core.rule_targets import RULE_TARGETS
+from meta.core.rule_targets import RULE_TARGETS, target_for_rule_key
 
 logger = logging.getLogger(__name__)
 
@@ -56,6 +56,13 @@ def _to_int(value: Any) -> Optional[int]:
         return int(value)
     except (TypeError, ValueError):
         raise RuleConfigError(f'期望整数，收到 {value!r}')
+
+
+def _natural_int(value: Any) -> Optional[int]:
+    """rule_key 天然键中的整数段：``None`` / 空串表示无该维度。"""
+    if value in (None, '', 'None', 'null'):
+        return None
+    return _to_int(value)
 
 
 class RuleConfigPublishService:
@@ -110,6 +117,91 @@ class RuleConfigPublishService:
         # 草稿不参与 active 解析，但会进入 include_draft 的试算结果，需清试算缓存
         self._invalidate()
         return self._envelope(target, rule_key, draft, draft_id, status='draft')
+
+    # ------------------------------------------------------------------
+    # 单条规则写草稿 / 删除草稿（目录 rule_key → 发布目标反查）
+    # ------------------------------------------------------------------
+
+    def save_draft_from_rule_key(self, rule_key: str,
+                                 payload: Optional[Dict[str, Any]] = None,
+                                 user_id: Any = None,
+                                 user_name: str = None) -> Dict[str, Any]:
+        """按目录 rule_key 保存草稿（仅 configurable 来源开放）。
+
+        key 字段（控制参数定义 / 单据类型 / 物料组 / 维度）由 rule_key 解析，
+        取值字段缺省时继承当前生效行，便于前端只提交「改了什么」。
+        """
+        target, row = self._row_from_rule_key(rule_key, payload or {})
+        result = self.save_draft(target, row, user_id=user_id, user_name=user_name)
+        result['rule_key'] = rule_key
+        return result
+
+    def discard_draft(self, rule_key: str,
+                      payload: Optional[Dict[str, Any]] = None,
+                      user_id: Any = None,
+                      user_name: str = None) -> Dict[str, Any]:
+        """删除 rule_key 对应的草稿行（无草稿时 404）。"""
+        target, row = self._row_from_rule_key(rule_key, payload or {})
+        spec = self._spec(target)
+        draft = self._find_draft(target, row)
+        if not draft:
+            raise RuleConfigNotFound(f'未找到待删除的草稿: {rule_key}')
+        self.ds.execute(
+            f"DELETE FROM {spec['table']} WHERE id = ? AND status = 'draft'",
+            (draft.get('id'),))
+        self._audit('DISCARD', target, self._rule_key(target, row),
+                    user_id, user_name, before=draft, after=None,
+                    extra={'draft_id': draft.get('id'), 'rule_key': rule_key})
+        self._invalidate()
+        return {
+            'target': target,
+            'rule_key': rule_key,
+            'id': draft.get('id'),
+            'status': 'discarded',
+        }
+
+    def _row_from_rule_key(self, rule_key: str,
+                           payload: Dict[str, Any]
+                           ) -> Tuple[str, Dict[str, Any]]:
+        target = target_for_rule_key(rule_key)
+        if not target:
+            raise RuleConfigError(f'该规则来源不支持配置写操作: {rule_key}')
+        split = split_key(rule_key)
+        if not split:
+            raise RuleConfigError(f'无法解析规则键: {rule_key}')
+        _source, natural = split
+        spec = self._spec(target)
+        data: Dict[str, Any] = {}
+        if target == 'control_parameter_value':
+            definition = self._one(
+                "SELECT id FROM control_parameter_defs "
+                "WHERE code = ? AND status = 'active'", (natural,))
+            if not definition:
+                raise RuleConfigNotFound(f'控制参数不存在或已停用: {natural}')
+            data['control_parameter_id'] = definition.get('id')
+            for field in ('org_id', 'document_type_id', 'line_type_id',
+                          'item_group_id'):
+                data[field] = _to_int(payload.get(field))
+        else:
+            document_part, _, group_part = natural.partition('.')
+            data['document_type_id'] = _natural_int(document_part)
+            data['item_group_id'] = _natural_int(group_part)
+
+        # 取值字段缺省继承生效行 / 已有草稿，避免前端重复提交全量字段
+        baseline = None
+        active = self._active_rows(target, data)
+        if active:
+            baseline = dict(active[0])
+        if baseline is None:
+            baseline = self._find_draft(target, data)
+        for field in spec['value_fields']:
+            if payload.get(field) not in (None, ''):
+                data[field] = payload.get(field)
+            elif baseline:
+                data[field] = baseline.get(field)
+            else:
+                data[field] = None
+        return target, self._normalize(target, data)
 
     # ------------------------------------------------------------------
     # 发布
@@ -319,6 +411,17 @@ class RuleConfigPublishService:
             except (TypeError, ValueError):
                 errors.append('specificity_rank 必须为整数')
 
+        # [B2 2026-11-13] 载荷若携带 condition 文本（复用本发布闸门的规则来源），
+        #   必须能被求值链路完整解析：OR / 嵌套 / 未知算子一律拒绝发布，
+        #   禁止「存 A 求 B」的静默丢弃。
+        condition = data.get('condition')
+        if condition not in (None, ''):
+            from meta.core.condition_converter import ConditionParseError, validate_condition_text
+            try:
+                validate_condition_text(condition)
+            except ConditionParseError as e:
+                errors.append(str(e))
+
         if errors:
             raise RuleConfigError('；'.join(errors))
 
@@ -413,14 +516,8 @@ class RuleConfigPublishService:
 
     @staticmethod
     def _target_from_rule_key(rule_key: str) -> Optional[str]:
-        """目录 rule_key 前缀 → 发布目标；未知前缀返回 None。"""
-        split = split_key(rule_key)
-        if not split:
-            return None
-        return {
-            'control_parameter': 'control_parameter_value',
-            'line_type': 'line_type_assignment',
-        }.get(split[0])
+        """目录 rule_key 前缀 → 发布目标；未知前缀返回 None（见 rule_targets）。"""
+        return target_for_rule_key(rule_key)
 
     def _history_object_id(self, target: Optional[str],
                            rule_key: str) -> Tuple[str, str]:

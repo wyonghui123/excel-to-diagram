@@ -115,6 +115,26 @@ FLAGS: Tuple[EnvFlag, ...] = (
         evidence="TEST-EFF P1-5：165MB 库实测 1.35-1.56s/进程；"
                  "测试库由 SQLite backup 快照产生，真损坏会在首次 SQL 操作时暴露",
     ),
+    EnvFlag(
+        name="RULE_LOAD_ALLOW_UNKNOWN",
+        value="0",
+        phase="configure",
+        mode="setdefault",
+        purpose="仅测试态允许未知 rule_type 降级为 validation"
+                "（生产加载必须报 RULE_TYPE_UNKNOWN）",
+        owner="meta/core/yaml_loader.py",
+        evidence="Rule Model M7-1：未知 rule_type 由告警升级为加载期错误",
+    ),
+    EnvFlag(
+        name="RULE_DECLARATION_STRICT",
+        value="0",
+        phase="configure",
+        mode="setdefault",
+        purpose="加载期规则声明校验默认仅告警并缓存，"
+                "置 1 才升级为 RuleDeclarationError",
+        owner="meta/core/yaml_loader.py",
+        evidence="spec-rule-model §11.1：先告警一轮再考虑严格模式",
+    ),
 )
 
 # 只做观测、不由本模块设置的开关（供基线/诊断输出展示真实运行态）。

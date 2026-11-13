@@ -786,7 +786,15 @@ M1–M6b 的能力已写进代码，但有 5 处「已实现、未接线 / 无�
 5. 详情抽屉接 `POST /<object_type>/rules/explain` + `GET /<object_type>/<record_id>/rule-trace`
    （`ruleCenterService.js:45-47`、`RuleTracePanel.vue`），展示 `explain[]` 而非仅条件文本。
 
-**验收**：R-A10。**测试落点**：`meta/tests/api/test_rule_center_crud.py`（新增）+ `tests/e2e/rule-center-config-flow.spec.js`（新增，仓库 E2E 扩展名为 `.spec.js`）。
+**验收**：R-A10。**测试落点**：`meta/tests/api/test_rule_center_crud.py`（新增）+ `e2e/features/rule-center-config-flow.spec.js`（新增；仓库 canonical E2E 目录为 `e2e/features/`，`playwright.config.js` 按 project 指定 testDir，旧的 `tests/e2e/` 不在扫描范围内）。
+
+**执行结果（2026-11-13）**
+
+- 后端落点：单条 CRUD 实际为 `POST /api/v2/rules`、`PUT|DELETE /api/v2/rules/<rule_key>`（`meta/api/rule_center_api.py`），键字段由 `rule_key` 反查目标解析，取值字段缺省继承生效行/已有草稿。
+- 后端测试（入口 `python d:\filework\test.py --file <path>`）：`test_rule_center_crud.py` 6 passed；`test_rule_center_api.py` 26 passed；`test_rule_simulate_api.py`、`test_rule_catalog_governance.py` 均通过。
+- 前端：`RuleCenterPage.vue` 的 config-section（取值 input + 配置行 select + 保存草稿）与历史 toolbar（刷新/发布草稿/回滚上一版本）已实装，成功写入后 `refreshAfterConfigChange()` 重载列表/详情/历史。
+- E2E：`e2e/features/rule-center-config-flow.spec.js` 已新增（覆盖改值→草稿→发布→回滚→历史，含草稿清理/回滚兜底），**已执行通过**：`npx playwright test e2e/features/rule-center-config-flow.spec.js --project=features --retries=0` → 3 passed（setup ×2 + features ×1，34.4s）。
+- 执行前置修复：`dev-login` 的权限列表由 `permission_set` 全量展开导致 JWT 达 8.6KB，超过浏览器单 cookie 4096 字节上限被 Chromium 丢弃（`auth_token` 缺失 → `/me` 401，setup 报 `hasUser:false`）。已收敛为「含 `*` 时只保留 `['*']`」（`meta/api/auth_api.py`），JWT 降至 ~0.8KB。
 
 ### 12.6 场景词表与条件构建器（承接 §11.1 #1#2、R-A11）
 

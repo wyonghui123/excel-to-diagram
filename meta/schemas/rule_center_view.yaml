@@ -64,10 +64,23 @@ column_labels:
   priority: 优先级
   version: 版本
   effective_from: 生效日期
+  # [规则模型 M7-2 2026-11-12] 治理字段展示文案
+  # （M1 处置动作 / FR-006 命中策略与排序口径 / 时效档）
+  disposition: 处置动作
+  hit_policy: 命中策略
+  order_by: 排序口径
+  effective_to: 失效日期
+  # [规则模型 M7-3 2026-11-12] 挂起页签列（rule_holds 表字段）
+  id: 挂起 ID
+  code: 挂起编码
+  reason: 挂起原因
+  applied_by: 操作人
+  applied_at: 挂起时间
   check_key: 检查项
   label: 检查项名称
   finding_count: 问题数
   sample: 样例
+  message: 说明
   # 单据推导表单 / 因子快照
   scenario: 场景
   config_mode: 配置口径
@@ -144,7 +157,8 @@ tabs:
   - id: validation
     label: 校验与默认值
     sources: [validation]
-    columns: [rule_key, name, rule_type, scope_bo, severity, enabled, version, effective_from, priority]
+    # [规则模型 M7-2 2026-11-12] 治理字段（处置动作 / 命中策略 / 排序口径 / 失效日期）上列
+    columns: [rule_key, name, rule_type, scope_bo, severity, enabled, version, effective_from, effective_to, priority, disposition, hit_policy, order_by]
     filters: [scope_bo, rule_type, severity, enabled, keyword]
     actions: [detail, view_source, copy_key]
 
@@ -173,6 +187,17 @@ tabs:
     columns: []
     filters: []
     actions: [rerun]
+
+  # [规则模型 M7-3 2026-11-12] 挂起页签：数据来自 /api/holds（active_holds），
+  # 不参与 list_rules 聚合；释放动作由页面按 kind 渲染，不占全局 action 词表。
+  - id: holds
+    label: 挂起
+    kind: holds
+    require: rule_center:read
+    sources: []
+    columns: [id, object_type, record_id, rule_key, code, reason, applied_by, applied_at]
+    filters: []
+    actions: []
 
 detail:
   sections:
@@ -359,6 +384,24 @@ trace:
     rollback_success: 已回滚（恢复 {count} 条配置）
     catalog_failed: 查询规则目录失败
     fallback_warning: 规则中心视图元数据不可用，已回落默认视图
+    # [规则模型 M7-3] 挂起页签
+    release_hold: 释放
+    release_confirm: 确认释放挂起规则 {rule_key}？
+    release_success: 已释放挂起
+    release_failed: 释放挂起失败
+    holds_load_failed: 查询挂起列表失败
+    object_type_required: 请先选择对象类型
+    # [规则模型 M7-4] 配置表单 / 单条 CRUD / health 页签
+    configure: 配置
+    config_row: 配置行
+    save_draft: 保存草稿
+    draft_saved: 草稿已保存
+    draft_failed: 保存草稿失败
+    draft_not_found: 未找到待删除的草稿
+    draft_discarded: 草稿已删除
+    health_empty: 所有规则声明校验通过
+    health_load_failed: 查询健康检查失败
+    column_required: 请填写 {field}
     # 配置变更动作 → 展示文案
     action_labels:
       SAVE: 保存草稿

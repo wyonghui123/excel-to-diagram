@@ -155,6 +155,122 @@
           />
         </div>
 
+        <div v-else-if="tab.kind === 'holds'" class="holds-pane">
+          <div class="filter-bar">
+            <el-input
+              v-model="holdForm.object_type"
+              class="filter-item keyword"
+              :placeholder="labelOfColumn('object_type')"
+              clearable
+              @keyup.enter="queryHolds"
+              @clear="queryHolds"
+            />
+            <el-input
+              v-model="holdForm.record_id"
+              class="filter-item"
+              :placeholder="labelOfColumn('record_id')"
+              clearable
+              @keyup.enter="queryHolds"
+            />
+            <el-input
+              v-model="holdForm.rule_key"
+              class="filter-item"
+              :placeholder="labelOfColumn('rule_key')"
+              clearable
+              @keyup.enter="queryHolds"
+            />
+            <el-button type="primary" :loading="loading" @click="queryHolds">
+              {{ messages.query }}
+            </el-button>
+          </div>
+
+          <el-table v-loading="loading" :data="pagedRows" border size="small">
+            <el-table-column
+              v-for="column in tab.columns || []"
+              :key="column"
+              :label="labelOfColumn(column)"
+              min-width="140"
+            >
+              <template #default="{ row }">
+                <span class="cell-text">{{ formatCell(pick(row, column)) }}</span>
+              </template>
+            </el-table-column>
+
+            <el-table-column :label="messages.action_column" width="120" fixed="right">
+              <template #default="{ row }">
+                <el-button
+                  v-if="canWriteConfig"
+                  link
+                  type="danger"
+                  :loading="releasingId === row.id"
+                  @click="releaseHold(row)"
+                >
+                  {{ messages.release_hold }}
+                </el-button>
+              </template>
+            </el-table-column>
+          </el-table>
+
+          <el-pagination
+            v-model:current-page="page"
+            v-model:page-size="pageSize"
+            class="pager"
+            layout="total, sizes, prev, pager, next"
+            :page-sizes="[20, 50, 100]"
+            :total="filteredRows.length"
+          />
+        </div>
+
+        <!-- [规则模型 M7-4] health 页签：validate_all 结果（R-A10） -->
+        <div v-else-if="tab.kind === 'health'" class="health-pane">
+          <div class="filter-bar">
+            <el-select
+              v-if="(tab.filters || []).includes('severity')"
+              v-model="filters.severity"
+              class="filter-item"
+              :placeholder="labelOfFilter('severity')"
+              clearable
+              @change="reload"
+            >
+              <el-option
+                v-for="option in optionsOf('severity')"
+                :key="option"
+                :label="option"
+                :value="option"
+              />
+            </el-select>
+            <el-button type="primary" @click="reload">{{ messages.query }}</el-button>
+          </div>
+
+          <el-table v-loading="loading" :data="pagedRows" border size="small">
+            <el-table-column
+              v-for="column in tab.columns || []"
+              :key="column"
+              :label="labelOfColumn(column)"
+              min-width="140"
+            >
+              <template #default="{ row }">
+                <span class="cell-text">{{ formatCell(pick(row, column)) }}</span>
+              </template>
+            </el-table-column>
+          </el-table>
+
+          <el-empty
+            v-if="!loading && !filteredRows.length"
+            :description="messages.health_empty"
+          />
+
+          <el-pagination
+            v-if="filteredRows.length > pageSize"
+            v-model:current-page="page"
+            v-model:page-size="pageSize"
+            class="pager"
+            layout="total, sizes, prev, pager, next"
+            :page-sizes="[20, 50, 100]"
+            :total="filteredRows.length"
+          />
+        </div>
+
         <div v-else-if="tab.kind" class="placeholder">
           <el-empty :description="`${tab.label} · ${messages.not_ready}`" />
         </div>
@@ -228,6 +344,15 @@
                 >
                   {{ messages.simulate_run }}
                 </el-button>
+                <!-- [规则模型 M7-4] 仅 configurable 来源（publishable）开放配置入口 -->
+                <el-button
+                  v-if="row.publishable"
+                  link
+                  type="primary"
+                  @click="openDetail(row)"
+                >
+                  {{ messages.configure }}
+                </el-button>
                 <el-button
                   v-else-if="hasP2Action(tab)"
                   link
@@ -254,6 +379,40 @@
 
     <el-drawer v-model="drawerVisible" :title="detailRow?.name || detailRow?.rule_key" size="52%">
       <div v-if="detailRow" class="detail">
+        <!-- [规则模型 M7-4] 配置表单：改值 → 保存草稿（仅可写目标渲染） -->
+        <section v-if="canEditConfig && configTarget" class="detail-section config-section">
+          <h4>{{ messages.configure }}</h4>
+          <el-form :model="configForm" label-width="120px" size="small">
+            <el-form-item
+              v-if="configTarget === 'control_parameter_value' && configValueRows.length"
+              :label="messages.config_row"
+            >
+              <el-select v-model="configForm.rowIndex" @change="syncConfigValueRow">
+                <el-option
+                  v-for="(item, index) in configValueRows"
+                  :key="index"
+                  :label="valueRowLabel(item)"
+                  :value="index"
+                />
+              </el-select>
+            </el-form-item>
+            <el-form-item
+              v-if="configTarget === 'control_parameter_value'"
+              :label="labelOfColumn('value')"
+            >
+              <el-input v-model="configForm.value" clearable />
+            </el-form-item>
+            <el-form-item v-else :label="labelOfColumn('line_type_id')">
+              <el-input v-model="configForm.line_type_id" clearable />
+            </el-form-item>
+            <el-form-item>
+              <el-button type="primary" :loading="savingDraft" @click="saveConfigDraft">
+                {{ messages.save_draft }}
+              </el-button>
+            </el-form-item>
+          </el-form>
+        </section>
+
         <section
           v-for="section in detailSections"
           :key="section.id"
@@ -360,11 +519,13 @@
 
 <script setup>
 import { computed, onMounted, reactive, ref } from 'vue'
+import { ElMessageBox } from 'element-plus'
 import { useMessage } from '@/composables/useMessage'
 import { useAuthStore } from '@/stores/authStore'
 import RuleTracePanel from '@/components/common/RuleTrace/RuleTracePanel.vue'
 import { apiV1 } from '@/utils/httpClient'
-import { getRule, getRuleCenterViewConfig, getRuleConfigHistory, listRules, publishRuleConfig, rollbackRuleConfig, simulateRule } from '@/services/ruleCenterService'
+import { getRule, getRuleCenterViewConfig, getRuleConfigHistory, listRuleHolds, listRules, publishRuleConfig, releaseRuleHold, rollbackRuleConfig, simulateRule } from '@/services/ruleCenterService'
+import { createRuleDraft, listRuleHealth } from '@/services/ruleCenterService'
 
 const FALLBACK_CONFIG = {
   title: '',
@@ -398,12 +559,20 @@ const traceRunSeq = ref(0)
 const tracePanelRef = ref(null)
 const objectTypeOptions = ref([])
 
+// [规则模型 M7-3] 挂起页签：object_type 必填，record_id / rule_key 可选
+const holdForm = reactive({ object_type: '', record_id: '', rule_key: '' })
+const releasingId = ref(null)
+
 const historyRows = ref([])
 const historyLoading = ref(false)
 const historyPage = ref(1)
 const historyPageSize = ref(10)
 const publishing = ref(false)
 const rollingBack = ref(false)
+
+// [规则模型 M7-4] 详情抽屉配置表单：改值 → 保存草稿
+const configForm = reactive({ rowIndex: 0, value: '', line_type_id: '' })
+const savingDraft = ref(false)
 
 const columnLabels = computed(() => config.value.column_labels || {})
 const filterLabels = computed(() => config.value.filter_labels || {})
@@ -522,6 +691,14 @@ const canRollback = computed(() =>
   )
 )
 
+// [规则模型 M7-4] 只有可写目标（控制参数取值 / 行类型确定）渲染配置表单
+const configValueRows = computed(() => detailRow.value?.detail?.values || [])
+
+const canEditConfig = computed(() =>
+  canWriteConfig.value &&
+  ['control_parameter_value', 'line_type_assignment'].includes(configTarget.value)
+)
+
 onMounted(async () => {
   try {
     const response = await getRuleCenterViewConfig()
@@ -538,6 +715,7 @@ onMounted(async () => {
   resetFilters()
   resetSimulate()
   resetTrace()
+  resetHolds()
   loadObjectTypes()
   await reload()
 })
@@ -570,6 +748,74 @@ async function loadObjectTypes() {
 function resetTrace() {
   Object.keys(traceForm).forEach(key => delete traceForm[key])
   traceRequest.value = null
+}
+
+function resetHolds() {
+  holdForm.object_type = ''
+  holdForm.record_id = ''
+  holdForm.rule_key = ''
+}
+
+async function loadHolds({ silent = false } = {}) {
+  const objectType = String(holdForm.object_type || '').trim()
+  page.value = 1
+  if (!objectType) {
+    rows.value = []
+    if (!silent) message.warning(messages.value.object_type_required)
+    return
+  }
+
+  loading.value = true
+  try {
+    const params = { object_type: objectType }
+    const recordRaw = String(holdForm.record_id ?? '').trim()
+    if (recordRaw) params.record_id = recordRaw
+    const ruleKey = String(holdForm.rule_key || '').trim()
+    if (ruleKey) params.rule_key = ruleKey
+
+    const response = await listRuleHolds(params)
+    rows.value = response.success ? response.data?.items || [] : []
+    if (!response.success) message.error(response.message || messages.value.holds_load_failed)
+  } catch {
+    rows.value = []
+    message.error(messages.value.holds_load_failed)
+  } finally {
+    loading.value = false
+  }
+}
+
+function queryHolds() {
+  return loadHolds()
+}
+
+async function releaseHold(row) {
+  const holdId = row?.id
+  if (holdId === undefined || holdId === null) return
+
+  try {
+    await ElMessageBox.confirm(
+      msgText('release_confirm', { rule_key: row.rule_key || '' }),
+      messages.value.release_hold,
+      { type: 'warning' }
+    )
+  } catch {
+    return
+  }
+
+  releasingId.value = holdId
+  try {
+    const response = await releaseRuleHold(holdId, {})
+    if (response.success) {
+      message.success(messages.value.release_success)
+      await loadHolds({ silent: true })
+    } else {
+      message.error(response.message || messages.value.release_failed)
+    }
+  } catch {
+    message.error(messages.value.release_failed)
+  } finally {
+    releasingId.value = null
+  }
 }
 
 function runTrace() {
@@ -792,7 +1038,32 @@ function resetFilters() {
 
 async function reload() {
   const tab = currentTab.value
-  if (!tab || tab.kind) {
+  if (!tab) {
+    rows.value = []
+    return
+  }
+  if (tab.kind === 'holds') {
+    // 切页签时静默加载；object_type 为空则不发请求
+    await loadHolds({ silent: true })
+    return
+  }
+  if (tab.kind === 'health') {
+    // [规则模型 M7-4] health 页签：validate_all 结果（R-A10）
+    loading.value = true
+    page.value = 1
+    try {
+      const response = await listRuleHealth()
+      rows.value = response.success ? response.data?.items || [] : []
+      if (!response.success) message.error(response.message || messages.value.health_load_failed)
+    } catch {
+      rows.value = []
+      message.error(messages.value.health_load_failed)
+    } finally {
+      loading.value = false
+    }
+    return
+  }
+  if (tab.kind) {
     rows.value = []
     return
   }
@@ -871,9 +1142,13 @@ async function openDetail(row) {
   detailRow.value = row
   drawerVisible.value = true
   historyRows.value = []
+  syncConfigForm()
   try {
     const response = await getRule(row.rule_key)
-    if (response.success && response.data) detailRow.value = response.data
+    if (response.success && response.data) {
+      detailRow.value = response.data
+      syncConfigForm()
+    }
   } catch {
     // 详情接口失败时保留列表行数据，不阻断抽屉
   }
@@ -886,6 +1161,84 @@ async function copyKey(row) {
     message.success(messages.value.copied_key)
   } catch {
     message.warning(row.rule_key)
+  }
+}
+
+// ---------------------------------------------------------------------------
+// [规则模型 M7-4] 配置表单（改值 → 草稿）
+// ---------------------------------------------------------------------------
+
+function valueRowLabel(item) {
+  const labels = traceMeta.value.factor_labels || {}
+  const parts = []
+  for (const key of factorKeys.value) {
+    const value = item?.[key]
+    if (value !== undefined && value !== null) parts.push(`${labels[key] || key}=${value}`)
+  }
+  return parts.length ? parts.join(' / ') : '—'
+}
+
+function syncConfigValueRow() {
+  const item = configValueRows.value[configForm.rowIndex] || {}
+  configForm.value = item.value === undefined || item.value === null ? '' : String(item.value)
+}
+
+function syncConfigForm() {
+  configForm.rowIndex = 0
+  configForm.value = ''
+  configForm.line_type_id = ''
+  if (configTarget.value === 'control_parameter_value') {
+    syncConfigValueRow()
+  } else if (configTarget.value === 'line_type_assignment') {
+    const current = pick(detailRow.value, 'line_type_id')
+    configForm.line_type_id =
+      current === undefined || current === null ? '' : String(current)
+  }
+}
+
+async function saveConfigDraft() {
+  const row = detailRow.value
+  const target = configTarget.value
+  if (!row || !target) return
+
+  const payload = { rule_key: row.rule_key }
+  if (target === 'control_parameter_value') {
+    // 维度键取自选中的取值行，值由表单改写
+    const source = configValueRows.value[configForm.rowIndex] || {}
+    for (const key of factorKeys.value) {
+      const value = source[key]
+      if (value !== undefined && value !== null) payload[key] = value
+    }
+    const value = String(configForm.value ?? '').trim()
+    if (!value) {
+      message.warning(msgText('column_required', { field: labelOfColumn('value') }))
+      return
+    }
+    payload.value = value
+  } else {
+    const raw = String(configForm.line_type_id ?? '').trim()
+    if (!raw) {
+      message.warning(
+        msgText('column_required', { field: labelOfColumn('line_type_id') })
+      )
+      return
+    }
+    payload.line_type_id = /^\d+$/.test(raw) ? Number(raw) : raw
+  }
+
+  savingDraft.value = true
+  try {
+    const response = await createRuleDraft(payload)
+    if (response.success) {
+      message.success(messages.value.draft_saved)
+      await refreshAfterConfigChange()
+    } else {
+      message.error(response.message || messages.value.draft_failed)
+    }
+  } catch {
+    message.error(messages.value.draft_failed)
+  } finally {
+    savingDraft.value = false
   }
 }
 </script>

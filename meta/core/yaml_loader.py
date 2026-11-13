@@ -118,6 +118,12 @@ class AssociationDefinition:
     # [R-MM-01] 逐条关联语义类型（Spec §3.2）；空串 = association（零行为变化）
     kind: str = ""
 
+
+# [规则模型 M7-2 2026-11-12] 治理字段注入所需常量/键生成器（均无回向导入，
+# 不构成循环依赖）。
+from meta.core.rule_hit_policy import ORDER_BY
+from meta.core.rule_keys import bo_yaml_key
+
 from meta.core.models import (
     MetaObject,
     MetaField,
@@ -2215,20 +2221,33 @@ def _parse_triggers(trigger_list: List[str]) -> List[RuleTrigger]:
     return triggers
 
 
-def parse_rule(data: Dict[str, Any]) -> MetaRule:
+def parse_rule(data: Dict[str, Any], bo_id: str = "") -> MetaRule:
     """
     解析规则（自动识别类型）
+
+    [规则模型 M7-2 2026-11-12] bo_id 用于生成只读派生 ``rule_key``；
+    单文件/无对象上下文（如装配单条规则）时留空，不臆造键。
     
     根据规则类型自动选择对应的解析函数
     """
     rule_type_str = data.get("type", data.get("rule_type", "validation")).lower()
     # [SSOT 2026-10-29] 未知 type 不再静默降级成 VALIDATION（拼错时会被
     # parse_validation 吞掉字段、按校验执行）。保留原文供追溯 + 显式告警。
+    # [规则模型 M7-1 2026-11-12] 升级为加载期错误：未知 rule_type 报
+    # RULE_TYPE_UNKNOWN；只有测试态开关 RULE_LOAD_ALLOW_UNKNOWN=1 才降级告警
+    # （存量测试用临时 YAML 需要这一逃生口）。
     unknown_type = rule_type_str not in RULE_TYPE_MAP
+    if unknown_type and not _allow_unknown_rule_type():
+        from meta.core.rule_declaration_validator import (
+            DeclarationError, RuleDeclarationError)
+        raise RuleDeclarationError([DeclarationError(
+            'RULE_TYPE_UNKNOWN', str(data.get("id", "") or ''),
+            '未知 rule_type %r（请修正 YAML 或在 RULE_TYPE_MAP 登记）'
+            % rule_type_str)])
     if unknown_type:
         logger.warning(
-            "parse_rule: 未知规则类型 '%s'（rule id=%s, name=%s），暂按 validation 解析；"
-            "请修正 YAML 或在 RULE_TYPE_MAP 登记",
+            "parse_rule: 未知规则类型 '%s'（rule id=%s, name=%s），按 RULE_LOAD_ALLOW_UNKNOWN=1 "
+            "降级为 validation 解析",
             rule_type_str, data.get("id", ""), data.get("name", ""),
         )
     rule_type = RULE_TYPE_MAP.get(rule_type_str, RuleType.VALIDATION)
@@ -2281,6 +2300,12 @@ def parse_rule(data: Dict[str, Any]) -> MetaRule:
     # [规则模型 M5 2026-11-10] 治理字段（FR-007），规则中心 validation 页签展示
     rule.version = str(data.get("version") or "")
     rule.effective_from = str(data.get("effective_from") or "")
+    # [规则模型 M7-2 2026-11-12] 治理字段：order_by 仅为治理声明（规则中心展示
+    # 该规则集的排序口径），不改变运行期排序；effective_to / rule_key 未声明留空，
+    # 不臆造默认值（rule_key 由 bo_id + rule.id 派生）。
+    rule.order_by = [str(item) for item in (data.get("order_by") or ORDER_BY)]
+    rule.effective_to = str(data.get("effective_to") or "")
+    rule.rule_key = bo_yaml_key(bo_id, rule.id) if bo_id else ""
     if unknown_type:
         # [SSOT 2026-10-29] 保留 YAML 原文，便于日志/排障追溯（rule_type 已降级为 VALIDATION）
         rule.custom["raw_rule_type"] = rule_type_str
@@ -3053,7 +3078,10 @@ def parse_meta_object(data: Dict[str, Any], source_file: str = "") -> MetaObject
     relations = [parse_relation(r) for r in data.get("relations", [])]
     actions = [parse_action(a) for a in data.get("actions", [])]
     queries = [parse_query(q) for q in data.get("queries", [])]
-    rules = [parse_rule(r) for r in data.get("rules", [])]
+    rules = [
+        parse_rule(r, bo_id=str(data.get("id", "") or ""))
+        for r in data.get("rules", [])
+    ]
     # [M3 FR-011 2026-10-29] 派生字段禁止作为 state_transition.state_field
     _validate_derived_state_field(rules, data.get("id", ""), source_file)
     indexes = [parse_index(i) for i in data.get("indexes", [])]
@@ -3225,6 +3253,56 @@ _shared_mtimes = {}
 _dir_registry_cache = {}
 _dir_registry_ids = {}
 
+#: 加载期规则声明校验错误缓存（M7-1）：file_path -> List[DeclarationError]。
+#: 供 CI / 测试直接读取「哪些文件有声明问题」，业务运行期不消费。
+_declaration_errors: Dict[str, List[Any]] = {}
+
+
+def get_declaration_errors() -> Dict[str, List[Any]]:
+    """返回加载期声明校验错误的副本（file_path -> errors）。
+
+    [规则模型 M7-4 2026-11-12] 规则中心 health 页签只读消费；
+    返回副本避免调用方修改内部缓存。
+    """
+    return {path: list(errors) for path, errors in _declaration_errors.items()}
+
+
+def _allow_unknown_rule_type() -> bool:
+    """未知 rule_type 是否允许降级为 validation（仅测试态开关）。"""
+    return os.environ.get('RULE_LOAD_ALLOW_UNKNOWN', '0').strip() == '1'
+
+
+def _declaration_strict() -> bool:
+    """加载期声明校验是否严格模式（RULE_DECLARATION_STRICT=1 时抛错）。"""
+    return os.environ.get('RULE_DECLARATION_STRICT', '0').strip() == '1'
+
+
+def _validate_object_declarations(obj: MetaObject, source_file: str) -> None:
+    """对单个已解析对象做加载期规则声明校验（M7-1 / FR-012）。
+
+    strict（``RULE_DECLARATION_STRICT=1``）抛 :class:`RuleDeclarationError`；
+    默认告警并缓存到 :data:`_declaration_errors`。
+    """
+    from meta.core.rule_declaration_validator import (
+        RuleDeclarationError, validate_all)
+
+    errors = validate_all(objects=[obj], doc_flow_rules=None)
+    # registry 在目录全量加载后才注册，单文件阶段表名未知；
+    # 跨对象审批表校验留给全量校验 / 测试，避免假告警。
+    errors = [item for item in errors if item.code != 'APPROVAL_TABLE_UNKNOWN']
+    if not errors:
+        _declaration_errors.pop(source_file, None)
+        return
+    _declaration_errors[source_file] = list(errors)
+    if _declaration_strict():
+        raise RuleDeclarationError(errors)
+    logger.warning(
+        "[M7-1] %s: 规则声明校验发现 %d 处问题"
+        "（RULE_DECLARATION_STRICT=1 可升级为错误）\n%s",
+        source_file, len(errors),
+        '\n'.join(str(item) for item in errors))
+
+
 def _get_file_cache_key(file_path: str) -> Optional[str]:
     """获取文件缓存键（基于 file_path + mtime），如果文件不存在返回 None
 
@@ -3269,6 +3347,9 @@ class DeprecatedSchemaSectionError(ValueError):
 
 
 def load_yaml_file(file_path: str, shared_props: Dict[str, List[Dict[str, Any]]] = None, aspects_defs: Dict[str, Dict] = None) -> Optional[MetaObject]:
+    # 惰性导入：except 分支需要按名捕获，且避免模块导入期的循环依赖。
+    from meta.core.rule_declaration_validator import RuleDeclarationError
+
     cache_key = _get_file_cache_key(file_path)
     if cache_key and cache_key in _yaml_cache:
         return _yaml_cache[cache_key]
@@ -3306,11 +3387,16 @@ def load_yaml_file(file_path: str, shared_props: Dict[str, List[Dict[str, Any]]]
         obj = parse_meta_object(data, source_file=file_path)
 
         obj = ensure_crud_actions(obj)
-        
+
+        # [规则模型 M7-1 2026-11-12] 加载期规则声明校验（FR-012）：
+        # 默认告警 + 缓存；RULE_DECLARATION_STRICT=1 抛 RuleDeclarationError。
+        _validate_object_declarations(obj, source_file=file_path)
+
         if cache_key:
             _yaml_cache[cache_key] = obj
         return obj
-    except (DeprecatedSchemaSectionError, UnknownFieldTypeError):
+    except (DeprecatedSchemaSectionError, UnknownFieldTypeError,
+            RuleDeclarationError):
         raise
     except Exception as e:
         print("[YAML Loader] Error loading {0}: {1}".format(file_path, str(e)))

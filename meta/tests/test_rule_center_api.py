@@ -43,7 +43,7 @@ def test_view_config_has_expected_tabs(service):
     tab_ids = [tab['id'] for tab in tabs]
     assert tab_ids == [
         'all', 'control_parameter', 'line_type', 'doc_flow',
-        'approval', 'validation', 'simulate', 'health', 'trace',
+        'approval', 'validation', 'simulate', 'health', 'trace', 'holds',
     ]
     assert len(set(tab_ids)) == len(tab_ids)
 
@@ -403,7 +403,7 @@ class TestRuleCenterEndpoints:
 
         body = resp.get_json()
         assert body['success'] is True
-        assert len(body['data']['tabs']) == 9
+        assert len(body['data']['tabs']) == 10
 
     def test_trace_metadata_complete(self):
         """新增渲染语义必须可由 YAML 提供，前端不得回退到硬编码。"""

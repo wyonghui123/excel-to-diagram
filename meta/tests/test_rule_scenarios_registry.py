@@ -106,7 +106,7 @@ def test_sourcing_registered_as_trace_scenario():
     assert spec.semantic_class == 'decision'
     assert spec.semantic_type == 'determination'
     assert spec.legacy_rule_type == 'sourcing'
-    assert spec.hit_policy == 'first'
+    assert spec.trace_policy == 'first'
     assert spec.instrumented is True
     assert spec.configurable is False
     assert spec.publishable is False
@@ -118,6 +118,13 @@ def test_sourcing_registered_as_trace_scenario():
     assert 'sourcing' not in NOT_INSTRUMENTED_SOURCES
     # M2 起进入 trace 白名单
     assert 'sourcing' in TRACE_SCENARIOS
+
+
+def test_approval_separates_trace_and_selection_policy():
+    spec = get_scenario('approval')
+    assert spec is not None
+    assert spec.trace_policy == 'all'
+    assert spec.selection_hit_policy == 'first'
 
 
 def test_sourcing_does_not_extend_rule_type_enum():

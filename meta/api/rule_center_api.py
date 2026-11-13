@@ -84,6 +84,9 @@ def list_rules():
             domain=args.get('domain') or None,
             bo=args.get('bo') or None,
             layer=args.get('layer') or None,
+            # [规则模型 M7-2 2026-11-12] 治理字段筛选透传（FILTER_KEYS 已声明）
+            severity=args.get('severity') or None,
+            enabled=_as_bool(args.get('enabled')),
             # 管理面板默认可看到草稿；显式 include_draft=false 时只看生效态
             include_draft=_as_bool(args.get('include_draft')) is not False,
             limit=args.get('limit') or args.get('page_size') or 50,
@@ -97,6 +100,18 @@ def list_rules():
     except Exception as e:  # noqa: BLE001
         logger.exception('Failed to list rules: %s', e)
         return error_response('查询规则目录失败', status=500)
+
+
+@rule_center_bp.route('/health', methods=['GET'])
+@login_required
+@require_permission('rule_center:read')
+def get_rule_health():
+    """规则声明健康检查（health 页签，R-A10）：聚合 validate_all 结果。"""
+    try:
+        return ok(get_rule_catalog_service().list_health())
+    except Exception as e:  # noqa: BLE001
+        logger.exception('Failed to load rule health: %s', e)
+        return error_response('查询规则健康检查失败', status=500)
 
 
 @rule_center_bp.route('/<path:rule_key>', methods=['GET'])
@@ -114,6 +129,70 @@ def get_rule(rule_key: str):
     if rule is None:
         return error_response('规则不存在', status=404, error_code='RULE_NOT_FOUND')
     return ok(rule)
+
+
+# ----------------------------------------------------------------------
+# 单条规则 CRUD（仅 configurable 来源开放，写草稿不碰生效数据）
+# ----------------------------------------------------------------------
+
+@rule_center_bp.route('', methods=['POST'])
+@login_required
+@require_permission('rule_center:write')
+def create_rule_draft():
+    """按 rule_key 创建 / 更新配置草稿。"""
+    payload = request.get_json(force=True, silent=True) or {}
+    rule_key = payload.get('rule_key')
+    if not rule_key:
+        return error_response('rule_key 不能为空', status=400)
+    return _save_draft_by_rule_key(str(rule_key), payload.get('payload') or payload)
+
+
+@rule_center_bp.route('/<path:rule_key>', methods=['PUT'])
+@login_required
+@require_permission('rule_center:write')
+def update_rule_draft(rule_key: str):
+    """按路径 rule_key 更新配置草稿（语义同 POST，键取自路径）。"""
+    payload = request.get_json(force=True, silent=True) or {}
+    return _save_draft_by_rule_key(rule_key, payload.get('payload') or payload)
+
+
+@rule_center_bp.route('/<path:rule_key>', methods=['DELETE'])
+@login_required
+@require_permission('rule_center:write')
+def delete_rule_draft(rule_key: str):
+    """删除 rule_key 对应草稿（无草稿 404）。"""
+    payload = request.get_json(force=True, silent=True) or {}
+    data = dict(request.args.to_dict())
+    data.update(payload.get('payload') or payload)
+    user = _current_user()
+    try:
+        result = get_rule_config_publish_service().discard_draft(
+            rule_key, data,
+            user_id=user.get('user_id'), user_name=user.get('username'))
+        return ok(result)
+    except RuleConfigNotFound as e:
+        return error_response(str(e), status=404, error_code='NOT_FOUND')
+    except RuleConfigError as e:
+        return error_response(str(e), status=400, error_code='RULE_CONFIG_INVALID')
+    except Exception as e:  # noqa: BLE001
+        logger.exception('Failed to discard rule config draft: %s', e)
+        return error_response('删除配置草稿失败', status=500)
+
+
+def _save_draft_by_rule_key(rule_key: str, data: dict):
+    user = _current_user()
+    try:
+        result = get_rule_config_publish_service().save_draft_from_rule_key(
+            rule_key, data,
+            user_id=user.get('user_id'), user_name=user.get('username'))
+        return ok(result)
+    except RuleConfigNotFound as e:
+        return error_response(str(e), status=404, error_code='NOT_FOUND')
+    except RuleConfigError as e:
+        return error_response(str(e), status=400, error_code='RULE_CONFIG_INVALID')
+    except Exception as e:  # noqa: BLE001
+        logger.exception('Failed to save rule config draft by key: %s', e)
+        return error_response('保存配置草稿失败', status=500)
 
 
 # ----------------------------------------------------------------------

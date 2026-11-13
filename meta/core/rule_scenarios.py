@@ -36,7 +36,8 @@ class ScenarioSpec:
     semantic_class: str
     semantic_type: str
     legacy_rule_type: str
-    hit_policy: str
+    #: trace 解释口径（first / best / all），决定 explain 展示几条命中
+    trace_policy: str
     factor_keys: Tuple[str, ...]
     instrumented: bool
     configurable: bool
@@ -44,6 +45,8 @@ class ScenarioSpec:
     stage: Optional[str] = None
     stage_map: Mapping[str, str] = field(default_factory=dict)
     handler: Optional[str] = None
+    #: 运行期选择口径（first / all）；与 trace_policy 正交，未声明表示不参与选择
+    selection_hit_policy: Optional[str] = None
     #: 是否参与旧 DIMENSION_FIELDS 并集投影（旧 6 场景专用，新场景应为 False）
     global_projection: bool = True
 
@@ -52,7 +55,7 @@ SCENARIOS: Tuple[ScenarioSpec, ...] = (
     ScenarioSpec(
         scenario='default', source='bo_yaml',
         semantic_class='action', semantic_type='computation',
-        legacy_rule_type='default', hit_policy='first',
+        legacy_rule_type='default', trace_policy='first',
         factor_keys=(), instrumented=True,
         configurable=False, publishable=False,
         stage='before_save', handler='core',
@@ -60,7 +63,7 @@ SCENARIOS: Tuple[ScenarioSpec, ...] = (
     ScenarioSpec(
         scenario='control_parameter', source='control_parameter',
         semantic_class='decision', semantic_type='determination',
-        legacy_rule_type='control_parameter', hit_policy='best',
+        legacy_rule_type='control_parameter', trace_policy='best',
         factor_keys=('org_id', 'document_type_id', 'line_type_id', 'item_group_id'),
         instrumented=True, configurable=True, publishable=True,
         stage='calc', handler='control_parameter',
@@ -68,7 +71,7 @@ SCENARIOS: Tuple[ScenarioSpec, ...] = (
     ScenarioSpec(
         scenario='line_type', source='line_type',
         semantic_class='decision', semantic_type='determination',
-        legacy_rule_type='line_type_assignment', hit_policy='best',
+        legacy_rule_type='line_type_assignment', trace_policy='best',
         factor_keys=('document_type_id', 'item_group_id'),
         instrumented=True, configurable=True, publishable=True,
         stage='calc', handler='line_type',
@@ -76,15 +79,16 @@ SCENARIOS: Tuple[ScenarioSpec, ...] = (
     ScenarioSpec(
         scenario='approval', source='approval',
         semantic_class='decision', semantic_type='approval',
-        legacy_rule_type='approval', hit_policy='all',
+        legacy_rule_type='approval', trace_policy='all',
         factor_keys=(), instrumented=True,
         configurable=False, publishable=False,
         stage='approve', handler='core',
+        selection_hit_policy='first',
     ),
     ScenarioSpec(
         scenario='state_transition', source='bo_yaml',
         semantic_class='decision', semantic_type='transition',
-        legacy_rule_type='state_transition', hit_policy='all',
+        legacy_rule_type='state_transition', trace_policy='all',
         factor_keys=(), instrumented=True,
         configurable=False, publishable=False,
         stage='status_transition', handler='core',
@@ -92,7 +96,7 @@ SCENARIOS: Tuple[ScenarioSpec, ...] = (
     ScenarioSpec(
         scenario='doc_flow', source='doc_flow',
         semantic_class='constraint', semantic_type='declaration',
-        legacy_rule_type='doc_flow', hit_policy='all',
+        legacy_rule_type='doc_flow', trace_policy='all',
         factor_keys=(), instrumented=True,
         configurable=False, publishable=False,
         stage='validate', handler='doc_flow',
@@ -100,7 +104,7 @@ SCENARIOS: Tuple[ScenarioSpec, ...] = (
     ScenarioSpec(
         scenario='sourcing', source='sourcing',
         semantic_class='decision', semantic_type='determination',
-        legacy_rule_type='sourcing', hit_policy='first',
+        legacy_rule_type='sourcing', trace_policy='first',
         factor_keys=('dest_org_id', 'item_id', 'usage', 'eval_date'),
         instrumented=True, configurable=False, publishable=False,
         stage_map={

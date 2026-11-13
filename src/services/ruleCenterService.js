@@ -3,7 +3,7 @@
  *
  * 全部为只读端点，统一返回 { success, data }。
  */
-import { apiV2 } from '@/utils/httpClient'
+import { apiRoot, apiV2 } from '@/utils/httpClient'
 
 /** 规则中心视图元数据（页签 / 列 / 详情分区唯一数据源）。 */
 export function getRuleCenterViewConfig() {
@@ -69,4 +69,34 @@ export function rollbackRuleConfig(payload) {
 /** 配置发布 / 回滚历史（audit_logs）。 */
 export function getRuleConfigHistory(params = {}) {
   return apiV2.get('/rules/config/history', { params })
+}
+
+/** 单条规则创建 / 更新草稿（payload.rule_key 指定规则）。 */
+export function createRuleDraft(payload) {
+  return apiV2.post('/rules', payload)
+}
+
+/** 单条规则更新草稿（键取自路径）。 */
+export function updateRuleDraft(ruleKey, payload = {}) {
+  return apiV2.put(`/rules/${encodeURIComponent(ruleKey)}`, payload)
+}
+
+/** 删除单条规则草稿（无草稿时后端返回 404）。 */
+export function discardRuleDraft(ruleKey, params = {}) {
+  return apiV2.delete(`/rules/${encodeURIComponent(ruleKey)}`, { params })
+}
+
+/** 规则声明健康检查（health 页签，R-A10）。 */
+export function listRuleHealth() {
+  return apiV2.get('/rules/health')
+}
+
+/** 活动挂起列表（spec-rule-model §12.4 M7-3）：只返回 released_at IS NULL。 */
+export function listRuleHolds(params = {}) {
+  return apiRoot.get('/holds', { params })
+}
+
+/** 按 id 释放挂起（只置 released_by / released_at，不删行）。 */
+export function releaseRuleHold(holdId, payload = {}) {
+  return apiRoot.post(`/holds/${encodeURIComponent(holdId)}/release`, payload)
 }

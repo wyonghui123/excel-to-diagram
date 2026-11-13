@@ -146,11 +146,19 @@ class MetricRegistry:
     def codes(self, object_type: str) -> List[str]:
         return sorted(d.code for d in self.definitions(object_type))
 
-    def validate(self, known_fields: Optional[Dict[str, Iterable[str]]] = None
-                 ) -> List[str]:
-        """整表校验；返回中文错误列表，空列表表示通过。"""
+    def validate(self, known_fields: Optional[Dict[str, Iterable[str]]] = None,
+                 scopes: Optional[Iterable[str]] = None) -> List[str]:
+        """整表校验；返回中文错误列表，空列表表示通过。
+
+        ``scopes`` 非空时只校验这些对象作用域（GLOBAL_SCOPE 始终校验），
+        供单文件加载期校验使用，避免把其他文件已注册的度量误报为错误。
+        """
+        scope_filter = set(scopes) if scopes is not None else None
         errors: List[str] = []
         for (scope, _code), definition in sorted(self._items.items()):
+            if (scope_filter is not None and scope != GLOBAL_SCOPE
+                    and scope not in scope_filter):
+                continue
             names, func_names, parse_error = _formula_identifiers(definition.formula)
             if parse_error:
                 errors.append('{0}.{1}：{2}'.format(scope, definition.code, parse_error))
@@ -170,10 +178,10 @@ class MetricRegistry:
                     errors.append(
                         '{0}.{1}：输入 {2} 既不是度量也不是该对象字段'.format(
                             scope, definition.code, name))
-        errors.extend(self._cycle_errors())
+        errors.extend(self._cycle_errors(scopes=scope_filter))
         return errors
 
-    def _cycle_errors(self) -> List[str]:
+    def _cycle_errors(self, scopes: Optional[Iterable[str]] = None) -> List[str]:
         """度量之间的循环依赖（A→B→A）在配置期报错。"""
         errors: List[str] = []
         state: Dict[Tuple[str, str], int] = {}  # 0=未访问 1=访问中 2=完成
@@ -201,6 +209,9 @@ class MetricRegistry:
             state[key] = 2
 
         for key in self._items:
+            if (scopes is not None and key[0] != GLOBAL_SCOPE
+                    and key[0] not in scopes):
+                continue
             if state.get(key, 0) == 0:
                 visit(key, [])
         return errors

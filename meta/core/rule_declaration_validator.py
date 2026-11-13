@@ -10,7 +10,8 @@
   单据流  DOC_FLOW_SOURCE_UNKNOWN / DOC_FLOW_TARGET_UNKNOWN /
           DOC_FLOW_QTY_FIELD_MISSING / DOC_FLOW_DUPLICATE
   动作    RULE_ACTION_INVALID
-  命中    RULE_HIT_POLICY_INVALID / RULE_OVERLAP
+  类型    RULE_TYPE_UNKNOWN
+  命中    RULE_HIT_POLICY_INVALID / RULE_HIT_POLICY_UNSUPPORTED / RULE_OVERLAP
   聚合    RULE_COMBINE_MODE_INVALID / RULE_KEY_INVALID
   约束    RULE_HOLD_RELEASE_MISSING
   度量    METRIC_DEFINITION_INVALID
@@ -40,6 +41,28 @@ class DeclarationError:
 
     def __str__(self) -> str:
         return '[%s] %s: %s' % (self.code, self.object_type, self.message)
+
+
+class RuleDeclarationError(Exception):
+    """加载期规则声明校验失败（M7-1）。
+
+    携带全部 :class:`DeclarationError`，``str()`` 逐条输出 ``[code] object: msg``，
+    便于日志与 CI 直接定位。
+    """
+
+    def __init__(self, errors: Optional[List[DeclarationError]] = None):
+        self.errors: List[DeclarationError] = list(errors or [])
+        super().__init__('\n'.join(str(item) for item in self.errors))
+
+
+#: 「选择型」规则类型（M7-1 / §11.1 #3）：只有它们存在真实的「首命中」语义，
+#: 声明 ``hit_policy=first/unique`` 才有运行期意义。
+#:
+#: 依据：``rule_executor.py`` 的 DEFAULT 域按 ``(priority, id)`` 升序执行，
+#: 同一 ``target_field`` 组内首个命中获胜（未获胜者记
+#: ``skip_reason=not_first_match``）。L1 的 validation / constraint 是
+#: 全量求值，等价于 ``all``，声明 ``first/unique`` 不会被任何代码消费。
+SELECTIVE_RULE_TYPE_VALUES = frozenset({RuleType.DEFAULT.value})
 
 
 def _objects(objects: Optional[Iterable[Any]] = None) -> List[Any]:
@@ -286,8 +309,12 @@ def validate_hit_policies(
 
     1. 显式声明的 ``hit_policy`` 必须落在封闭词表 ``first / all / unique`` 内；
        未声明视为默认 ``first``，不报错。
-    2. ``unique`` 只做建模期静态重叠检查：同一对象、同一 ``rule_type`` 下
-       条件文本相同的多条 ``unique`` 规则即视为「规则重叠」。
+    2. 非选择型 ``rule_type``（见 :data:`SELECTIVE_RULE_TYPE_VALUES`）
+       **显式声明** ``first/unique`` 报 ``RULE_HIT_POLICY_UNSUPPORTED``：
+       这些类型全量求值，声明值不会被任何代码消费（§11.1 #3）。
+    3. ``unique`` 只做建模期静态重叠检查：同一对象、同一 ``rule_type`` 下
+       条件文本相同的多条 ``unique`` 规则即视为「规则重叠」。这是 lint 下界，
+       不做语义重叠识别（§11.1 #4）。
     """
     errors: List[DeclarationError] = []
     for meta_object in _objects(objects):
@@ -301,6 +328,18 @@ def validate_hit_policies(
                 errors.append(DeclarationError(
                     'RULE_HIT_POLICY_INVALID', object_id,
                     '%s：%s' % (rule_key, reason)))
+                continue
+            # 用原始声明值判「显式声明」：normalize 会把空值补成 first，
+            # 直接拿 normalized 值判断会把未声明的规则全部误报。
+            declared_text = str(declared or '').strip().lower()
+            rule_type = getattr(rule, 'rule_type', None)
+            rule_type_value = str(getattr(rule_type, 'value', rule_type) or '')
+            if (declared_text in ('first', 'unique')
+                    and rule_type_value not in SELECTIVE_RULE_TYPE_VALUES):
+                errors.append(DeclarationError(
+                    'RULE_HIT_POLICY_UNSUPPORTED', object_id,
+                    '%s：rule_type=%s 非选择型，命中策略 %s 无运行期消费'
+                    % (rule_key, rule_type_value, declared_text)))
                 continue
             if normalize_hit_policy(declared) != 'unique':
                 continue
@@ -391,7 +430,8 @@ def validate_constraint_keys(
 
 def validate_metric_definitions(
         metric_registry: Any = None,
-        known_fields: Optional[Dict[str, Iterable[str]]] = None
+        known_fields: Optional[Dict[str, Iterable[str]]] = None,
+        scopes: Optional[Iterable[str]] = None
 ) -> List[DeclarationError]:
     """派生度量定义校验（M3 / FR-003 / NFR-003）。
 
@@ -404,14 +444,15 @@ def validate_metric_definitions(
 
     target = metric_registry if metric_registry is not None else DEFAULT_METRIC_REGISTRY
     return [DeclarationError('METRIC_DEFINITION_INVALID', '', message)
-            for message in target.validate(known_fields=known_fields)]
+            for message in target.validate(known_fields=known_fields,
+                                           scopes=scopes)]
 
 
 def validate_all(
         objects: Optional[Iterable[Any]] = None,
         doc_flow_rules: Optional[Iterable[Dict[str, Any]]] = None
 ) -> List[DeclarationError]:
-    """聚合七域校验。"""
+    """聚合九域校验。"""
     target = list(objects) if objects is not None else None
     errors = validate_state_machines(target)
     errors.extend(validate_approval(target))
@@ -426,7 +467,11 @@ def validate_all(
         str(getattr(obj, 'id', '') or ''): _field_names(obj)
         for obj in (target if target is not None else _objects())
     }
-    errors.extend(validate_metric_definitions(known_fields=known_fields))
+    # [Rule Model M7-1 2026-11-12] 单文件加载时只校验本次对象作用域的度量：
+    # 度量注册表是全局的，全表校验会把其他文件已注册的度量误报为本文件问题。
+    scopes = None if target is None else set(known_fields)
+    errors.extend(validate_metric_definitions(known_fields=known_fields,
+                                              scopes=scopes))
     if doc_flow_rules is not None:
         errors.extend(validate_doc_flow_rules(doc_flow_rules, target))
     return errors
