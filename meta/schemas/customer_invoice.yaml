@@ -1138,6 +1138,13 @@ ui_view_config:
   detail:
     showChangeHistory: true
     showRelations: true
+    # [规则回溯 2026-11-13] 规则推导分区：与销售订单共用 RuleTracePanel / RuleTraceService
+    rule_trace:
+      enabled: true
+      label: 规则推导
+      permission: rule_center:trace
+      scenarios: [default, control_parameter, line_type, approval, doc_flow]
+      codes: [billing_pricing_mode]
     # [金额回溯 2026-11-13] 统一只读金额分解分区（含贷项 / 红冲来源）
     amount_trace:
       enabled: true
