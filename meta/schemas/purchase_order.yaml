@@ -1546,7 +1546,14 @@ ui_view_config:
           - fields: [description]
 
   # [金额回溯 2026-11-13] 统一只读金额分解分区，共用后端 amount-trace 契约
+  # [规则回溯 2026-11-13] 规则推导分区，与销售订单共用 RuleTracePanel / RuleTraceService
   detail:
+    rule_trace:
+      enabled: true
+      label: 规则推导
+      permission: rule_center:trace
+      scenarios: [default, control_parameter, line_type, approval, doc_flow]
+      codes: [price_break_cumulative]
     amount_trace:
       enabled: true
       label: 金额回溯

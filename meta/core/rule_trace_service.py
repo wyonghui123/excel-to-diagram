@@ -455,11 +455,21 @@ class RuleTraceService:
                            data_source=data_source)
         if scenario == 'state_transition':
             state_field = factors_state_field(record)
+            current_state = from_state if from_state is not None \
+                else record.get(state_field)
+            if to_state is None:
+                # 详情页静态回溯没有目标状态 ⇒ 无流转可推导，按 skipped 呈现，
+                # 与 control_parameter 的 no_codes_requested 同口径（不报错）
+                return _envelope(
+                    'state_transition', 'skipped', source='db',
+                    reason='no_transition_context',
+                    factors={'state_field': state_field,
+                             'from_state': current_state},
+                )
             return explain(
                 object_type, 'state_transition',
                 state_field=state_field,
-                from_state=from_state if from_state is not None
-                else record.get(state_field),
+                from_state=current_state,
                 to_state=to_state,
             )
         return explain(object_type, 'approval', record_id=record_id,
@@ -723,8 +733,13 @@ class RuleTraceService:
     def _doc_flow(self, object_type: str, data_source: Any,
                   started: float) -> Dict[str, Any]:
         from meta.core.doc_flow_node_groups import build_node_groups, node_group_detail
-        from meta.core.rule_provider import list_doc_flow_rules
+        from meta.core.rule_provider import (
+            ensure_doc_flow_rule_table, list_doc_flow_rules,
+        )
 
+        # 规则表可能由旧版本建过（缺 target_qty_field 等列）；
+        # 启动期未声明 doc_flow 的应用不会触发建表/加列，这里幂等兜底一次。
+        ensure_doc_flow_rule_table(data_source)
         all_rules = list_doc_flow_rules(data_source)
         rules = [
             rule for rule in all_rules

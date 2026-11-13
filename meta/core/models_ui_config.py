@@ -143,6 +143,10 @@ class UIDetailViewConfig:
     #   {enabled, label, permission, scenarios, codes}
     #   不入库、不参与规则解析，仅决定详情页是否挂载「规则推导」分区。
     rule_trace: Dict[str, Any] = field(default_factory=dict)
+    # [金额回溯 2026-11-13] 金额回溯分区声明（原样透传给前端 DetailPage）：
+    #   {enabled, label, permission}；此前 dataclass 缺该字段 ⇒ YAML
+    #   detail.amount_trace 被加载时静默丢弃，前端无法挂载金额分解面板。
+    amount_trace: Dict[str, Any] = field(default_factory=dict)
     # [2026-11-12] 详情页业务动作声明（原样透传给前端 DetailPage）：
     #   [{id, label, icon, variant, permission, action, params, confirm_message,
     #     visible_when, input_fields}]；含 action 的项由前端派发 BO Action，
