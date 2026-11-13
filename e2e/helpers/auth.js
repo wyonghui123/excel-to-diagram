@@ -34,9 +34,30 @@
  * - 自动创建测试数据，避免测试被跳过
  * - 使用 runCleanup() 在测试后自动清理
  */
+import fs from 'fs'
+import path from 'path'
+
+// [端口单一真源] 与 playwright.config.js / global.setup.js 同源读取 scripts/ports.json。
+//   历史问题：本文件曾硬编码 3004，导致服务在 3006 时 login() 的 goto 直接 ERR_CONNECTION_REFUSED。
+function resolvePorts() {
+  try {
+    const file = path.join(process.cwd(), 'scripts', 'ports.json')
+    const ports = JSON.parse(fs.readFileSync(file, 'utf-8'))
+    return {
+      frontend: Number.isInteger(ports.frontend) ? ports.frontend : 3004,
+      backend: Number.isInteger(ports.backend) ? ports.backend : 3010
+    }
+  } catch (e) {
+    console.warn(`[auth] 读取 scripts/ports.json 失败: ${e.message}`)
+    return { frontend: 3004, backend: 3010 }
+  }
+}
+
+const PORTS = resolvePorts()
+
 export async function login(page) {
-  const baseUrl = process.env.TEST_BASE_URL || 'http://localhost:3010'
-  const appUrl = process.env.APP_URL || 'http://localhost:3004'
+  const baseUrl = process.env.TEST_BASE_URL || `http://localhost:${PORTS.backend}`
+  const appUrl = process.env.APP_URL || `http://localhost:${PORTS.frontend}`
 
   const resp = await page.request.get(`${baseUrl}/api/v1/auth/dev-login?username=admin`)
   if (!resp.ok()) {

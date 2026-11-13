@@ -60,9 +60,11 @@
         <el-table-column prop="title" label="标题" min-width="200" show-overflow-tooltip />
         <el-table-column label="状态" width="110">
           <template #default="{ row }">
-            <el-tag :type="statusTagType(row.status)" size="small" data-test="ec-row-status">
-              {{ statusLabel(row.status) }}
-            </el-tag>
+            <EnumTag
+              enum-name="engineering_change_status"
+              :value="row.status"
+              data-test="ec-row-status"
+            />
           </template>
         </el-table-column>
         <el-table-column label="物料" min-width="150" show-overflow-tooltip>
@@ -117,6 +119,7 @@ import { useRouter } from 'vue-router'
 import { PageShell, AppButton } from '@/components/common'
 import { listChanges } from '@/services/engineeringChangeService'
 import { getEnum } from '@/services/metaEnumService'
+import EnumTag from '@/components/meta/EnumTag.vue'
 
 defineOptions({ name: 'EngineeringChangeListPage' })
 
@@ -126,22 +129,12 @@ const router = useRouter()
 
 const filters = reactive({ status: '' })
 const statusOptions = ref([])
-const statusLabelMap = ref({})
-const statusTagMap = ref({})
 const rows = ref([])
 const total = ref(0)
 const page = ref(1)
 const pageSize = ref(20)
 const loading = ref(false)
 const error = ref('')
-
-function statusLabel(status) {
-  return statusLabelMap.value[status] || status || '—'
-}
-
-function statusTagType(status) {
-  return statusTagMap.value[status] || 'info'
-}
 
 function itemLabel(row) {
   const code = row?.item_no
@@ -217,11 +210,8 @@ async function load() {
 async function loadStatusEnum() {
   try {
     const items = await getEnum('engineering_change_status')
+    // 状态列渲染交给 EnumTag（label/color 由后端下发），此处只取筛选项
     statusOptions.value = items.map(item => ({ value: item.value, label: item.label }))
-    statusLabelMap.value = Object.fromEntries(items.map(item => [item.value, item.label]))
-    statusTagMap.value = Object.fromEntries(
-      items.filter(item => item.color).map(item => [item.value, item.color])
-    )
   } catch (e) {
     statusOptions.value = []
   }

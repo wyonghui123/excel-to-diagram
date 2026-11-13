@@ -74,8 +74,18 @@ function Read-EnvBool($key, $default) {
     return $default
 }
 
+# [P0 端口单一真源] 与 python 版 / vite.config.js / playwright.config.js 一致读 scripts/ports.json。
+#   历史: 此处硬编码 3004，导致服务起在 3004 而 e2e 打 3006 (ERR_CONNECTION_REFUSED)。
+$portsFile = Join-Path $root 'scripts\ports.json'
+$portsFrontend = 3006
+if (Test-Path $portsFile) {
+    try {
+        $portsJson = Get-Content $portsFile -Raw | ConvertFrom-Json
+        if ($portsJson.frontend) { $portsFrontend = [int]$portsJson.frontend }
+    } catch {}
+}
 $flaskPort = Read-EnvPort 'FLASK_PORT' $Port
-$vitePort  = Read-EnvPort 'VITE_DEV_PORT' 3004
+$vitePort  = Read-EnvPort 'VITE_DEV_PORT' $portsFrontend
 
 # 🆕 v3.19: 用 pythonw.exe 避免 console 窗口弹窗
 # pythonw = GUI Python, 不会创建 console 窗口

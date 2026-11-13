@@ -12,6 +12,27 @@ vi.mock('@/services/engineeringChangeService', () => ({
   default: { listChanges: mocks.listChanges }
 }))
 
+// [T13-9 2026-11-13] 枚举改为后端 batch 下发后，单元测试禁止走真实网络：
+// 之前未 mock 导致 getEnum 重试超时，onMounted 的 await 阻塞 listChanges。
+vi.mock('@/services/metaEnumService', () => ({
+  getEnum: vi.fn(async name =>
+    name === 'engineering_change_status'
+      ? [
+          { value: 'draft', label: '草稿', color: 'info' },
+          { value: 'in_review', label: '评审中', color: 'primary' },
+          { value: 'approved', label: '已批准', color: 'success' },
+          { value: 'applied', label: '已应用', color: 'success' },
+          { value: 'rejected', label: '已驳回', color: 'danger' }
+        ]
+      : []
+  ),
+  getEnumBatch: vi.fn(async names => {
+    const out = {}
+    for (const n of names || []) out[n] = []
+    return out
+  })
+}))
+
 import EngineeringChangeListPage from '../EngineeringChangeListPage.vue'
 
 const router = createRouter({
