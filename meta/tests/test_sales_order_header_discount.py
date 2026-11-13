@@ -202,18 +202,20 @@ class _FakeDS:
                 'allocation_rule_id': p[11],
                 'origin': p[17],
                 'target': p[21],
+                'status': p[22],
             })
             return _WriteResult(lastrowid=self._alloc_id, rowcount=1)
 
-        if head.startswith('DELETE FROM ALLOCATION_RESULTS'):
-            before = len(self.allocation_results)
-            self.allocation_results = [
-                r for r in self.allocation_results
-                if not (r['document_type'] == p[0]
+        if head.startswith('UPDATE ALLOCATION_RESULTS SET STATUS'):
+            count = 0
+            for r in self.allocation_results:
+                if (r['document_type'] == p[0]
                         and r['document_id'] == p[1]
-                        and r['origin'] == 'planned')
-            ]
-            return _WriteResult(rowcount=before - len(self.allocation_results))
+                        and r['origin'] == 'planned'
+                        and r['status'] == 'active'):
+                    r['status'] = 'invalid'
+                    count += 1
+            return _WriteResult(rowcount=count)
 
         if head.startswith('UPDATE ALLOCATION_RESULTS'):
             for r in self.allocation_results:
@@ -221,7 +223,8 @@ class _FakeDS:
                         and r['document_type'] == p[1]
                         and r['document_id'] == p[2]
                         and r['parent_id'] == p[3]
-                        and r['origin'] == 'planned'):
+                        and r['origin'] == 'planned'
+                        and r['status'] == 'active'):
                     r['parent_id'] = p[0]
             return _WriteResult(rowcount=0)
 
@@ -407,23 +410,29 @@ def test_guard_rejects_invalid_header_discount():
 # ---------------- 6. 幂等 ----------------
 
 def test_apply_is_idempotent():
-    """幂等：同单 apply 两次，calc_results / allocation_results 行数不翻倍。"""
+    """幂等：同单 apply 两次，calc_results 不增行、留痕只多出失效历史。"""
     ds = _ds(5, 3)
     service = SalesOrderHeaderDiscountService(ds)
 
+    def _count(status):
+        return len([r for r in ds.allocation_results if r['status'] == status])
+
     service.apply(5)
     calc_rows = len(ds.calc_results)
-    alloc_rows = len(ds.allocation_results)
+    active_rows = _count('active')
     order_net = _dec(ds.orders[5]['net_amount'])
     line_discount = _dec(ds.lines[11]['header_discount_amount'])
     line_surcharge = _dec(ds.lines[11]['header_surcharge_amount'])
 
     assert calc_rows == 4
-    assert alloc_rows == 6
+    assert active_rows == 6
+    assert _count('invalid') == 0
 
     service.apply(5)
     assert len(ds.calc_results) == calc_rows
-    assert len(ds.allocation_results) == alloc_rows
+    # 旧留痕置 invalid（不删除），新留痕仍为 6 条 active
+    assert _count('active') == active_rows
+    assert _count('invalid') == active_rows
     assert _dec(ds.orders[5]['net_amount']) == order_net
     assert _dec(ds.lines[11]['header_discount_amount']) == line_discount
     assert _dec(ds.lines[11]['header_surcharge_amount']) == line_surcharge
@@ -462,8 +471,10 @@ def test_allocation_trace_replays_line_amounts():
     ds = _ds(5, 3)
     SalesOrderHeaderDiscountService(ds).apply(5)
 
-    heads = [r for r in ds.allocation_results if r['level'] == 'header']
-    lines = [r for r in ds.allocation_results if r['level'] == 'line']
+    heads = [r for r in ds.allocation_results
+             if r['level'] == 'header' and r['status'] == 'active']
+    lines = [r for r in ds.allocation_results
+             if r['level'] == 'line' and r['status'] == 'active']
     assert len(heads) == 2
     assert len(lines) == 4
 

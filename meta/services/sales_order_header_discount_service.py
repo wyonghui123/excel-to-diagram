@@ -252,8 +252,8 @@ class SalesOrderHeaderDiscountService:
     def apply(self, order_id: Any) -> Dict[str, Any]:
         """事务边界：compute（落 4 步结果）+ apply（行/抬头快照 + 留痕）原子提交。
 
-        spec §4.6 要求「删除重建在同一事务内」——数据源为自动提交模式，
-        故整段包事务；中途异常一律回滚，不留「留痕删了没重建」的半状态。
+        spec §4.6 要求「失效重建在同一事务内」——数据源为自动提交模式，
+        故整段包事务；中途异常一律回滚，不留「留痕失效了没重建」的半状态。
         嵌套调用时 `transaction()` 自动并入外层事务（datasource 的嵌套守卫）。
         """
         with self.ds.transaction():
@@ -280,7 +280,7 @@ class SalesOrderHeaderDiscountService:
 
         if discount == 0 and surcharge == 0:
             self._clear_adjustments(order_id, base_list)
-            self._delete_traces(order_id)
+            self._invalidate_traces(order_id)
             return {
                 'order_id': order_id,
                 'discount_amount': discount,
@@ -346,7 +346,7 @@ class SalesOrderHeaderDiscountService:
         self.amount.recompute_order(order_id)
         self._write_order(order_id, -discount, surcharge)
 
-        self._delete_traces(order_id)
+        self._invalidate_traces(order_id)
         rule = self._load_rule()
         if not rule:
             raise HeaderDiscountError(
@@ -442,15 +442,24 @@ class SalesOrderHeaderDiscountService:
         self.ds.execute(
             "UPDATE allocation_results SET parent_id = ?"
             " WHERE document_type = ? AND document_id = ? AND level = 'line'"
-            "   AND parent_id = ? AND origin = 'planned'",
+            "   AND parent_id = ? AND origin = 'planned'"
+            "   AND status = 'active'",
             [header_result_id, DOCUMENT_TYPE, order_id, calc_result_id])
         return recorded['line_result_ids']
 
-    def _delete_traces(self, order_id: Any) -> None:
-        """删本订单本规则的计划内留痕（幂等：重复 apply 不累积）。"""
+    def _invalidate_traces(self, order_id: Any) -> None:
+        """把本订单本规则仍活动的计划内留痕置 `invalid`（幂等：重复 apply 不累积）。
+
+        【为何不删】`allocation_result.yaml` L11 / L486 契约：同一单据同一行
+        重跑分摊必须把旧留痕置 `invalid`，**不物理删除**——成本调整 / 审计
+        需要回放上一次的比例与基数。宿主单据删除时才由 `deletion_policy:
+        cascade` 级联清理，那是「单没了」而非「重摊了」，两种语义不同。
+        【只动 active】已失效的历史行保持原样，不被二次覆盖。
+        """
         self.ds.execute(
-            "DELETE FROM allocation_results"
+            "UPDATE allocation_results SET status = 'invalid'"
             " WHERE document_type = ? AND document_id = ? AND origin = 'planned'"
+            "   AND status = 'active'"
             "   AND allocation_rule_id ="
             "       (SELECT id FROM allocation_rules WHERE code = ?)",
             [DOCUMENT_TYPE, order_id, RULE_CODE])

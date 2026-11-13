@@ -54,6 +54,8 @@ _WRITE_ACTIONS = ('crud_create', 'crud_update', 'crud_delete')
 _MANUAL_FORBIDDEN_CATEGORIES = ('credit_memo', 'debit_memo', 'cancellation')
 _RESULT_KEY = 'vendor_invoice_result'
 _RESULT_KEYS = ('status', 'match_status', 'match_exception_reason')
+#: 服务端快照列：行入参不得写入（由匹配服务按锚点重算，Spec §22.4 / R-VI-27）
+_SERVER_SNAPSHOT_KEYS = ('po_unit_price', 'price_source', 'price_trace')
 
 
 def _object_id(context) -> Any:
@@ -135,6 +137,9 @@ class VendorInvoiceGuardInterceptor(Interceptor):
                     'VI_MANUAL_ADJUSTMENT_FORBIDDEN', 'document_category')
             if category == CATEGORY_ADJUSTMENT:
                 self._guard_adjustment_create(service, params)
+            # R-VI-5：创建时快照定价模式（四维解析），避免后续参数变更穿透历史单据
+            if _blank(params.get('match_pricing_mode')):
+                params['match_pricing_mode'] = service._resolve_match_pricing_mode(params)
             return
 
         old_data = context.old_data or {}
@@ -274,6 +279,11 @@ class VendorInvoiceGuardInterceptor(Interceptor):
         if not isinstance(params, dict):
             return
         service = VendorInvoiceMatchService(context.data_source)
+
+        if context.action in ('crud_create', 'crud_update'):
+            # 价格来源 / 轨迹由匹配服务按锚点快照，入参伪造一律剔除（不报错）
+            for key in _SERVER_SNAPSHOT_KEYS:
+                params.pop(key, None)
 
         if context.action == 'crud_create':
             invoice_id = params.get('invoice_id')

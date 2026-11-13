@@ -29,6 +29,11 @@ from meta.migrations import (
     v255__vendor_invoice_actions as v255,
     v258__vendor_invoice_reversal as v258,
     v259__vendor_invoice_adjustment as v259,
+    v260__vendor_invoice_amount_columns as v260,
+    v261__vendor_invoice_match_mode_default as v261,
+    v262__vendor_invoice_line_price_trace as v262,
+    v263__vendor_invoice_pricing_mode_seed as v263,
+    v264__vendor_invoice_charge_line_seed as v264,
 )
 from meta.tests.factories import _vendor_invoice_migration_helpers as MH
 
@@ -295,5 +300,230 @@ def test_v259_adjustment_columns_phase2(db_path):
             'SELECT COUNT(*) FROM %s WHERE %s IS NOT NULL'
             % (v259.HEADER_TABLE, v259.COLUMNS[0][0])).fetchone()[0] == 0
         assert not _index_exists(conn, v259.INDEX_NAME), '回滚应删除索引'
+    finally:
+        conn.close()
+
+
+def test_v260_amount_columns(db_path):
+    """金额链路两列 / 幂等 / 回滚清值（列保留）。"""
+    assert v252.migrate(db_path, skip_backup=True) is True
+    assert v260.migrate(db_path, skip_backup=True) is True
+    assert v260.verify(db_path) is True
+
+    # 幂等：二次执行不报错
+    assert v260.migrate(db_path, skip_backup=True) is True
+    assert v260.verify(db_path) is True
+
+    conn = _connect(db_path)
+    try:
+        for table, columns in ((v260.HEADER_TABLE, v260.HEADER_COLUMNS),
+                               (v260.LINE_TABLE, v260.LINE_COLUMNS)):
+            existing = _columns(conn, table)
+            for column, _ in columns:
+                assert column in existing, '缺少列 %s.%s' % (table, column)
+    finally:
+        conn.close()
+
+    assert v260.rollback(db_path) is True
+    conn = _connect(db_path)
+    try:
+        assert conn.execute(
+            'SELECT COUNT(*) FROM %s WHERE supplier_gross_amount IS NOT NULL'
+            % v260.HEADER_TABLE).fetchone()[0] == 0
+        assert conn.execute(
+            'SELECT COUNT(*) FROM %s WHERE tax_rate_percent IS NOT NULL'
+            % v260.LINE_TABLE).fetchone()[0] == 0
+        # 列保留（SQLite 老版本不支持 DROP COLUMN）
+        assert 'supplier_gross_amount' in _columns(conn, v260.HEADER_TABLE)
+        assert 'tax_rate_percent' in _columns(conn, v260.LINE_TABLE)
+    finally:
+        conn.close()
+
+
+def test_v261_match_mode_default_po_based(db_path):
+    """vi_match_mode 默认值 gr_based → po_based / 幂等 / 回滚。"""
+    assert v252.migrate(db_path, skip_backup=True) is True
+    assert v253.migrate(db_path, skip_backup=True) is True
+    assert v261.migrate(db_path, skip_backup=True) is True
+    assert v261.verify(db_path) is True
+
+    conn = _connect(db_path)
+    try:
+        value = conn.execute(
+            'SELECT default_value FROM control_parameter_defs WHERE code = ?',
+            [v261.PARAM_CODE]).fetchone()[0]
+        assert value == v261.DEFAULT_NEW
+    finally:
+        conn.close()
+
+    assert v261.rollback(db_path) is True
+    conn = _connect(db_path)
+    try:
+        value = conn.execute(
+            'SELECT default_value FROM control_parameter_defs WHERE code = ?',
+            [v261.PARAM_CODE]).fetchone()[0]
+        assert value == v261.DEFAULT_OLD
+    finally:
+        conn.close()
+
+
+def test_v262_line_price_trace_backfill_and_rollback(db_path):
+    """price_source / price_trace 两列 / 历史回填口径 / 幂等 / 回滚清值。"""
+    assert v252.migrate(db_path, skip_backup=True) is True
+
+    conn = _connect(db_path)
+    try:
+        header_cols = (
+            'invoice_no, document_type_id, document_category, invoice_date, '
+            'supplier_account_id, supplier_party_id, currency_id, org_id')
+        conn.execute(
+            'INSERT INTO vendor_invoices (%s) VALUES (?, ?, ?, ?, ?, ?, ?, ?)'
+            % header_cols,
+            ['VI-V262', 1, 'invoice', '2026-11-13', 1, 1, 1, 1])
+        conn.execute(
+            'INSERT INTO vendor_invoices (%s) VALUES (?, ?, ?, ?, ?, ?, ?, ?)'
+            % header_cols,
+            ['VIA-V262', 1, 'adjustment', '2026-11-13', 1, 1, 1, 1])
+        line_sql = (
+            'INSERT INTO vendor_invoice_lines '
+            '(invoice_id, line_no, order_line_id) VALUES (?, ?, ?)')
+        conn.execute(line_sql, [1, 1, 7101])   # PO 锚
+        conn.execute(line_sql, [1, 2, None])   # 无锚
+        conn.execute(line_sql, [2, 1, None])   # 调整单
+        conn.commit()
+    finally:
+        conn.close()
+
+    assert v262.migrate(db_path, skip_backup=True) is True
+    assert v262.verify(db_path) is True
+    # 幂等：二次执行不报错、不重复加列
+    assert v262.migrate(db_path, skip_backup=True) is True
+    assert v262.verify(db_path) is True
+
+    conn = _connect(db_path)
+    try:
+        assert {'price_source', 'price_trace'} <= _columns(
+            conn, v262.LINE_TABLE)
+        rows = dict(conn.execute(
+            'SELECT line_no, price_source FROM %s WHERE invoice_id = 1'
+            % v262.LINE_TABLE).fetchall())
+        assert rows[1] == 'po'
+        assert rows[2] == 'manual'
+        adjustment = conn.execute(
+            'SELECT price_source FROM %s WHERE invoice_id = 2'
+            % v262.LINE_TABLE).fetchone()[0]
+        assert adjustment == 'adjustment'
+    finally:
+        conn.close()
+
+    assert v262.rollback(db_path) is True
+    conn = _connect(db_path)
+    try:
+        # 列保留（SQLite 老版本不支持 DROP COLUMN），值已清空
+        assert 'price_source' in _columns(conn, v262.LINE_TABLE)
+        assert conn.execute(
+            'SELECT COUNT(*) FROM %s WHERE price_source IS NOT NULL'
+            % v262.LINE_TABLE).fetchone()[0] == 0
+    finally:
+        conn.close()
+
+
+def test_v263_pricing_mode_param_seed_and_rollback(db_path):
+    """vi_match_pricing_mode 定义 / 幂等 / 回滚删除。"""
+    assert v263.migrate(db_path, skip_backup=True) is True
+    assert v263.verify(db_path) is True
+    # 幂等：二次执行不重复插入
+    assert v263.migrate(db_path, skip_backup=True) is True
+    assert v263.verify(db_path) is True
+
+    conn = _connect(db_path)
+    try:
+        count = conn.execute(
+            'SELECT COUNT(*) FROM control_parameter_defs WHERE code = ?',
+            [v263.PARAM_CODE]).fetchone()[0]
+        assert count == 1
+        row = conn.execute(
+            'SELECT domain, value_type, target_bo, default_value, status '
+            'FROM control_parameter_defs WHERE code = ?',
+            [v263.PARAM_CODE]).fetchone()
+        assert row == ('procurement', 'enum', 'vendor_invoice', 'po_price', 'active')
+    finally:
+        conn.close()
+
+    assert v263.rollback(db_path) is True
+    conn = _connect(db_path)
+    try:
+        assert conn.execute(
+            'SELECT COUNT(*) FROM control_parameter_defs WHERE code = ?',
+            [v263.PARAM_CODE]).fetchone()[0] == 0
+    finally:
+        conn.close()
+
+
+def test_v264_charge_line_types_and_tax_params_seed(db_path):
+    """5 个行类型（含 3 费用行）/ 4 个税与费用参数 / 幂等 / 回滚。"""
+    assert v264.migrate(db_path, skip_backup=True) is True
+    assert v264.verify(db_path) is True
+
+    expected_types = {spec['code']: spec for spec in v264.LINE_TYPES}
+    conn = _connect(db_path)
+    try:
+        rows = {row[0]: row for row in conn.execute(
+            'SELECT code, is_default, line_category, delivery_relevant, status '
+            "FROM type_definitions WHERE scope_bo = 'vendor_invoice' "
+            "AND level = 'line'")}
+        assert set(rows) == set(expected_types)
+        for code, spec in expected_types.items():
+            assert rows[code][1] == spec['is_default'], code
+            assert rows[code][2] == spec['line_category'], code
+            assert rows[code][3] == spec['delivery_relevant'], code
+            assert rows[code][4] == 'active', code
+        assert [code for code, row in rows.items() if int(row[1] or 0) == 1] \
+            == ['VI_LINE_GOODS']
+
+        params = {row[0]: row[1:] for row in conn.execute(
+            'SELECT code, domain, value_type, target_bo, default_value, status '
+            'FROM control_parameter_defs WHERE target_bo = ?',
+            [v264.SCOPE_BO])}
+        assert set(v264.PARAM_CODES) <= set(params)
+        assert params['vi_tax_mode'][3] == 'line_direct'
+        assert params['vi_tax_tolerance_abs'][3] == '0.01'
+        assert params['vi_freight_tolerance_abs'][3] == '0.00'
+        assert params['vi_po_tax_compare'][3] == 'false'
+        for code in v264.PARAM_CODES:
+            assert params[code][2] == v264.SCOPE_BO, code
+            assert params[code][4] == 'active', code
+    finally:
+        conn.close()
+
+    # 幂等：二次执行不重复插入
+    assert v264.migrate(db_path, skip_backup=True) is True
+    assert v264.verify(db_path) is True
+
+    conn = _connect(db_path)
+    try:
+        assert conn.execute(
+            'SELECT COUNT(*) FROM type_definitions '
+            "WHERE scope_bo = 'vendor_invoice' AND level = 'line'"
+        ).fetchone()[0] == len(v264.LINE_TYPES)
+        placeholders = ','.join('?' for _ in v264.PARAM_CODES)
+        assert conn.execute(
+            'SELECT COUNT(*) FROM control_parameter_defs WHERE code IN (%s)'
+            % placeholders, list(v264.PARAM_CODES)).fetchone()[0] \
+            == len(v264.PARAM_CODES)
+    finally:
+        conn.close()
+
+    assert v264.rollback(db_path) is True
+    conn = _connect(db_path)
+    try:
+        assert conn.execute(
+            'SELECT COUNT(*) FROM type_definitions '
+            "WHERE scope_bo = 'vendor_invoice' AND level = 'line'"
+        ).fetchone()[0] == 0
+        placeholders = ','.join('?' for _ in v264.PARAM_CODES)
+        assert conn.execute(
+            'SELECT COUNT(*) FROM control_parameter_defs WHERE code IN (%s)'
+            % placeholders, list(v264.PARAM_CODES)).fetchone()[0] == 0
     finally:
         conn.close()

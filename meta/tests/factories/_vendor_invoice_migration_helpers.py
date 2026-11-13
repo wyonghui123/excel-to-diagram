@@ -17,6 +17,8 @@ BASE_DDL = (
         level VARCHAR(20),
         document_category VARCHAR(30),
         document_role VARCHAR(30),
+        line_category VARCHAR(30),
+        delivery_relevant INTEGER DEFAULT 0,
         direction INTEGER DEFAULT 1,
         is_default INTEGER DEFAULT 0,
         number_sequence_id INTEGER,

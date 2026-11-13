@@ -39,6 +39,7 @@ from meta.tests.factories._vendor_invoice_helpers import (
     seed_purchase_order,
     seed_receipt_line,
     seed_type_definitions,
+    set_supplier_gross,
     update_edge_quantity,
 )
 
@@ -57,7 +58,8 @@ def service(tmp_path, monkeypatch):
 def _posted_invoice(ds, *, promised=10.0, received=10.0, qty=10.0,
                     net=100.0, tax=13.0, status='posted',
                     category='invoice', document_type_id=DOC_TYPE_ID,
-                    direction=1, anchors=True):
+                    direction=1, anchors=True, unit_price=10.0,
+                    tax_rate_percent=None):
     seed_type_definitions(ds)
     seed_purchase_order(ds, promised_qty=promised)
     seed_receipt_line(ds, qty_received=received)
@@ -67,7 +69,8 @@ def _posted_invoice(ds, *, promised=10.0, received=10.0, qty=10.0,
         gross_amount=net + tax)
     line_id = insert_line(
         ds, invoice_id, qty=qty, net_amount=net, tax_amount=tax,
-        gross_amount=net + tax,
+        gross_amount=net + tax, unit_price=unit_price,
+        tax_rate_percent=tax_rate_percent,
         schedule_id=SCHEDULE_ID if anchors else None,
         receipt_line_id=RECEIPT_LINE_ID if anchors else None,
         match_status='matched')
@@ -475,3 +478,115 @@ def test_create_adjustment_handler_accepts_source_doc_id(service, monkeypatch):
     assert result['success'] is True
     assert result['data']['adjustment_of_invoice_id'] == invoice_id
     assert get_header(ds, result['data']['invoice_id'])['adjustment_reason'] == '补收运费'
+
+
+# ---------------------------------------------------------------- W7 金额内核
+
+def test_create_unit_price_adjustment_recomputes_by_kernel(service):
+    """A9（Spec §22.13）：qty=5 + 单价 100→110，13% → 550 / 71.5 / 621.5。"""
+    svc, ds = service
+    invoice_id, line_id = _posted_invoice(
+        ds, promised=5.0, received=5.0, qty=5.0, net=500.0, tax=65.0,
+        unit_price=100.0, tax_rate_percent=13.0)
+
+    result = svc.create_adjustment(
+        invoice_id, direction='increase', reason='价格调整',
+        lines=[{'invoice_line_id': line_id, 'qty': 5, 'unit_price': 110}])
+
+    header = get_header(ds, result['invoice_id'])
+    assert header['net_amount'] == pytest.approx(550.0)
+    assert header['tax_amount'] == pytest.approx(71.5)
+    assert header['gross_amount'] == pytest.approx(621.5)
+    line = get_lines(ds, result['invoice_id'])[0]
+    assert line['qty'] == pytest.approx(5.0)
+    assert line['unit_price'] == pytest.approx(110.0)
+    assert line['tax_rate_percent'] == pytest.approx(13.0)
+
+
+def test_create_qty_only_prefers_rate_snapshot(service):
+    """T1：税率快照优先于源行税额比例（§22.7 G-4）。"""
+    svc, ds = service
+    # 源行税额 10 与 13% 不一致，按比例缩放会得 2.0，按快照重算应得 2.6
+    invoice_id, line_id = _posted_invoice(
+        ds, net=100.0, tax=10.0, tax_rate_percent=13.0)
+
+    result = svc.create_adjustment(
+        invoice_id, direction='increase', reason='补量',
+        lines=[{'invoice_line_id': line_id, 'qty': 2}])
+
+    line = get_lines(ds, result['invoice_id'])[0]
+    assert line['net_amount'] == pytest.approx(20.0)
+    assert line['tax_amount'] == pytest.approx(2.6)
+
+
+def test_create_pure_amount_adjustment_posts_without_edges(service):
+    """A10（Spec §22.13）：qty=0 + 净额递减，不写边。"""
+    svc, ds = service
+    invoice_id, line_id = _posted_invoice(ds)
+
+    result = svc.create_adjustment(
+        invoice_id, direction='decrease', reason='折让',
+        lines=[{'invoice_line_id': line_id, 'qty': 0, 'net_amount': -50}])
+    adjustment_id = result['invoice_id']
+
+    header = get_header(ds, adjustment_id)
+    assert header['net_amount'] == pytest.approx(-50.0)
+    assert header['tax_amount'] == pytest.approx(-6.5)
+    assert header['gross_amount'] == pytest.approx(-56.5)
+    line = get_lines(ds, adjustment_id)[0]
+    assert line['qty'] == pytest.approx(0.0)
+    assert line['unit_price'] == pytest.approx(0.0)
+
+    svc.submit(adjustment_id)
+    svc.post(adjustment_id)
+    assert consumed_qty(ds, 'receipt_line', RECEIPT_LINE_ID, 'ap_match') == 10.0
+    assert count_edges(ds, quantity_sign='red') == 0
+
+
+def test_create_pure_amount_adopts_declared_tax(service):
+    """T3：直录税额按 line_direct 采用（容差外的例外由匹配层置 VI_TAX_MISMATCH）。"""
+    svc, ds = service
+    invoice_id, line_id = _posted_invoice(ds, tax_rate_percent=13.0)
+
+    result = svc.create_adjustment(
+        invoice_id, direction='increase', reason='净额调整',
+        lines=[{'invoice_line_id': line_id, 'qty': 0, 'net_amount': 50,
+                'tax_amount': 4}])
+
+    header = get_header(ds, result['invoice_id'])
+    assert header['net_amount'] == pytest.approx(50.0)
+    assert header['tax_amount'] == pytest.approx(4.0)
+    assert header['gross_amount'] == pytest.approx(54.0)
+
+    # 50×13% = 6.5，直录 4 超容差 → 匹配层置 VI_TAX_MISMATCH（可 override）
+    matched = svc.match(result['invoice_id'])
+    assert matched['match_status'] == 'exception'
+    assert matched['match_exception_reason'] == 'VI_TAX_MISMATCH'
+
+
+def test_create_rejects_empty_adjustment_line(service):
+    """§22.5 规则 2：qty=0 且 net=0 的调整行禁止占位。"""
+    svc, ds = service
+    invoice_id, line_id = _posted_invoice(ds)
+
+    with pytest.raises(VendorInvoiceError) as error:
+        svc.create_adjustment(
+            invoice_id, direction='increase', reason='空行',
+            lines=[{'invoice_line_id': line_id, 'qty': 0, 'net_amount': 0}])
+    assert error.value.rule == 'VI_ADJUSTMENT_EMPTY_LINE'
+
+
+def test_adjustment_drops_supplier_gross_and_recomputes_rounding(service):
+    """调整单不继承原票票面总额，rounding_diff 由内核汇总（§22.3）。"""
+    svc, ds = service
+    invoice_id, line_id = _posted_invoice(ds)
+    set_supplier_gross(ds, invoice_id, 999)
+
+    result = svc.create_adjustment(
+        invoice_id, direction='increase', reason='补量',
+        lines=[{'invoice_line_id': line_id, 'qty': 2}])
+
+    header = get_header(ds, result['invoice_id'])
+    assert header['supplier_gross_amount'] is None
+    assert header['gross_amount'] == pytest.approx(22.6)
+    assert header['rounding_diff'] == pytest.approx(0.0)

@@ -194,3 +194,64 @@ class TestInterceptorAfterAction:
         ctx.meta_object = SimpleNamespace(id='sales_order')
         SalesOrderGuardInterceptor().after_action(ctx)
         assert ds.executed == []
+
+
+class TestAmountHooks:
+    """[D-VI-27 2026-11-12] 内核算术钩子：默认零回归 + 含税倒算路径（VI 复用）。"""
+
+    def _svc(self):
+        return SalesOrderAmountService(_FakeDS())
+
+    def test_line_hook_default_path_a_matches_legacy(self):
+        values = self._svc()._line_amounts(
+            qty=Decimal('3'), unit_price=Decimal('33.33'),
+            tax_rate_percent=Decimal('13'), tax_rounding='round',
+            decimals=2)
+        assert values['net_amount'] == Decimal('99.99')
+        assert values['tax_amount'] == Decimal('13.00')
+        assert values['gross_amount'] == Decimal('112.99')
+
+    def test_line_hook_path_a_applies_net_adjustment_before_tax(self):
+        values = self._svc()._line_amounts(
+            qty=Decimal('1'), unit_price=Decimal('100'),
+            tax_rate_percent=Decimal('13'), net_adjustment=Decimal('-10'),
+            decimals=2)
+        assert values['net_amount'] == Decimal('90.00')
+        assert values['tax_amount'] == Decimal('11.70')
+        assert values['gross_amount'] == Decimal('101.70')
+
+    def test_line_hook_price_includes_tax_back_calculates(self):
+        # A2: 3 × 113（含税）@13% → gross 339 / net 300 / tax 39
+        values = self._svc()._line_amounts(
+            qty=Decimal('3'), unit_price=Decimal('113'),
+            price_includes_tax=1, tax_rate_percent=Decimal('13'),
+            decimals=2)
+        assert values['gross_amount'] == Decimal('339.00')
+        assert values['net_amount'] == Decimal('300.00')
+        assert values['tax_amount'] == Decimal('39.00')
+
+    def test_line_hook_price_includes_tax_zero_decimal(self):
+        # A4: 0 位币种 1 × 1001.4（含税）@13% → gross 1001，net + tax 恒等
+        values = self._svc()._line_amounts(
+            qty=Decimal('1'), unit_price=Decimal('1001.4'),
+            price_includes_tax=True, tax_rate_percent=Decimal('13'),
+            decimals=0)
+        assert values['gross_amount'] == Decimal('1001')
+        assert values['net_amount'] + values['tax_amount'] == Decimal('1001')
+
+    def test_line_hook_without_rate_falls_back_to_path_a(self):
+        values = self._svc()._line_amounts(
+            qty=Decimal('2'), unit_price=Decimal('50'),
+            price_includes_tax=1, tax_rate_percent=None, decimals=2)
+        assert values['net_amount'] == Decimal('100.00')
+        assert values['tax_amount'] == Decimal('0.00')
+
+    def test_header_hook_default_rounds_three_items(self):
+        values = self._svc()._header_amounts(
+            sum_net=Decimal('1000.005'), sum_tax=Decimal('130.005'),
+            sum_gross=Decimal('1130.01'), decimals=2)
+        assert values == {
+            'net_amount': Decimal('1000.01'),
+            'tax_amount': Decimal('130.01'),
+            'gross_amount': Decimal('1130.01'),
+        }

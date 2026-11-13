@@ -269,3 +269,32 @@ def test_line_create_autofills_line_no(tmp_path):
         _ctx(ds, 'vendor_invoice_line', 'crud_create', params))
 
     assert params['line_no'] == 2
+
+
+# ---------------------------------------------------------------- 价格快照（W5 遗留）
+
+def test_vendor_create_snapshots_match_pricing_mode(tmp_path):
+    """R-VI-5：创建时把四维解析结果快照进头表，后续参数变更不穿透历史单据。"""
+    ds = make_env(tmp_path)
+    params = {'invoice_no': 'VI-SNAP', 'org_id': 1, 'document_type_id': 1}
+
+    _INTERCEPTOR.before_action(
+        _ctx(ds, 'vendor_invoice', 'crud_create', params))
+
+    assert params['match_pricing_mode'] == 'po_price'
+
+
+def test_line_payload_cannot_inject_price_snapshot(tmp_path):
+    """R-VI-27：行入参伪造 po_unit_price / price_source / price_trace 一律剔除。"""
+    ds = make_env(tmp_path)
+    invoice_id = insert_invoice(ds, status='draft')
+    params = {'invoice_id': invoice_id, 'qty': 2,
+              'po_unit_price': 999.0, 'price_source': 'po',
+              'price_trace': '{"po_id": 1}'}
+
+    _INTERCEPTOR.before_action(
+        _ctx(ds, 'vendor_invoice_line', 'crud_create', params))
+
+    assert 'po_unit_price' not in params
+    assert 'price_source' not in params
+    assert 'price_trace' not in params
