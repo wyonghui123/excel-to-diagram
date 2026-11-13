@@ -1,6 +1,7 @@
 import { ref, reactive, computed, watch, onBeforeUnmount } from 'vue'
 import { useMessage } from '@/composables/useMessage'
 import * as permService from '@/services/permissionService'
+import { getRuleCenterViewConfigCached } from '@/services/ruleCenterService'
 import {
   initRuleForField,
   isBizkeyRuleValue,
@@ -214,12 +215,40 @@ export function useConditionRuleDialog(options) {
   const showFieldHelp = ref(false)
   const overlapWarnings = ref([])
 
+  // [规则模型 §12.6 2026-11-13] 规则因子字段：key 唯一真源是后端场景注册表，
+  // 经 view-config 的 trace.scenario_factor_keys 下发；中文名取 trace.factor_labels，未登记回落 key。
+  async function loadFactorFieldMetadata() {
+    try {
+      const r = await getRuleCenterViewConfigCached()
+      const trace = (r && r.data && r.data.trace) || {}
+      const scenarioKeys = trace.scenario_factor_keys || {}
+      const labels = trace.factor_labels || {}
+      const seen = new Set()
+      const fields = []
+      Object.values(scenarioKeys).forEach((keys) => {
+        ;(keys || []).forEach((key) => {
+          if (!key || seen.has(key)) return
+          seen.add(key)
+          fields.push({ db_column: key, name: labels[key] || key, field_type: 'string' })
+        })
+      })
+      return fields
+    } catch (e) {
+      console.warn('Failed to load scenario factor metadata:', e)
+      return []
+    }
+  }
+
   async function loadFieldMetadata() {
     if (!form.resource_type) return
     try {
       const r = await permService.loadFieldMetadata(form.resource_type)
       if (r.success) {
-        fieldMetadata.value = r.data || []
+        const baseFields = r.data || []
+        const existing = new Set(baseFields.map((f) => f.db_column))
+        fieldMetadata.value = baseFields.concat(
+          (await loadFactorFieldMetadata()).filter((f) => !existing.has(f.db_column))
+        )
         if (!isEditMode.value && fieldMetadata.value.length > 0 && customRules.value.length > 0) {
           const firstRule = customRules.value[0]
           if (!firstRule.field) {
@@ -345,11 +374,11 @@ export function useConditionRuleDialog(options) {
     if (!form.condition) return
     saving.value = true
     try {
+      // [B1 2026-11-13] 不再提交 condition_display：后端按 condition 现算后落库
       const payload = {
         permission_set_id: psIdRef.value,
         resource_type: form.resource_type,
         condition: form.condition,
-        condition_display: form.condition_display || '',
         inherit_to_children: form.inherit_to_children,
         propagate_to_parents: form.propagate_to_parents,
       }
@@ -404,6 +433,8 @@ export function useConditionRuleDialog(options) {
       operator: row.operator,
       value: row.value || '',
       fieldType: meta?.field_type || 'string',
+      // [B3 2026-11-13] 透传后端算子白名单，驱动算子下拉
+      allowedOperators: meta?.allowed_operators,
       relationObject: meta?.relation_object || '',
       isBusinessKey: !!(meta?.is_business_key || row.field === 'id'),
       isEnum: !!meta?.is_enum,

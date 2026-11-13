@@ -39,6 +39,7 @@
 <script setup lang="ts">
 import { computed } from 'vue'
 import { ElMessageBox } from 'element-plus'
+import { getPermissionLevelLabel } from '@/services/permissionService'
 
 interface ConditionRule {
   id: number | string
@@ -63,15 +64,9 @@ const emit = defineEmits<{
 
 const rules = computed(() => props.modelValue)
 
-const permLevelLabels: Record<string, string> = {
-  none: '无权限',
-  read: '只读',
-  write: '可编辑',
-  manage: '完全管理'
-}
-
+// [B2-2 2026-11-13] 等级标签唯一来源：permissionService.getPermissionLevelLabel
 function getPermLevelLabel(level: string): string {
-  return permLevelLabels[level] || level
+  return getPermissionLevelLabel(level)
 }
 
 async function handleDelete(rule: ConditionRule) {

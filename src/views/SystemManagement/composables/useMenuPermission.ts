@@ -1,15 +1,31 @@
 import { ref, type Ref } from 'vue'
 import * as permService from '@/services/permissionService'
+import { getPermissionMatrixSchema } from '@/services/metaEnumService'
 import {
-  GROUP_ACTIONS_MAP,
   type Menu,
   type PermissionSource,
 } from '../constants/permissionConstants'
 
-// [2026-08-28 重构清理] 数据模型 interface 已收敛到 permissionConstants.ts（单一事实源）；
-// 动作分组映射改用权威常量 GROUP_ACTIONS_MAP（原本地 ACTION_GROUPS 副本删除）。
-// 注：分组/独立动作的切换交互已由 ResourceActionMatrix（矩阵 change 回写）承担，
-//     原 toggleMenu / toggleActionGroup / toggleStandaloneAction 不可达，已删除。
+// [B2-2 2026-11-13] 动作分组映射改由后端下发（/api/v2/meta/permission-matrix-schema），
+// 前端不再维护 GROUP_ACTIONS_MAP 副本。
+let groupActionsMap: Record<string, readonly string[]> = {}
+let matrixSchemaPromise: Promise<Record<string, readonly string[]>> | null = null
+
+export function ensureMatrixSchema(): Promise<Record<string, readonly string[]>> {
+  if (Object.keys(groupActionsMap).length > 0) return Promise.resolve(groupActionsMap)
+  if (!matrixSchemaPromise) {
+    matrixSchemaPromise = getPermissionMatrixSchema()
+      .then(schema => {
+        groupActionsMap = schema?.group_actions_map || {}
+        return groupActionsMap
+      })
+      .catch(err => {
+        matrixSchemaPromise = null
+        throw err
+      })
+  }
+  return matrixSchemaPromise
+}
 
 export function useMenuPermission(permissionSetId: Ref<string>) {
   const menus = ref<Menu[]>([])
@@ -38,6 +54,12 @@ export function useMenuPermission(permissionSetId: Ref<string>) {
 
     loading.value = true
     try {
+      // 分组 schema 必须先就绪，否则 recalcBoGroupStatus 无法推导分组状态
+      try {
+        await ensureMatrixSchema()
+      } catch (schemaError) {
+        console.error('[useMenuPermission] load permission matrix schema failed:', schemaError)
+      }
       const r = await permService.loadUnifiedPermissions(permissionSetId.value)
 
       if (r.success && r.data?.menus) {
@@ -220,8 +242,8 @@ export function recalcBoGroupStatus(menu: Menu, boId: string) {
   // 从 required_permissions 重新推导
   const boPerms = menu.required_permissions?.filter(p => p.code.startsWith(`${boId}:`)) || []
 
-  Object.keys(GROUP_ACTIONS_MAP).forEach(gk => {
-    const groupActions = GROUP_ACTIONS_MAP[gk as keyof typeof GROUP_ACTIONS_MAP]
+  Object.keys(groupActionsMap).forEach(gk => {
+    const groupActions = groupActionsMap[gk]
     const matchingPerms = boPerms.filter(p => {
       const action = p.code.split(':')[1]
       return groupActions.includes(action as never)

@@ -2213,7 +2213,7 @@ def get_role_permission_rules_v2(permission_set_id: int):
 
 
 @roles_bp.route("/<int:permission_set_id>/permission-rules", methods=["POST"])
-@_login_required
+@admin_required
 def save_permission_rule(permission_set_id: int):
     """
     保存权限规则
@@ -2301,7 +2301,7 @@ def save_permission_rule(permission_set_id: int):
 
 @ps_matrix_bp.route("/<int:permission_set_id>/resource-action-matrix", methods=["PUT"])
 @roles_bp.route("/<int:permission_set_id>/resource-action-matrix", methods=["PUT"])
-@_login_required
+@admin_required
 def save_resource_action_matrix(permission_set_id: int):
     """
     保存角色「资源 × 动作」矩阵手动授权
@@ -2416,6 +2416,21 @@ def save_resource_action_matrix(permission_set_id: int):
         logger.info(
             f"[resource-action-matrix] 保存成功 permission_set_id={permission_set_id} "
             f"granted={granted_count} revoked={revoked_count}"
+        )
+
+        # [B1-3] 写操作审计：矩阵授权变更需留痕（与 POST /permission-rules 对齐）
+        from meta.api._audit_helper import write_permission_config_audit
+        write_permission_config_audit(
+            action='UPDATE',
+            object_type='permission_set_permissions',
+            object_id=permission_set_id,
+            data={
+                'permission_set_id': permission_set_id,
+                'granted': granted_count,
+                'revoked': revoked_count,
+            },
+            parent_object_type='role',
+            parent_object_id=permission_set_id,
         )
 
         return ok(

@@ -30,6 +30,22 @@ from meta.api.scheduler_api import (
 from meta.core.maintenance_scheduler import MaintenanceScheduler, JOB_CODES
 from meta.core.platform_scheduler import PlatformScheduler
 
+AUTH = {'Authorization': 'Bearer test-token'}
+
+
+@pytest.fixture(autouse=True)
+def _auth(monkeypatch):
+    """[B1-3] 两个运维端点已加鉴权：默认放行 admin，负向用例自行覆盖。"""
+    monkeypatch.setattr(
+        'meta.services.auth_middleware.TokenService.verify_token',
+        lambda token: {'user_id': 1, 'permissions': ['*']})
+    monkeypatch.setattr(
+        'meta.services.auth_middleware.token_blacklist_service.is_blacklisted',
+        lambda token: False)
+    monkeypatch.setattr(
+        'meta.services.auth_middleware.evaluate_code',
+        lambda user, code: True)
+
 
 @pytest.fixture(autouse=True)
 def _reset_schedulers():
@@ -62,7 +78,7 @@ def _wired(paused=False):
 class Test调度器状态端点:
     def test_暴露两个调度器的作业(self):
         maint, plat = _wired()
-        resp = _client().get('/api/v2/schedulers/status')
+        resp = _client().get('/api/v2/schedulers/status', headers=AUTH)
         assert resp.status_code == 200
         body = resp.get_json()
         assert body['success'] is True
@@ -78,12 +94,12 @@ class Test调度器状态端点:
         assert data['maintenance']['db_analyze']['handler_registered'] is False
 
     def test_未接线返回503(self):
-        resp = _client().get('/api/v2/schedulers/status')
+        resp = _client().get('/api/v2/schedulers/status', headers=AUTH)
         assert resp.status_code == 503
 
     def test_暂停态返回200且标记paused(self):
         set_inprocess_schedulers(None, None, paused=True)
-        resp = _client().get('/api/v2/schedulers/status')
+        resp = _client().get('/api/v2/schedulers/status', headers=AUTH)
         assert resp.status_code == 200
         assert resp.get_json()['data']['paused'] is True
 
@@ -98,7 +114,7 @@ class Test按需触发:
         maint, _ = _wired()
         fired = []
         maint.register_handler('db_analyze', lambda p, c: fired.append('db_analyze'))
-        resp = _client().post('/api/v2/schedulers/db_analyze/run-now')
+        resp = _client().post('/api/v2/schedulers/db_analyze/run-now', headers=AUTH)
         assert resp.status_code == 200
         assert resp.get_json()['success'] is True
         assert fired == ['db_analyze']
@@ -107,19 +123,43 @@ class Test按需触发:
         _, plat = _wired()
         fired = []
         plat.register_handler('platform_tick', lambda p, c: fired.append('platform_tick'))
-        resp = _client().post('/api/v2/schedulers/platform_tick/run-now')
+        resp = _client().post('/api/v2/schedulers/platform_tick/run-now', headers=AUTH)
         assert resp.status_code == 200
         assert fired == ['platform_tick']
 
     def test_未注册handler返回409(self):
         _wired()  # 两个调度器都接线了，但没有注册任何 handler
-        resp = _client().post('/api/v2/schedulers/db_analyze/run-now')
+        resp = _client().post('/api/v2/schedulers/db_analyze/run-now', headers=AUTH)
         assert resp.status_code == 409
 
     def test_未知code返回404(self):
         _wired()
-        resp = _client().post('/api/v2/schedulers/not_a_job/run-now')
+        resp = _client().post('/api/v2/schedulers/not_a_job/run-now', headers=AUTH)
         assert resp.status_code == 404
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# C2.5 鉴权（B1-3：原先两个端点无任何装饰器，匿名可读可触发）
+# ─────────────────────────────────────────────────────────────────────────────
+
+@pytest.mark.unit
+class Test运维端点鉴权:
+    def test_状态端点无token返回401(self):
+        _wired()
+        assert _client().get('/api/v2/schedulers/status').status_code == 401
+
+    def test_触发端点无token返回401(self):
+        _wired()
+        assert _client().post('/api/v2/schedulers/db_analyze/run-now').status_code == 401
+
+    def test_触发端点无job_admin权限返回403(self, monkeypatch):
+        _wired()
+        monkeypatch.setattr(
+            'meta.services.auth_middleware.evaluate_code',
+            lambda user, code: False)
+        resp = _client().post('/api/v2/schedulers/db_analyze/run-now', headers=AUTH)
+        assert resp.status_code == 403
+        assert resp.get_json()['required_permission'] == 'job_admin'
 
 
 # ─────────────────────────────────────────────────────────────────────────────

@@ -21,6 +21,8 @@ import logging
 
 from flask import Blueprint, jsonify
 
+from meta.services.auth_middleware import login_required, require_permission
+
 logger = logging.getLogger(__name__)
 
 scheduler_bp = Blueprint('scheduler_api', __name__)
@@ -52,6 +54,7 @@ def _find_scheduler(code: str):
 
 
 @scheduler_bp.route('/api/v2/schedulers/status', methods=['GET'])
+@login_required
 def schedulers_status():
     if _maintenance is None and _platform is None:
         # 暂停态：两个调度器都没启动，但这是**有意**的（CRON_JOBS_ENABLED=0）
@@ -76,6 +79,7 @@ def schedulers_status():
 
 
 @scheduler_bp.route('/api/v2/schedulers/<code>/run-now', methods=['POST'])
+@require_permission('job_admin')
 def scheduler_run_now(code):
     sched = _find_scheduler(code)
     if sched is None:

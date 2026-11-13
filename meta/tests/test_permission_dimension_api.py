@@ -675,3 +675,46 @@ class TestPermissionDimensionAPIErrorHandling:
             data = {}
         assert data["success"]
         assert data["data"]["summary"]["total_affected"] == 0
+
+
+class TestRoleConfigWriteAuth:
+    """[B1-3] 角色权限配置写端点：非 admin 一律 403。
+
+    修复前这两个端点只有 `_login_required`，任意登录用户即可给自己所属权限集
+    写入规则/授权，构成自提权路径。
+    """
+
+    HEADERS = {"Authorization": "Bearer normal-user"}
+
+    def _as_normal_user(self, monkeypatch):
+        import meta.api.permission_dimension_api as pda
+
+        monkeypatch.setattr(pda, "_is_testing", lambda: False)
+        monkeypatch.setattr(
+            "meta.services.auth_middleware.TokenService.verify_token",
+            lambda token: {"user_id": 2, "permissions": ["business_object:read"]})
+        monkeypatch.setattr(
+            "meta.services.auth_middleware.token_blacklist_service.is_blacklisted",
+            lambda token: False)
+
+    def test_普通用户写权限规则返回403(self, mgmt_dimension_client, monkeypatch):
+        client, _ = mgmt_dimension_client
+        self._as_normal_user(monkeypatch)
+        resp = client.post(
+            "/api/v1/roles/1/permission-rules",
+            data=json.dumps({"resource_type": "business_object", "condition": "x"}),
+            content_type="application/json",
+            headers=self.HEADERS,
+        )
+        assert resp.status_code == 403
+
+    def test_普通用户写资源动作矩阵返回403(self, mgmt_dimension_client, monkeypatch):
+        client, _ = mgmt_dimension_client
+        self._as_normal_user(monkeypatch)
+        resp = client.put(
+            "/api/v1/roles/1/resource-action-matrix",
+            data=json.dumps({"cells": []}),
+            content_type="application/json",
+            headers=self.HEADERS,
+        )
+        assert resp.status_code == 403

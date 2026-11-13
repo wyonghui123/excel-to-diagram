@@ -3,7 +3,8 @@
  *
  * 覆盖：
  *  - 纯函数：getPermissionLevelType / getPermissionLevelLabel / getResourceLabel / getDimensionName
- *  - 常量完整性：PERMISSION_LEVELS / RESOURCE_LABELS / DIMENSION_PARENT_MAP
+ *  - 常量完整性：PERMISSION_LEVELS
+ *  - 标签 getter：meta（/permission_dimension/meta）单一来源
  *  - API 函数：loadRoles / loadRole / loadDimensions / loadPermissionRules / savePermissionRules
  *  - API 函数：calculateImpact / loadUnifiedPermissions / searchUsers
  */
@@ -11,8 +12,6 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest'
 import {
   PERMISSION_LEVELS,
-  RESOURCE_LABELS,
-  DIMENSION_PARENT_MAP,
   getPermissionLevelType,
   getPermissionLevelLabel,
   getResourceLabel,
@@ -107,24 +106,16 @@ describe('permissionService', () => {
   })
 
   describe('RESOURCE_LABELS', () => {
-    it('应包含 domain/sub_domain/service_module/business_object/product/version/relationship/annotation', () => {
-      expect(Object.keys(RESOURCE_LABELS)).toEqual(
-        expect.arrayContaining([
-          'domain', 'sub_domain', 'service_module', 'business_object',
-          'product', 'version', 'relationship', 'annotation',
-        ])
-      )
-      // [Spec 19 M2-8] 追加 audit_log / org / user 三行（委托授权），共 11 项
-      expect(Object.keys(RESOURCE_LABELS)).toHaveLength(11)
+    it('[B2-2] 常量副本已删除，资源类型标签仅由后端 meta 下发', async () => {
+      const mod = await import('@/services/permissionService')
+      expect(mod.RESOURCE_LABELS).toBeUndefined()
     })
   })
 
   describe('DIMENSION_PARENT_MAP', () => {
-    it('product 无父级，version 父级为 product，domain 父级为 version，sub_domain 父级为 domain', () => {
-      expect(DIMENSION_PARENT_MAP.product).toBeNull()
-      expect(DIMENSION_PARENT_MAP.version).toBe('product')
-      expect(DIMENSION_PARENT_MAP.domain).toBe('version')
-      expect(DIMENSION_PARENT_MAP.sub_domain).toBe('domain')
+    it('[B2-2] 常量副本已删除，维度层级仅由后端 meta 下发', async () => {
+      const mod = await import('@/services/permissionService')
+      expect(mod.DIMENSION_PARENT_MAP).toBeUndefined()
     })
   })
 
@@ -162,7 +153,18 @@ describe('permissionService', () => {
   })
 
   describe('getResourceLabel', () => {
-    it('应返回对应资源类型的中文标签', () => {
+    beforeEach(async () => {
+      invalidatePermissionMetaCache()
+      mocks.apiV2Get.mockResolvedValueOnce(okResp({
+        resource_type_labels: {
+          domain: '领域', sub_domain: '子领域', service_module: '服务模块',
+          business_object: '业务对象', product: '产品', version: '版本',
+        },
+      }))
+      await loadPermissionMeta()
+    })
+
+    it('应返回后端 meta 下发的资源类型中文标签', () => {
       expect(getResourceLabel('domain')).toBe('领域')
       expect(getResourceLabel('sub_domain')).toBe('子领域')
       expect(getResourceLabel('service_module')).toBe('服务模块')
@@ -176,6 +178,13 @@ describe('permissionService', () => {
   })
 
   describe('getDimensionName', () => {
+    beforeEach(async () => {
+      invalidatePermissionMetaCache()
+      mocks.apiV2Get.mockResolvedValueOnce(okResp({
+        resource_type_labels: { domain: '领域', version: '版本' },
+      }))
+      await loadPermissionMeta()
+    })
     const dimensions = [
       { code: 'product', name: '产品' },
       { code: 'domain', name: '领域' },
@@ -388,14 +397,14 @@ describe('permissionService', () => {
       expect(getPermissionLevelLabel('read')).toBe('只读X')
     })
 
-    it('API 异常时返回 null，标签走常量 fallback 不白屏', async () => {
-      mocks.apiV2Get.mockRejectedValueOnce(new Error('network down'))
+    it('API 异常时返回 null，标签显示原始 code 且级别仍走常量', async () => {
+      mocks.apiV2Get.mockRejectedValue(new Error('network down'))
 
       const meta = await loadPermissionMeta()
 
       expect(meta).toBeNull()
-      expect(getResourceLabel('domain')).toBe('领域')
-      expect(getActionLabel('create')).toBe('创建')
+      expect(getResourceLabel('domain')).toBe('domain')
+      expect(getActionLabel('create')).toBe('create')
       expect(getPermissionLevelLabel('read')).toBe('只读')
     })
 

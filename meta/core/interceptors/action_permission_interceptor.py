@@ -58,13 +58,20 @@ class ActionPermissionInterceptor(Interceptor):
         return context.action == 'crud_update'
 
     def before_action(self, context: 'ActionContext') -> None:
-        from flask import g
         from meta.services.auth_middleware import is_admin
 
         meta_obj = getattr(context, 'meta_object', None)
         if not meta_obj or not getattr(meta_obj, 'rules', None):
             return  # 无 rules 定义的对象跳过
 
+        # [FIX 2026-11-12] 无请求上下文时访问 flask.g 会抛
+        #   RuntimeError("Working outside of application context")；直调路径跳过。
+        try:
+            from flask import g, has_app_context, has_request_context
+        except ImportError:
+            return
+        if not (has_app_context() and has_request_context()):
+            return
         user_info = g.get('current_user') if hasattr(g, 'current_user') else None
         if not user_info:
             return  # 登录态校验交给 login_required / PermissionInterceptor

@@ -111,8 +111,18 @@ class PermissionInterceptor(Interceptor):
         return context.action.startswith('crud_')
 
     def before_action(self, context: 'ActionContext') -> None:
-        from flask import g
         from meta.services.auth_middleware import is_admin
+
+        # [FIX 2026-11-12] 无请求上下文时不能访问 flask.g：LocalProxy 会抛
+        #   RuntimeError("Working outside of application context")，把直调 BO /
+        #   后台线程路径整体打成失败。HTTP 入口的登录态由 login_required 兜底，
+        #   此处只在真实请求内做功能权限判定。
+        try:
+            from flask import g, has_app_context, has_request_context
+        except ImportError:
+            return
+        if not (has_app_context() and has_request_context()):
+            return
 
         user_info = g.get('current_user') if hasattr(g, 'current_user') else None
         if not user_info:

@@ -115,6 +115,7 @@ class TestFieldPolicyInterceptorCreate:
         mock_validator_instance = Mock()
         mock_result = Mock()
         mock_result.valid = False
+        mock_result.errors = []
         mock_result.get_error_message.return_value = "Field 'status' is not editable"
         mock_validator_instance.validate_create.return_value = mock_result
         MockValidator.return_value = mock_validator_instance
@@ -195,6 +196,7 @@ class TestFieldPolicyInterceptorUpdate:
         mock_validator_instance = Mock()
         mock_result = Mock()
         mock_result.valid = False
+        mock_result.errors = []
         mock_result.get_error_message.return_value = "Field 'username' is immutable"
         mock_validator_instance.validate_update.return_value = mock_result
         MockValidator.return_value = mock_validator_instance
