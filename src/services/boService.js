@@ -160,6 +160,17 @@ class BOService extends BaseService {
     return this._request('GET', `/bo/${objectType}/state-transition-actions`)
   }
 
+  // [B1-2 2026-11-13] 批量判定行级动作可用性（后端权威判定）
+  // 返回 { [rowId]: { [actionId]: { enabled, reason, required_permission } } }
+  async evaluateActions(objectType, ids, actions) {
+    if (!objectType) {
+      return { success: false, message: 'MISSING_OBJECT_TYPE', data: {} }
+    }
+    return this._request('POST', `/bo/${objectType}/actions/evaluate`, {
+      body: { ids: ids || [], actions: actions || [] }
+    })
+  }
+
   clearAllCache() {
     this.cache.clear()
     // [FIX] boService 的 CRUD 实际由 _crud (BOCrudService) 执行，

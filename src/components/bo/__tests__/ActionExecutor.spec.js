@@ -133,11 +133,10 @@ describe('ActionExecutor', () => {
       expect(wrapper.vm.isActionDisabled({ condition: 'record.status === "approved"' })).toBe(true)
     })
 
-    it('returns false on condition error', () => {
+    it('returns true on condition error (fail-closed)', () => {
       const wrapper = createWrapper({ record: {} })
-      // 使用 forbidden 路径触发 evaluateCondition 抛错（被 catch 后返回 true → 不禁用）
-      // 注：safeExpression 是 fail-open 设计，解析错误时返回 true（visible）
-      expect(wrapper.vm.isActionDisabled({ condition: '__proto__' })).toBe(false)
+      // 使用 forbidden 路径触发 evaluateCondition 抛错（B1-2 起 safeExpression fail-closed → false → 禁用）
+      expect(wrapper.vm.isActionDisabled({ condition: '__proto__' })).toBe(true)
     })
 
     it('returns false for action without condition', () => {

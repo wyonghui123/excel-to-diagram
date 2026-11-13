@@ -11,7 +11,7 @@
  *   - Whitelist operators only (===, !==, ==, !=, >, <, >=, <=)
  *   - Compound conditions: `and` / `or` (top level), `in [..]` membership
  *   - Block prototype chain access (__proto__, constructor, prototype)
- *   - Fail-open: return true on parse errors to avoid hiding UI elements
+ *   - Fail-closed: return false on parse/evaluation errors (never grant by accident)
  *   - Zero external dependencies
  */
 
@@ -105,7 +105,7 @@ function compare(left, op, right) {
     case '<': return left < right
     case '>=': return left >= right
     case '<=': return left <= right
-    default: return true
+    default: return false
   }
 }
 
@@ -196,14 +196,14 @@ function evaluateClause(clause, record, prefix) {
  * @param {string} expr - The condition expression (e.g. "row.is_current !== true")
  * @param {object} record - The data record to evaluate against
  * @param {string} [prefix='row'] - Variable prefix used in the expression
- * @returns {boolean} Evaluation result. Returns true on error (fail-open).
+ * @returns {boolean} Evaluation result. Returns false on error (fail-closed).
  */
 export function evaluateCondition(expr, record, prefix) {
   if (!expr || typeof expr !== 'string') return true
   const trimmed = expr.trim()
   if (trimmed === 'true') return true
   if (trimmed === 'false') return false
-  if (!record || typeof record !== 'object') return true
+  if (!record || typeof record !== 'object') return false
 
   prefix = prefix || 'row'
 
@@ -218,8 +218,8 @@ export function evaluateCondition(expr, record, prefix) {
     return splitTopLevel(trimmed, ' and ')
       .every(clause => evaluateClause(clause, record, prefix))
   } catch (e) {
-    console.warn('[safeExpression] Evaluation failed for "' + trimmed + '":', e.message)
-    return true
+    console.error('[safeExpression] Evaluation failed for "' + trimmed + '", fail-closed:', e.message)
+    return false
   }
 }
 

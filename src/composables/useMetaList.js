@@ -100,9 +100,10 @@ export function useMetaList(objectTypeOrRef, options = {}) {
   try {
     _authStore = useAuthStore()
   } catch (_e) {
-    // 在非 setup 上下文调用时, 降级为 null, _checkPermission 退回占位行为
-    console.warn('[useMetaList] useAuthStore() 调用失败, _checkPermission 将退回占位行为:', _e?.message)
+    // [B1-2 2026-11-13] fail-closed: 无 authStore 时不再默认放行
+    console.error('[useMetaList] useAuthStore() 调用失败, 权限检查 fail-closed:', _e?.message)
   }
+  let _authStoreWarned = false
 
   // [NFR-004] 请求竞态安全：版本号保护
   let _initVersion = 0
@@ -209,6 +210,13 @@ export function useMetaList(objectTypeOrRef, options = {}) {
   // [M2 PR-2.1] data 列表可能包含 1000+ 行，整个 set 替换 (data.value = ...) 而非 push/splice
   //   改 shallowRef 避免深度代理，v-for 直接消费 data.value 不受影响
   const data = shallowRef([])
+
+  /**
+   * [B1-2 2026-11-13] 行级动作可用性（后端 `actions/evaluate` 批量结果）
+   * 结构: { [rowId]: { [actionId]: { enabled, reason, required_permission } } }
+   * 后端不可用时为 null → 行级动作按 fail-closed 处理。
+   */
+  const actionAvailability = shallowRef(null)
   
   /** 加载状态 */
   const loading = ref(false)
@@ -522,6 +530,7 @@ export function useMetaList(objectTypeOrRef, options = {}) {
         permissionDenied.value = true
         data.value = []
         pagination.total = 0
+        actionAvailability.value = null
         return
       }
 
@@ -554,6 +563,8 @@ export function useMetaList(objectTypeOrRef, options = {}) {
 
         
         _restoreSelectionState()
+        // [B1-2 2026-11-13] 行级动作可用性改由后端批量判定（异步，不阻塞列表渲染）
+        void refreshActionAvailability()
       } else {
         console.warn(`[useMetaList] [WARNING] boService.query 返回 success=false:`, result.message || '无消息')
         handleError('加载数据', new Error(result.message || '加载数据失败'), { showMessage: false })
@@ -562,6 +573,7 @@ export function useMetaList(objectTypeOrRef, options = {}) {
       console.error(`[useMetaList] [X] loadList 异常:`, error)
       handleError('加载数据', error)
       data.value = []
+      actionAvailability.value = null
     } finally {
       loading.value = false
     }
@@ -1042,15 +1054,83 @@ export function useMetaList(objectTypeOrRef, options = {}) {
   }
 
   /**
-   * 获取行的可用操作（考虑权限和条件）
+   * 获取行的可用操作（权限与条件由后端 actions/evaluate 批量判定）
    * @param {Object} row - 当前行数据
    * @returns {Array} 可用的行级操作
+   *
+   * [B1-2 2026-11-13] 判定下沉：后端 verdict 优先；后端结果缺失/请求失败 fail-closed。
+   * 仅无 id 的新行（后端无法判定）才走本地兜底，兜底同样 fail-closed。
    */
   function getRowActions(row) {
-    const builtin = _filterRowActionsSvc(rowActions.value, row, objectTypeRef.value, config.rowMutability, _checkPermission, _evaluateCondition)
+    const rowId = row && row.id !== undefined && row.id !== null ? String(row.id) : null
+    const availability = rowId ? actionAvailability.value?.[rowId] || null : null
+    const resolveVerdict = (action) => {
+      if (!availability) return null
+      // [B1-2 2026-11-13] 元数据动作可能只有 key（transformActions 输出 key），统一 id || key
+      const actionId = String(action?.id || action?.key || '').toLowerCase()
+      return actionId ? availability[actionId] || null : null
+    }
+    const checkPermission = (action) => {
+      const verdict = resolveVerdict(action)
+      if (verdict) return verdict.enabled === true
+      if (availability) return false
+      return _checkPermission(action)
+    }
+    const checkCondition = (condition, rowData) => {
+      // 有后端判定时条件结果已包含在 verdict 中，不再本地求值
+      if (availability) return true
+      return _evaluateCondition(condition, rowData)
+    }
+
+    const builtin = _filterRowActionsSvc(
+      rowActions.value, row, objectTypeRef.value, config.rowMutability,
+      checkPermission, checkCondition)
     if (!config.extraRowActions || config.extraRowActions.length === 0) return builtin
-    const extras = _filterRowActionsSvc(config.extraRowActions, row, objectTypeRef.value, config.rowMutability, _checkPermission, _evaluateCondition)
+    const extras = _filterRowActionsSvc(
+      config.extraRowActions, row, objectTypeRef.value, config.rowMutability,
+      checkPermission, checkCondition)
     return [...extras, ...builtin]
+  }
+
+  /**
+   * [B1-2 2026-11-13] 批量拉取行级动作可用性（后端权威判定）。
+   * 失败/异常一律清空为 null → 行级动作 fail-closed 不渲染。
+   * @private
+   */
+  async function refreshActionAvailability() {
+    // [NFR-004] 与 loadList 共用版本号，丢弃过期的批量判定结果
+    const version = _loadVersion
+    const objectType = objectTypeRef.value
+    const rows = data.value || []
+    const candidates = [...(rowActions.value || []), ...(config.extraRowActions || [])]
+    // [B1-2 2026-11-13] 元数据动作可能只有 key（transformActions 输出 key），统一 id || key
+    const actions = candidates
+      .filter(action => action && (action.id || action.key))
+      .map(action => ({
+        id: action.id || action.key,
+        permission: action.permission || '',
+        condition: action.condition || ''
+      }))
+    const ids = rows
+      .map(item => item && item.id)
+      .filter(id => id !== undefined && id !== null)
+    if (!objectType || !ids.length || !actions.length) {
+      actionAvailability.value = null
+      return
+    }
+    try {
+      const res = await boService.evaluateActions(objectType, ids, actions)
+      if (version !== _loadVersion) return
+      if (res?.success && res.data && typeof res.data === 'object') {
+        actionAvailability.value = res.data
+      } else {
+        console.error('[useMetaList] actions/evaluate 返回失败, 行级动作 fail-closed:', res?.message)
+        actionAvailability.value = null
+      }
+    } catch (e) {
+      console.error('[useMetaList] actions/evaluate 请求异常, 行级动作 fail-closed:', e)
+      actionAvailability.value = null
+    }
   }
 
   // ======== 内部方法 ======
@@ -1542,7 +1622,7 @@ export function useMetaList(objectTypeOrRef, options = {}) {
    * [P0-4 2026-07-25] 替代占位实现；[FR-009 2026-10-31] 收敛到统一判定入口
    *   - 优先级 1: action 无配置 permission → 视为公开操作, 返回 true
    *   - 优先级 2: authStore 已加载 → 调用 can(null, { permission, authStore })
-   *   - 优先级 3: authStore 未加载 (非 setup 上下文) → 降级返回 true (兼容旧测试)
+   *   - 优先级 3: authStore 未加载 → fail-closed 返回 false（B1-2）
    *
    * 安全策略:
    *   - 后端 API 仍会做权威校验, 这里只是 UI 显隐控制
@@ -1551,8 +1631,11 @@ export function useMetaList(objectTypeOrRef, options = {}) {
   function _checkPermission(action) {
     if (!action.permission) return true
     if (!_authStore) {
-      // 降级: 非 setup 上下文 (如某些单元测试), 保持旧行为
-      return true
+      if (!_authStoreWarned) {
+        _authStoreWarned = true
+        console.error('[useMetaList] authStore 不可用, 权限检查 fail-closed（返回 false）')
+      }
+      return false
     }
     // 支持权限字符串或数组 (数组时任意一项满足即可)
     return can(null, { permission: action.permission, authStore: _authStore })

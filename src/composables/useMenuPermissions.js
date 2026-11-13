@@ -239,10 +239,12 @@ export function useMenuPermissions() {
       if (result.success) {
         return !!(result.data?.visible)
       }
+      console.error(`[MenuPermissions] 菜单可见性接口返回失败, fail-closed: ${menuCode}`)
     } catch (err) {
-      console.error(`Failed to check menu visibility for ${menuCode}:`, err)
+      console.error(`Failed to check menu visibility for ${menuCode}, fail-closed:`, err)
     }
-    return true
+    // [B1-2 2026-11-13] fail-closed: 判定失败不再默认可见
+    return false
   }
 
   const getPermissionReport = async () => {

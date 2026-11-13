@@ -964,6 +964,135 @@ def get_state_transition_actions(object_type):
     return ok(action_refs)
 
 
+# ───────────────────────────────────────────
+# [B1-2 2026-11-13] 动作可用性 / 条件求值下沉
+# 前端不再本地求值 permission / condition，统一由后端返回判定结果。
+# 必须放在 '/<object_type>/<path:obj_id>' 之前，否则被贪婪匹配吞掉。
+# ───────────────────────────────────────────
+
+def _eval_permission_checker(user_id):
+    """构造动作权限检查器（fail-closed：无用户 / 服务异常 / 检查异常一律 False）。"""
+    if user_id is None:
+        return lambda _code: False
+    try:
+        from meta.services.permission_service import PermissionService
+        service = PermissionService(_get_data_source())
+    except Exception as exc:
+        logger.warning('[bo_api] 权限服务初始化失败，动作权限检查 fail-closed: %s', exc)
+        return lambda _code: False
+
+    def _check(code):
+        try:
+            return bool(service.has_permission(user_id, code))
+        except Exception as exc:
+            logger.warning('[bo_api] 权限检查异常，动作 fail-closed（%s）: %s', code, exc)
+            return False
+
+    return _check
+
+
+def _eval_condition_evaluator():
+    """构造条件评估器（fail-closed：评估异常一律 False）。"""
+    from meta.core.condition_evaluator import ConditionEvaluator
+    evaluator = ConditionEvaluator()
+
+    def _evaluate(condition, record=None):
+        try:
+            return bool(evaluator.evaluate(
+                condition, {'self': record} if record is not None else None))
+        except Exception as exc:
+            logger.warning('[bo_api] 条件求值异常，动作 fail-closed: %s', exc)
+            return False
+
+    return _evaluate
+
+
+def _load_eval_records(meta_obj, ids):
+    """按 ids 读取记录（per-record 条件求值用）；失败返回空映射 → 条件 fail-closed。"""
+    if not ids:
+        return {}
+    table_name = getattr(meta_obj, 'table_name', None)
+    if not table_name:
+        return {}
+    try:
+        rows = _get_data_source().find(table_name, {'id__in': list(ids)})
+    except Exception as exc:
+        logger.warning('[bo_api] 动作评估读取记录失败，条件 fail-closed: %s', exc)
+        return {}
+    return {str(row.get('id')): row for row in rows if isinstance(row, dict)}
+
+
+@bo_bp.route('/<object_type>/actions/evaluate', methods=['POST'])
+@login_required
+def evaluate_bo_actions(object_type):
+    """[B1-2] 批量判定动作可用性（fail-closed）。
+
+    body: {"ids": [...], "actions": [...]}；ids 为空时按对象级动作（`_object` 桶）。
+    resp: { [id]: { [action_id]: {enabled, reason, required_permission} } }
+    """
+    meta_obj = registry.get(object_type)
+    if meta_obj is None:
+        return error_response(f'Object type not found: {object_type}', status=404)
+
+    body = request.get_json(silent=True) or {}
+    ids = body.get('ids') or []
+    actions = body.get('actions') or []
+    if not isinstance(ids, list):
+        return error_response('ids 必须是数组', error_code='INVALID_ARGUMENT', status=400)
+    if not isinstance(actions, list):
+        return error_response('actions 必须是数组', error_code='INVALID_ARGUMENT', status=400)
+
+    from meta.services.action_policy import create_action_policy
+    user = _get_current_user_safe() or {}
+    user_id = user.get('user_id') or user.get('id')
+
+    result = create_action_policy(meta_obj).evaluate_batch(
+        ids=ids,
+        actions=actions,
+        permission_checker=_eval_permission_checker(user_id),
+        condition_evaluator=_eval_condition_evaluator(),
+        records=_load_eval_records(meta_obj, ids),
+    )
+    return ok(result)
+
+
+@bo_bp.route('/<object_type>/conditions/evaluate', methods=['POST'])
+@login_required
+def evaluate_bo_conditions(object_type):
+    """[B1-2] 批量条件求值（fail-closed）。
+
+    body: {"ids": [...], "conditions": ["...", ...]}；ids 为空时按对象级求值。
+    resp: { [id]: { [condition]: {matched, trace} } }
+    """
+    meta_obj = registry.get(object_type)
+    if meta_obj is None:
+        return error_response(f'Object type not found: {object_type}', status=404)
+
+    body = request.get_json(silent=True) or {}
+    ids = body.get('ids') or []
+    conditions = body.get('conditions') or []
+    if not isinstance(ids, list):
+        return error_response('ids 必须是数组', error_code='INVALID_ARGUMENT', status=400)
+    if not isinstance(conditions, list) or not all(
+            isinstance(c, str) for c in conditions):
+        return error_response(
+            'conditions 必须是字符串数组', error_code='INVALID_ARGUMENT', status=400)
+
+    from meta.services.action_policy import _OBJECT_BUCKET
+    evaluator = _eval_condition_evaluator()
+    records = _load_eval_records(meta_obj, ids)
+    id_list = [str(i) for i in ids] or [_OBJECT_BUCKET]
+
+    result = {}
+    for obj_id in id_list:
+        record = records.get(obj_id)
+        result[obj_id] = {
+            condition: {'matched': evaluator(condition, record), 'trace': []}
+            for condition in conditions
+        }
+    return ok(result)
+
+
 @bo_bp.route('/<object_type>/<path:obj_id>', methods=['GET'])
 @login_required
 def read_bo_by_string_id(object_type, obj_id):

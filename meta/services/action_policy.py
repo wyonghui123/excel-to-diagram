@@ -8,8 +8,18 @@ ActionPolicy - 动作策略引擎
 3. 基于 mutability 的操作过滤
 """
 
-from typing import Dict, List, Optional, Set
+import logging
+from typing import Any, Callable, Dict, List, Optional, Set
 from dataclasses import dataclass, field
+
+logger = logging.getLogger(__name__)
+
+
+#: 动作可用性判定失败原因（B1-2 下沉，前端不再自行求值）
+REASON_UNSUPPORTED = 'unsupported'
+REASON_READONLY_OBJECT = 'readonly_object'
+REASON_NO_PERMISSION = 'no_permission'
+REASON_PRECONDITION_FALSE = 'precondition_false'
 
 
 @dataclass
@@ -301,6 +311,172 @@ class ActionPolicy:
         """
         mutability = self._get_mutability()
         return mutability == 'locked'
+
+    # ── [B1-2 2026-11-13] 动作可用性下沉评估 ──
+    # 前端不再自行求值 permission / condition；统一由后端返回 enabled + reason。
+    # 权限检查与条件评估通过 callable 注入，保持本模块纯逻辑、不依赖 DB。
+
+    def evaluate_action(
+        self,
+        action,
+        record=None,
+        permission_checker: Optional[Callable[[str], bool]] = None,
+        condition_evaluator: Optional[Callable[[str, Optional[Dict[str, Any]]], bool]] = None,
+    ) -> 'ActionAvailability':
+        """判定单个动作在当前记录下是否可用（fail-closed）。
+
+        判定顺序：
+        1. 缺少 id → unsupported
+        2. 对象 locked 且动作属于写操作 → readonly_object
+        3. 声明了 permission 但检查失败/检查器缺失 → no_permission
+        4. 声明了 condition 但求值为 False/评估器缺失/抛异常 → precondition_false
+        5. 其余 → enabled
+        """
+        action_id = _action_id(action)
+        if not action_id:
+            return ActionAvailability(enabled=False, reason=REASON_UNSUPPORTED)
+
+        required_permission = _action_field(action, 'permission', '') or ''
+        condition = _action_field(action, 'condition', '') or ''
+
+        if self.is_readonly() and action_id in (
+                self.CREATE_ACTIONS | self.UPDATE_ACTIONS | self.DELETE_ACTIONS):
+            return ActionAvailability(
+                enabled=False,
+                reason=REASON_READONLY_OBJECT,
+                required_permission=required_permission,
+            )
+
+        if required_permission:
+            allowed = False
+            if permission_checker is None:
+                logger.warning(
+                    '[action_policy] 未注入权限检查器，动作 %s 按 fail-closed 处理',
+                    action_id)
+            else:
+                try:
+                    allowed = bool(permission_checker(required_permission))
+                except Exception as e:  # noqa: BLE001 - 检查器故障一律拒绝
+                    logger.warning(
+                        '[action_policy] 权限检查异常，动作 %s 按 fail-closed 处理: %s',
+                        action_id, e)
+                    allowed = False
+            if not allowed:
+                return ActionAvailability(
+                    enabled=False,
+                    reason=REASON_NO_PERMISSION,
+                    required_permission=required_permission,
+                )
+
+        if condition:
+            matched = False
+            if condition_evaluator is None:
+                logger.warning(
+                    '[action_policy] 未注入条件评估器，动作 %s 按 fail-closed 处理',
+                    action_id)
+            else:
+                try:
+                    matched = bool(condition_evaluator(condition, record))
+                except Exception as e:  # noqa: BLE001 - 评估器故障一律拒绝
+                    logger.warning(
+                        '[action_policy] 条件评估异常，动作 %s 按 fail-closed 处理: %s',
+                        action_id, e)
+                    matched = False
+            if not matched:
+                return ActionAvailability(
+                    enabled=False,
+                    reason=REASON_PRECONDITION_FALSE,
+                    required_permission=required_permission,
+                )
+
+        return ActionAvailability(
+            enabled=True, reason='', required_permission=required_permission)
+
+    def evaluate_batch(
+        self,
+        ids: Optional[List[Any]] = None,
+        actions: Optional[List[Any]] = None,
+        permission_checker: Optional[Callable[[str], bool]] = None,
+        condition_evaluator: Optional[Callable[[str, Optional[Dict[str, Any]]], bool]] = None,
+        records: Optional[Any] = None,
+    ) -> Dict[str, Dict[str, Dict[str, Any]]]:
+        """批量判定动作可用性，返回 `{ [id]: { [action_id]: availability } }`。
+
+        - `ids` 为空时使用 `'_object'` 桶（对象级动作，record=None）
+        - `records` 支持 dict（按 str(key) 映射）或 list（与 ids 顺序对齐）
+        """
+        id_list = [str(i) for i in (ids or [])]
+        if not id_list:
+            id_list = [_OBJECT_BUCKET]
+
+        record_map = _normalize_records(records, id_list)
+        action_list = list(actions or [])
+
+        result: Dict[str, Dict[str, Dict[str, Any]]] = {}
+        for obj_id in id_list:
+            record = record_map.get(obj_id)
+            bucket: Dict[str, Dict[str, Any]] = {}
+            for action in action_list:
+                aid = _action_id(action)
+                if not aid:
+                    continue
+                availability = self.evaluate_action(
+                    action,
+                    record=record,
+                    permission_checker=permission_checker,
+                    condition_evaluator=condition_evaluator,
+                )
+                bucket[aid] = availability.to_dict()
+            result[obj_id] = bucket
+        return result
+
+
+@dataclass
+class ActionAvailability:
+    """动作可用性判定结果"""
+    enabled: bool
+    reason: str = ''
+    required_permission: str = ''
+
+    def to_dict(self) -> Dict[str, Any]:
+        return {
+            'enabled': self.enabled,
+            'reason': self.reason,
+            'required_permission': self.required_permission,
+        }
+
+
+#: 无 ids 时的对象级动作桶键
+_OBJECT_BUCKET = '_object'
+
+
+def _action_id(action) -> str:
+    """读取动作 id，兼容 dict / 对象两种结构。"""
+    return str(_action_field(action, 'id', '') or '').strip().lower()
+
+
+def _action_field(action, name: str, default=None):
+    """读取动作字段，兼容 dict / 对象两种结构。"""
+    if isinstance(action, dict):
+        value = action.get(name, default)
+    else:
+        value = getattr(action, name, default)
+    return default if value is None else value
+
+
+def _normalize_records(records, id_list: List[str]) -> Dict[str, Any]:
+    """把 records 归一为 `{ id: record }` 映射。"""
+    if records is None:
+        return {}
+    if isinstance(records, dict):
+        return {str(k): v for k, v in records.items()}
+    if isinstance(records, (list, tuple)):
+        return {
+            obj_id: records[idx]
+            for idx, obj_id in enumerate(id_list)
+            if idx < len(records)
+        }
+    return {}
 
 
 def create_action_policy(meta_object=None) -> ActionPolicy:
