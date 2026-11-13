@@ -213,6 +213,10 @@ def dev_login():
             permissions.add(r[2])
     roles = list(roles.values())
     permissions = list(permissions)
+    # admin 的 permission_set 会展开全部权限行，JWT 随之超过浏览器单 cookie 4096 字节上限
+    # （Chromium 直接丢弃 auth_token → /me 401）。已含通配符 '*' 时收敛，语义等价且与 /me 一致。
+    if '*' in permissions:
+        permissions = ['*']
 
     from meta.services.auth_provider import UserInfo
     user_info = UserInfo(
