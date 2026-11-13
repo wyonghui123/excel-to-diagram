@@ -1,6 +1,6 @@
 # 采购发票对象模型 Spec（Vendor Invoice Object Model）
 
-> 版本：v1.0 草案 ｜ 日期：2026-11-11 ｜ 状态：待评审
+> 版本：v1.4 草案（2026-11-13 追加 22.6.2 费用变更与单一事实源约束 / R-1~R-4 / 变更矩阵 A~D；v1.3 同日追加 22.6.1 费用分摊方案 / D-CH-01~12；v1.2 于 2026-11-12 §22 细化，金额计算改为复用统一内核 `SalesOrderAmountService`，D-VI-27）｜ 日期：2026-11-11 ｜ 状态：待评审
 > 上游契约：[spec-receipt-object-model-2026-11-01.md](./spec-receipt-object-model-2026-11-01.md) §10 / §11
 > 样板：[sales-invoice-pricing-spec-2026-11-10.md](./sales-invoice-pricing-spec-2026-11-10.md)（FR/NFR/IF/TR 编号体系）
 > 平台基线：`document_category / document_role / direction`（v243）、`doc_flow_rule`（v215）、`control_parameter_def`（容差）
@@ -429,6 +429,8 @@ draft ──submit──▶ submitted ──post──▶ posted ──reverse�
 | R-VI-16 | 红冲蓝票（`reversal_of_invoice_id` 非空）必须指向 `posted` 且同供应商、同币种、同计划的蓝字发票；红字发票自身的 `direction=-1` 由类型派生，不可改 | 服务 |
 | R-VI-17 | 一次匹配调用只能包含同一 `direction` 的发票；红字发票不得与蓝字发票同批匹配（金蝶「不允许红蓝一起匹配」，§19 / D-VI-13） | 服务 |
 | R-VI-18 | 匹配提交以 **`BEGIN IMMEDIATE`** 开启事务，在同一事务内重算剩余量（计划量 / 可开票净收量 / 已匹配量）后才写边；`uq_doc_flow_idem` 冲突即整笔拒绝，不部分成功（TBD-13 已裁决） | 服务 + DB |
+
+> 金额计算（行 / 头公式、舍入、税、运费）、价格变更矩阵与新增不变量 **R-VI-24 ~ R-VI-33** 见 **§22**（2026-11-12 细化追加）；R-VI-6 / R-VI-7 以 §22.2 / §22.3 为准；金额算术统一复用 `SalesOrderAmountService`（D-VI-27）。
 
 ---
 
@@ -906,6 +908,8 @@ doc_effect:
 | TBD-11 | `purchase_order_schedule.invoiced_qty` 缓存列 | **不加**（N3）。设性能门槛：`ap_match` 切片的 `doc_flow_edges` 边数 > 5 万或 `v_doc_flow_consumed_qty` p95 > 200ms 时才评估**物化视图**，仍不落实体列 | Fusion `quantity_billed` / D365 已开票数量确实落列，但依赖严格过账引擎与批量重算；本平台已有视图层 ⇒ 先测后优 | §11.2（补门槛）、§15 | P2 | 架构 |
 | TBD-12 | 多套匹配 / 容差方案并存 + 单据级选择 | **不建「方案」对象**。用 `vi_match_mode` 参数多级解析 + TBD-2 维度扩展表达「按组织/类型/物料组/物料/供应商不同策略」；若未来确有单据级切换需求，再建 `match_profile` 头引用参数集，不预埋字段 | 金蝶把匹配关系/匹配方案/容差方案做成基础资料，是为承载**审批流 + 匹配单据**；本平台无匹配审批场景（D-VI-12）⇒ 方案对象是空壳 | §5.1、§15 | P2 | 架构 |
 | TBD-13 | 并发匹配 TOCTOU 锁策略 | 匹配提交用 **`BEGIN IMMEDIATE`**（写前取 RESERVED 锁）→ 事务内重算剩余量 → 写边；**不加行级悲观锁**；`uq_doc_flow_idem` 冲突即整笔拒绝。视图仅展示，不承担锁语义。未来迁 PG 时等价替换为 `SELECT … FOR UPDATE`（按 `schedule_id`） | SQLite 单写者 + Waitress 多线程单文件库（C）⇒ 应用层锁只会引入死锁；SAP/Fusion 用 DB 行锁，语义等价 | §6.3 R-VI-18、§8、§15 | P0 | 架构 |
+| TBD-14 | 是否与 PO 行税额比对 | 本波**不比对**，仅预留 `vi_po_tax_compare`（默认 `false`）；开启后按行 `tax_amount` 与 PO 行税额差 > `vi_tax_tolerance_abs` 置 `exception` | 税额差异多数来自税率快照时点不同，先积累数据再定口径 | §22.7、§22.10 | P3 | PM |
+| TBD-15 | `customer_invoice_service` 金额逻辑未复用统一内核 | **本波不改**；登记为已知不一致，后续独立波次收敛到 `SalesOrderAmountService`（补齐含税价倒算与 `rounding_diff` 口径），与 VI 同源 | SO/PO 已统一在该内核，CI 自带舍入与抬头合计 ⇒ 同一平台存在两套金额口径，长期会漂移 | §22.1（销售侧对照）、§22.14 D-VI-27 | P2 | 架构 |
 
 ### 20.2 需业务（PM）签字项
 
@@ -1043,6 +1047,7 @@ doc_effect:
 - increase：行金额为**正数**，头金额 = Σ 行金额。
 - decrease：行数量存**正数幅值**，行金额存**负数**（`-abs(amount)`），头金额 = Σ 行金额（负数）。
 - `direction` 仍由类型派生为 `1`（文档方向），**不**用 `direction` 表达增减；增减只由 `adjustment_direction` 表达。
+- 调整行金额必须由计算层按 §22.2 重算（T1 数量 / T2 价格 / T3 纯金额，见 §22.5），不允许只改 `unit_price` 不改金额。
 
 ### 21.4 状态机与 `doc_effect`
 
@@ -1059,7 +1064,7 @@ doc_effect:
 | decrease | **red**（`red_ink_edge`） | 原行该规则的**全部** active normal 边 | 先按 `Σ_red_available` 校验，超出 → `VI_ADJUSTMENT_EXCEEDED`；无 active 边 → `VI_ADJUSTMENT_ANCHOR_MISSING` | 同上（负数金额写正数 quantity + `quantity_sign='red'`） |
 | qty=0 | 不写边 | — | 纯金额调整（如价格差异） | 仅头/行金额变化 |
 
-- 行金额口径：`lines[]` 只给 `qty` 未给 `net_amount` / `tax_amount` 时，按**原行数量比例**折算金额（`net × qty/qty_原行`），避免「数量是部分、金额是全额」的口径失衡。
+- 行金额口径：`lines[]` 只给 `qty` 未给 `net_amount` / `tax_amount` 时，按**原行单价 × 新数量**重算净额、按**原税率**重算税额（§22.5 T1），避免「数量是部分、金额是全额」的口径失衡；`tax_rate_percent` 缺失时按原行税额比例缩放并做容差校验。
 - decrease 分摊：同一原行可能因 increase 产生多条 normal 边（分属多条计划行），按 `rowid` FIFO 依次冲减直至满足本次冲减量；校验用累计可用量而非单边可用量。
 - 原票边**永不**被 update/delete；decrease 通过新增红字边使 `_red_available` 归零，语义与 Phase 1 红冲一致。
 - increase 的 open 量按 `(source_bo, source_id, pool)` 聚合后减去该行的已开票量（含红字抵扣），复用 `v_doc_flow_consumed_amount`。
@@ -1105,7 +1110,7 @@ doc_effect:
 - 不做调整单自身的红冲（撤销 = 新建反向调整单，即对调整单建 `decrease` 调整单，红字冲减其入边）。
 - 不支持对调整单再 `increase`（调整行不落锚点列，过账无法解析订单/收货锚点；需要继续加量请对原发票行做 `increase`）。服务层与守卫均在创建期拒绝，规则码 `VI_ADJUSTMENT_INCREASE_UNSUPPORTED`。
 - 不支持调整单跨供应商 / 跨币种 / 跨 org（头字段全部从原票复制）。
-- 不支持调整单修改数量以外的价格模型重算（价格差异用 qty=0 的纯金额调整表达）。
+- 不按定价模板重新取价（发票侧只对位快照，§22.4）；价格差异二选一表达：① 调整行显式给 `unit_price` 并按 §22.2 重算（T2）；② `qty=0` 的纯金额调整（T3）。**不再**限定「只能改数量」（D-VI-25）。
 
 ### 21.9 迁移与测试（W7 = v259）
 
@@ -1127,3 +1132,482 @@ doc_effect:
 | `cancel` | 草稿/已提交撤销 | → cancelled | 无（未过账） | 既有状态迁移 |
 | `reverse` | 已过账全额红冲 | → reversed | 红字单（引擎派生） | Phase 1，`doc_effect.reversal` |
 | `return` / 调整 | 已过账部分增减 | **保持 posted** | **调整单（正向新事实）** | Phase 2，本节 |
+
+---
+
+## 22. 采购金额与费用计算契约（细化，2026-11-12 追加）
+
+> 本节是 §4 / §5 / §6 / §11 / §21 的**实施级细化**，不改变对象骨架与已裁决事项；与本节冲突处以本节为准（冲突清单见 §22.15）。
+> 输入：2026-11-12 对采购侧「定价模板 / 价格配置 / 价格与金额变更 / 计划外运费 / 税 / 金额计算」的代码审查结论（16 条缺口，记 `G-1 ~ G-16`）。
+
+### 22.0 缺口 → 条款映射
+
+| # | 缺口（审查结论） | 级别 | 落点 |
+|---|---|---|---|
+| G-1 | 行 / 头金额无服务端重算链路（前端只读、后端不计算 ⇒ 金额恒 0 仍可过账，边 `amount=0`） | P0 | 22.1 / 22.2 / 22.3 / R-VI-24~26 |
+| G-2 | 含税单价未参与价格匹配；行无税率快照，无法折算 | P0 | 22.2 / 22.4 / 22.7 / R-VI-27 |
+| G-3 | 写边 `min(qty, open_qty)`、`min(qty, available)` 静默截断 | P0 | 22.8 / R-VI-28 |
+| G-4 | 调整单改 `unit_price` 不重算金额（net/tax 取源金额 × 比例） | P1 | 22.5 / R-VI-31 |
+| G-5 | 可开票量基数不一致（match 扣退货、写边不扣；`gr_based` 无退货来源） | P1 | 22.8 / 22.10 |
+| G-6 | `match_mode` / `match_pricing_mode` 无参数解析，模式实际恒定 | P1 | 22.8 / 22.10 |
+| G-7 | `receipt_price` 模式伪造 override | P1 | 22.4 |
+| G-8 | 计划外运费 / 附加费无承载 | P1 | 22.6 |
+| G-9 | R-VI-3 锚点回填条件化（`if not result.get`）、API 可注入 `po_unit_price` | P2 | 22.4 / 22.8 / R-VI-27 |
+| G-10 | 供应商 / 币种校验可被空锚点绕过 | P2 | 22.8 |
+| G-11 | 税：`tax_amount` 可编辑无校验、无税率、无 PO 税额比对 | P2 | 22.7 |
+| G-12 | 舍入：`rounding_diff` 恒 0、`round(...,2)` 绕过币种精度 | P2 | 22.2 / 22.3 / R-VI-26 |
+| G-13 | 红冲与调整并存无互斥检查；红边只取末条 active 边 | P2 | 22.5 / 22.8 |
+| G-14 | 定价不可追溯（行无 `price_source` / `price_trace`） | P3 | 22.4 |
+| G-15 | 调整单 `direction=1` + 负金额可能双重取负 | P3 | 22.5 |
+| G-16 | 调整行 `unit_price` 与 `net_amount` 不同步；`qty=0` 纯金额行可能被跳过 | P3 | 22.5 |
+
+### 22.1 三层计算链与唯一入口
+
+| 层 | 载体 | 职责 | 禁止 |
+|---|---|---|---|
+| 输入层 | YAML `ui.editable` | 只暴露业务可改字段（`qty` / `unit_price` / `price_includes_tax` / `tax_rate_percent` / `tax_code_id` / 调整行金额） | 前端不得做任何金额换算 |
+| 计算层 | **复用统一金额内核** `meta/services/sales_order_amount_service.py` 的 `SalesOrderAmountService`（模板方法：算术在内核，加载 / 写回由钩子注入） | 行 / 头金额、差额、税校验 | 禁止新建第三套金额算术；禁止在 handler / interceptor / 前端复制公式 |
+| 汇总层 | `vendor_invoice_match_service` | 在 create / update / match / submit / post / 调整 / 红冲复制处调用计算层并落库 | 禁止跳过计算层直接写金额列 |
+
+复用方式（新增薄子类，算术零复制，与 `purchase_order_guard_service._PurchaseOrderAmountService` 同一先例）：
+
+```python
+class VendorInvoiceAmountService(SalesOrderAmountService):
+    """VI 专属口径；算术全部继承内核。"""
+    # 覆写：_load_line / _load_order / _sum_lines / _write_line / _write_order（表名不同）
+    # 覆写：_line_amounts(...)    ← 新增钩子，支持含税价倒算 / line_direct
+    # 覆写：_header_amounts(...)  ← 新增钩子，支持 supplier_gross_amount / rounding_diff
+```
+
+内核最小扩展（**只加两个可覆写钩子，默认实现 = 现行 SO/PO 口径，零回归**）：
+
+```python
+def _line_amounts(self, *, qty, unit_price, price_includes_tax,
+                  tax_rate_percent, tax_rounding, decimals) -> dict:
+    # 默认：net = R(q×p)；tax = R(net×r/100)；gross = R(net+tax)
+    # VI 覆写：22.2 路径 B（含税价倒算）+ line_direct（税额直录 + 容差校验）
+
+def _header_amounts(self, *, sum_net, sum_tax, sum_gross, supplier_gross,
+                    decimals, rounding_tolerance) -> dict:
+    # 默认：R(Σ 行)
+    # VI 覆写：追加 supplier_gross_amount / rounding_diff / 头恒等式校验
+```
+
+> **销售侧对照（C）**：SO / PO 侧已统一在该内核上 —— `sales_order_pricing_service`、`sales_order_header_discount_service`、`sales_order_expand_service`、`sales_order_guard_interceptor` 直接持有内核；`purchase_order_guard_service._PurchaseOrderAmountService` 用子类覆写四张表的加载 / 写回。**唯一例外**是 `customer_invoice_service`（自带舍入与抬头合计，未接内核），属已知不一致，见 TBD-15，本波不改。
+
+触发点矩阵：
+
+| 触发 | 必须重算 | 说明 |
+|---|---|---|
+| 行新增 / 修改 / 删除 | 该行 + 头 | `draft` / `submitted` 允许；`posted` 禁止直改（22.5） |
+| `match` | 行 `price_diff_*` / `qty_over_receipt` | 匹配只读金额，不改金额事实 |
+| `submit` / `post` | 全量行 + 头 | 过账前最后一次校验并落库（R-VI-18 同事务） |
+| 调整单创建 | 调整行 + 调整头 | 见 22.5 |
+| 红冲复制 | 复制行取负 + 头 | 仅符号翻转，不重算（R-VI-9） |
+
+约束：
+
+1. 算术方法必须**幂等**：同输入同输出。DB 访问只允许经 `_load_*` / `_write_*` 钩子，算术方法内禁止查询。
+2. 币种精度一律由内核 `_currency_decimals()` 获取（真源 `currencies.decimal_places`，`currency.yaml` 已注明），禁止硬编码 2 位。
+3. 禁止 `if not value: value = computed` 式「有值不覆盖」回填；`editable: false` 字段一律**覆盖写**（G-9）。
+4. `direction` 不进入行级公式；行金额符号由红字复制 / 调整方向决定（22.5）。
+5. 计算层错误一律抛业务异常（`VendorInvoiceError`），不返回「部分结果」。
+6. **禁止新增第三套金额算术**（R-VI-33）：任何新的金额需求一律「内核 + 子类覆写钩子」，不得复制公式到新文件或 handler。
+
+### 22.2 行金额公式（唯一口径）
+
+符号：`q` 数量、`p` 单价、`pit` 含税标记（0/1）、`r` 税率（%）、`d = currencies.decimal_places`、`R(x) = round_amount(x, d)`。
+
+| 路径 | 条件 | `net` | `tax` | `gross` |
+|---|---|---|---|---|
+| A 不含税价 | `pit = 0` | `R(q × p)` | `rate_calc`：`R(net × r / 100)`；`line_direct`：用户直录 | `R(net + tax)` |
+| B 含税价 | `pit = 1` | `R(gross / (1 + r / 100))` | `R(gross − net)`（**吸收项**） | `R(q × p)` |
+
+规则：
+
+1. **行恒等式**：落库后必须满足 `gross_amount = net_amount + tax_amount`（R-VI-24）；任何差额一律吸入 `tax_amount`。
+2. **舍入唯一入口** `round_amount`（`meta/core/rounding.py`）：禁止 `round(x, 2)`、禁止中间值预舍入；全精度计算，最后一步才 `R`（R-VI-26 / G-12）。
+3. 路径 B 缺 `r`（`tax_rate_percent` 空且税码无税率）→ `VI_TAX_RATE_REQUIRED`，不得静默按 0 处理。
+4. `line_direct` 模式（TBD-4 现行口径）：`tax_amount` 可录入，但必须满足 `|tax − R(net × r / 100)| ≤ vi_tax_tolerance_abs`，否则 `VI_TAX_MISMATCH`（R-VI-30）。
+5. `q ≥ 0`（R-VI-32）；负向只由红字复制 / `adjustment_direction` 表达，禁止负数量。
+6. 匹配用价格归一（不改落库单价）：`price_ex_tax = p`（`pit=0`）或 `p / (1 + r / 100)`（`pit=1`）。
+7. `price_diff_amount = R((price_ex_tax − po_unit_price) × q)`；`price_diff_percent` 保留 4 位，仅展示口径。
+
+### 22.3 头金额与 `rounding_diff`
+
+| 字段 | 公式 | 说明 |
+|---|---|---|
+| `net_amount` | `R(Σ net_i)` | 行已舍入，`R` 幂等 ⇒ 等于 Σ |
+| `tax_amount` | `R(Σ tax_i)` | 同上 |
+| `gross_amount` | 有 `supplier_gross_amount` → 取其值；否则 `R(Σ gross_i)` | 供应商原件总额优先（业务事实） |
+| `rounding_diff` | `R(gross_amount − net_amount − tax_amount)` | 无 `supplier_gross_amount` 时恒 0 |
+
+- 头恒等式：`net_amount + tax_amount + rounding_diff = gross_amount`（R-VI-25）。
+- 舍入差容差：`|rounding_diff| > vi_rounding_tolerance_abs` → `match_status='exception'`，原因 `VI_ROUNDING_DIFF_EXCEEDED`，需 `override_match` 方可过账。
+- 新增头字段 `supplier_gross_amount`（22.11）；为空表示「以行为准」。
+- 头级 `net_amount / tax_amount / gross_amount` 维持 `editable: false`，不接受前端直写。
+- `supplier_gross_amount` 与 `gross_amount` 同符号口径（红字为负）。
+
+### 22.4 定价模板与价格配置（发票侧只快照、不取价）
+
+| 环节 | 归属 | 发票侧行为 |
+|---|---|---|
+| 定价模板匹配（`pricing_determination_service` / `purchase_pricing_service`） | PO 侧 | **不重跑**；发票只引用 PO 行快照 |
+| 价格来源 | `purchase_order_line.unit_price`（不含税） | 复制到行 `po_unit_price`（只读） |
+| 价格来源优先级 | ① PO 行快照 → ② 人工录入（`manual`） | `receipt_price` 本波**禁用** |
+| 追溯 | PO 侧已写 `price_source` / `price_trace` | 发票行复制同名两列（只读） |
+
+行字段语义（新增列见 22.11）：
+
+| 字段 | 写入方 | 语义 |
+|---|---|---|
+| `po_unit_price` | 服务端 | 锚点 PO 行单价快照；API 入参一律剔除（R-VI-27 / G-9） |
+| `price_source` | 服务端 | `po`（默认）/ `manual`（人工行）/ `adjustment`（调整单继承原行） |
+| `price_trace` | 服务端 | JSON 快照 `{po_id, order_line_id, schedule_id, po_unit_price, price_source, snapshot_at}`；PO 侧 `price_trace` 存在时整段嵌入 |
+| `tax_rate_percent` | 服务端 | 税率快照（%），取值 22.7；含税价行必填 |
+| `price_includes_tax` | 用户（0/1） | 单价含税标记，写入后参与 22.2 / 22.8 归一 |
+
+匹配模式 `match_pricing_mode`（**修订 §5.4**）：
+
+| 取值 | 价格比对 | 本波状态 |
+|---|---|---|
+| `po_price` | 归一后不含税单价 vs `po_unit_price`，超 `vi_price_tolerance` → `exception` | 默认，启用 |
+| `manual` | 不比对价格；必须 `override_match` + `override_reason='manual_pricing_required'` | 启用 |
+| `receipt_price` | 无收货价可依（D-RC-9 / N4） | **禁用**：选择即 `VI_PRICING_MODE_UNSUPPORTED`，**不再伪造 override**（G-7 / D-VI-22） |
+
+- `match_pricing_mode` 由控制参数 `vi_match_pricing_mode` 解析（22.10）；同一单据内价格来源必须一致，否则 `exception`。
+- 发票侧**不新增** `price_list_id`：采购价格清单属于 PO 承诺（D-VI-26）。
+
+### 22.5 价格与金额变更矩阵
+
+可改范围（按状态）：
+
+| 状态 | 改 `qty` | 改 `unit_price` | 改税码 / 税率 | 纯金额（`qty=0`） | 增 / 删行 | 载体 |
+|---|---|---|---|---|---|---|
+| `draft` | ✅ | ✅ | ✅ | ✅ | ✅ | 直接编辑 → 重算 |
+| `submitted` | ✅ | ✅ | ✅ | ✅ | ✅ | 直接编辑 → 重算 |
+| `posted` | ❌ | ❌ | ❌ | ❌ | ❌ | 只能调整单 / 红冲 |
+| `cancelled` / `reversed` | ❌ | ❌ | ❌ | ❌ | ❌ | 终态 |
+
+调整单三种表达（**修订 §21.8 末条**）：
+
+| 类型 | 输入 | 计算规则 |
+|---|---|---|
+| T1 数量调整 | 只给 `qty` | 单价沿用原行 `unit_price`；`net = R(qty × unit_price)`；税按 22.2 路径 A；`tax_rate_percent` 缺失时按原行税额比例缩放并做容差校验 |
+| T2 价格调整 | 只给 `unit_price`（`qty` 缺省取原行） | 必须按 22.2 全量重算 `net / tax / gross`；**禁止**只改 `unit_price` 不改金额（G-4 / R-VI-31） |
+| T3 纯金额调整 | `qty=0` + 直接给 `net_amount`（可选 `tax_amount`） | `net` 采用输入；`tax` 未给则 `R(net × r / 100)`；`gross = R(net + tax)`；`line_direct` 下按 22.7 校验 |
+| 组合 | `qty` + `unit_price`（+ 可选 `tax_rate_percent`） | 按 22.2 重算并覆盖输入 |
+
+规则：
+
+1. 调整行同样满足行恒等式（R-VI-24）；`unit_price` 与 `net_amount` 由计算层同步写入（G-16）。
+2. `qty=0` 且 `net_amount=0` 的调整行 → `VI_ADJUSTMENT_EMPTY_LINE`（禁止空行占位，G-16）。
+3. decrease 符号沿用 §21.3：数量存正数幅值、金额取负；`direction` 固定 `1`，**不得**再按 `direction` 乘 -1（G-15）。
+4. 红冲与调整互斥（G-13）：原票存在 active 调整单时，红冲前必须先将其 decrease 清零，否则 `VI_ADJUSTMENT_PENDING`；原票 `reversed` 后调整单不可再 `increase`。
+5. 调整单不重跑定价模板；价格差异用 T2 / T3 显式表达（D-VI-25）。
+
+### 22.6 计划外运费与其他费用
+
+**承载方式（D-VI-21）**：费用以**费用行**表达，不新增头级费用字段、不建费用表。
+
+行类型种子（`type_definitions`，`scope_bo='vendor_invoice'`，`level='line'`）：
+
+| code | 名称 | 行性质 | `qty` | `unit_price` | 税 |
+|---|---|---|---|---|---|
+| `VI_LINE_GOODS` | 物料行 | 正常（默认） | 实收量 | PO 快照 | 按 22.7 |
+| `VI_LINE_SERVICE` | 服务行 | 正常 | 服务量 | 合同价 | 按 22.7 |
+| `VI_LINE_FREIGHT` | 运费行 | 费用 | 1 | 运费金额 | 必填税码 |
+| `VI_LINE_SURCHARGE` | 附加费行 | 费用 | 1 | 附加费金额 | 必填税码 |
+| `VI_LINE_DISCOUNT` | 折扣行 | 费用（负向） | 1 | 负数金额 | 按税码 |
+
+规则：
+
+1. 费用行判定 = `line_type.code ∈ CHARGE_LINE_TYPE_CODES`（服务常量，**不新增物理列**）。
+2. 费用行**不写 doc_flow 边**（无 PO 锚点、不占采购量），金额只进头（R-VI-29）。
+3. 费用行豁免数量匹配（`qty_over_receipt = 0`）；价格容差改用绝对额 `vi_freight_tolerance_abs`。
+4. 费用行仍参与头金额与税校验；`schedule_id` / `receipt_line_id` 必须为空；**非费用行**两锚点全空 → `VI_ANCHOR_REQUIRED`。
+5. PO 对账：PO 头 `header_surcharge_amount`（或 `header_discount_amount`）非 0 时，发票费用行合计与其差额超 `vi_freight_tolerance_abs` → `exception`，原因 `VI_FREIGHT_OVER_TOLERANCE`；**不自动分摊**到物料行。
+6. 费用 → 物料行 / 入库成本的分摊**本波不实现**；方案、波次边界与硬约束见 **22.6.1**（W8）；变更语义与单一事实源约束见 **22.6.2**。
+7. 调整单：费用行可 increase / decrease（T2 / T3），但不写边，故 decrease 不做 `Σ_red_available` 校验。
+8. 红冲：费用行随头一起取负复制。
+
+#### 22.6.1 费用分摊方案（下一波，D-CH-01~12）
+
+> 本节固化 §22.6 规则 6 的方案。依据：`采购费用分摊-Fusion研究与落地建议-2026-11-13.md`、`采购费用分摊-SAP研究与三方对比-2026-11-13.md`（SAP MM 条件技术 + MIRO unplanned delivery costs；Oracle Fusion AP 费用行分摊 + LCM）。
+> **W6 不实现本节**：W6 只做费用行承载与 PO 对账（22.6 规则 1~5、7、8）；分摊归 **W8**，与成本域协同。
+> 复用现有引擎：`meta/services/allocation_service.py`（`AllocationService.plan / plan_floor / allocate_by_rule / record_allocation_results`）+ `allocation_results` 留痕表；**不新建分摊引擎、不新建分摊表**。
+
+##### 22.6.1.1 外部机制 → 本项目落点
+
+| 外部做法 | 本项目落点 | 明确不做 |
+|---|---|---|
+| SAP Planned Delivery Cost（PO 条件类型，收货即记账） | 仅以**参考成本视图**表达（D-CH-11） | 不做应计 / 清算科目（D-CH-10） |
+| SAP Unplanned Delivery Cost → 按**发票行价值**摊到物料行 | 费用行 → `allocate_by_rule` → 同发票物料行 | — |
+| SAP Unplanned → 单独 G/L 科目（不借记库存） | `allocation_rules.target = expense` + 行 `expense_account_code` | 不产出凭证 |
+| SAP account key / OBYC 科目映射、MR11 价差 | —— | 总账域能力，P3 明确取消 |
+| SAP GTS 关务 landed cost（`/SAPSLL/LEGAL_CUS_TLC`） | —— | 域外 |
+| Fusion AP 费用行 Allocate All / Specific Lines | P1 全摊；P2 支持按行子集 | — |
+| Fusion LCM 四基数（Quantity/Value/Volume/Weight） | 沿用 `allocation_rules.basis` 六基数（已有） | 不新增基数 |
+
+> 负向结论（证据缺口已声明）：S/4HANA 核心采购**不存在**独立 "Landed Cost" 应用/对象。P3 成本域由"待研究"改判为"**已确认不必做**"。
+
+##### 22.6.1.2 波次边界
+
+| 波次 | 范围 | 不做 |
+|---|---|---|
+| W6（已定） | 费用行承载、头金额与税、PO 对账容差 | 不产出 `allocation_results` |
+| **W8-P1** | 同宿主单据内：宿主发票的费用行摊到**同发票物料行**；`basis ∈ {value, quantity, weight, volume, equal, manual}`；`target ∈ {cost, expense}` | 跨单据来源；费用行作目标；入库成本重估 |
+| W8-P2 | 跨单据来源（运费商发票 → 货物单据 / 收货行）；显式行子集；参考成本视图 | 会计落点；存货计价 |
+| P3（取消） | —— | account key / OBYC / 清算科目 / landed cost 对象 / GL 凭证 |
+
+##### 22.6.1.3 决策表
+
+| ID | 决策 | 备选 | 理由 |
+|---|---|---|---|
+| D-CH-01 | 费用以**行**承载，不新增头级费用字段、不建费用表 | 头级 `freight_amount` | 沿用 D-VI-21；金额天然进 Σ 行 |
+| D-CH-02 | 分摊一律走 `AllocationService.allocate_by_rule`，**禁止单据侧自写算法** | 发票侧内联分摊 | 引擎已覆盖六基数 / 取整 / floor / 留痕，销售侧已有先例 |
+| D-CH-03 | 默认基数 `value`；`basis_field ∈ {net_amount, gross_amount}`，**两值都可用且必须快照进留痕** | 写死 `net_amount` | 不可抵扣进项税时 SAP 按含税毛额摊（F/S 双证据）；写死会系统性少摊税额部分 |
+| D-CH-04 | 摊痕（`allocation_results`）与行分摊额（派生列）**分离** | 只留痕 / 只落列 | 查询性能 + 可回放 |
+| D-CH-05 | 分摊**不改变**发票 / PO 金额校验，只做归属 | 分摊后重算头金额 | 避免破坏三单匹配与容差口径 |
+| D-CH-06 | 重摊把旧结果置 `invalid`，**永不物理删除** | 先删后写 | 成本调整需历史比例 |
+| D-CH-07 | **来源可跨，目标不可跨**：`source_document_type/id` 可指向另一张单据（如独立运费发票、另一供应商）；摊入行必须属于宿主单据 | 全部禁止跨单 / 全部放开 | SAP 支持运费付给另一供应商；目标跨单则爆炸半径不可控 |
+| D-CH-08 | 若未来开 accrue-at-receipt，分摊只做成本调整，**不重复确认费用** | 分摊即确认费用 | 对齐 Fusion 官方语义 |
+| D-CH-09 | `origin` 判定 = **宿主单据上是否存在该费用的金额锚点**（PO 头/行有 → `planned`；只来自发票费用行 → `unplanned`）；**禁止**按录入人/录入界面判定 | 按录入界面判定 | SAP 二分依据是"金额在采购时点是否已知"，与 `origin` 既有注释（业务语义非管线标识）一致 |
+| D-CH-10 | 分摊**只产出归属金额**，不产出会计落点；"进存货 / 进价差 / 进独立科目"一律**不进** `allocation_results`，不新增 GL 字段 | 留痕中带科目与存货标志 | 本项目无物料计价与总账，硬建模会得到"有值但错值"的列 |
+| D-CH-11 | 参考成本口径固定 `单价 × 数量 + 分摊费用`，以视图/计算列表达；**不参与校验、不入账、不写业务字段** | 落库为业务列 | 无 GL 时只能做视图 |
+| D-CH-12 | 费用行**不做二次分摊**：费用行自身 `allocated_charge_amount = 0`，分摊目标集合**排除费用行** | 允许费用行互相摊 | SAP unplanned 只摊发票物料行；Fusion AP 费用行也只摊物料行，两证据一致 |
+
+##### 22.6.1.4 数据与参数（W8-P1 增量）
+
+| 项 | 内容 |
+|---|---|
+| 新增列 | `vendor_invoice_lines.allocated_charge_amount`，`number(18,4)`，默认 `0`，只读派生 |
+| 新增参数 | `vi_charge_allocation_enabled`（bool，默认 `false`）、`vi_charge_allocation_rule_code`（string，指向 `allocation_rules.code`，默认按 `value`） |
+| 留痕 | `allocation_results`：`charge_source='invoice'`、`document_type='vendor_invoice'`、`parent_id=发票头`、`document_line_id=物料行`；头 1 行记待摊总额 + 行 N 记摊得额，`basis_field` 快照 |
+| 规则绑定 | `allocation_rules.code` ↔ `vi_charge_allocation_rule_code`；P1 单规则，**不新增**"费用类型 → 规则"映射表 |
+| 触发 | `submit_vendor_invoice` 匹配通过后、置 `submitted` 前；草稿可 `compute` 预演（不落库） |
+
+##### 22.6.1.5 硬约束（实现必须校验）
+
+1. **守恒**：`Σ 物料行 allocated_charge_amount = Σ 费用行 net_amount`（口径与 `basis_field` 一致，以留痕快照为准）；不等 → 拒绝落库。
+2. **不改金额**：分摊不改任何行 `net_amount`，不改头金额与 `rounding_diff`（D-CH-05）。
+3. **费用行为零**：费用行 `allocated_charge_amount = 0`，且不进目标集合（D-CH-12）。
+4. **余差**：取整差额按 `allocation_rules.rounding` 落到最后一行，不新造尾差行。
+5. **零基数**：分母为 0 → 按 `floor` / 均分策略处理或拒绝，**不得产生 0/0**。
+6. **重摊**：旧 `allocation_results` 置 `invalid` + 派生列重写；红冲 / 调整按原比例取负。
+7. **顺序**：先匹配后分摊；`match_status` 未通过不得分摊。
+
+错误码（W8 预留，不占用 W6 编号）：`VI_CHARGE_ALLOCATION_DISABLED`、`VI_CHARGE_ALLOC_BASE_ZERO`、`VI_CHARGE_ALLOC_CONSERVATION`、`VI_CHARGE_ALLOC_MIXED_SIGN`、`VI_CHARGE_ALLOC_MATCH_REQUIRED`（对应第 7 条"先匹配后分摊"；见 22.6.2.2）。
+
+#### 22.6.2 费用变更与单一事实源约束
+
+> 本节回答两件事：费用**本身**变更时怎么处理（22.6.2.1 ~ 22.6.2.3），以及"费用归属"在系统里**只能有一份事实**（22.6.2.4）。
+> 证据：SAP KBA 3507926 / 3317057 / 3417121 / 2714115（见《采购费用分摊-SAP研究与三方对比-2026-11-13.md》§14）；Fusion 侧对照见《采购费用分摊-Fusion研究与落地建议-2026-11-13.md》§12。
+
+##### 22.6.2.1 四条收敛原则（R-1 ~ R-4）
+
+| # | 原则 | 含义 | 对标证据 | 落点 |
+|---|---|---|---|---|
+| R-1 | **一套规则，多入口** | 采购发票 / 贷项凭证 / 借项通知单 / 后续借代上的费用，共用同一套分摊规则与同一张留痕表；入口不同不产生第二套分摊机制 | SAP 贷项凭证可录 unplanned delivery cost 并按本凭证行项目金额分摊（KBA 3507926） | 承运载体是 `document_category`，不是新的分摊实现 |
+| R-2 | **变更独立成单，不原地改数** | 金额变化只以新单据承载（贷项 / 借项 / 红冲），已过账单据的数字不改 | SAP 更正只剩 MR8M 冲销重开或后续借 / 贷补差；冲销一律生成反向凭证（KBA 2714115） | 复用 `reversal_of_invoice_id` + `direction` |
+| R-3 | **变更独立重摊，不修历史** | 每张变更单只摊**本单**费用；被变更单据的旧留痕置 `invalid` 保留，可回放 | SAP 无 re-allocation，已过账凭证不回溯重算（KBA 3417121） | `D-CH-06` + 22.6.1.5 第 6 条 |
+| R-4 | **分摊只做归属，不回写源单** | 不写 PO 条件 / 净价、不改收货、不改发票 `net_amount` 与头金额 | SAP 分摊只加大发票行金额 + 写 FI 分录，PO 历史不变（走独立 G/L 时甚至不进 PO 历史） | `D-CH-05` |
+
+##### 22.6.2.2 变更矩阵（A / B / C / D）
+
+| # | 变更形态 | 承载方式 | 分摊口径 | 旧留痕 | 触发点 |
+|---|---|---|---|---|---|
+| A | **同票内调整**（本票费用行金额修正） | 原地改本票费用行，**仅 `draft`** | 重跑本票分摊，基数 = 本票行金额 | 置 `invalid` 后重写 | `draft` 保存 / `submit` 前 |
+| B | **贷项**（费用冲减 / 供应商退款） | 新单 `document_category='credit_memo'`、`direction=-1`，可引用原 PO / 收货 | 独立分摊本单费用（金额为负，按原比例取负） | 原票留痕**不动** | 贷项 `submit` |
+| C | **借项 / 后续借代**（追加费用，只调金额不动数量） | 新单 `document_category='debit_memo'`、`direction=1` | 独立分摊本单费用 | 原票留痕**不动** | 借项 `submit` |
+| D | **整票红冲** | `reversal_of_invoice_id` 指向原票的反向单 | 按原比例全额取负 | 原票留痕置 `invalid` | 红冲 `posted` |
+
+约束：
+
+1. **A 只在 `draft` 允许**；`submitted / posted` 一律走 B / C / D，禁止原地改数（R-2）。
+2. **B / C 只重写本单行的 `allocated_charge_amount`**，不得回写原票任何字段（R-4）。
+3. **借贷混行禁止**（对齐 SAP KBA 3317057"同凭证借贷行并存导致分摊异常"）：同一张变更单内若同时存在借方费用行与贷方费用行，分摊**直接拒绝**并返回 `VI_CHARGE_ALLOC_MIXED_SIGN`；需要混号时拆成两张单据。这是显式拒绝，不是"尽力摊"。
+4. **D 的负数口径**：红冲单 `direction=-1`，摊得额按**原留痕比例取负**后写入，不重新计算比例（避免二次四舍五入漂移）；尾差由原留痕金额最大的行吸收。
+5. **A 的幂等**：同一票重复 `submit` 不产生第二份 active 留痕；旧留痕先置 `invalid` 再写新行，全程同一事务。
+
+##### 22.6.2.3 累计开票口径（裁决：不采纳，留 P2）
+
+SAP 的分摊基数是「**迄今已开票金额 + 本凭证金额**」，比本 Spec P1 的「仅本票内分摊」更宽（KBA 3417121）。
+
+**裁决：P1 保持「仅本票内分摊」**，理由：
+
+- 累计口径需要读取历史 `active` 留痕并与本票金额相加，分母随开票次数增长，与 22.6.1.5 第 1 条守恒式（`Σ 物料行 allocated_charge_amount = Σ 本票费用行 net_amount`）**不同构**，会引入"本票摊额 ≠ 本票费用"的跨期尾差。
+- 历史票一旦被 B / C / D 变更，"已开票金额"必须重算 ⇒ 等于把局部变更传播成全局重摊，违反 R-3。
+- 我们的费用载体是**发票费用行**（D-VI-21），费用金额本身随票携带，不存在 SAP 那种"PO 侧 planned 条件金额跨多张收货发票累积"的场景。
+
+**P2 若开跨单据分摊**（22.6.1.2 W8-P2），届时再以累计口径重做守恒式定义，并必须在 `allocation_results` 上新增 `allocation_basis_window`（`invoice` / `cumulative`）快照列，不得靠调用方约定。
+
+##### 22.6.2.4 单一事实源约束（S-1 ~ S-4）
+
+| # | 约束 | 判据 | 违反后果 |
+|---|---|---|---|
+| S-1 | **归属金额只有一份事实** = `allocation_results` 中 `status='active'` 的行 | 报表 / 视图 / API 读归属一律走该表或其派生视图 | 两处各存一份 ⇒ 对不上时无法判定谁对 |
+| S-2 | **派生列是投影，不是事实** | `vendor_invoice_lines.allocated_charge_amount` 必须可由 active 留痕完整重算 | 派生列单独维护 ⇒ 必然漂移 |
+| S-3 | **重摊置 `invalid`，永不物理删除** | 仅宿主单据删除时由 `deletion_policy: cascade` 级联清理 | 删除即丢历史比例，成本调整 / 审计无据 |
+| S-4 | **分摊不回写源单** | PO 条件 / 净价 / 收货 / 发票金额均不得因分摊而变 | 回写即产生第二事实源，违反 R-4 |
+
+> S-3 的两种删除语义必须区分：**「重摊了」** ⇒ 置 `invalid`（历史保留，可回放）；**「单没了」** ⇒ `cascade` 物理清理（历史无宿主可挂）。把两者混为一谈就会出现"重算一次丢一次凭证"的缺陷。
+> 同构要求已落到代码：销售侧 `SalesOrderHeaderDiscountService._invalidate_traces` 亦由物理 `DELETE` 改为置 `invalid`（同一事务内），与 `meta/schemas/allocation_result.yaml` L11 / L486 契约对齐。
+
+### 22.7 税
+
+| 项 | 规则 |
+|---|---|
+| 税率快照 | `tax_rate_percent`（新增，`number(9,4)`，可空）；取值顺序：`tax_code.rate` → 行录入 → PO 行 `tax_rate_percent` |
+| 税码必填 | 非费用行可继承物料税务分类；费用行必填；草稿可空，`submit` 前必填（`VI_TAX_CODE_REQUIRED`） |
+| 计税模式 | `vi_tax_mode ∈ {line_direct, rate_calc}`；本波默认 `line_direct`（TBD-4），`rate_calc` 为可选开关 |
+| `line_direct` | `tax_amount` 可录入，服务端按 22.2 规则 4 校验（R-VI-30）；`editable: true` |
+| `rate_calc` | `tax_amount` 置 `editable: false`，由 22.2 计算；录入被忽略 |
+| 含税价 | `price_includes_tax=1` 时税率必填，否则 `VI_TAX_RATE_REQUIRED`（G-2） |
+| 调整单 | 税额一律按**新净额 × 原税率**重算，**不**按源金额比例（G-4） |
+| 红冲 | 税行随复制取负，税率不变 |
+| PO 税额比对 | 本波不做（TBD-14）；预留开关 `vi_po_tax_compare`（默认 `false`） |
+
+### 22.8 匹配与金额一致性
+
+1. **单一可开票量函数** `_open_qty(schedule_id, mode, receipt_line_id=None)`，`match` 与 `write_edges` **必须**调用同一实现（G-5）：
+   - `po_based`：`open = schedule.qty_ordered − Σ normal(billing) + Σ red(billing)`；
+   - `gr_based`：`open = Σ qty_invoiceable(receipt_line) − Σ normal(ap_match) + Σ red(ap_match)`，其中 `qty_invoiceable = qty_received − qty_rejected`（仅 `return_to_supplier` / `scrap` 扣减，D-VI-16）；
+   - 已退货量：`receipt_line.qty_returned` 缺失时由退货 doc_flow 推导；两者皆无 ⇒ `gr_based` 不可用（22.10 默认改 `po_based`）。
+2. **禁止静默截断**（G-3 / R-VI-28）：`qty > open + 容差` → `VI_QTY_EXCEEDED`；容差内 → `match_status='exception'` 且**不写边**；删除现有 `min(qty, open_qty)` / `min(qty, available)`。
+3. 四维锚点回填（G-9）：`item_id / item_group_id / line_type_id / uom_id` 由服务端解析并**覆盖落库**，禁止 `if not result.get(...)` 条件回填；`item_group_id` 由物料反查必填。
+4. 供应商 / 币种校验（G-10）：锚点为空也必须校验头 `supplier_account_id` / `currency_id`；PO 存在时须与 PO 头一致，否则 `VI_SUPPLIER_MISMATCH` / `VI_CURRENCY_MISMATCH`（R-VI-4 / R-VI-13）。
+5. 价格比较一律用 22.2 归一后的不含税价（G-2）；`price_diff_amount` 公式见 22.2 规则 7。
+6. `match_mode` 解析（G-6）：`vi_match_mode` 多级解析（org → document_type → line_type → item_group，0 哨兵 + `specificity_rank`），解析不到回落 `po_based`；头字段 `match_mode` 为创建时快照（不可变）。
+7. 红边分摊：`decrease` 按 active normal 边 `rowid` FIFO 遍历冲减；“只取末条边”的实现必须改为累计可用量遍历（G-13）。
+
+### 22.9 新增不变量（R-VI-24 ~ R-VI-33）
+
+| ID | 不变量 | 校验点 |
+|---|---|---|
+| R-VI-24 | 行恒等式 `gross_amount = net_amount + tax_amount`（含税 / 不含税 / 调整 / 红字行均成立） | 计算层 + 落库前 |
+| R-VI-25 | 头恒等式 `net + tax + rounding_diff = gross` | 计算层 + 过账前 |
+| R-VI-26 | 金额只经 `round_amount(x, currencies.decimal_places)` 舍入 | 计算层（lint 禁止 `round(`） |
+| R-VI-27 | `po_unit_price / price_source / price_trace / tax_rate_percent / price_includes_tax` 由服务端写，入参一律剔除 | handler 入参白名单 |
+| R-VI-28 | 超量 / 超额边显式拒绝或置 `exception`，禁止 `min()` 截断 | `_write_edges` / `_write_credit_red_edges` |
+| R-VI-29 | 费用行不写 doc_flow 边、不参与数量匹配 | 边写入层 |
+| R-VI-30 | `line_direct` 税额偏差 ≤ `vi_tax_tolerance_abs` | 计算层 |
+| R-VI-31 | 调整行金额必须由计算层按 22.2 重算，`unit_price` 与 `net_amount` 同步 | 调整单创建 |
+| R-VI-32 | `qty ≥ 0`；负向只由红字复制 / `adjustment_direction` 表达 | schema + 服务 |
+| R-VI-33 | 金额算术**单一实现**：VI 只允许继承 `SalesOrderAmountService` 并覆写钩子，禁止复制公式 / 新建平行金额服务 | 代码评审 + lint（禁止 `vendor_invoice` 内出现 `round(` / `× 税率` 硬编码） |
+
+> 编号衔接：R-VI-19 仍留空（保留给 SES / ERS 结算模式），R-VI-20~23 属调整单（§21.1），本节从 24 起。
+
+### 22.10 控制参数
+
+| 参数 | 类型 | 默认 | 解析 | 超限动作 |
+|---|---|---|---|---|
+| `vi_match_mode` | enum `po_based/gr_based` | **`po_based`（由 `gr_based` 调整）** | 四维多级 | 快照到头条 |
+| `vi_match_pricing_mode`（新） | enum `po_price/manual` | `po_price` | 四维多级 | 快照到行 |
+| `vi_price_tolerance` | decimal | `0.00` | 四维 | 价格差异 → exception |
+| `vi_qty_tolerance_receipt` | decimal | `0.00` | 四维 | 超收 → exception |
+| `vi_qty_tolerance_order` | decimal | `0.00` | 四维 | 超订 → exception |
+| `vi_amount_tolerance_abs` | decimal | `0.00` | 四维 | 头金额差 → exception |
+| `vi_rounding_tolerance_abs` | decimal | `0.01` | 四维 | `rounding_diff` 超限 → exception |
+| `vi_tax_tolerance_abs`（新） | decimal | `0.01` | 四维 | 税额差 → exception |
+| `vi_freight_tolerance_abs`（新） | decimal | `0.00` | 四维 | 费用行 / PO 对账 → exception |
+| `vi_tax_mode`（新） | enum `line_direct/rate_calc` | `line_direct` | 四维 | 决定 `tax_amount` 可编辑性 |
+| `vi_po_tax_compare`（新，预留） | bool | `false` | 四维 | 开启后比对 PO 税额（TBD-14） |
+| `vi_charge_allocation_enabled`（W8） | bool | `false` | 四维 | 未开启时分摊不执行（`VI_CHARGE_ALLOCATION_DISABLED`）；见 22.6.1.4 |
+| `vi_charge_allocation_rule_code`（W8） | string | 按 `value` 的规则 code | 四维 | 分摊基数 / 取整 / target 由该规则决定 |
+
+> `vi_match_mode` 默认值变更由迁移更新 `control_parameter_values`；复用 `control_parameter_def`，不建新表。
+
+### 22.11 数据模型变更清单
+
+| 对象 | 变更 | 类型 | 空 | 说明 |
+|---|---|---|---|---|
+| `vendor_invoices` | `supplier_gross_amount` | number(18,4) | 是 | 供应商发票原件总额（与 `gross_amount` 同符号），驱动 `rounding_diff` |
+| `vendor_invoice_lines` | `tax_rate_percent` | number(9,4) | 是 | 税率快照（%），含税价行必填 |
+| `vendor_invoice_lines` | `price_source` | string(20) | 是 | `po / manual / adjustment`；只读 |
+| `vendor_invoice_lines` | `price_trace` | text | 是 | JSON 快照；只读；**不**建 JSON 索引 |
+| `vendor_invoice_lines` | `allocated_charge_amount`（W8） | number(18,4) | 否 | 摊得费用额，默认 `0`；只读派生；费用行恒为 `0`（22.6.1.5） |
+| `type_definitions` | 5 条 line 种子 | — | — | 22.6；`VI_LINE_GOODS` 为默认 |
+| `control_parameter_def` | 7 条新参数（5 条 W6 + 2 条 W8） | — | — | 22.10 |
+| `sales_order_amount_service` | 新增 2 个可覆写钩子 `_line_amounts` / `_header_amounts` | — | — | 默认实现 = 现行 SO/PO 口径（零回归）；VI 子类覆写（22.1） |
+| YAML | `tax_amount.editable` 随 `vi_tax_mode`；`supplier_gross_amount / tax_rate_percent` 可编辑，其余只读 | — | — | 无新表 / 无新视图 |
+
+**不新增**：头级 `freight_amount / surcharge_amount / other_amount`（用费用行）、费用分摊表（结果由 `allocation_results` 承载）、税率表、匹配结果表。
+
+### 22.12 错误码
+
+| 码 | 触发 | 处置 |
+|---|---|---|
+| `VI_AMOUNT_IDENTITY` | 行 / 头恒等式不成立 | 拒绝保存 |
+| `VI_TAX_RATE_REQUIRED` | 含税价缺税率 | 拒绝 |
+| `VI_TAX_CODE_REQUIRED` | `submit` 前缺税码 | 拒绝 |
+| `VI_TAX_MISMATCH` | 直录税额超容差 | exception（可 override） |
+| `VI_ROUNDING_DIFF_EXCEEDED` | 舍入差超容差 | exception |
+| `VI_QTY_EXCEEDED` | 超可开票量 | 拒绝写边 |
+| `VI_PRICE_OVER_TOLERANCE` | 价格超容差 | exception（原因 `price_over_tolerance`） |
+| `VI_PRICING_MODE_UNSUPPORTED` | 选择 `receipt_price` | 拒绝 |
+| `VI_ANCHOR_REQUIRED` | 非费用行无锚点 | 拒绝 |
+| `VI_SUPPLIER_MISMATCH` / `VI_CURRENCY_MISMATCH` | 与 PO 头不一致 | 拒绝 |
+| `VI_FREIGHT_OVER_TOLERANCE` | 费用与 PO 对账超限 | exception |
+| `VI_ADJUSTMENT_EMPTY_LINE` | 调整行金额与数量均为 0 | 拒绝 |
+| `VI_ADJUSTMENT_PENDING` | 红冲时存在 active 调整单 | 拒绝 |
+
+### 22.13 验收判据与测试矩阵
+
+| # | 场景 | 期望 | 测试落点 |
+|---|---|---|---|
+| A1 | 不含税价 `q=10 p=100 r=13 d=2` | net 1000.00 / tax 130.00 / gross 1130.00 | `test_vendor_invoice_amount.py` |
+| A2 | 含税价 `q=3 p=113 r=13 d=2` | gross 339.00 / net 300.00 / tax 39.00（恒等式成立） | 同上 |
+| A3 | 含税价缺税率 | `VI_TAX_RATE_REQUIRED` | 同上 |
+| A4 | `d=0`（JPY）金额 1001.4 | 落库 1001（不得 1001.40） | 同上 |
+| A5 | 供应商总额 1130.05 vs 行合计 1130.00 | `rounding_diff=0.05`；超容差 → exception | 同上 |
+| A6 | PO 价 100，发票含税价 113（r=13） | 匹配通过（归一后 100.00） | `test_vendor_invoice_match.py` |
+| A7 | 可开票 10，发票 12 | `VI_QTY_EXCEEDED`，不写边（不得静默写 10） | 同上 |
+| A8 | `receipt_price` 模式 | `VI_PRICING_MODE_UNSUPPORTED` | 同上 |
+| A9 | 调整单只改 `unit_price` 100→110，q=5 | net 550.00 / tax 71.50（13%）/ gross 621.50 | `test_vendor_invoice_adjustment.py` |
+| A10 | 调整单 `qty=0` + `net=-50` | 纯金额递减，不写边 | 同上 |
+| A11 | 运费行 50（税 6%）+ 物料行 1000 | 头 net 1050 / tax 133 / gross 1183；无运费边 | `test_vendor_invoice_charge_line.py`（新） |
+| A12 | 费用合计与 PO `header_surcharge_amount` 差 10，容差 0 | `VI_FREIGHT_OVER_TOLERANCE` → exception | 同上 |
+
+运行入口：`python d:\filework\test.py --single meta/tests/test_vendor_invoice_amount.py`（禁 `pytest`）。
+
+### 22.14 Decision Log 追加
+
+| ID | 决策 | 备选 | 理由 |
+|---|---|---|---|
+| D-VI-21 | 计划外费用用**费用行**承载，不新增头级费用字段 | 头级 `freight_amount` 等 | 金额天然进 Σ 行；无需分摊表；与销售侧抬头折扣/附加费可对位 |
+| D-VI-22 | `receipt_price` 本波禁用而非伪造 override | 保留自动 override | 无收货价即无比较基准，伪造 override 使差异不可审计（G-7） |
+| D-VI-23 | 含税价匹配统一折算为不含税价，税率必须快照 | 直接比含税价 | PO 价为不含税（`purchase_order_line.unit_price`），混比产生假差异（G-2） |
+| D-VI-24 | `vi_match_mode` 默认改 `po_based` | 保持 `gr_based` | `gr_based` 依赖 `qty_returned`，退货扣减未落地（G-5） |
+| D-VI-25 | 调整行允许显式 `unit_price` 并按 22.2 重算 | 仅允许纯金额调整（原 §21.8 口径） | 价格变更是真实业务；只改价不改金额会产出错账（G-4 / G-16） |
+| D-VI-26 | 发票侧不新增 `price_list_id`、不重跑定价模板 | 发票侧重新取价 | 定价属 PO 承诺，发票只对位快照（§1.2 边界） |
+| D-VI-27 | 金额计算**统一复用** `SalesOrderAmountService` 内核（子类 + 钩子），不新建独立金额服务 | 新建 `vendor_invoice_amount_service.py` 纯函数（首版草案）；或复制公式 | 销售侧 SO/PO 已统一在该内核（C）；再建一套即第三套算术，口径漂移与回归风险不可控 |
+| D-CH-01~12 | 费用分摊 12 条决策：费用以行承载、只走 `allocate_by_rule`、`basis_field ∈ {net_amount, gross_amount}`、来源可跨/目标不可跨、`origin` 按金额锚点判定、分摊不产会计落点、参考成本只做视图、费用行不可为目标 | 见 22.6.1.3 逐条备选 | 分摊属成本域；本波只固化方案不实现（W8），避免与 W6 费用行承载耦合 |
+| D-CH-13 | 费用变更按 **R-1~R-4** 与变更矩阵 **A / B / C / D** 落地；**累计开票口径不采纳**（P1 仅本票，P2 再议） | 累计口径（SAP KBA 3417121）/ 变更回写原票 / 重算历史票 | 累计口径与 22.6.1.5 守恒式不同构，且把局部变更放大成全局重摊（违反 R-3）；回写原票产生第二事实源（22.6.2.1 / 22.6.2.3） |
+| D-CH-14 | 同票**借贷混行显式拒绝**（`VI_CHARGE_ALLOC_MIXED_SIGN`），不做"尽力摊" | 允许混行、按净额摊 | SAP KBA 3317057 已证实同凭证借贷行并存时分摊异常；净额摊会掩盖方向错误（22.6.2.2 约束 3） |
+
+### 22.15 对既有条款的修订索引
+
+| 既有条款 | 修订 |
+|---|---|
+| §4.2 行字段表 | 增 `tax_rate_percent / price_source / price_trace`；`tax_amount` 可编辑性随 `vi_tax_mode` |
+| §5.4 `match_pricing_mode` 三值表 | `receipt_price` 改为禁用（22.4）；补价格归一与 `vi_match_pricing_mode` 参数 |
+| §6.3 R-VI-6 | 以 22.2 两条路径替换，明确含税路径与税额吸收项 |
+| §6.3 R-VI-7 | 以 22.3 头恒等式替换「Σ 行」简式，增加 `rounding_diff` |
+| §11.2 | 头金额合计仍落列；`supplier_gross_amount` 为**输入**而非派生 |
+| §21.3 金额口径 | 保留符号规则；补「调整行恒等式 + 计算层重算」 |
+| §21.5 行金额折算 | 按原行**单价 × 新数量**重算净额，税按原税率重算（不是源金额 × 数量比例） |
+| §21.8 末条 | 改为「不重跑定价模板；价格差异用 T2 显式 `unit_price` 或 T3 纯金额表达」（D-VI-25） |
+| §22.6 规则 6 | 由「费用 → 物料行 / 入库成本的分摊不在本波，归成本域」改为「本波不实现；方案、波次边界与硬约束见 22.6.1（W8）」 |
+| §22.6.1.5 第 6 条 | 「重摊置 `invalid`」由单句细化为 **22.6.2** 的四种变更形态（A/B/C/D）与 S-1~S-4 单一事实源约束；并明确区分「重摊了」（置 `invalid`）与「单没了」（`cascade` 物理清理）两种清理语义 |
+
+### 22.16 实施波次归属
+
+| 波次 | 内容 |
+|---|---|
+| W2（金额链路） | 22.1 **内核钩子扩展 + VI 子类** / 22.2 / 22.3 / 22.11 金额列与 `supplier_gross_amount` |
+| W5（匹配） | 22.4 / 22.8 / 22.10 参数解析 |
+| W6（税与费用） | 22.6 / 22.7 / line 种子 / 参数 |
+| W7（调整单） | 22.5 T1 / T2 / T3 重算 |
+| W8-P1（费用分摊） | 22.6.1：`allocated_charge_amount` 列 / 2 个 `vi_charge_allocation_*` 参数 / 分摊接线 / 7 条硬约束；22.6.2：A（同票内调整）与 D（整票红冲）两种变更形态 / R-1~R-4 / S-1~S-4 |
+| W8-P2（可选） | 22.6.1.2：跨单据来源、显式行子集、参考成本视图；22.6.2.2：B（贷项）与 C（借项）独立重摊；22.6.2.3：累计开票口径 + `allocation_basis_window` 快照列 |

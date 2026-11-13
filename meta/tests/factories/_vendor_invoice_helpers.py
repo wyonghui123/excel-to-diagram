@@ -46,6 +46,11 @@ RECEIPT_LINE_ID = 7401
 ITEM_ID = 5001
 UOM_ID = 1
 LINE_TYPE_ID = 31
+# W6 行类型种子（Spec §22.10）
+LINE_TYPE_SERVICE_ID = 32
+LINE_TYPE_FREIGHT_ID = 33
+LINE_TYPE_SURCHARGE_ID = 34
+LINE_TYPE_DISCOUNT_ID = 35
 
 SUPPORT_DDL = (
     """
@@ -56,7 +61,9 @@ SUPPORT_DDL = (
         supplier_party_id INTEGER,
         currency_id INTEGER,
         org_id INTEGER,
-        purchase_org_id INTEGER
+        purchase_org_id INTEGER,
+        header_surcharge_amount NUMERIC(18,4),
+        header_discount_amount NUMERIC(18,4)
     )
     """,
     """
@@ -130,6 +137,15 @@ SUPPORT_DDL = (
     )
     """,
     """
+    CREATE TABLE IF NOT EXISTS tax_rates (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        tax_code_id INTEGER,
+        rate_percent NUMERIC(9,4),
+        effective_from DATE,
+        effective_to DATE
+    )
+    """,
+    """
     CREATE TABLE IF NOT EXISTS type_definitions (
         id INTEGER PRIMARY KEY,
         code VARCHAR(40),
@@ -158,6 +174,61 @@ SUPPORT_DDL = (
         status VARCHAR(20) DEFAULT 'active',
         description TEXT,
         created_at DATETIME
+    )
+    """,
+    # W8-P1：费用分摊（规则 / 留痕 / 币种）
+    """
+    CREATE TABLE IF NOT EXISTS currencies (
+        id INTEGER PRIMARY KEY,
+        code VARCHAR(3) UNIQUE NOT NULL,
+        name VARCHAR(50) NOT NULL,
+        decimal_places INTEGER NOT NULL DEFAULT 2
+    )
+    """,
+    """
+    CREATE TABLE IF NOT EXISTS allocation_rules (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        code VARCHAR(50) UNIQUE NOT NULL,
+        name VARCHAR(100) NOT NULL,
+        basis VARCHAR(200) NOT NULL DEFAULT 'equal',
+        manual_factor REAL,
+        group_by VARCHAR(100),
+        rounding VARCHAR(20),
+        floor REAL,
+        target VARCHAR(200) NOT NULL DEFAULT 'cost',
+        description TEXT,
+        created_at DATETIME,
+        updated_at DATETIME
+    )
+    """,
+    """
+    CREATE TABLE IF NOT EXISTS allocation_results (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        code VARCHAR(50) UNIQUE NOT NULL,
+        document_type VARCHAR(50) NOT NULL,
+        document_id INTEGER NOT NULL,
+        document_line_id INTEGER,
+        parent_id INTEGER NOT NULL,
+        level VARCHAR(200) NOT NULL,
+        sequence INTEGER NOT NULL DEFAULT 0,
+        amount REAL NOT NULL,
+        net_amount REAL NOT NULL,
+        currency VARCHAR(10) DEFAULT 'CNY',
+        sign VARCHAR(200) NOT NULL DEFAULT '+',
+        allocation_rule_id INTEGER NOT NULL,
+        allocation_basis VARCHAR(200) NOT NULL,
+        allocation_basis_field VARCHAR(100),
+        group_by VARCHAR(100),
+        rounding VARCHAR(20),
+        floor_value REAL,
+        origin VARCHAR(200) NOT NULL DEFAULT 'unplanned',
+        charge_source VARCHAR(50),
+        source_document_type VARCHAR(50),
+        source_document_id INTEGER,
+        target VARCHAR(20),
+        status VARCHAR(200) NOT NULL DEFAULT 'active',
+        created_at DATETIME,
+        updated_at DATETIME
     )
     """,
 )
@@ -220,6 +291,29 @@ def make_env(tmp_path):
     if 'adjustment_reason' not in columns:
         ds.execute(
             'ALTER TABLE vendor_invoices ADD COLUMN adjustment_reason VARCHAR(256)')
+    # v262 行价格追溯两列（HEADER_DDL 是 v252 基线，生产库由迁移追加）
+    line_columns = ds.get_table_columns('vendor_invoice_lines')
+    if 'price_source' not in line_columns:
+        ds.execute(
+            'ALTER TABLE vendor_invoice_lines ADD COLUMN price_source VARCHAR(20)')
+    if 'price_trace' not in line_columns:
+        ds.execute('ALTER TABLE vendor_invoice_lines ADD COLUMN price_trace TEXT')
+    # v260 金额冻结列（直录税额 / 含税毛额 / 税率快照）
+    if 'supplier_gross_amount' not in ds.get_table_columns(HEADER_TABLE):
+        ds.execute(
+            'ALTER TABLE vendor_invoices ADD COLUMN supplier_gross_amount NUMERIC(18,4)')
+    if 'rounding_diff' not in ds.get_table_columns(HEADER_TABLE):
+        ds.execute(
+            'ALTER TABLE vendor_invoices ADD COLUMN rounding_diff NUMERIC(18,4)')
+    if 'tax_rate_percent' not in line_columns:
+        ds.execute(
+            'ALTER TABLE vendor_invoice_lines ADD COLUMN tax_rate_percent NUMERIC(9,4)')
+    # v268 费用分摊派生列（W8-P1）
+    if 'allocated_charge_amount' not in ds.get_table_columns(
+            'vendor_invoice_lines'):
+        ds.execute(
+            'ALTER TABLE vendor_invoice_lines ADD COLUMN '
+            'allocated_charge_amount NUMERIC(18,4) NOT NULL DEFAULT 0')
     for ddl in SUPPORT_DDL:
         ds.execute(ddl)
     create_audit_logs(ds)
@@ -263,6 +357,21 @@ def seed_type_definitions(ds, *, reversal_type_id=RED_TYPE_ID):
          'adjustment', 'adjustment', 1, None, 'header', 0, VIA_SEQUENCE_ID,
          'active'],
     )
+    # W6 行类型种子（Spec §22.10）：测试态 type_definitions 无 name /
+    # line_category / delivery_relevant 列，只写公共列；费用行判定只看 code。
+    for type_id, code, is_default in (
+            (LINE_TYPE_ID, 'VI_LINE_GOODS', 1),
+            (LINE_TYPE_SERVICE_ID, 'VI_LINE_SERVICE', 0),
+            (LINE_TYPE_FREIGHT_ID, 'VI_LINE_FREIGHT', 0),
+            (LINE_TYPE_SURCHARGE_ID, 'VI_LINE_SURCHARGE', 0),
+            (LINE_TYPE_DISCOUNT_ID, 'VI_LINE_DISCOUNT', 0),
+    ):
+        ds.execute(
+            'INSERT INTO type_definitions '
+            '(id, code, scope_bo, level, is_default, status) '
+            'VALUES (?, ?, ?, ?, ?, ?)',
+            [type_id, code, 'vendor_invoice', 'line', is_default, 'active'],
+        )
     ds.commit()
 
 
@@ -279,6 +388,14 @@ def _seed_sequence(ds, sequence_id, code, pattern):
 def get_header(ds, invoice_id):
     rows = ds.query('SELECT * FROM vendor_invoices WHERE id = ?', [invoice_id])
     return rows[0] if rows else None
+
+
+def set_supplier_gross(ds, invoice_id, amount):
+    """写入原票票面总额（验证调整单不继承该字段）。"""
+    ds.execute(
+        'UPDATE vendor_invoices SET supplier_gross_amount = ? WHERE id = ?',
+        [amount, invoice_id])
+    ds.commit()
 
 
 def get_lines(ds, invoice_id):
@@ -298,14 +415,73 @@ def seed_params(ds):
         )
 
 
+def set_param(ds, code, value):
+    """按用例调整控制参数默认值（四维未命中时的回落值）。"""
+    ds.execute(
+        'UPDATE control_parameter_defs SET default_value = ? WHERE code = ?',
+        [str(value), code])
+    ds.commit()
+
+
+def seed_charge_params(ds, *, tax_mode='line_direct', tax_tolerance='0.01',
+                       freight_tolerance='0.00'):
+    """W6 控制参数（Spec §22.10 / v264 同构）。"""
+    rows = (
+        ('vi_tax_mode', '采购发票税额模式', 'tax', 'enum', tax_mode, None, None),
+        ('vi_tax_tolerance_abs', '采购发票税额绝对容差', 'tolerance', 'decimal',
+         tax_tolerance, 'both', 'absolute'),
+        ('vi_freight_tolerance_abs', '采购发票费用行绝对容差', 'tolerance',
+         'decimal', freight_tolerance, 'both', 'absolute'),
+        ('vi_po_tax_compare', '采购发票税额与订单比对', 'tax', 'bool',
+         'false', None, None),
+    )
+    for code, name, domain, value_type, default, direction, basis in rows:
+        ds.execute(
+            "INSERT INTO control_parameter_defs "
+            "(code, name, domain, value_type, default_value, "
+            " tolerance_direction, tolerance_basis, status) "
+            "VALUES (?, ?, ?, ?, ?, ?, ?, 'active') "
+            "ON CONFLICT(code) DO UPDATE SET default_value = excluded.default_value",
+            [code, name, domain, value_type, default, direction, basis],
+        )
+    ds.commit()
+
+
+def seed_pricing_mode_param(ds, default_value='po_price'):
+    """v263 定价模式参数定义（vi_match_pricing_mode）。"""
+    ds.execute(
+        "INSERT OR IGNORE INTO control_parameter_defs "
+        "(code, name, domain, value_type, target_bo, default_value, status) "
+        "VALUES ('vi_match_pricing_mode', '采购发票定价模式', 'procurement', "
+        "'enum', 'vendor_invoice', ?, 'active')",
+        [default_value])
+    ds.execute(
+        "UPDATE control_parameter_defs SET default_value = ? "
+        "WHERE code = 'vi_match_pricing_mode'", [default_value])
+    ds.commit()
+
+
+def seed_tax_rate(ds, *, tax_code_id, rate_percent,
+                  effective_from='2020-01-01', effective_to=None):
+    ds.execute(
+        'INSERT INTO tax_rates '
+        '(tax_code_id, rate_percent, effective_from, effective_to) '
+        'VALUES (?, ?, ?, ?)',
+        [tax_code_id, rate_percent, effective_from, effective_to])
+    ds.commit()
+
+
 def seed_purchase_order(ds, *, promised_qty=10.0, returned_qty=0.0,
-                        unit_price=10.0, line_type_id=LINE_TYPE_ID):
+                        unit_price=10.0, line_type_id=LINE_TYPE_ID,
+                        header_surcharge_amount=0.0, header_discount_amount=0.0):
     ds.execute(
         'INSERT OR REPLACE INTO purchase_orders '
         '(id, order_no, supplier_account_id, supplier_party_id, currency_id, '
-        ' org_id, purchase_org_id) VALUES (?, ?, ?, ?, ?, ?, ?)',
+        ' org_id, purchase_org_id, header_surcharge_amount, '
+        ' header_discount_amount) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)',
         [PO_ID, 'PO-0001', SUPPLIER_ACCOUNT_ID, SUPPLIER_PARTY_ID,
-         CURRENCY_ID, ORG_ID, PURCHASE_ORG_ID],
+         CURRENCY_ID, ORG_ID, PURCHASE_ORG_ID, header_surcharge_amount,
+         header_discount_amount],
     )
     ds.execute(
         'INSERT OR REPLACE INTO purchase_order_lines '
@@ -363,18 +539,22 @@ def insert_line(ds, invoice_id, *, line_no=1, qty=10.0, unit_price=10.0,
                 schedule_id=None, receipt_line_id=None, invoice_line_id=None,
                 return_line_id=None, po_unit_price=None,
                 item_id=ITEM_ID, uom_id=UOM_ID, line_type_id=LINE_TYPE_ID,
-                match_status='unmatched', override_reason=None):
+                match_status='unmatched', override_reason=None,
+                price_includes_tax=0, tax_code_id=None,
+                price_source=None, price_trace=None, tax_rate_percent=None):
     ds.execute(
         'INSERT INTO vendor_invoice_lines '
         '(invoice_id, line_no, schedule_id, receipt_line_id, invoice_line_id, '
         ' return_line_id, item_id, line_type_id, qty, uom_id, unit_price, '
         ' po_unit_price, net_amount, tax_amount, gross_amount, match_status, '
-        ' override_reason) '
-        'VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)',
+        ' override_reason, price_includes_tax, tax_code_id, '
+        ' price_source, price_trace, tax_rate_percent) '
+        'VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)',
         [invoice_id, line_no, schedule_id, receipt_line_id, invoice_line_id,
          return_line_id, item_id, line_type_id, qty, uom_id, unit_price,
          po_unit_price, net_amount, tax_amount, gross_amount, match_status,
-         override_reason],
+         override_reason, price_includes_tax, tax_code_id,
+         price_source, price_trace, tax_rate_percent],
     )
     ds.commit()
     rows = ds.query(
@@ -429,4 +609,58 @@ def update_edge_quantity(ds, rule_id, target_line_id, quantity):
     ds.execute(
         'UPDATE doc_flow_edges SET quantity = ? WHERE rule_id = ? AND target_id = ?',
         [quantity, rule_id, str(target_line_id)])
+    ds.commit()
+
+
+# ------------------------------------------------------------------ W8-P1
+
+def seed_allocation_rule(ds, *, code='VI_CHARGE_BY_NET_VALUE', name='按净值摊费用',
+                         basis='value', manual_factor=None, group_by=None,
+                         rounding='round', floor=None, target='cost'):
+    """v268 依赖的分摊规则（生产由 allocation_rules 维护）。"""
+    ds.execute(
+        'INSERT OR REPLACE INTO allocation_rules '
+        '(code, name, basis, manual_factor, group_by, rounding, floor, target) '
+        'VALUES (?, ?, ?, ?, ?, ?, ?, ?)',
+        [code, name, basis, manual_factor, group_by, rounding, floor, target])
+    ds.commit()
+    return ds.query('SELECT id FROM allocation_rules WHERE code = ?', [code])[0]['id']
+
+
+def seed_charge_allocation_params(ds, *, enabled=False, rule_code='',
+                                  org_id=ORG_ID):
+    """v268 参数定义 + 组织级取值（vi_charge_allocation_*）。"""
+    defs = (
+        ('vi_charge_allocation_enabled', '采购发票费用分摊开关', 'bool', 'false'),
+        ('vi_charge_allocation_rule_code', '采购发票费用分摊规则', 'string', ''),
+    )
+    ids = {}
+    for code, name, value_type, default in defs:
+        ds.execute(
+            "INSERT INTO control_parameter_defs "
+            "(code, name, domain, value_type, target_bo, default_value, status) "
+            "VALUES (?, ?, 'procurement', ?, 'vendor_invoice', ?, 'active') "
+            "ON CONFLICT(code) DO UPDATE SET default_value = excluded.default_value",
+            [code, name, value_type, default])
+        ids[code] = ds.query(
+            'SELECT id FROM control_parameter_defs WHERE code = ?', [code])[0]['id']
+    for code, value in (
+            ('vi_charge_allocation_enabled', 'true' if enabled else 'false'),
+            ('vi_charge_allocation_rule_code', rule_code)):
+        ds.execute(
+            'DELETE FROM control_parameter_values WHERE control_parameter_id = ?',
+            [ids[code]])
+        if value:
+            ds.execute(
+                'INSERT INTO control_parameter_values '
+                '(control_parameter_id, org_id, specificity_rank, value, status) '
+                "VALUES (?, ?, 1, ?, 'active')", [ids[code], org_id, value])
+    ds.commit()
+
+
+def seed_currency(ds, *, currency_id=CURRENCY_ID, code='CNY',
+                  name='人民币', decimal_places=2):
+    ds.execute(
+        'INSERT OR REPLACE INTO currencies (id, code, name, decimal_places) '
+        'VALUES (?, ?, ?, ?)', [currency_id, code, name, decimal_places])
     ds.commit()

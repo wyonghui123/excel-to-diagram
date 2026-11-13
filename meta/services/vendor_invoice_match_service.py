@@ -34,12 +34,21 @@
 """
 from __future__ import annotations
 
+import json
 import logging
 from datetime import date, datetime
+from decimal import Decimal
 from typing import Any, Dict, List, Optional
 
 from meta.core.doc_flow_attach import attach_edge
 from meta.core.doc_flow_reversal import red_ink_edge
+from meta.core.rounding import round_amount
+from meta.services.control_parameter_service import ControlParameterResolver
+from meta.services.sales_order_amount_service import (
+    SalesOrderAmountError,
+    _round_tax,
+    _truthy,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -89,7 +98,29 @@ REASON_QTY_ORDER = 'qty_over_order_tolerance'
 REASON_QTY_RECEIPT = 'qty_over_receipt_tolerance'
 REASON_PRICE = 'price_over_tolerance'
 REASON_MANUAL_PRICING = 'manual_pricing_required'
-REASON_RECEIPT_PRICE_MODE = 'receipt_price_mode'
+REASON_PRICE_SOURCE_INCONSISTENT = 'price_source_inconsistent'
+REASON_TAX = 'VI_TAX_MISMATCH'
+REASON_FREIGHT = 'VI_FREIGHT_OVER_TOLERANCE'
+
+# 行类型（Spec §22.6 种子 / §22.10）：费用行判定按 line_type.code，不新增物理列
+LINE_TYPE_GOODS = 'VI_LINE_GOODS'
+LINE_TYPE_SERVICE = 'VI_LINE_SERVICE'
+LINE_TYPE_FREIGHT = 'VI_LINE_FREIGHT'
+LINE_TYPE_SURCHARGE = 'VI_LINE_SURCHARGE'
+LINE_TYPE_DISCOUNT = 'VI_LINE_DISCOUNT'
+CHARGE_LINE_TYPE_CODES = frozenset({
+    LINE_TYPE_FREIGHT, LINE_TYPE_SURCHARGE, LINE_TYPE_DISCOUNT,
+})
+
+TAX_MODE_LINE_DIRECT = 'line_direct'
+TAX_MODE_RATE_CALC = 'rate_calc'
+DEFAULT_TAX_TOLERANCE = 0.01
+
+# 行价格来源（Spec §22.4 / R-VI-27）：只服务端写入，行入参不接受的快照列
+PRICE_SOURCE_PO = 'po'
+PRICE_SOURCE_MANUAL = 'manual'
+PRICE_SOURCE_ADJUSTMENT = 'adjustment'
+PRICE_SOURCE_VALUES = (PRICE_SOURCE_PO, PRICE_SOURCE_MANUAL, PRICE_SOURCE_ADJUSTMENT)
 
 # line_source_policy（Spec §4.3）
 LINE_SOURCE_POLICY = {
@@ -114,9 +145,11 @@ _RED_HEADER_DROP = frozenset({
 })
 
 # 调整单复制头字段时额外剔除的列（增减上下文由创建器重写）
+# supplier_gross_amount 必须剔除：票面总额只属于原票，调整单以 Σ 行金额为准
+# （否则 recompute_order 会用原票总额覆盖调整单 gross，算出巨大 rounding_diff）。
 _ADJUSTMENT_HEADER_DROP = _RED_HEADER_DROP | {
     'adjustment_of_invoice_id', 'adjustment_direction', 'adjustment_reason',
-    'rounding_diff',
+    'rounding_diff', 'supplier_gross_amount',
 }
 
 # 调整行复制原行时剔除的锚点列（锚点在过账时从原行解析，不重复落库）
@@ -136,7 +169,6 @@ _RED_LINE_NEGATE_FIELDS = (
 )
 
 EPS = 1e-6
-_DIM_WEIGHTS = (('org_id', 8), ('document_type_id', 4), ('line_type_id', 2), ('item_group_id', 1))
 
 
 class VendorInvoiceError(Exception):
@@ -227,6 +259,7 @@ class VendorInvoiceMatchService:
     def __init__(self, data_source=None, platform_data_source=None):
         self._ds = data_source
         self._platform_ds = platform_data_source
+        self._line_type_cache: Dict[Any, str] = {}
 
     # ------------------------------------------------------------------ 数据源
     @property
@@ -303,6 +336,27 @@ class VendorInvoiceMatchService:
         )
         return sum(_f(r.get('consumed_qty')) for r in rows)
 
+    def _open_qty(self, schedule_id: Any = None, mode: str = MODE_PO_BASED,
+                  receipt_line_id: Any = None) -> float:
+        """可开票余量唯一实现（Spec §22.8 G-5）：匹配与写边共用，禁止各自复制。
+
+        po_based: promised_qty − returned_qty − billing 已消耗（含红字）；
+        gr_based: 收货行 qty_invoiceable − ap_match 已消耗（含红字）。
+        """
+        if mode == MODE_GR_BASED:
+            if not receipt_line_id:
+                return 0.0
+            receipt = self._receipt_line(receipt_line_id) or {}
+            consumed = self._consumed_qty('receipt_line', receipt_line_id, POOL_AP_MATCH)
+            return max(qty_invoiceable(receipt) - consumed, 0.0)
+        if not schedule_id:
+            return 0.0
+        schedule = self._schedule(schedule_id) or {}
+        base = _f(schedule.get('promised_qty')) - _f(schedule.get('returned_qty'))
+        consumed = self._consumed_qty(
+            'purchase_order_schedule', schedule_id, POOL_BILLING)
+        return max(base - consumed, 0.0)
+
     # ------------------------------------------------------------------ 参数解析
     def _param_def(self, code: str) -> Optional[Dict[str, Any]]:
         rows = self._rows(
@@ -314,41 +368,88 @@ class VendorInvoiceMatchService:
 
     def resolve_param(self, code: str, *, org_id=None, document_type_id=None,
                       line_type_id=None, item_group_id=None, default: float = 0.0) -> float:
-        """四维容差解析：精确匹配 → 逐级放宽 → def.default_value → default。"""
-        definition = self._param_def(code)
-        if not definition:
-            return default
+        """四维容差解析：复用平台 `ControlParameterResolver`（单一实现）。
+
+        命中顺序由平台解析器统一维护（精确 → 逐级放宽 → def.default）；
+        本服务不再维护第二套匹配 / specificity 打分逻辑。
+        """
         dims = {
-            'org_id': org_id,
-            'document_type_id': document_type_id,
-            'line_type_id': line_type_id,
-            'item_group_id': item_group_id,
+            'org_id': org_id or 0,
+            'document_type_id': document_type_id or 0,
+            'line_type_id': line_type_id or 0,
+            'item_group_id': item_group_id or 0,
         }
-        rows = self._rows(
-            'SELECT org_id, document_type_id, line_type_id, item_group_id, '
-            'specificity_rank, value FROM control_parameter_values '
-            'WHERE control_parameter_id = ? AND status = ?',
-            [definition['id'], 'active'],
-        )
-        best_value = None
-        best_score = None
-        for row in rows:
-            score = _f(row.get('specificity_rank')) * 10
-            matched = True
-            for field, weight in _DIM_WEIGHTS:
-                row_value = row.get(field)
-                if row_value is None:
-                    continue
-                if dims.get(field) is None or str(row_value) != str(dims.get(field)):
-                    matched = False
-                    break
-                score += weight
-            if matched and (best_score is None or score > best_score):
-                best_score = score
-                best_value = row.get('value')
-        if best_value is not None:
-            return _f(best_value)
-        return _f(definition.get('default_value')) if definition.get('default_value') is not None else default
+        try:
+            value = ControlParameterResolver(self.ds).resolve(code, dims)
+        except Exception as exc:
+            logger.warning('[vendor_invoice] resolve param %s failed: %s', code, exc)
+            return default
+        return default if value is None else _f(value)
+
+    def _resolve_match_mode(self, header: Dict[str, Any]) -> str:
+        """匹配模式兜底（Spec §22.8.6）：头部快照 → 四维命中 → def.default → po_based。"""
+        mode = _s(header.get('match_mode'))
+        if mode in (MODE_PO_BASED, MODE_GR_BASED):
+            return mode
+        dims = {
+            'org_id': header.get('org_id') or 0,
+            'document_type_id': header.get('document_type_id') or 0,
+        }
+        try:
+            resolved = _s(ControlParameterResolver(self.ds)
+                          .resolve('vi_match_mode', dims))
+        except Exception:
+            resolved = ''
+        return resolved if resolved in (MODE_PO_BASED, MODE_GR_BASED) else MODE_PO_BASED
+
+    def _resolve_match_pricing_mode(self, header: Dict[str, Any]) -> str:
+        """定价模式解析（Spec §22.10）：头部快照 → 四维命中 → 硬编码兜底 po_price。
+
+        receipt_price 保留头部快照直取，交由 _match_line 抛 VI_PRICING_MODE_UNSUPPORTED，
+        避免历史数据静默降级为 po_price。
+        """
+        mode = _s(header.get('match_pricing_mode'))
+        if mode in (PRICING_PO_PRICE, PRICING_MANUAL, PRICING_RECEIPT_PRICE):
+            return mode
+        dims = {
+            'org_id': header.get('org_id') or 0,
+            'document_type_id': header.get('document_type_id') or 0,
+        }
+        try:
+            resolved = _s(ControlParameterResolver(self.ds)
+                          .resolve('vi_match_pricing_mode', dims))
+        except Exception as exc:
+            logger.warning('[vendor_invoice] resolve vi_match_pricing_mode failed: %s', exc)
+            resolved = ''
+        return resolved if resolved in (PRICING_PO_PRICE, PRICING_MANUAL) else PRICING_PO_PRICE
+
+    def _net_unit_price(self, header: Dict[str, Any], line: Dict[str, Any]) -> float:
+        """不含税单价（价格比较唯一口径，Spec §22.2 规则 7）：复用金额内核。"""
+        from meta.services.vendor_invoice_amount_service import VendorInvoiceAmountService
+        unit_price = _f(line.get('unit_price'))
+        if not _truthy(line.get('price_includes_tax')):
+            return unit_price
+        kernel = VendorInvoiceAmountService(self.ds)
+        rate = line.get('tax_rate_percent')
+        if rate in (None, ''):
+            rate = kernel._lookup_rate_percent(
+                line.get('tax_code_id'), header.get('invoice_date'))
+        try:
+            return float(kernel.net_unit_price(
+                unit_price=unit_price, price_includes_tax=True,
+                tax_rate_percent=rate,
+                decimals=kernel._currency_decimals(header.get('currency_id'))))
+        except SalesOrderAmountError as exc:
+            # 含税行缺税率（A3）：转成 VI 契约错误，避免 500
+            raise VendorInvoiceError(
+                str(exc), getattr(exc, 'rule', '') or 'VI_TAX_RATE_REQUIRED',
+                'tax_rate_percent')
+
+    def _amount_decimals(self, header: Dict[str, Any]) -> int:
+        """金额精度：币种 decimal_places（舍入唯一入口 round_amount 的位数来源）。"""
+        from meta.services.vendor_invoice_amount_service import VendorInvoiceAmountService
+        kernel = VendorInvoiceAmountService(self.ds)
+        return kernel._currency_decimals(header.get('currency_id'))
 
     def _param_basis(self, code: str) -> str:
         definition = self._param_def(code) or {}
@@ -383,8 +484,13 @@ class VendorInvoiceMatchService:
 
         normalized = [self._normalize_line_anchors(header, line) for line in lines]
         results = [self._match_line(header, line) for line in normalized]
+        self._validate_price_source_consistency(header, normalized, results)
+        self._validate_line_tax(header, normalized, results)
 
         match_status, match_reason = self._aggregate(results)
+        charge_reason = self._validate_charge_reconciliation(header, normalized)
+        if charge_reason:
+            match_status, match_reason = MATCH_EXCEPTION, charge_reason
         if persist:
             for result in results:
                 self._persist_line_result(result)
@@ -418,6 +524,9 @@ class VendorInvoiceMatchService:
                 '匹配异常，需先处理或放行: {0}'.format(result.get('match_exception_reason') or ''),
                 'VI_MATCH_EXCEPTION', 'match_status')
 
+        # W8-P1：匹配通过后、置 submitted 前，把本票费用行摊到本票物料行
+        self._allocate_charges(invoice_id, header)
+
         self.ds.execute(
             'UPDATE {0} SET status = ?, updated_at = ? WHERE id = ?'.format(HEADER_TABLE),
             [STATUS_SUBMITTED, _now(), _int(invoice_id)],
@@ -425,6 +534,18 @@ class VendorInvoiceMatchService:
         self._audit(invoice_id, 'submit', user_name=user_name,
                     extra={'match_status': result.get('match_status')})
         return dict(result, status=STATUS_SUBMITTED)
+
+    def _allocate_charges(self, invoice_id: Any, header: Dict[str, Any]) -> None:
+        """W8-P1：提交时把本票费用行摊到本票物料行（开关关闭则静默跳过）。"""
+        from meta.services.vendor_invoice_charge_allocation_service import (
+            ChargeAllocationError,
+            VendorInvoiceChargeAllocationService,
+        )
+        try:
+            VendorInvoiceChargeAllocationService(self.ds).apply(
+                invoice_id, header=header)
+        except ChargeAllocationError as exc:
+            raise VendorInvoiceError(exc.message, exc.rule, exc.field)
 
     def post(self, invoice_id: Any, *, user_name: str = 'system') -> Dict[str, Any]:
         """submitted → posted：写 billing + ap_match 边（贷项/取消单写红字冲减）。"""
@@ -578,6 +699,124 @@ class VendorInvoiceMatchService:
         )
         return bool(rows)
 
+    # ------------------------------------------------------------------ 费用行 / 直录税额（W6）
+    def _line_type_code(self, line_type_id: Any) -> str:
+        """行类型编码（type_definitions.code）；实例级缓存，查不到返回空串。"""
+        if not line_type_id:
+            return ''
+        key = _int(line_type_id)
+        if key not in self._line_type_cache:
+            row = self._one(
+                'SELECT code FROM type_definitions WHERE id = ?', [key]) or {}
+            self._line_type_cache[key] = _s(row.get('code'))
+        return self._line_type_cache[key]
+
+    def _is_charge_line(self, line: Dict[str, Any]) -> bool:
+        """费用行判定（Spec §22.6）：freight / surcharge / discount 三类行类型。"""
+        return self._line_type_code(line.get('line_type_id')) in CHARGE_LINE_TYPE_CODES
+
+    def _resolve_tax_settings(self, header: Dict[str, Any]):
+        """税模式与税额绝对容差（Spec §22.10）：四维命中 → 定义默认。"""
+        dims = {
+            'org_id': header.get('org_id') or 0,
+            'document_type_id': header.get('document_type_id') or 0,
+        }
+        mode, tolerance = '', None
+        try:
+            resolver = ControlParameterResolver(self.ds)
+            mode = _s(resolver.resolve('vi_tax_mode', dims))
+            tolerance = resolver.resolve('vi_tax_tolerance_abs', dims)
+        except Exception as exc:
+            logger.warning('[vendor_invoice] resolve tax settings failed: %s', exc)
+        if mode not in (TAX_MODE_LINE_DIRECT, TAX_MODE_RATE_CALC):
+            mode = TAX_MODE_LINE_DIRECT
+        return mode, (_f(tolerance) if tolerance not in (None, '') else DEFAULT_TAX_TOLERANCE)
+
+    def _tax_rounding(self, line: Dict[str, Any]) -> Optional[str]:
+        tax_code_id = line.get('tax_code_id')
+        if not tax_code_id:
+            return None
+        rows = self._rows('SELECT rounding FROM tax_codes WHERE id = ?', [_int(tax_code_id)])
+        return _s(rows[0].get('rounding')) if rows else None
+
+    def _line_tax_mismatch(self, header: Dict[str, Any], line: Dict[str, Any],
+                           decimals: int) -> bool:
+        """直录税额校验（Spec §22.2 规则 2）：|tax − R(net×r/100)| ≤ viable 容差。"""
+        mode, tolerance = self._resolve_tax_settings(header)
+        if mode != TAX_MODE_LINE_DIRECT or _truthy(line.get('price_includes_tax')):
+            return False
+        declared = line.get('tax_amount')
+        rate = line.get('tax_rate_percent')
+        if declared in (None, '') or rate in (None, ''):
+            return False
+        net = line.get('net_amount')
+        if net in (None, ''):
+            net = _f(line.get('qty')) * _f(line.get('unit_price'))
+        expected = _round_tax(
+            Decimal(str(_f(net))) * Decimal(str(_f(rate))) / Decimal('100'),
+            decimals, self._tax_rounding(line))
+        return abs(Decimal(str(_f(declared))) - expected) > Decimal(str(tolerance))
+
+    def _validate_line_tax(self, header: Dict[str, Any], lines: List[Dict[str, Any]],
+                           results: List[Dict[str, Any]]) -> None:
+        """行级税额异常：invoice / debit_memo / adjustment 直录超容差置 exception（可 override）。
+
+        调整行同样按「新净额 × 原税率」校验（Spec §22.5 T1 容差校验 / §22.7）。
+        """
+        if _s(header.get('document_category')) not in (
+                CATEGORY_INVOICE, CATEGORY_DEBIT_MEMO, CATEGORY_ADJUSTMENT):
+            return
+        decimals = self._amount_decimals(header)
+        for line, result in zip(lines, results):
+            if result.get('match_status') == MATCH_OVERRIDDEN:
+                continue
+            if not self._line_tax_mismatch(header, line, decimals):
+                continue
+            result['match_status'] = MATCH_EXCEPTION
+            result['match_exception_reason'] = REASON_TAX
+            result['tax_mismatch'] = True
+
+    def _validate_charge_reconciliation(self, header: Dict[str, Any],
+                                        lines: List[Dict[str, Any]]) -> str:
+        """费用行合计 vs PO 头附加费 / 折扣（Spec §22.6）：超容差返回异常码。
+
+        仅正向采购发票比对；PO 经由非费用行锚点的 schedule → order 反查。
+        费用行无锚点，因此本函数不依赖任何费用行自身锚点。
+        """
+        if _s(header.get('document_category')) != CATEGORY_INVOICE:
+            return ''
+        charge_lines = [line for line in lines if self._is_charge_line(line)]
+        if not charge_lines:
+            return ''
+        order_id = None
+        for line in lines:
+            schedule_id = line.get('schedule_id')
+            if not schedule_id:
+                continue
+            schedule = self._schedule(schedule_id) or {}
+            order_id = schedule.get('order_id')
+            if order_id:
+                break
+        if not order_id:
+            return ''
+        order = self._one(
+            'SELECT header_surcharge_amount, header_discount_amount FROM {0} WHERE id = ?'
+            .format(ORDER_TABLE), [_int(order_id)]) or {}
+        target = _f(order.get('header_surcharge_amount'))
+        if not target:
+            target = _f(order.get('header_discount_amount'))
+        if not target:
+            return ''
+        total = sum(_f(line.get('net_amount')) for line in charge_lines)
+        tolerance = self.resolve_param(
+            'vi_freight_tolerance_abs', default=0.0,
+            org_id=header.get('org_id'), document_type_id=header.get('document_type_id'))
+        if abs(total - target) > tolerance + EPS:
+            logger.info('[vendor_invoice] charge lines %s vs PO header %s over tolerance %s',
+                        total, target, tolerance)
+            return REASON_FREIGHT
+        return ''
+
     # ------------------------------------------------------------------ 校验
     def _validate_anchors(self, lines: List[Dict[str, Any]]) -> None:
         """R-VI-2：schedule / receipt_line / invoice_line / return_line 锚点至多一个。"""
@@ -591,6 +830,12 @@ class VendorInvoiceMatchService:
                 if not schedule_and_receipt or others:
                     raise VendorInvoiceError(
                         '行 {0} 匹配锚点互斥'.format(line.get('line_no')), 'VI_ANCHOR_CONFLICT', 'anchor')
+            # Spec §22.6：费用行不挂数量锚点（订单排程 / 收货行）
+            if (self._is_charge_line(line)
+                    and (line.get('schedule_id') or line.get('receipt_line_id'))):
+                raise VendorInvoiceError(
+                    '费用行 {0} 不得挂采购订单 / 收货锚点'.format(line.get('line_no')),
+                    'VI_ANCHOR_CONFLICT', 'anchor')
 
     def _source_kind(self, line: Dict[str, Any]) -> str:
         if line.get('schedule_id'):
@@ -619,6 +864,30 @@ class VendorInvoiceMatchService:
                     '行 {0} 来源 {1} 不被 {2} 允许（允许: {3}）'.format(
                         line.get('line_no'), ','.join(sorted(kinds)), category, ','.join(sorted(allowed))),
                     'VI_SOURCE_POLICY', 'line_source_policy')
+
+    def _validate_price_source_consistency(self, header: Dict[str, Any],
+                                           normalized: List[Dict[str, Any]],
+                                           results: List[Dict[str, Any]]) -> None:
+        """R-VI-27：同一单据内 po / manual 价格来源混用 → 未放通行置异常。
+
+        调整单整单 price_source=adjustment，不参与混用判定。
+        已 override 的行保留人工放行结论，不降级（与 post 内重算口径一致）。
+        """
+        category = _s(header.get('document_category')) or CATEGORY_INVOICE
+        if category == CATEGORY_ADJUSTMENT:
+            return
+        # 费用行不参与价格来源混用判定（Spec §22.6：无 PO 锚点 → manual）
+        priced = [line for line in normalized if not self._is_charge_line(line)]
+        sources = {_s(line.get('price_source')) for line in priced} - {''}
+        if not ({PRICE_SOURCE_PO, PRICE_SOURCE_MANUAL} <= sources):
+            return
+        for line, result in zip(normalized, results):
+            if self._is_charge_line(line):
+                continue
+            if result.get('match_status') == MATCH_OVERRIDDEN:
+                continue
+            result['match_status'] = MATCH_EXCEPTION
+            result['match_exception_reason'] = REASON_PRICE_SOURCE_INCONSISTENT
 
     def _validate_direction(self, header: Dict[str, Any], lines: List[Dict[str, Any]]) -> None:
         """R-VI-17：一次匹配只能同 direction（贷项行方向必须与头相反）。
@@ -717,11 +986,10 @@ class VendorInvoiceMatchService:
             if order_line_id:
                 result['order_line_id'] = order_line_id
                 po_line = self._order_line(order_line_id) or {}
-                if not result.get('item_id'):
-                    result['item_id'] = po_line.get('item_id')
-                if not result.get('uom_id'):
-                    result['uom_id'] = po_line.get('uom_id')
-                if result.get('po_unit_price') is None:
+                # R-VI-3 / §22.8.3：快照一律以源单为准，禁止信任行入参
+                result['item_id'] = po_line.get('item_id') or result.get('item_id')
+                result['uom_id'] = po_line.get('uom_id') or result.get('uom_id')
+                if po_line.get('unit_price') is not None:
                     result['po_unit_price'] = po_line.get('unit_price')
                 if not result.get('line_type_id'):
                     result['line_type_id'] = po_line.get('line_type_id')
@@ -732,23 +1000,69 @@ class VendorInvoiceMatchService:
                 result['schedule_id'] = receipt.get('schedule_id')
             if not result.get('order_line_id') and receipt.get('order_line_id'):
                 result['order_line_id'] = receipt.get('order_line_id')
-            if not result.get('item_id'):
-                result['item_id'] = receipt.get('item_id')
-            if not result.get('uom_id'):
-                result['uom_id'] = receipt.get('uom_id')
+            result['item_id'] = receipt.get('item_id') or result.get('item_id')
+            result['uom_id'] = receipt.get('uom_id') or result.get('uom_id')
             # gr_based 快照：收货行回填 order_line_id 后仍需取 PO 单价做价格容差比对
             order_line_id = result.get('order_line_id')
-            if order_line_id and result.get('po_unit_price') is None:
+            if order_line_id:
                 po_line = self._order_line(order_line_id) or {}
-                if result.get('po_unit_price') is None:
+                if po_line.get('unit_price') is not None:
                     result['po_unit_price'] = po_line.get('unit_price')
                 if not result.get('line_type_id'):
                     result['line_type_id'] = po_line.get('line_type_id')
-        return result
+        if result.get('item_group_id') in (None, ''):
+            result['item_group_id'] = self._item_group_id(result.get('item_id'))
+        return self._price_snapshot(header, result)
+
+    def _price_snapshot(self, header: Dict[str, Any],
+                        line: Dict[str, Any]) -> Dict[str, Any]:
+        """R-VI-27：按锚点快照行价格来源（po / manual / adjustment）。
+
+        · 有 PO 锚（order_line_id + PO 单价）→ po，并记录 po_id / 计划行 / PO 单价；
+        · 无 PO 锚 → manual；
+        · 调整行（已落库 price_source=adjustment）不覆盖，保留原快照；
+        · 历史行（price_source 为空）按锚点近似回填（与 v262 口径一致）。
+        空值写 None，不写空串。
+        """
+        existing = _s(line.get('price_source')).lower()
+        if existing == PRICE_SOURCE_ADJUSTMENT:
+            return line
+        order_line_id = line.get('order_line_id')
+        po_price = line.get('po_unit_price')
+        trace: Dict[str, Any] = {}
+        if order_line_id not in (None, '') and po_price not in (None, ''):
+            source = PRICE_SOURCE_PO
+            po_line = self._order_line(order_line_id) or {}
+            trace = {
+                'po_id': _int(po_line.get('order_id')) if po_line.get('order_id') else None,
+                'order_line_id': _int(order_line_id),
+                'schedule_id': _int(line.get('schedule_id')) if line.get('schedule_id') else None,
+                'po_unit_price': float(_f(po_price)),
+                'price_source': source,
+                'snapshot_at': _now(),
+            }
+        else:
+            source = PRICE_SOURCE_MANUAL
+            trace = {'price_source': source, 'snapshot_at': _now()}
+        line['price_source'] = source
+        line['price_trace'] = json.dumps(trace, ensure_ascii=False, sort_keys=True)
+        return line
+
+    def _item_group_id(self, item_id: Any) -> Optional[int]:
+        """§22.8.3：item_group_id 由物料反查（四维容差维度，不允许为空锚）。"""
+        if item_id in (None, ''):
+            return None
+        try:
+            rows = self.ds.query(
+                'SELECT item_group_id FROM items WHERE id = ?', [_int(item_id)])
+        except Exception as exc:
+            logger.debug('[vendor_invoice] 反查 item_group_id 失败: %s', exc)
+            return None
+        return rows[0].get('item_group_id') if rows else None
 
     def _match_line(self, header: Dict[str, Any], line: Dict[str, Any]) -> Dict[str, Any]:
-        mode = _s(header.get('match_mode')) or MODE_GR_BASED
-        pricing = _s(header.get('match_pricing_mode')) or PRICING_PO_PRICE
+        mode = self._resolve_match_mode(header)
+        pricing = self._resolve_match_pricing_mode(header)
         dims = {
             'org_id': header.get('org_id'),
             'document_type_id': header.get('document_type_id'),
@@ -758,8 +1072,37 @@ class VendorInvoiceMatchService:
         qty = _f(line.get('qty'))
         reasons: List[str] = []
         open_qty = 0.0
+        override_reason = line.get('override_reason')
+        overridden_by = line.get('overridden_by')
+        overridden_at = line.get('overridden_at')
+        overridden_now = line.get('match_status') == MATCH_OVERRIDDEN and bool(override_reason)
 
         category = _s(header.get('document_category')) or CATEGORY_INVOICE
+        if self._is_charge_line(line):
+            # Spec §22.6：费用行不参与数量 / 价格匹配，只参与头金额与税额校验；
+            # 无数量锚点 → qty_over_receipt 恒为 0（豁免收货量核对）。
+            return {
+                'id': line.get('id'),
+                'line_no': line.get('line_no'),
+                'schedule_id': line.get('schedule_id'),
+                'order_line_id': line.get('order_line_id'),
+                'receipt_line_id': line.get('receipt_line_id'),
+                'item_id': line.get('item_id'),
+                'uom_id': line.get('uom_id'),
+                'po_unit_price': line.get('po_unit_price'),
+                'price_source': line.get('price_source'),
+                'price_trace': line.get('price_trace'),
+                'qty': qty,
+                'open_qty': qty,
+                'qty_over_receipt': 0.0,
+                'price_diff_amount': None,
+                'price_diff_percent': None,
+                'match_status': MATCH_OVERRIDDEN if overridden_now else MATCH_MATCHED,
+                'match_exception_reason': None,
+                'override_reason': override_reason if overridden_now else None,
+                'overridden_by': overridden_by if overridden_now else None,
+                'overridden_at': overridden_at if overridden_now else None,
+            }
         if category in (CATEGORY_CREDIT_MEMO, CATEGORY_DEBIT_MEMO,
                         CATEGORY_CANCELLATION, CATEGORY_ADJUSTMENT):
             # 冲销 / 补收类单据按原发票行核销，不做量价匹配；
@@ -773,6 +1116,8 @@ class VendorInvoiceMatchService:
                 'item_id': line.get('item_id'),
                 'uom_id': line.get('uom_id'),
                 'po_unit_price': line.get('po_unit_price'),
+                'price_source': line.get('price_source'),
+                'price_trace': line.get('price_trace'),
                 'qty': qty,
                 'open_qty': qty,
                 'qty_over_receipt': None,
@@ -791,12 +1136,14 @@ class VendorInvoiceMatchService:
                 raise VendorInvoiceError(
                     '按订单匹配需要订单计划行锚点（行 {0}）'.format(line.get('line_no')),
                     'VI_ANCHOR_REQUIRED', 'schedule_id')
-            schedule = self._schedule(schedule_id) or {}
-            base = _f(schedule.get('promised_qty')) - _f(schedule.get('returned_qty'))
-            consumed = self._consumed_qty('purchase_order_schedule', schedule_id, POOL_BILLING)
-            open_qty = max(base - consumed, 0.0)
+            open_qty = self._open_qty(schedule_id, MODE_PO_BASED)
             allowed = self._allowed_upper(open_qty, 'vi_qty_tolerance_order', **dims)
-            if qty > allowed + EPS:
+            if qty > allowed + EPS and not overridden_now:
+                raise VendorInvoiceError(
+                    '行 {0} 开票数量 {1} 超过可开票余量 {2} + 容差'.format(
+                        line.get('line_no'), qty, open_qty),
+                    'VI_QTY_EXCEEDED', 'qty')
+            if qty > open_qty + EPS:
                 reasons.append(REASON_QTY_ORDER)
         else:
             receipt_line_id = line.get('receipt_line_id')
@@ -810,46 +1157,48 @@ class VendorInvoiceMatchService:
                     _int(line.get('schedule_id')) != _int(receipt_schedule):
                 raise VendorInvoiceError(
                     '收货行与发票行计划行不一致', 'VI_RECEIPT_SCHEDULE_MISMATCH', 'schedule_id')
-            base = qty_invoiceable(receipt)
-            consumed = self._consumed_qty('receipt_line', receipt_line_id, POOL_AP_MATCH)
-            open_qty = max(base - consumed, 0.0)
+            open_qty = self._open_qty(line.get('schedule_id'), MODE_GR_BASED, receipt_line_id)
             allowed = self._allowed_upper(open_qty, 'vi_qty_tolerance_receipt', **dims)
-            if qty > allowed + EPS:
+            if qty > allowed + EPS and not overridden_now:
+                raise VendorInvoiceError(
+                    '行 {0} 开票数量 {1} 超过可开票余量 {2} + 容差'.format(
+                        line.get('line_no'), qty, open_qty),
+                    'VI_QTY_EXCEEDED', 'qty')
+            if qty > open_qty + EPS:
                 reasons.append(REASON_QTY_RECEIPT)
 
         qty_over = max(qty - open_qty, 0.0)
 
-        unit_price = _f(line.get('unit_price'))
+        # 价格比较一律用 22.2 归一后的不含税单价（含税价倒算走金额内核）
+        unit_price = self._net_unit_price(header, line)
         po_price = line.get('po_unit_price')
         price_diff_amount = None
         price_diff_percent = None
         if po_price is not None:
             po_price = _f(po_price)
-            price_diff_amount = (unit_price - po_price) * qty
+            decimals = self._amount_decimals(header)
+            price_diff_amount = float(round_amount(
+                (unit_price - po_price) * qty, decimals))
             if po_price > 0:
-                price_diff_percent = (unit_price - po_price) / po_price * 100.0
+                price_diff_percent = float(round_amount(
+                    (unit_price - po_price) / po_price * 100.0, 4))
                 if pricing == PRICING_PO_PRICE and unit_price > po_price + EPS:
                     tolerance = self.resolve_param('vi_price_tolerance', default=0.0, **dims)
                     if price_diff_percent > tolerance + EPS:
                         reasons.append(REASON_PRICE)
 
-        override_reason = line.get('override_reason')
-        overridden_by = line.get('overridden_by')
-        overridden_at = line.get('overridden_at')
-
+        if pricing == PRICING_RECEIPT_PRICE:
+            raise VendorInvoiceError(
+                '暂不支持按收货价定价（receipt_price），请使用 po_price 或 manual',
+                'VI_PRICING_MODE_UNSUPPORTED', 'match_pricing_mode')
         if pricing == PRICING_MANUAL:
             # 手工定价：不自动校验，必须 override 才能过账
-            if line.get('match_status') == MATCH_OVERRIDDEN and override_reason:
+            if overridden_now:
                 status = MATCH_OVERRIDDEN
             else:
                 status = MATCH_UNMATCHED
                 reasons = reasons or [REASON_MANUAL_PRICING]
-        elif pricing == PRICING_RECEIPT_PRICE:
-            override_reason = override_reason or REASON_RECEIPT_PRICE_MODE
-            overridden_by = overridden_by or 'system'
-            overridden_at = overridden_at or _now()
-            status = MATCH_EXCEPTION if reasons else MATCH_OVERRIDDEN
-        elif line.get('match_status') == MATCH_OVERRIDDEN and override_reason:
+        elif overridden_now:
             # 保留历史放行结论（post 内重算不覆盖人工 override）
             status = MATCH_OVERRIDDEN
         else:
@@ -864,6 +1213,8 @@ class VendorInvoiceMatchService:
             'item_id': line.get('item_id'),
             'uom_id': line.get('uom_id'),
             'po_unit_price': line.get('po_unit_price'),
+            'price_source': line.get('price_source'),
+            'price_trace': line.get('price_trace'),
             'qty': qty,
             'open_qty': open_qty,
             'qty_over_receipt': qty_over if mode == MODE_GR_BASED else None,
@@ -897,10 +1248,12 @@ class VendorInvoiceMatchService:
     def _persist_line_result(self, result: Dict[str, Any]) -> None:
         self.ds.execute(
             'UPDATE {0} SET schedule_id = ?, order_line_id = ?, po_unit_price = ?, '
+            'price_source = ?, price_trace = ?, '
             'qty_over_receipt = ?, price_diff_amount = ?, price_diff_percent = ?, '
             'match_status = ?, match_exception_reason = ?, override_reason = ?, '
             'overridden_by = ?, overridden_at = ?, updated_at = ? WHERE id = ?'.format(LINE_TABLE),
             [result.get('schedule_id'), result.get('order_line_id'), result.get('po_unit_price'),
+             result.get('price_source'), result.get('price_trace'),
              result.get('qty_over_receipt'), result.get('price_diff_amount'),
              result.get('price_diff_percent'), result.get('match_status'),
              result.get('match_exception_reason'), result.get('override_reason'),
@@ -912,6 +1265,8 @@ class VendorInvoiceMatchService:
         category = _s(header.get('document_category')) or CATEGORY_INVOICE
         if category in (CATEGORY_CREDIT_MEMO, CATEGORY_CANCELLATION):
             for line in lines:
+                if self._is_charge_line(line):
+                    continue  # R-VI-29：费用行不写 doc_flow 边
                 self._write_credit_red_edges(header, line)
             return
 
@@ -922,6 +1277,8 @@ class VendorInvoiceMatchService:
                     '调整方向必须为 increase / decrease', 'VI_ADJUSTMENT_DIRECTION_INVALID',
                     'adjustment_direction')
             for line in lines:
+                if self._is_charge_line(line):
+                    continue  # R-VI-29：费用行不写 doc_flow 边
                 if direction == ADJUSTMENT_INCREASE:
                     self._write_adjustment_increase_edges(header, line)
                 else:
@@ -929,64 +1286,88 @@ class VendorInvoiceMatchService:
             return
 
         for line in lines:
+            if self._is_charge_line(line):
+                continue  # R-VI-29：费用行不写 doc_flow 边
             line_id = line.get('id')
-            qty = abs(_f(line.get('qty')))
+            qty = _f(line.get('qty'))
             if qty <= 0 or not line_id:
                 continue
             net_amount = _f(line.get('net_amount'))
             unit = _s(line.get('uom_id'))
+            overridden = (line.get('match_status') == MATCH_OVERRIDDEN
+                          and bool(line.get('override_reason')))
 
             schedule_id = line.get('schedule_id')
             if schedule_id:
-                schedule = self._schedule(schedule_id) or {}
-                open_qty = max(_f(schedule.get('promised_qty')) -
-                               self._consumed_qty('purchase_order_schedule', schedule_id, POOL_BILLING), 0.0)
-                edge_qty = min(qty, open_qty)
-                if edge_qty > 0:
-                    attach_edge(
-                        self.ds, self.platform_ds, RULE_SCHEDULE_BILLING,
-                        schedule_id, line_id, edge_qty,
-                        target_item=str(line_id), unit=unit,
-                        amount=net_amount * edge_qty / qty,
-                        derived_by='vendor_invoice_match_service',
-                    )
+                # po_based 余量：promised − returned − billing 已消耗（唯一实现）
+                self._attach_consumption_edge(
+                    line, source_id=schedule_id, rule_id=RULE_SCHEDULE_BILLING,
+                    open_qty=self._open_qty(schedule_id, MODE_PO_BASED),
+                    net_amount=net_amount, unit=unit, overridden=overridden)
 
             receipt_line_id = line.get('receipt_line_id')
             if receipt_line_id:
-                receipt = self._receipt_line(receipt_line_id) or {}
-                open_qty = max(qty_invoiceable(receipt) -
-                               self._consumed_qty('receipt_line', receipt_line_id, POOL_AP_MATCH), 0.0)
-                edge_qty = min(qty, open_qty)
-                if edge_qty > 0:
-                    attach_edge(
-                        self.ds, self.platform_ds, RULE_RECEIPT_AP,
-                        receipt_line_id, line_id, edge_qty,
-                        target_item=str(line_id), unit=unit,
-                        amount=net_amount * edge_qty / qty,
-                        derived_by='vendor_invoice_match_service',
-                    )
+                # gr_based 余量：qty_invoiceable − ap_match 已消耗（唯一实现）
+                self._attach_consumption_edge(
+                    line, source_id=receipt_line_id, rule_id=RULE_RECEIPT_AP,
+                    open_qty=self._open_qty(None, MODE_GR_BASED, receipt_line_id),
+                    net_amount=net_amount, unit=unit, overridden=overridden)
+
+    def _attach_consumption_edge(self, line: Dict[str, Any], *, source_id: Any,
+                                 rule_id: str, open_qty: float, net_amount: float,
+                                 unit: str, overridden: bool) -> None:
+        """写 normal 消耗边（Spec §22.8.2）：超量显式拒绝，禁止 `min(qty, open)` 静默截断。
+
+        容差内超量在匹配阶段已置 exception，post 不会到达这里；人工 override 显式放行，
+        按全额写边（边是事实投影，不是判定输入的唯一副本）。
+        """
+        qty = _f(line.get('qty'))
+        if qty > open_qty + EPS and not overridden:
+            raise VendorInvoiceError(
+                '行 {0} 开票数量 {1} 超过可开票余量 {2}'.format(
+                    line.get('line_no'), qty, open_qty),
+                'VI_QTY_EXCEEDED', 'qty')
+        attach_edge(
+            self.ds, self.platform_ds, rule_id, source_id, line.get('id'), qty,
+            target_item=str(line.get('id')), unit=unit,
+            amount=net_amount,
+            derived_by='vendor_invoice_match_service',
+        )
 
     def _write_credit_red_edges(self, header: Dict[str, Any], line: Dict[str, Any]) -> None:
-        """贷项 / 取消单：对原发票行的 billing / ap_match 边写红字冲减（净额归零）。"""
+        """贷项 / 取消单：对原发票行的 billing / ap_match 边写红字冲减（净额归零）。
+
+        严格校验可冲减总量（Spec §22.8.2 / R-VI-28）：超出即显式拒绝，
+        不再 `min(qty, available)` 静默少冲；多条 normal 边按 rowid FIFO 累计分摊。
+        """
         original_line_id = line.get('invoice_line_id')
         qty = abs(_f(line.get('qty')))
         if not original_line_id or qty <= 0:
             return
         for rule_id in (RULE_SCHEDULE_BILLING, RULE_RECEIPT_AP):
-            edge = self._find_active_edge(rule_id, original_line_id)
-            if not edge:
+            edges = self._find_active_edges(rule_id, original_line_id)
+            if not edges:
                 continue
-            available = self._red_available(edge)
-            red_qty = min(qty, available)
-            if red_qty <= 0:
-                continue
-            try:
-                red_ink_edge(self.ds, edge.get('id'), quantity=red_qty,
-                             ref_id=str(line.get('id')),
-                             derived_by='vendor_invoice_match_service')
-            except Exception as exc:
+            available = sum(self._red_available(edge) for edge in edges)
+            if qty > available + EPS:
                 raise VendorInvoiceError(
-                    '红字冲减失败: {0}'.format(exc), 'VI_RED_INK_FAILED', 'invoice_line_id')
+                    '红冲数量 {0} 超过可冲减余量 {1}'.format(qty, available),
+                    'VI_RED_QTY_EXCEEDED', 'qty')
+            remaining = qty
+            for edge in edges:
+                if remaining <= EPS:
+                    break
+                red_qty = min(remaining, self._red_available(edge))
+                if red_qty <= EPS:
+                    continue
+                try:
+                    red_ink_edge(self.ds, edge.get('id'), quantity=red_qty,
+                                 ref_id=str(line.get('id')),
+                                 derived_by='vendor_invoice_match_service')
+                except Exception as exc:
+                    raise VendorInvoiceError(
+                        '红字冲减失败: {0}'.format(exc), 'VI_RED_INK_FAILED', 'invoice_line_id')
+                remaining -= red_qty
 
     def _write_adjustment_increase_edges(self, header: Dict[str, Any],
                                         line: Dict[str, Any]) -> None:
@@ -1007,9 +1388,7 @@ class VendorInvoiceMatchService:
 
         schedule_id = resolved.get('schedule_id')
         if schedule_id:
-            schedule = self._schedule(schedule_id) or {}
-            open_qty = max(_f(schedule.get('promised_qty')) -
-                           self._consumed_qty('purchase_order_schedule', schedule_id, POOL_BILLING), 0.0)
+            open_qty = self._open_qty(schedule_id, MODE_PO_BASED)
             if qty > open_qty + EPS:
                 raise VendorInvoiceError(
                     '调整数量 {0} 超过订单可开票余量 {1}'.format(qty, open_qty),
@@ -1025,9 +1404,7 @@ class VendorInvoiceMatchService:
 
         receipt_line_id = resolved.get('receipt_line_id')
         if receipt_line_id:
-            receipt = self._receipt_line(receipt_line_id) or {}
-            open_qty = max(qty_invoiceable(receipt) -
-                           self._consumed_qty('receipt_line', receipt_line_id, POOL_AP_MATCH), 0.0)
+            open_qty = self._open_qty(None, MODE_GR_BASED, receipt_line_id)
             if qty > open_qty + EPS:
                 raise VendorInvoiceError(
                     '调整数量 {0} 超过收货可开票余量 {1}'.format(qty, open_qty),
@@ -1097,10 +1474,6 @@ class VendorInvoiceMatchService:
             'ORDER BY rowid',
             [rule_id, str(target_line_id)],
         )
-
-    def _find_active_edge(self, rule_id: str, target_line_id: Any) -> Optional[Dict[str, Any]]:
-        edges = self._find_active_edges(rule_id, target_line_id)
-        return edges[-1] if edges else None
 
     def _red_available(self, edge: Dict[str, Any]) -> float:
         rows = self._rows(
@@ -1278,11 +1651,14 @@ class VendorInvoiceMatchService:
         originals = self._load_lines(invoice_id)
         if not originals:
             raise VendorInvoiceError('原单无明细行，无法调整', 'VI_LINES_EMPTY', 'lines')
-        built = self._build_adjustment_lines(originals, direction, lines)
+        adjustment_date = _s(invoice_date)[:10] or _today()
+        # 税率按调整日期回退取值；其余解析维度（org / 单据类型）沿用原票
+        calc_header = dict(original)
+        calc_header['invoice_date'] = adjustment_date
+        built = self._build_adjustment_lines(originals, direction, lines, calc_header)
         if not built:
             raise VendorInvoiceError('调整行不能为空', 'VI_LINES_EMPTY', 'lines')
 
-        adjustment_date = _s(invoice_date)[:10] or _today()
         invoice_no = self._allocate_number(adjustment_date, adjustment_meta.get('id'))
 
         now = _now()
@@ -1320,6 +1696,17 @@ class VendorInvoiceMatchService:
                 raise VendorInvoiceError(
                     '调整单创建失败', 'VI_ADJUSTMENT_FAILED', 'invoice_no')
             line_ids = self._insert_adjustment_lines(adjustment_id, built, now)
+            # 头金额统一由金额内核按已落库行汇总（含 rounding_diff），
+            # 不再在此手工求和 / 硬编码 rounding_diff=0（Spec §22.3）。
+            from meta.services.vendor_invoice_amount_service import (
+                VendorInvoiceAmountService,
+            )
+            header_values = VendorInvoiceAmountService(self.ds).recompute_order(
+                adjustment_id)
+        if header_values:
+            for key in ('net_amount', 'tax_amount', 'gross_amount', 'rounding_diff'):
+                if key in header_values:
+                    data[key] = _f(header_values[key])
 
         self._audit(adjustment_id, 'create_adjustment', user_name=user_name,
                     extra={'adjustment_of_invoice_id': _int(invoice_id),
@@ -1353,11 +1740,22 @@ class VendorInvoiceMatchService:
         return rows[0]
 
     def _build_adjustment_lines(self, originals: List[Dict[str, Any]], direction: str,
-                                requested: Optional[List[Dict[str, Any]]]) -> List[Dict[str, Any]]:
-        """按原行生成调整行；requested 为空表示整单全额调整。"""
+                                requested: Optional[List[Dict[str, Any]]],
+                                header: Optional[Dict[str, Any]] = None) -> List[Dict[str, Any]]:
+        """按原行生成调整行；requested 为空表示整单全额调整。
+
+        金额一律由金额内核 `compute_adjustment_line` 计算（Spec §22.5 T1/T2/T3），
+        本层只负责选行、回填锚点与价格轨迹：不做算术、不做 `round(x, 2)`、
+        不再按数量比例缩放金额（G-4 / R-VI-31）。
+        """
+        from meta.services.vendor_invoice_amount_service import (
+            VendorInvoiceAmountService,
+        )
+
         by_id = {_int(row.get('id')): row for row in originals}
+        explicit = bool(requested)
         picks: List[Any] = []
-        if requested:
+        if explicit:
             seen = set()
             for item in requested:
                 line_id = _int(item.get('invoice_line_id') or item.get('id'))
@@ -1373,37 +1771,68 @@ class VendorInvoiceMatchService:
         else:
             picks = [(lid, {}) for lid in by_id]
 
-        sign = 1.0 if direction == ADJUSTMENT_INCREASE else -1.0
+        kernel = VendorInvoiceAmountService(self.ds)
         built: List[Dict[str, Any]] = []
         for line_id, override in picks:
             source = by_id[line_id]
-            source_qty = abs(_f(source.get('qty')))
-            qty = abs(_f(override['qty'] if override.get('qty') is not None
-                         else source.get('qty')))
-            unit_price = _f(override['unit_price'] if override.get('unit_price') is not None
-                            else source.get('unit_price'))
-            # 只给数量不给金额时按数量比例折算，避免行金额仍是原行全额（数量/金额口径失衡）
-            ratio = (qty / source_qty) if qty > 0 and source_qty > 0 and qty != source_qty else 1.0
-            net = abs(_f(override['net_amount'])) if override.get('net_amount') is not None \
-                else round(abs(_f(source.get('net_amount'))) * ratio, 2)
-            tax = abs(_f(override['tax_amount'])) if override.get('tax_amount') is not None \
-                else round(abs(_f(source.get('tax_amount'))) * ratio, 2)
-            if qty <= 0 and net <= 0:
+            # 整单模式跳过零数量零金额行；显式指定则由内核报 VI_ADJUSTMENT_EMPTY_LINE
+            if (not explicit and abs(_f(source.get('qty'))) <= EPS
+                    and abs(_f(source.get('net_amount'))) <= EPS):
                 continue
+            try:
+                computed = kernel.compute_adjustment_line(
+                    header or {}, source,
+                    qty=override.get('qty'),
+                    unit_price=override.get('unit_price'),
+                    net_amount=override.get('net_amount'),
+                    tax_amount=override.get('tax_amount'),
+                    direction=direction)
+            except SalesOrderAmountError as exc:
+                raise VendorInvoiceError(
+                    str(exc), getattr(exc, 'rule', '') or 'VI_AMOUNT_ERROR',
+                    getattr(exc, 'field_name', '')) from exc
+            # §22.5 规则 2：qty=0 且 net_amount=0 的调整行禁止占位
+            if (abs(_f(computed['qty'])) <= EPS
+                    and abs(_f(computed['net_amount'])) <= EPS):
+                raise VendorInvoiceError(
+                    '调整行不能为空', 'VI_ADJUSTMENT_EMPTY_LINE', 'net_amount')
             row = {
                 key: value for key, value in source.items()
                 if key not in _ADJUSTMENT_LINE_DROP
             }
             row.update({
                 'original_line_id': line_id,
-                'qty': qty,
-                'unit_price': unit_price,
-                'net_amount': sign * net,
-                'tax_amount': sign * tax,
-                'gross_amount': sign * (net + tax),
+                'qty': _f(computed['qty']),
+                'unit_price': _f(computed['unit_price']),
+                'price_includes_tax': computed['price_includes_tax'],
+                'net_amount': _f(computed['net_amount']),
+                'tax_amount': _f(computed['tax_amount']),
+                'gross_amount': _f(computed['gross_amount']),
+                'tax_base_amount': _f(computed['net_amount']),
+                'tax_rate_percent': (None if computed.get('tax_rate_percent') is None
+                                     else _f(computed['tax_rate_percent'])),
+                'price_source': PRICE_SOURCE_ADJUSTMENT,
+                'price_trace': self._adjustment_price_trace(source, line_id),
             })
             built.append(row)
         return built
+
+    @staticmethod
+    def _adjustment_price_trace(source: Dict[str, Any], line_id: Any) -> str:
+        """调整单价格轨迹：保留原行 PO 键整段，再标记 adjustment + 原行回指。"""
+        trace: Dict[str, Any] = {}
+        raw = source.get('price_trace')
+        if raw:
+            try:
+                parsed = json.loads(raw)
+                if isinstance(parsed, dict):
+                    trace = parsed
+            except (TypeError, ValueError):
+                trace = {}
+        trace['original_line_id'] = _int(line_id)
+        trace['price_source'] = PRICE_SOURCE_ADJUSTMENT
+        trace['snapshot_at'] = _now()
+        return json.dumps(trace, ensure_ascii=False, sort_keys=True)
 
     def _insert_adjustment_lines(self, invoice_id: int,
                                  lines: List[Dict[str, Any]], now: str) -> List[int]:

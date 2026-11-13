@@ -409,6 +409,23 @@ fields:
       widget: number
       editable: false
 
+  - id: allocated_charge_amount
+    name: 分摊费用额
+    type: number
+    db_column: allocated_charge_amount
+    required: true
+    default: 0
+    constraints:
+      - type: numeric_range
+        decimal_places: 4
+    description: 由本票费用行摊得的金额（只读派生，事实源为 allocation_results）
+    semantics:
+      meaning: 摊得的费用金额
+      read_only: true
+    ui:
+      widget: number
+      editable: false
+
   - id: po_unit_price
     name: PO 单价
     type: number
@@ -771,6 +788,8 @@ ui_view_config:
         width: 120
       - field: tax_amount
         width: 110
+      - field: allocated_charge_amount
+        width: 130
       - field: match_status
         width: 110
     selection:

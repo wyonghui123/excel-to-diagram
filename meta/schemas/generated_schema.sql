@@ -4116,6 +4116,7 @@ CREATE TABLE IF NOT EXISTS vendor_invoice_lines (
     net_amount REAL NOT NULL DEFAULT 0,
     tax_amount REAL NOT NULL DEFAULT 0,
     gross_amount REAL NOT NULL DEFAULT 0,
+    allocated_charge_amount REAL NOT NULL DEFAULT 0,
     po_unit_price REAL,
     price_source VARCHAR(20) CHECK (price_source IN ('po', 'manual', 'adjustment')),
     price_trace TEXT,
