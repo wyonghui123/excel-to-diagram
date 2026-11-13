@@ -18,6 +18,8 @@ import os
 import re
 from typing import Dict, List, Any, Optional, Tuple
 from meta.services.condition_evaluator import ConditionEvaluator
+from meta.core.condition_converter import ConditionParseError, validate_condition_text
+from meta.core.condition_parser import allowed_operators_for, validate_operator
 from meta.core.hierarchy_loader import (
     get_child_type_map,
     get_extra_entity_map,
@@ -622,6 +624,11 @@ class ConditionPermissionService:
             if rule_type not in self.VALID_RULE_TYPES:
                 rule_type = 'condition'
 
+            # [B1 2026-11-13] condition_display 单一写入口：忽略客户端传入值，
+            #   一律按 condition 现算，避免前后端双口径展示串漂移。
+            condition_display = self._generate_friendly_condition(
+                data.get('condition') or '')
+
             cursor = self.ds.execute(
                 """INSERT INTO data_permission_rules
                    (permission_set_id, rule_type, resource_type, dimension_code, condition,
@@ -635,7 +642,7 @@ class ConditionPermissionService:
                     data.get('resource_type'),
                     data.get('dimension_code'),
                     data.get('condition'),
-                    data.get('condition_display'),
+                    condition_display,
                     data.get('scope_mode', 'include'),
                     data.get('permission_level', 'read'),
                     1 if data.get('is_denied') else 0,
@@ -736,6 +743,18 @@ class ConditionPermissionService:
                 if wildcard_err:
                     print(f"[Spec19 FR-002] {wildcard_err}")
                     return False
+
+            # [B1 2026-11-13] condition_display 单一写入口：
+            #   - 带 condition → 现算展示串，忽略客户端值；
+            #   - 只带 condition_display（无 condition）→ 视为非法输入直接忽略，
+            #     避免库内展示串与 condition 脱节。
+            data = dict(data)
+            if 'condition' in data:
+                data['condition_display'] = self._generate_friendly_condition(
+                    data.get('condition') or '')
+            else:
+                data.pop('condition_display', None)
+
             sets = []
             params = []
             for field in ['condition', 'condition_display', 'permission_level', 'is_denied',
@@ -1009,6 +1028,8 @@ class ConditionPermissionService:
                         'enum_values': None,
                         'enum_ref': None,
                         'anchor_semantics': 'bizkey',
+                        # [B3 2026-11-13] 该字段允许的算子（前端下拉唯一来源）
+                        'allowed_operators': allowed_operators_for(field.field_type.value),
                     })
                     continue
 
@@ -1045,6 +1066,8 @@ class ConditionPermissionService:
                     #   None       = 普通属性条件
                     # 前端字段分组 / 对偶 hint / placeholder / 保存契约全部由它派生
                     'anchor_semantics': None,
+                    # [B3 2026-11-13] 该字段允许的算子（前端下拉唯一来源）
+                    'allowed_operators': allowed_operators_for(field.field_type.value),
                 }
 
                 # 判断是否为外键
@@ -1106,6 +1129,39 @@ class ConditionPermissionService:
         except Exception as e:
             print(f"Error loading field metadata for {resource_type}: {e}")
             return []
+
+    def validate_condition_fields(self, resource_type: str,
+                                  condition: Optional[str]) -> None:
+        """[B2/B3 2026-11-13] 写路径条件校验：严格解析 + 字段类型 × 算子白名单。
+
+        - B2：任何片段无法被扁平 AND 解析器消费（OR / 嵌套括号 / 未知算子）
+          即抛错，禁止静默丢弃后「存 A 求 B」。
+        - B3：已暴露字段按 field_type 的算子矩阵校验；未暴露字段
+          （业务基线 / 派生字段）无法判定类型，不做算子拦截。
+
+        Raises:
+            ConditionParseError: 条件文本非法。
+        """
+        conditions = validate_condition_text(condition)
+        if not conditions:
+            return
+
+        meta_by_key: Dict[str, Dict] = {}
+        for item in self.get_resource_field_metadata(resource_type):
+            for key in (item.get('db_column'), item.get('id')):
+                if key:
+                    meta_by_key[str(key)] = item
+
+        for cond in conditions:
+            field = str(cond.get('field') or '')
+            op = str(cond.get('op') or '')
+            meta = meta_by_key.get(field)
+            if not meta:
+                continue
+            if not validate_operator(meta.get('field_type'), op):
+                allowed = ' / '.join(allowed_operators_for(meta.get('field_type')))
+                raise ConditionParseError(
+                    f"字段 {field}（{meta.get('field_type')}）不支持算子 {op}，可用: {allowed}")
 
     # ========== 员工数据权限 ==========
 

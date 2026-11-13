@@ -3876,13 +3876,22 @@ def create_permission_rule_v2():
         current_user = getattr(g, 'current_user', None) or {}
         user_id = current_user.get('user_id')
 
+        # [B2/B3 2026-11-13] 写路径条件校验：严格解析（禁 OR/嵌套/未知算子静默丢弃）
+        #   + 字段类型 × 算子白名单；非法条件明确 400，不落库。
+        from meta.core.condition_converter import ConditionParseError
+        try:
+            service.validate_condition_fields(
+                data.get('resource_type'), data.get('condition'))
+        except ConditionParseError as e:
+            return error_response(str(e), status=400, error_code='CONDITION_INVALID')
+
         rule_data = {
             'permission_set_id': data.get('permission_set_id'),
             'rule_type': rule_type,
             'resource_type': data.get('resource_type'),
             'dimension_code': data.get('dimension_code'),
             'condition': data.get('condition', ''),
-            'condition_display': data.get('condition_display', ''),
+            # condition_display 由服务端按 condition 现算（B1 单一写入口）
             'scope_mode': data.get('scope_mode', 'include'),
             'permission_level': data.get('permission_level', 'read'),
             'is_denied': data.get('is_denied', False),
@@ -3932,6 +3941,21 @@ def update_permission_rule_v2(rule_id):
                     data.get('resource_type'), data.get('condition'))
                 if wildcard_err:
                     return error_response(wildcard_err, status=400)
+
+            # [B2/B3 2026-11-13] 条件严格解析 + 算子白名单校验（载荷带 condition 时）
+            resource_type = data.get('resource_type')
+            if not resource_type:
+                row = service.ds.execute(
+                    'SELECT resource_type FROM data_permission_rules WHERE id = ?',
+                    [rule_id]).fetchone()
+                if row:
+                    resource_type = row[0]
+            from meta.core.condition_converter import ConditionParseError
+            try:
+                service.validate_condition_fields(
+                    resource_type, data.get('condition'))
+            except ConditionParseError as e:
+                return error_response(str(e), status=400, error_code='CONDITION_INVALID')
 
         # 先尝试统一表更新
         success = service.update_unified_rule(rule_id, data)

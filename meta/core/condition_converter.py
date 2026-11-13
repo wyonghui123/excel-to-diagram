@@ -60,6 +60,10 @@ _STR_LITERAL_RE = re.compile(r"^'([^']*)'$")
 _NUM_LITERAL_RE = re.compile(r'^-?\d+(?:\.\d+)?$')
 
 
+class ConditionParseError(ValueError):
+    """条件文本无法被扁平 AND 解析器完整消费（禁止静默丢弃）。"""
+
+
 class ConditionConverter:
     """自由文本条件 → 结构化 [{field, op, value}]"""
 
@@ -201,3 +205,48 @@ class ConditionConverter:
         if re.match(r'^[A-Za-z_][A-Za-z0-9_\.]*$', raw):
             return raw
         return None
+
+
+def validate_condition_text(text: Optional[str]) -> List[Dict[str, Any]]:
+    """严格解析条件文本：任何片段无法解析即抛 :class:`ConditionParseError`。
+
+    与 ``ConditionConverter.convert`` 的区别：convert 为向前兼容会**静默跳过**
+    无法解析的片段（如未知算子 / OR 组合 / 嵌套括号），导致落库后求值链路
+    只消费部分条件（fail-open 风险）。写路径必须用本函数，保证「存什么就求什么」。
+
+    Returns:
+        [{field, op, value}, ...]；空文本返回 []。
+
+    Raises:
+        ConditionParseError: 存在 OR 组合 / 括号不匹配 / 无法解析的片段。
+    """
+    if text is None:
+        return []
+    raw = str(text)
+    if not raw.strip():
+        return []
+
+    # 1. 顶层 OR：求值链路（condition_evaluator）只按 AND 拆分，OR 会被吞掉
+    upper = raw.upper()
+    depth = 0
+    for i, ch in enumerate(raw):
+        if ch == '(':
+            depth += 1
+        elif ch == ')':
+            depth -= 1
+            if depth < 0:
+                raise ConditionParseError('条件括号不匹配')
+        elif depth == 0 and upper[i:i + 4] == ' OR ':
+            raise ConditionParseError('条件不支持 OR 组合（求值链路仅支持 AND 串联），请拆分为多条规则')
+    if depth != 0:
+        raise ConditionParseError('条件括号不匹配')
+
+    # 2. 逐段严格解析：复用 convert 的拆分 / 单条解析，但不允许任何片段被丢弃
+    converter = ConditionConverter()
+    conditions: List[Dict[str, Any]] = []
+    for part in converter._split_and(raw):
+        cond = converter._parse_single(part)
+        if cond is None:
+            raise ConditionParseError(f'条件片段无法解析: {part}')
+        conditions.append(cond)
+    return conditions

@@ -33,12 +33,14 @@ export interface FieldMeta {
   enum_ref?: string | null
   is_foreign_key?: boolean
   relation_object?: string
+  /** [B3 2026-11-13] 后端按 field_type 下发的合法算子白名单（有则以它为准） */
+  allowed_operators?: string[]
 }
 
 /**
  * 按字段类型返回合法操作符下拉项
  */
-export function getOperatorOptions(fieldType) {
+function baseOperatorOptions(fieldType): OperatorOption[] {
   const ft = (fieldType || 'string').toLowerCase()
 
   // 1. 数值类型
@@ -91,6 +93,27 @@ export function getOperatorOptions(fieldType) {
     { value: 'IN', label: '在列表中（多值）' },
     { value: 'NOT IN', label: '不在列表中（多值）' },
   ]
+}
+
+/**
+ * 字段可用算子：优先后端下发的 allowed_operators，缺省回退本地类型矩阵
+ *
+ * [B3 2026-11-13] 后端（字段元数据接口）与写路径校验共用同一矩阵，
+ * 前端不再自说自话；后端新增算子无需改前端即可生效。
+ */
+export function getOperatorOptions(
+  fieldType,
+  allowedOperators?: string[] | null,
+): OperatorOption[] {
+  const options = baseOperatorOptions(fieldType)
+  if (!Array.isArray(allowedOperators) || allowedOperators.length === 0) {
+    return options
+  }
+  const allow = new Set(allowedOperators.map(o => String(o).toUpperCase()))
+  const filtered = options.filter(o => allow.has(o.value.toUpperCase()))
+  if (filtered.length) return filtered
+  // 后端算子不在本地矩阵中（如新增 IS NULL）→ 直接按后端值生成
+  return allowedOperators.map(v => ({ value: v, label: v }))
 }
 
 /**

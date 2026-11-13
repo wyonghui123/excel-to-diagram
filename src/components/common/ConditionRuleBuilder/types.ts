@@ -29,7 +29,12 @@ export interface FieldMetadata {
   is_enum?: boolean
   enum_values?: string[] | null
   enum_ref?: string | null
+  /** [B3 2026-11-13] 后端下发的合法算子白名单（缺省回退本地类型矩阵） */
+  allowed_operators?: string[]
 }
+
+/** rule-init 等模块使用的简写别名 */
+export type FieldMeta = FieldMetadata
 
 /**
  * 原子条件（叶子节点）
@@ -47,6 +52,8 @@ export interface RuleNode {
   isEnum?: boolean
   enumValues?: any[] | null
   enumRef?: string | null
+  /** [B3 2026-11-13] 该字段允许的算子（来自字段元数据，驱动算子下拉） */
+  allowedOperators?: string[]
 }
 
 /**

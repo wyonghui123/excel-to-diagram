@@ -36,7 +36,7 @@ export function initRuleForField(rule: RuleNode, meta: FieldMeta | null): RuleNo
 
   // operator 校验: 旧 operator 在新 fieldType 的合法操作符集合内则保留,
   // 否则切换到该 fieldType 的第一个合法 operator
-  const validOps = getOperatorOptions(fieldType).map((o) => o.value)
+  const validOps = getOperatorOptions(fieldType, meta?.allowed_operators).map((o) => o.value)
   const newOp = validOps.includes(rule.operator) ? rule.operator : (validOps[0] || "=")
 
   return {
@@ -44,6 +44,7 @@ export function initRuleForField(rule: RuleNode, meta: FieldMeta | null): RuleNo
     field,
     fieldType,
     operator: newOp,
+    allowedOperators: meta?.allowed_operators ?? rule.allowedOperators,
     value: '',  // 重置值
     relationObject: meta?.is_foreign_key ? meta.relation_object : '',
     isBusinessKey: meta ? isBusinessKeyField(meta) : false,

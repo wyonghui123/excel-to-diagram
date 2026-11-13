@@ -17,6 +17,50 @@ from typing import Any, Dict, List, Optional, Tuple
 
 from meta.core.hierarchy_loader import get_hierarchy_chain
 
+# ────────────────────────────────────────────
+# [规则模型 B3 2026-11-13] 字段类型 × 操作符矩阵（唯一真源）
+#   前端 operators.ts getOperatorOptions 的同构矩阵；字段元数据接口下发
+#   allowed_operators，写路径按此校验，避免「UI 给了不能求值的算子」。
+#   IS NULL / IS NOT NULL 求值链路支持但 UI 不下发，校验时按兼容集合放行。
+# ────────────────────────────────────────────
+OPERATORS_BY_FIELD_TYPE = {
+    'number': ['=', '!=', '>', '<', '>=', '<=', 'IN', 'NOT IN'],
+    'date': ['=', '!=', '>', '<', '>=', '<='],
+    'boolean': ['=', '!='],
+    'text': ['LIKE', 'NOT LIKE'],
+    'string': ['=', '!=', 'LIKE', 'IN', 'NOT IN'],
+}
+
+_NUMBER_TYPES = {'integer', 'int', 'number', 'decimal', 'float'}
+_DATE_TYPES = {'date', 'datetime', 'timestamp'}
+_BOOLEAN_TYPES = {'boolean', 'bool'}
+
+# 校验兼容集：上述矩阵 + NULL 判断（存量数据 / 内部写入可能使用）
+_NULL_OPS = ['IS NULL', 'IS NOT NULL']
+
+
+def allowed_operators_for(field_type: Optional[str]) -> List[str]:
+    """字段类型 → 合法操作符列表（前端下拉与后端校验同源）。"""
+    ft = (field_type or 'string').lower()
+    if ft in _NUMBER_TYPES:
+        return list(OPERATORS_BY_FIELD_TYPE['number'])
+    if ft in _DATE_TYPES:
+        return list(OPERATORS_BY_FIELD_TYPE['date'])
+    if ft in _BOOLEAN_TYPES:
+        return list(OPERATORS_BY_FIELD_TYPE['boolean'])
+    if ft == 'text':
+        return list(OPERATORS_BY_FIELD_TYPE['text'])
+    return list(OPERATORS_BY_FIELD_TYPE['string'])
+
+
+def validate_operator(field_type: Optional[str], op: str) -> bool:
+    """判断 (field_type, op) 是否合法（NULL 判断按兼容集放行）。"""
+    norm = (op or '').strip().upper()
+    if norm in _NULL_OPS:
+        return True
+    return norm in {o.upper() for o in allowed_operators_for(field_type)}
+
+
 # 操作符白名单 (与 SafeExpressionEvaluator.ALLOWED_OPERATORS 对齐)
 SUPPORTED_OPS = {
     '=', '!=', '<', '<=', '>', '>=',

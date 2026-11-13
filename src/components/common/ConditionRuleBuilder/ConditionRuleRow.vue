@@ -254,7 +254,8 @@ const emit = defineEmits(['update:rule', 'change', 'remove', 'removeGroup'])
 // 子组 connector 改由 RuleBuilderGroup tag-row 承担, 这里只关心 per-row connector
 const isConnectorEmpty = computed(() => props.isFirst)
 
-const operatorOptions = computed(() => getOperatorOptions(props.rule.fieldType))
+const operatorOptions = computed(() =>
+  getOperatorOptions(props.rule.fieldType, props.rule.allowedOperators))
 const isDate = computed(() => isDateFieldType(props.rule.fieldType))
 const isNumber = computed(() => isNumberFieldType(props.rule.fieldType))
 const isBoolean = computed(() => isBooleanFieldType(props.rule.fieldType))
