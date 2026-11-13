@@ -501,8 +501,8 @@ async function loadStatusEnum() {
   }
 }
 
-onMounted(async () => {
-  await loadStatusEnum()
+onMounted(() => {
+  loadStatusEnum()
   loadChange()
   loadImpact()
 })

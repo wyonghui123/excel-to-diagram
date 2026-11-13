@@ -37,6 +37,7 @@ from meta.core.models_value_help import (
 from meta.core.models_ui_config import (
     UIListViewColumn, UIListViewConfig, UIDetailFacet, UIDetailTab,
     UIDetailViewConfig, UIFormColumn, UIFormSection, UIFormViewConfig,
+    UITabConfig,
     UIFilterDefinition, UIFilterViewConfig, ChangeEventConfig,
     WebhookConfig, ChangeNotificationConfig, UIViewConfig,
     UIReportConfig, UIReportFilterConfig, UIReportKpiConfig,

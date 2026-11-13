@@ -169,8 +169,12 @@ class TestActionExecutorUserCreate:
 
     def _assert_user_in_db(self, user_id, must_change_password, username):
         """辅助：直接查 DB 验证落库"""
-        from meta.core.datasource import get_data_source
-        ds = get_data_source()
+        # [FIX 2026-11-12] get_data_source() 签名要求必填 source_type
+        #   (meta/core/datasource.py:443)，零参调用必抛 TypeError。
+        #   这里复用 BO 框架当前绑定的数据源，与上面的 _delete_user_by_username 一致，
+        #   避免测试自行猜测连接参数而连到错误的库。
+        from meta.core.bo_framework import bo_framework as global_bo
+        ds = global_bo._data_source
         cursor = ds.execute(
             "SELECT must_change_password, username FROM users WHERE id = ?", [user_id]
         )

@@ -102,15 +102,26 @@ class TestTreeNodeSelectionToList:
         if vid is None:
             pytest.skip("No sub_domains available")
 
-        rows = get_data_source("sqlite", database=get_test_db_path()).execute(
-            f"SELECT id FROM sub_domains WHERE version_id = {vid} LIMIT 3"
+        ds = get_data_source("sqlite", database=get_test_db_path())
+        # sub_domains 表没有 sub_domain_id 列，此前按自身 id 过滤会被 API 忽略，
+        # 导致分页默认只回前 20 条、断言失败。按 domain_id（树节点）过滤才是本用例意图。
+        domain_row = ds.execute(
+            f"SELECT domain_id FROM sub_domains WHERE version_id = {vid} "
+            "AND domain_id IS NOT NULL LIMIT 1"
+        ).fetchone()
+        if not domain_row:
+            pytest.skip("No sub_domains available")
+        domain_id = domain_row[0]
+
+        rows = ds.execute(
+            f"SELECT id FROM sub_domains WHERE domain_id = {domain_id} LIMIT 3"
         ).fetchall()
         sub_domain_ids = [str(r[0]) for r in rows]
 
         if len(sub_domain_ids) < 1:
             pytest.skip("No sub_domains available")
 
-        qs = f"version_id={vid}&" + "&".join([f"sub_domain_id={sdid}" for sdid in sub_domain_ids])
+        qs = f"domain_id={domain_id}&page_size=100"
 
         resp = client.get(f"/api/v2/bo/sub_domain?{qs}", headers=auth_headers)
         data = resp.get_json()

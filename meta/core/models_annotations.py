@@ -278,6 +278,11 @@ class UIAnnotation:
     value_help: Optional['ValueHelpConfig'] = None
     cascade_group: str = ""
     cascade_level: int = 0
+    # [UI 元数据聚合 2026-11-13] 显隐表达式只承载 UI 显隐，不含权限判定；
+    #   权限启用态只来自 actions/evaluate，避免两套口径。
+    visible_when: Optional[str] = None
+    # [UI 元数据聚合 2026-11-13] 栅格跨列 1..4；越界/非整数在加载期降级为 None 并 warning。
+    col_span: Optional[int] = None
 
 
 @dataclass

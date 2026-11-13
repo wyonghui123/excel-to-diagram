@@ -130,6 +130,7 @@ from meta.api.data_permission_api import data_perm_bp, init_data_perm_services
 from meta.api.org_api import org_bp, init_org_services
 from meta.api.org_function_api import org_function_bp, init_org_function_services
 from meta.api.enum_api import enum_bp, init_enum_services
+from meta.api.meta_enum_api import meta_enum_bp
 from meta.api.menu_permission_api import menu_permission_bp
 from meta.api.permission_bundle_api import permission_bundle_bp
 from meta.api.permission_audit_api import permission_audit_bp
@@ -1117,6 +1118,7 @@ def create_app(db_path=None):
     app.register_blueprint(org_bp)
     app.register_blueprint(org_function_bp)
     app.register_blueprint(enum_bp)
+    app.register_blueprint(meta_enum_bp)  # /api/v2/meta/*（B2-1 统一枚举/矩阵 schema）
     app.register_blueprint(menu_permission_bp)
     app.register_blueprint(permission_bundle_bp)
     app.register_blueprint(permission_audit_bp)
@@ -1150,6 +1152,9 @@ def create_app(db_path=None):
     #   app_builder 已登记，生产入口（waitress → create_app）必须同址补齐。
     from meta.api.doc_flow_api import doc_flow_bp
     app.register_blueprint(doc_flow_bp)
+    # [P0-1 2026-11-13] 三方集成凭证收口（app_builder 已登记，生产入口补齐）。
+    from meta.api.integration_api import integration_bp
+    app.register_blueprint(integration_bp)
     # [roadmap v1.32.0 §6.2.4] 任务体系 = 部署级可关闭的平台模块。
     # 不注册 blueprint ⇒ 路由真 404（不只是前端看不见），须与菜单种子同门。
     _tasks_enabled = is_module_enabled('tasks')
@@ -1216,9 +1221,11 @@ def create_app(db_path=None):
     #   app_builder 已登记，生产入口（waitress → create_app）必须同址补齐。
     from meta.api.rule_center_api import rule_center_bp, rule_trace_bp
     from meta.api.amount_trace_api import amount_trace_bp
+    from meta.api.rule_hold_api import rule_hold_bp
     app.register_blueprint(rule_center_bp)
     app.register_blueprint(rule_trace_bp)
     app.register_blueprint(amount_trace_bp)
+    app.register_blueprint(rule_hold_bp)
     app.register_blueprint(key_template_bp)
     app.register_blueprint(test_bp)
     app.register_blueprint(debug_bp)

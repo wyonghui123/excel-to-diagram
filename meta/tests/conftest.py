@@ -61,22 +61,80 @@ logger = logging.getLogger(__name__)
 _SHARED_APP = None
 _SHARED_CLIENT = None
 
+# [TEST-ISO 2026-11-12] 共享 app 必须按 ENABLED_APPS 配置分桶缓存。
+# 事故: test_e2e_tree_to_list 先以 legacy 模式创建并缓存 app; 随后
+# test_event_outbox_poc4 设置 ENABLED_APPS=warehouse,tms 调 create_app()
+# 命中同一缓存 → 返回未注册应用的 app → 18 条 `Unknown object type: warehouse`。
+# 单文件运行不复现（缓存里没有 legacy app）；与 registry 污染无关。
+_SHARED_APP_ENV_KEY = None
+_APP_CACHE = {}     # (enabled_app_ids...) -> Flask app
+_CLIENT_CACHE = {}  # (enabled_app_ids...) -> test client
+
+
+def _current_enabled_apps_key():
+    """当前进程应用配置的缓存键（决定是否需要另一个 Flask app 实例）。
+
+    仅 ENABLED_APPS 不够：`test_event_outbox_poc4` 与 `test_merged_two_apps_menu`
+    都用 warehouse,tms，但各自要求应用库落在自己的 SQLITE_DB_DIR。配置不同
+    ⇒ 必须是不同 app 实例，否则应用表会建到上一个模块的临时目录里。
+    """
+    try:
+        from meta.core.app_registry import get_enabled_app_ids
+        enabled = tuple(get_enabled_app_ids())
+    except Exception:
+        enabled = ()
+    return (
+        enabled,
+        os.environ.get('SQLITE_DB_DIR', ''),
+        os.environ.get('APP_DB_ROUTING', ''),
+        os.environ.get('SQLITE_DB_PATH', ''),
+        os.environ.get('TEST_DB_PATH', ''),
+    )
+
+
+def _dedupe_interceptors_once():
+    """[TEST-ISO 2026-11-12] 同一进程多次 create_app() 时剔除重复拦截器。
+
+    `ApplicationBuilder.with_interceptors()` 无条件 append，进程内第 2 个 app
+    会得到两套 PersistenceInterceptor → 一次写入持久化两遍 → 400「编号值已存在」。
+    每个 create_app 注册的是完整一套，按类型去重保留最后一套即可。
+    """
+    try:
+        from meta.core.bo_framework import bo_framework
+        latest = {}
+        for interceptor in bo_framework._interceptors:
+            latest[type(interceptor)] = interceptor
+        if len(latest) != len(bo_framework._interceptors):
+            bo_framework._interceptors = sorted(
+                latest.values(), key=lambda i: i.priority
+            )
+    except Exception as e:
+        logger.warning("interceptor dedupe skipped: %s", e)
+
+
 def get_shared_app():
     """
     获取共享的 Flask app 和 client
     必须在导入 shared.fixtures 之前定义，避免循环导入问题
     """
-    global _SHARED_APP, _SHARED_CLIENT
+    global _SHARED_APP, _SHARED_CLIENT, _SHARED_APP_ENV_KEY
 
-    if _SHARED_APP is None:
-        if OPTIMIZER_AVAILABLE:
-            create_app_func = create_app_with_retry(max_retries=5, retry_delay=1.0)
-            _SHARED_APP = create_app_func()
+    env_key = _current_enabled_apps_key()
+    if _SHARED_APP is None or _SHARED_APP_ENV_KEY != env_key:
+        if env_key not in _APP_CACHE:
+            if OPTIMIZER_AVAILABLE:
+                create_app_func = create_app_with_retry(max_retries=5, retry_delay=1.0)
+                _SHARED_APP = create_app_func()
+            else:
+                from meta.server import create_app
+                _SHARED_APP = create_app()
+            _SHARED_APP.config['TESTING'] = True
+            _APP_CACHE[env_key] = _SHARED_APP
         else:
-            from meta.server import create_app
-            _SHARED_APP = create_app()
-        _SHARED_APP.config['TESTING'] = True
-        _SHARED_CLIENT = _SHARED_APP.test_client()
+            _SHARED_APP = _APP_CACHE[env_key]
+        _SHARED_APP_ENV_KEY = env_key
+        # app 换了，client 必须重建（client 绑定旧 app 的 url_map / 上下文）
+        _SHARED_CLIENT = _CLIENT_CACHE.get(env_key)
         # [FIX 2026-07-19] meta/server.py 用 load_dotenv(override=True) 加载 .env,
         # .env 含 FLASK_ENV=production 会导致 dev-login 返回 404, 大量 integration 测试 fail.
         # 测试环境下强制清除, 让 _is_production() 返回 False, dev-login 可用.
@@ -89,6 +147,7 @@ def get_shared_app():
     if _SHARED_CLIENT is None:
         _SHARED_APP.config['TESTING'] = True
         _SHARED_CLIENT = _SHARED_APP.test_client()
+        _CLIENT_CACHE[env_key] = _SHARED_CLIENT
 
     if hasattr(_SHARED_CLIENT, '_cookies'):
         _SHARED_CLIENT._cookies.clear()
@@ -1241,13 +1300,26 @@ def _safe_create_app_wrapper(original_func):
         # (典型现场: test_date_format_api 与 test_key_template_api 同进程运行时,
         #  version 名称唯一却报「编号「版本名称」值已存在」)。
         # 带 db_path 等参数的调用 (临时库/多 app 探针) 不走复用, 保持原语义。
-        global _SHARED_APP
+        global _SHARED_APP, _SHARED_APP_ENV_KEY
         if not args and not kwargs:
-            if _SHARED_APP is not None:
-                return _SHARED_APP
+            # [TEST-ISO 2026-11-12] 复用必须按完整应用配置分桶：
+            # legacy app 与 `ENABLED_APPS=warehouse,tms` 的 app 不是同一个，
+            # 混用会让后者拿不到应用 schema（Unknown object type: warehouse）。
+            # 同应用不同 SQLITE_DB_DIR 也不能混用（应用库会落到上一个模块的目录）。
+            env_key = _current_enabled_apps_key()
+            cached = _APP_CACHE.get(env_key)
+            if cached is not None:
+                _SHARED_APP = cached
+                _SHARED_APP_ENV_KEY = env_key
+                return cached
             try:
-                _SHARED_APP = original_func()
-                return _SHARED_APP
+                app = original_func()
+                # 第 2+ 个实例会重复 append 拦截器；去掉旧的一套，避免双写。
+                _dedupe_interceptors_once()
+                _APP_CACHE[env_key] = app
+                _SHARED_APP = app
+                _SHARED_APP_ENV_KEY = env_key
+                return app
             except Exception as e:
                 logger.error("create_app() failed: %s", e, exc_info=True)
                 return FakeApp(e)
