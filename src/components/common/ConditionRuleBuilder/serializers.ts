@@ -54,11 +54,52 @@ export function serialize(tree: ConditionNode): string {
  *     connector='AND', 此兜底仅剩防御意义。
  *   组内混合 AND/OR 时平铺输出, 求值依赖标准布尔优先级 (AND > OR),
  *   与 Python/SQL 共识一致, 与 parseConditionToRuleRows 的行级模型闭环。
+ *
+ * [2026-11-13 spec-rule-model §12.6.1 方案 C] 取反映射表
+ *   非组内只有 1 条原子规则，序列化时直接替换运算符（不输出 `NOT (...)`），
+ *   后端三处求值链路（condition_converter / condition_parser /
+ *   condition_evaluator）只吃扁平 AND 文本，故取反必须在运算符级完成。
+ *   未列出的运算符无法安全取反 → 整段跳过，绝不产出脏公式。
  */
+const NEGATE_OPERATOR_MAP: Record<string, string> = {
+  '=': '!=',
+  '!=': '=',
+  'IN': 'NOT IN',
+  'NOT IN': 'IN',
+  'LIKE': 'NOT LIKE',
+  'NOT LIKE': 'LIKE',
+  'IS NULL': 'IS NOT NULL',
+  'IS NOT NULL': 'IS NULL',
+  '>': '<=',
+  '>=': '<',
+  '<': '>=',
+  '<=': '>',
+}
+
+function negateOperator(operator: string): string {
+  return NEGATE_OPERATOR_MAP[String(operator).toUpperCase()] || ''
+}
+
+/** 是否为「非组」形状：group + negate + 唯一 rule 子节点 */
+function isNegateRuleGroup(node: ConditionNode): boolean {
+  const group = node as GroupNode
+  return (
+    node.type === 'group' &&
+    group.negate === true &&
+    group.children.length === 1 &&
+    group.children[0].type === 'rule'
+  )
+}
+
 function serializeGroup(group: GroupNode, isNested: boolean): string {
   const parts = group.children.map((c) => {
     if (c.type === 'rule') {
       return serializeRule(c as RuleNode)
+    }
+    // [2026-11-13 §12.6.1 方案 C] 非组：对组内唯一原子规则按映射取反，
+    //   不包裹括号（单条原子规则无优先级歧义）
+    if (isNegateRuleGroup(c)) {
+      return serializeRule((c as GroupNode).children[0] as RuleNode, true)
     }
     return serializeGroup(c as GroupNode, true)
   })
@@ -93,15 +134,21 @@ function serializeGroup(group: GroupNode, isNested: boolean): string {
  *   - number: 不加引号数字字面量
  *   - 默认: 数字不加引号，字符串加单引号
  */
-function serializeRule(rule: RuleNode): string {
+function serializeRule(rule: RuleNode, negate = false): string {
   const { field, operator, value, fieldType } = rule
   if (!field || !operator) return ''
-  const valueStr = formatValue(value, operator, fieldType)
+  let op = operator
+  if (negate) {
+    op = negateOperator(operator)
+    // 未映射运算符无法安全取反 → 跳过该段（不产生 `NOT (...)` 脏公式）
+    if (!op) return ''
+  }
+  const valueStr = formatValue(value, op, fieldType)
   // [v55 2026-08-27] 未选值的未完成规则不进入表达式（如新增预填的 "id IN "）。
   //   此前输出 "id IN "（尾随空格），被 parseConditionToRuleRows 视为有损公式，
   //   导致新增空条件打开弹窗时高级模式被误判默认展开。
   if (!valueStr) return ''
-  return `${field} ${operator} ${valueStr}`
+  return `${field} ${op} ${valueStr}`
 }
 
 /**
@@ -204,6 +251,8 @@ export function serializeDisplay(tree: any, labelMap: Record<string, string> = {
 function serializeGroupDisplay(group: any, isNested: boolean, labelMap: Record<string, string>): string {
   const parts = group.children.map((c: any) => {
     if (c.type === 'rule') return serializeRuleDisplay(c, labelMap)
+    // [2026-11-13 §12.6.1 方案 C] 与 serializeGroup 同构：非组展示也走运算符取反
+    if (isNegateRuleGroup(c)) return serializeRuleDisplay(c.children[0], labelMap, true)
     return serializeGroupDisplay(c, true, labelMap)
   })
   // [FIX 2026-09-12] 与 serializeGroup 同构: 逐 child 取 connector (行级模型),
@@ -223,9 +272,14 @@ function serializeGroupDisplay(group: any, isNested: boolean, labelMap: Record<s
   return isNested ? `(${result})` : result
 }
 
-function serializeRuleDisplay(rule: any, labelMap: Record<string, string>): string {
+function serializeRuleDisplay(rule: any, labelMap: Record<string, string>, negate = false): string {
   const { field, operator } = rule
   if (!field || !operator) return ''
+  let op = operator
+  if (negate) {
+    op = negateOperator(operator)
+    if (!op) return ''
+  }
   const fieldLabel = labelMap[field] || field
 
   // 值优先取 picker 已选项的显示名
@@ -244,15 +298,15 @@ function serializeRuleDisplay(rule: any, labelMap: Record<string, string>): stri
     .filter(Boolean)
 
   let valueStr = ''
-  if (names.length > 0 && ['IN', 'NOT IN'].includes(operator)) {
+  if (names.length > 0 && ['IN', 'NOT IN'].includes(op)) {
     valueStr = '(' + names.join('、') + ')'
-  } else if (names.length === 1 && ['LIKE', 'NOT LIKE'].includes(operator)) {
+  } else if (names.length === 1 && ['LIKE', 'NOT LIKE'].includes(op)) {
     valueStr = names[0]
   } else {
     // 兜底：无 picker 缓存（高级模式手写 / number/datetime 手输）→ 用原始格式
-    valueStr = formatValue(rule.value, operator, rule.fieldType)
+    valueStr = formatValue(rule.value, op, rule.fieldType)
   }
-  return `${fieldLabel} ${displayOperator(operator)} ${valueStr}`
+  return `${fieldLabel} ${displayOperator(op)} ${valueStr}`
 }
 
 /**

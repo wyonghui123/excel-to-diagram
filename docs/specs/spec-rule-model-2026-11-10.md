@@ -1,8 +1,9 @@
 # Spec: 规则模型（条件构建 · 判定 · 处置动作）
 
-> **版本**: v1.2（`hold` 存储方案二次评估后修订）
-> **日期**: 2026-11-10
+> **版本**: v1.3（M7 接线与闭环细化）
+> **日期**: 2026-11-12（初版 2026-11-10）
 > **状态**: 设计中（M1 词表/矩阵/加载期校验、M2 统一谓词求值器 + explain、M3 派生度量注册表、M4 typed 判定结果、M5 命中策略 + 治理字段、M6a 容差规则接线、M6b `holds` 表 + 释放路径 + 盘点 post 拦截 / 全规则释放 / 审计留痕已实现；见 §11.2.2）
+> **v1.3 变更**: 新增 §12「M7 接线与闭环」——把 M1–M6b 已实现但未接线/无出口/不可见的 5 处缺口（G-1~G-5）落成 M7-1~M7-4 可实施项，补验收 R-A7~R-A12；§9.9 增 M7 行，§11.1 补承接映射。本节不新增模型，只接线
 > **v1.2 变更**: 撤回「单据 `hold_state` 汇总字段」，`holds` 为唯一事实源，单据侧不落冗余状态（§10.4、TBD-6、TBD-11）
 > **v1.1 变更**: `hit_policy` 由 `priority_first` 修正为 `first`（§10 TBD-9）；`hold` / `warn_ack` 落点确定（§10 TBD-6/7）；治理字段分两档（§10 TBD-8）
 > **作者**: AI Agent
@@ -465,6 +466,8 @@ GroupNode { connector: and|or|not, children[] }
 | R-7 | explain / 试算未统一 | 视图已有列定义，但无统一后端契约 | 统一 `explain[]` 契约（§9.6） |
 | R-8 | 治理字段不对齐 | `validation` 页签缺 `version / effective_from / priority`；`approval` 页签有 `status` 无 `version` | 两页签统一补列 |
 
+> **M7 承接（v1.3）**：R-1 → M7-1（加载期校验接线）+ M7-3（运行期按 `decision.action` 分派）；R-2/R-3/R-4 → M2/M3/M4 已实现，无需重做；R-5 → §10 TBD-5 三级解析（不改）；R-6 → M7-2（补 `order_by` / 显式声明）；R-7 → M7-4（详情抽屉接 `explain`）；R-8 → M7-2（`_descriptor` 补 4 键 + 视图补列）。详见 §12.1。
+
 ### 9.8 反模式（必须避免）
 
 | # | 反模式 | 现实案例 | 后果 |
@@ -484,8 +487,9 @@ GroupNode { connector: and|or|not, children[] }
 | M3 | 派生度量注册表 | 同一度量在一张单据只计算一次；引用方结果一致 **（已实现 2026-11-10：`meta/core/rule_metrics.py`，审批条件可直接引用度量 code，快照 `metrics` 带 `derived_cache=True`）** |
 | M4 | typed 判定结果 | approval 结果不出现在 `ValidationDecision.findings` **（已实现 2026-11-10：`meta/core/rule_decisions.py`，`resolve_requirement()` 返回 `ApprovalRequirement`）** |
 | M5 | `hit_policy` + 治理字段 + 试算 | 规则中心可见 `version / effective_from / priority`；试算给出逐条 explain **（已实现 2026-11-10：`meta/core/rule_hit_policy.py` 封闭词表 + `ORDER_BY` 唯一真源；`validate_hit_policies()` 报 `RULE_HIT_POLICY_INVALID / RULE_OVERLAP`；validation 页签补三列）** |
+| M7 | **接线与闭环**（§12） | M7-1 加载期校验真接线；M7-2 治理字段 + `order_by` 可见可筛；M7-3 `decision.action` 分派 + holds HTTP/UI；M7-4 配置页 draft/publish 闭环 + 单条 CRUD + health/explain。**验收见 R-A7~R-A12** |
 
-**验收标准 R-A1 ~ R-A6**
+**验收标准 R-A1 ~ R-A12**
 
 - **R-A1** 任意 `rule_type × action` 组合，非法组合在配置期被拒绝。
 - **R-A2** 同一条件在审批策略与校验规则中引用，求值结果一致（同一求值器）。
@@ -493,6 +497,12 @@ GroupNode { connector: and|or|not, children[] }
 - **R-A4** `warn_ack` 有确认留痕；`hold` 后单据可保存但不可推进；`route` 产生 `tasks(type=approval)`。
 - **R-A5** `severity` 不出现在动作字段；`hold` 不出现在 `severity` 取值域。
 - **R-A6** 规则中心可回答「这条单据为什么被拦 / 为什么免审批」，输出含 `rule_key` 与 `explain[]`。
+- **R-A7**（M7-1）非法 `rule_type × action`、未知 `rule_type` 在加载期报错，错误含 `rule_key` 与稳定 code；规则集加载不再静默降级。
+- **R-A8**（M7-2）规则中心列表 / 详情可见 `disposition / hit_policy / order_by / effective_to`；`severity` / `enabled` 筛选返回真子集。
+- **R-A9**（M7-3）`hold` 可保存但不可推进、可查 active、可释放且留痕；`warn_ack` 有确认留痕；`route` 产生 `tasks(type=approval)`；分发器对未知 action 抛错不静默。
+- **R-A10**（M7-4）配置页面可完成「改值 → 草稿 → 试算 → 发布 → 回滚 → 历史」闭环；单条规则 CRUD 仅对 `configurable=True` 来源开放；`health` 页签显示 `validate_all` 结果。
+- **R-A11**（场景 / 构建器）条件构建器可选规则因子并保存，保存后 `POST /simulate` 可求值；场景解释读 `trace_policy`、选择读 `selection_hit_policy`，两者不再混用。
+- **R-A12**（回归）以上每条均有单测或 E2E 覆盖；`python d:\filework\test.py --all` 无新增失败，`--failed` 串行复跑清零。
 
 ---
 
@@ -598,10 +608,12 @@ GroupNode { connector: and|or|not, children[] }
 | 3 | **`MetaRule.hit_policy` 声明后无运行期消费**：`RuleProvider` 明确不排序/不过滤（保持 YAML 顺序），L1 校验等价 `all` | `rule_provider.py:17-23` | 加载期加 lint：非选择型 `rule_type` 声明 `hit_policy=first/unique` 报 `RULE_HIT_POLICY_UNSUPPORTED`；或文档限定生效范围 |
 | 4 | **`unique` 重叠检查只做条件文本归一相等**，不识别语义重叠（`>100` vs `>=100`），也不区分不同 `effective_from` | `rule_declaration_validator.validate_hit_policies` | 明确为 lint 下界（不替代人工建模评审），写入 §9.9 |
 | 5 | **validation 页签 `severity` / `enabled` 列空白**：描述符未透出 | `rule_catalog_service._descriptor` | **已修**：新增 `severity` / `enabled` 键，`_bo_yaml_descriptors` 传入 |
-| 6 | **`MetaRule.priority` 注释与 M5 排序方向相反**：注释「数字越小越先执行」，`ORDER_BY` 为 `priority DESC` | `models.py` `priority: int = 100` vs `rule_hit_policy.ORDER_BY` | 当前 `MetaRule.priority` 未参与运行期排序（仅展示），不改变行为；须统一注释口径为「数值越大优先级越高」 |
+| 6 | **`priority` 方向两域相反**：`approval_policies` 域 `ORDER_BY` 为 `priority DESC`（数值大优先）；`MetaRule.priority` 注释「数字越小越先执行」，且 DEFAULT 规则在 `rule_executor.py:1614` 按 `(priority, id)` **升序**取（数值小先） | `rule_hit_policy.ORDER_BY` vs `models.py:179,274` vs `rule_executor.py:1614` | **只按域修正注释，不统一行为**：approval 域「数值大者优先」、`MetaRule`/DEFAULT 域「数值小者先执行」；强行统一会翻转 DEFAULT 规则默认值的生效顺序（破坏性） |
 | 7 | **`FILTER_KEYS` 声明 `severity/enabled` 但 `list_rules` 未实现对应过滤** | `rule_catalog_service.FILTER_KEYS` / `list_rules` | 前端若下发该筛选则静默失效；补过滤或从 `FILTER_KEYS` 移除 |
 | 8 | **销售 `allow_over_delivery` / `allow_under_delivery` 仅种子、无消费方** | `init_sales_config_seed.py:49,51,113,114`（全仓无其它引用） | 属死配置；接入 M6 容差收敛时一并处理，否则直接删除 |
 
+> **M7 承接映射（v1.3）**：#1/#2 → §12.6 场景词表改名（`trace_policy` + `selection_hit_policy`）；#3/#4 → 合入 M7-1 加载期 lint（`RULE_HIT_POLICY_UNSUPPORTED`）；#5 已修，M7-2 保持；#6/#7 → M7-2；#8 → §11.2 迁移映射（M6 收口，不进 M7 代码路径）。
+>
 > `approval_policies` 无 `version` 列（v178 仅有 `priority/effective_from/effective_to`）不算缺陷：视图留空如实反映；若需策略集版本，单独迁移补列。
 
 ### 11.2 容差（tolerance）：现状与 M6 提案
@@ -691,3 +703,206 @@ GroupNode { connector: and|or|not, children[] }
 | 销售 `allow_over_delivery` / `allow_under_delivery` | 按方向各建一个参数（`gr_over_*` / `gr_under_*` 语义），**不合并为单个 `tolerance_pct=0`**；若确认无消费方，按治理规则直接下线而非迁移 |
 
 **验收口径（M6a）**：同一 `control_parameter_values` 行在收货 / 调拨 / 盘点三个域的解析结果一致；`explain()` 能回答「命中哪条参数行、限值多少、偏差多少、为何拒绝」；全仓不再有第二处裸 SQL 读取容差参数。
+
+---
+
+## 12. M7：接线与闭环（v1.3 细化，2026-11-12）
+
+### 12.1 问题定性：不是模型缺口，是接线缺口
+
+M1–M6b 的能力已写进代码，但有 5 处「已实现、未接线 / 无出口 / 不可见」，导致规则中心仍是「规则查看中心」：
+
+| 编号 | 已实现 | 缺口 | 证据 |
+|---|---|---|---|
+| G-1 | `validate_all()` 聚合状态机 / 审批 / 编号 / 单据流 / 动作 / 命中 / 聚合 / 约束 / 度量九域，错误码稳定 | 生产代码零调用方；`yaml_loader` 遇未知 `rule_type` 静默降级为 `VALIDATION` | `rule_declaration_validator.py:410-428`；`yaml_loader.py:2253,2276-2284`（Grep 确认 `validate_all(` 仅定义处 1 次） |
+| G-2 | 处置动作 7 值封闭 + `rule_type × action` 8×7 矩阵 | 运行期不读 `decision.action`；盘点 `submit()` 只看 `decision.matched` 并硬编码 `holds.apply` | `rule_action_matrix.py:27`；`inventory_count_service.py:360,391,398`（其余 release 路径见 §12.4 第 2 条） |
+| G-3 | `holds` 表 + `RuleHoldService.apply/release/is_held/active_holds` 全套 | 无 HTTP 出口、无 UI 入口（`meta/api` 内 Grep `RuleHoldService` 零命中） | `rule_hold_service.py`；§11.2.2「明确延后 2」 |
+| G-4 | config 级 `draft / publish / rollback / history` 写通道 | 前端按钮 P2 禁用未接；无单条规则 CRUD；draft 仅覆盖 2 个 `rule_type` | `rule_center_api.py:149,169,188,213`；`RuleCenterPage.vue:231-238,864-868`；`ruleCenterService.js:54-57` |
+| G-5 | 目录描述符归一 6 来源 | `_descriptor` 缺 `disposition / hit_policy / order_by / effective_to`；`severity/enabled` 筛选声明未实现 | `rule_catalog_service.py:101-146,51-56`；`rule_center_view.yaml:147` |
+
+**M7 原则**：不新增模型、不重写 M1–M6；只做接线、出口、可见性。每条验收以「页面上能完成一次闭环操作」为准，不以「代码里存在某函数」为准。
+
+### 12.2 M7-1 加载期校验真接线（承接 R-1 / §11.1 #3#4）
+
+**改动**
+
+1. `yaml_loader` 规则装载循环结束后（`:2253` 之后、`registry` 提交之前）调用
+   `validate_all(objects=..., doc_flow_rules=...)`；非空则 `raise RuleDeclarationError(errors)`。
+   异常类新增于 `rule_declaration_validator.py`，携带 `List[DeclarationError]`，`str()` 逐条输出 `[code] object_type: message`。
+2. 未知 `rule_type`：删掉 `:2284` 的静默降级，改报 `RULE_TYPE_UNKNOWN`；仅测试态开关
+   `RULE_LOAD_ALLOW_UNKNOWN=1` 允许降级（统一走 `meta/tests/shared/env_flags.py`，测试文件内不写 `os.environ`）。
+3. 校验结果缓存到模块级 `_declaration_errors`，供 M7-4 `health` 页签读取，避免每次请求重跑九域校验。
+4. `MetaRule.hit_policy` 生效范围 lint：非选择型 `rule_type` 声明 `first/unique` 报
+   `RULE_HIT_POLICY_UNSUPPORTED`（§11.1 #3）；`unique` 重叠检查在文档中明确为 lint 下界，不做语义重叠识别（§11.1 #4）。
+
+**验收**：R-A7。**测试落点**：`meta/tests/core/test_rule_declaration_wiring.py`（新增）。
+
+### 12.3 M7-2 治理字段可见可筛（承接 R-6 / R-8 / §11.1 #6#7）
+
+**改动**
+
+1. `MetaRule` 补三字段：`order_by: List[str]`（默认 `['priority DESC', 'effective_from DESC', 'id DESC']`，与 `rule_hit_policy.ORDER_BY` 同源）、`effective_to: Optional[str]`、只读 `rule_key`（= `bo_yaml_key(bo_id, id)`）。
+   - `order_by` 定位为**治理声明**（规则中心展示「该规则集的排序口径」），M7 **不改变运行期排序**：approval 域仍走全局 `order_by_sql()`（`document_approval_service.py:198,220`，不读单条策略字段）、DEFAULT 域仍走 `rule_executor.py:1614` 的 `(priority, id)` 升序。若要按单条 `order_by` 排序，另立 TBD，避免新增「已声明未接线」字段。
+   - `priority` 注释**按域**表述（§11.1 #6）：`MetaRule`（BO 规则 / DEFAULT 域）为「数值小者先执行」；**不**改成「越大越高」。
+2. `yaml_loader:2281-2283` 与 `version / effective_from` 同路径注入 `order_by / effective_to`；`MetaRule` 为纯 `@dataclass`、**无 `to_dict / from_dict`**（`models.py:147-192`），故改在 `parse_rule` 出口注入 + dataclass 快照断言处（`asdict` 口径）校验字段存在，避免读写往返静默丢字段。
+3. `rule_catalog_service._descriptor` 补 4 键 `disposition / hit_policy / order_by / effective_to`；`_bo_yaml_descriptors` 如实传值（未声明留空，不臆造默认）。
+4. `rule_center_view.yaml` `validation` 页签治理列增补上述 4 列（`:147`），与 `approval` 页签对齐。
+5. `list_rules` 落地 `severity / enabled` 过滤（`:51-56` 已声明）：在描述符产出后统一过滤；`severity` 为空的行不匹配任何非空筛选值。
+
+**验收**：R-A8。**测试落点**：`meta/tests/services/test_rule_catalog_governance.py`（新增）。
+
+### 12.4 M7-3 动作分发与 hold 闭环（承接 R-1 运行期 / R-A4）
+
+**改动**
+
+1. 新增 `meta/core/rule_dispatcher.py`：
+   `dispatch(decision, context) -> DispatchResult{applied[], skipped[]}`，按 `decision.action` 分派 7 个处理器——
+   `block` → 抛 `ValidationFailedError`（带 `rule_key / explain`）；`warn_ack` → 返回待确认项并写 `audit_log`；
+   `hold` → `RuleHoldService.apply`；`route` → 建 `tasks(type=approval)`；`notify` → 现有消息通道；
+   `default` → 写字段；`lock` → 输出置灰声明。处理器注册表封闭，未知 `action` 抛错，不静默跳过。
+2. `inventory_count_service.submit()` 改调分发器：`:357-359` 的 `evaluate_constraint_rule` 保留（求值不是动作），`:360` 的「只看 `decision.matched`」改为读 `decision.action`，`:391 apply` / `:398 release` 两处硬编码交由分发器执行；
+   行为等价性由既有 `test_rule_hold_service.py` + 盘点用例守住。
+   同文件另有 4 处 `holds.release` **不进分发器**、保留服务直调（生命周期兜底释放，不是规则动作）：`:442`（审批放行）、`:611`（取消）、`:756` / `:763`（删除 / 单行释放辅助）。
+3. `holds` HTTP（复用服务层，不新增业务逻辑）：
+   - `GET /api/holds?object_type=&record_id=&rule_key=` → `active_holds()`（默认只返回 active，`released_at IS NULL`）
+   - `POST /api/holds/<hold_id>/release`，body `{released_by}` → `release(object_type, record_id, rule_key, released_by)`
+   - 释放只 UPDATE `released_by / released_at`，不删行；`release_reason` 列（TBD-12）不在本节范围。
+4. 前端：规则中心增「挂起」页签（`rule_catalog_service.TAB_KINDS:50` 加 `holds`，`rule_center_view.yaml` 增对应 tab 声明）——
+   active 列表 + 释放按钮；`warn_ack` 命中时保存前弹确认框并落 `audit_log`；`route` 命中跳审批任务详情。
+
+**验收**：R-A9。**测试落点**：`meta/tests/core/test_rule_dispatcher.py`（新增）+ holds 用例回归。
+
+### 12.5 M7-4 配置页面可用性（承接 G-4 / G-5）
+
+**改动**
+
+1. 接已有写通道：`POST /config/draft|publish|rollback` + `GET /config/history`（`rule_center_api.py:149-224`）；
+   `RuleCenterPage.vue:231-238,864-868` 的 P2 禁用改为按 `publishable` 控制；`ruleCenterService.js` 增
+   `saveDraft / publishConfig / rollbackConfig / historyConfig`（`explainRule` 已有，`:45-47`）。
+2. draft 覆盖扩展：`:54-57` 当前仅 2 个 `rule_type`，按矩阵可发布来源补齐，顺序 `control_parameter → line_type → doc_flow`。
+3. 单条规则 CRUD：`POST /api/rule-center/rules`、`PUT|DELETE /api/rule-center/rules/<rule_key>`，
+   仅对 `configurable=True` 来源开放，写入走草稿（不直接改 YAML；数据源归属见 §12.8 S-1）。
+4. `health` 页签接 M7-1 缓存结果（`rule_center_view.yaml:158-160` 空壳 → 表格 `code / object_type / message / rule_key`）。
+5. 详情抽屉接 `POST /<object_type>/rules/explain` + `GET /<object_type>/<record_id>/rule-trace`
+   （`ruleCenterService.js:45-47`、`RuleTracePanel.vue`），展示 `explain[]` 而非仅条件文本。
+
+**验收**：R-A10。**测试落点**：`meta/tests/api/test_rule_center_crud.py`（新增）+ `tests/e2e/rule-center-config-flow.spec.js`（新增，仓库 E2E 扩展名为 `.spec.js`）。
+
+### 12.6 场景词表与条件构建器（承接 §11.1 #1#2、R-A11）
+
+| 项 | 改动 | 证据 |
+|---|---|---|
+| 场景 `hit_policy` 改名（已完成 2026-11-13） | `rule_scenarios.py` 字段 → `trace_policy`；`approval` 场景同时声明 `trace_policy=all` + `selection_hit_policy=first`，消除「声明 all、运行取首条」的误读 | `rule_scenarios.py:40-49,82-86`；`meta/tests/test_rule_scenarios_registry.py` |
+| 条件构建器字段源（已完成 2026-11-13） | `useConditionRuleDialog.js:217-220` 由「单据字段」扩为「单据字段 + 规则因子（`SCENARIO_FACTOR_KEYS`）」，因子 key 唯一真源在 `rule_scenarios.py` | `rule_scenarios.py`；`rule_catalog_service.py:491-494`（view-config 下发）；`useConditionRuleDialog.js:218-251` |
+| NOT 组（已实装 2026-11-13） | 结论：**不能只改 UI**。三处求值链路均只接受扁平 AND 文本（`condition_converter.py:66-83`、`condition_parser.py:71-115`、`condition_evaluator.py:84-104`），`NOT (...)` 会被静默丢弃 / 整段判假；JSON 树链路（`rule_predicate.py:199-201`）与 builder 的文本输出不互通。落地采用 **方案 C：NOT 归一化**（详见 §12.6.1）：只改前端 3 个文件，序列化时按运算符取反，文本中不出现 `NOT (...)`，后端与 schema 零改动 | `generated_schema.sql:2157-2169`（`permission_rules` 仅 `condition TEXT NOT NULL`，无 JSON 列 ⇒ 排除新增 JSON 树列）；`types.ts:64`（`negate?: boolean`）；`RuleBuilderGroup.vue:71-81,137-152,227-240,317-321,525-555`（「非」开关 / 单条件约束 / 添加按钮禁用 / 样式）；`serializers.ts:64-110,137-152,255,275`（取反映射、非组不包裹号、展示侧同构）；`__tests__/serializers.spec.js:350-477`（18 条取反用例；Node 24 直跑真实 `serializers.ts` 全部 PASS，vitest 未安装故未走 vitest 入口） |
+| 销售死配置（本期不做） | `allow_over_delivery / allow_under_delivery` 无消费方 → 按 §11.2 迁移映射处理（建方向参数或下线），不进 M7 代码路径 | `init_sales_config_seed.py:49,51,113,114` |
+
+**验收**：R-A11。
+
+#### 12.6.1 NOT 组细化设计（NOT 归一化，方案 C）
+
+**为什么不能只改 UI**：`NOT (...)` 若只作为前端展示，落库后三处消费方均无法识别——
+
+| 消费方 | 现状 | 遇到 `NOT (...)` 的后果 |
+|---|---|---|
+| `condition_converter.py:66-83` | 顶层 `AND` 拆分 → `_parse_single` 逐段匹配 | 整段匹配失败 → **静默丢弃**（条件失效，权限被放大） |
+| `condition_parser.py:71-115` | 同上，扁平列表 | 同上 |
+| `condition_evaluator.py:84-104` | `re.split(r'\s+AND\s+')` 后逐段求值 | 整段作为单条原子条件 → `_evaluate_single_predicate` 判假（条件恒不命中） |
+
+`rule_predicate.evaluate()` 支持 `logic == 'not'` 递归（`rule_predicate.py:199-201`），但它消费的是 JSON 复合树，与 `ConditionRuleBuilder` 的文本输出不互通。
+
+**方案对比**
+
+| 方案 | 做法 | 判定 |
+|---|---|---|
+| A 递归扩展文本语法 | 让 `condition_converter / parser / evaluator` 支持括号 + OR + NOT 递归 | 否：违反 §1.3 非目标（不重写文本解析）；下游 SQL 构建与运行期求值全链路需递归改造 |
+| B 新增 JSON 树持久化列 | `permission_rules` 加 `condition_tree JSON` | 否：违反零 DDL。`generated_schema.sql:2157-2169` 证实该表只有 `condition TEXT NOT NULL` |
+| **C NOT 归一化（采纳）** | NOT 组限定为「单个原子规则」，序列化时按取反映射输出普通表达式 | 是：零 DDL、后端零改动、不触碰 §1.3 非目标 |
+| D 文本列 `json:` 前缀双格式 | 复用 `condition` 列，前缀区分两种格式 | 否：所有读取方都要识别前缀，任一处漏判即静默错判 |
+
+**头部产品对照（2026-11-13 二次调研）**
+
+头部产品的「取反」不是一种做法，而是三族，差别在于**取反放在语法的哪一层**：
+
+| 族 | 做法 | 代表产品与官方口径 | 前提条件 |
+|---|---|---|---|
+| ① 表达式级 `NOT` | 把 `NOT` 作为与 `AND / OR` 并列的逻辑运算符，可包裹任意子表达式 | **Azure RBAC / ABAC 角色分配条件**：条件表达式支持 `NOT` 与 `!(...)`，与 `AND/OR` 同级组合（`learn.microsoft.com/azure/role-based-access-control/conditions-format`）；**Cedar**：语法 `Unary ::= ['!' | '-'] Member`，JSON 策略格式对应 `!` / `neg`，可嵌套（`docs.cedarpolicy.com/policies/syntax-grammar`、`policies/json-format`） | 必须有表达式解析器 / 求值引擎；本项目若要支持，等于方案 A（违反 §1.3 非目标） |
+| ② 运算符级取反 | 不引入 `NOT` 关键字，每个比较运算符自带取反形态 | **Microsoft Entra ID 动态成员资格规则**：运算符级提供 `-ne / -notIn / -notMatch / -notContains / -notStartsWith / -notEndsWith`；同时也提供逻辑级 `-not`（如 `(user.department -eq "Sales") -and -not (user.jobTitle -startsWith "SDE")`），并明确「不要用 `-not` 比较 null」（`learn.microsoft.com/entra/identity/users/groups-dynamic-membership`） | 与 **方案 C 同族**：取反在序列化时下沉到运算符，文本层不出现 `NOT (...)` |
+| ③ 例外 / 显式拒绝建模 | 不写取反，而是把「排除项」建成与「包含项」并列的独立列表或独立元素 | **AWS IAM**：用 `NotAction / NotResource / NotPrincipal` 元素配合 `Effect: Deny` 表达排除，且 `NotPrincipal` 只允许与 `Deny` 搭配（`docs.aws.amazon.com/reference_policies_elements_notaction`、`notprincipal`）；**Exchange Online 邮件流规则**：条件列表写「包含」，另设「Except if（例外）」列表写排除，两者语法完全相同（`learn.microsoft.com/exchange/.../mail-flow-rules/conditions-and-exceptions`） | 需要数据层已有「排除条件」载体；本项目已有 `permission_rules.is_denied`（`migrate_rules_to_v2.py:9-10,167-178`：`is_denied=1 → exclude_conditions`、`is_denied=0 → include_conditions`；列定义见 `generated_schema.sql:2157-2169`） |
+
+对本方案的验证结论：
+
+- 方案 C 落在族 ②，是头部产品中**真实存在且被大规模使用**的做法，不是我们为绕开改造而降级的临时方案；Entra 同时提供 `-not` 与运算符级取反，说明「只要遇到多条件取反就必须升级到表达式级」并不成立——它把两者并存，简单场景用运算符、复杂场景用 `-not`。
+- 我们与 Entra 的差别只在「复杂场景的出口」：Entra 直接给 `-not`，我们本期不给，而是把复杂取反留给族 ③（`is_denied` 排除条件）承载。该出口已存在于数据层，因此不构成能力天花板，只是本期不实装。
+- Entra 的「不要用 `-not` 比较 null」与本设计「SQL 三值逻辑：`NOT (a != 'x')` 与 `a = 'x'` 在 `a IS NULL` 时不等价」是同一类坑；我们选择不额外对齐 NULL 语义，属已知限制（见下）。
+- 未取证项（不写入断言）：**SAP** 仅检索到 SAP CAP 实例授权 `IS RESTRICTED / IS NOT RESTRICTED` 与 DCL `WHERE` 支持 AND/OR 的社区资料，**未取得「DCL 支持 NOT」的官方权威页面**；**Salesforce** 本轮未检索到「权限集 / 限制规则条件构建器是否支持 NOT」的权威页面（命中结果均为 GraphQL 过滤运算符等无关文档）。二者仅作旁证，不作为方案选择的依据。
+
+来源（检索日 2026-11-13）：
+
+- https://learn.microsoft.com/en-us/entra/identity/users/groups-dynamic-membership
+- https://learn.microsoft.com/en-us/azure/role-based-access-control/conditions-format
+- https://docs.aws.amazon.com/IAM/latest/UserGuide/reference_policies_elements_notaction.html
+- https://docs.aws.amazon.com/IAM/latest/UserGuide/reference_policies_elements_notprincipal.html
+- https://learn.microsoft.com/en-us/exchange/security-and-compliance/mail-flow-rules/conditions-and-exceptions
+- https://docs.cedarpolicy.com/policies/syntax-grammar.html
+- https://docs.cedarpolicy.com/policies/json-format.html
+
+**C 的改动点（全部在前端，3 个文件）**
+
+1. `types.ts:55-60`：`GroupNode` 增 `negate?: boolean`（缺省 false）。
+2. `RuleBuilderGroup.vue`：子组 tag-row（`:38-69`）在「且 / 或」旁增「非」开关（与 `updateConnector` 同位新增 `toggleNegate()`）；`node.negate === true` 时——
+   - 组内强制只有 1 个 `rule` 子节点：「添加子组」置灰、「添加条件」禁用；已有多个子项时「非」按钮不可点并提示「非组仅支持单个条件」；
+   - 组内行的连接符控件隐藏（单条无意义）。
+3. `serializers.ts`：
+   - `serializeGroup` 判断 `child.type === 'group' && child.negate`，递归时把取反标志下传；
+   - `serializeRule(rule, negate?)` 在取反时先按映射表替换运算符，再走原 `field OP value` 输出；
+   - 输出文本**永不出现** `NOT (`，保证后端与 SQL 构建零改动。
+4. `parseConditionToRuleRows`（`:269-298`）**不改**：回填得到语义等价的普通规则（如库中 `status != 'x'` 回填为「状态 不等于 x」），不还原「非组」UI 形状。
+
+**取反映射表**（未列出的运算符在 NOT 组内禁用）
+
+| 原运算符 | 取反后 | 原运算符 | 取反后 |
+|---|---|---|---|
+| `=` | `!=` | `!=` | `=` |
+| `IN` | `NOT IN` | `NOT IN` | `IN` |
+| `LIKE` | `NOT LIKE` | `NOT LIKE` | `LIKE` |
+| `IS NULL` | `IS NOT NULL` | `IS NOT NULL` | `IS NULL` |
+| `>` | `<=` | `<=` | `>` |
+| `>=` | `<` | `<` | `>=` |
+
+**边界与已知限制**
+
+- NOT 组内不得含嵌套组或多条件：`NOT (A OR B)` 需德摩根展开为 `¬A AND ¬B`，超出本期范围。
+- SQL 三值逻辑：`NOT (a != 'x')` 与 `a = 'x'` 在 `a IS NULL` 时不等价。归一化后 NULL 语义沿用原链路（`ConditionExpressionParser.to_sql`）既有行为，不额外对齐。
+- 回填不还原 NOT 组形状（见改动点第 4 条），仅语义等价；此为已知限制，需在弹窗高级模式切换时保持静默。
+- [2026-11-13 实装核对] `NOT LIKE` / `IS NULL` 类取反结果在既有后端链路中支持不完整：`condition_converter._CONDITION_RE`（`meta/core/condition_converter.py:39-45`）只识别 `LIKE` 不识别 `NOT LIKE`（迁移链路会跳过该子条件）；`condition_parser.SUPPORTED_OPS`（`meta/core/condition_parser.py:21-27`）不含 `LIKE/NOT LIKE`；运行期 `ConditionEvaluator._evaluate_single_predicate`（`meta/services/condition_evaluator.py:106-168`）仅覆盖 `IN/NOT IN/!=/=/<`，`LIKE` 本身也回落 `False`（fail-closed）。该缺口在本次改动前已存在，非取反引入；文本字段取反暂按映射表输出，后续若要可用需后端补 `NOT LIKE`。
+
+**验收**：R-A11 增补一条——NOT 组序列化结果不含 `NOT (`，且取反运算符符合映射表。
+**测试落点**：`src/components/common/ConditionRuleBuilder/__tests__/serializers.spec.js`（补取反用例：12 组映射 + 未完成规则跳过）+ `meta/tests/test_derivation_pipeline.py` 回归（确认归一化后文本仍走原扁平 AND 链路）。
+
+### 12.7 实施顺序与依赖
+
+`M7-1 → M7-2 →（M7-3 ∥ M7-4）→ §12.6`
+
+理由：校验先于可见性（否则展示的是未校验数据）；holds HTTP 与页面写通道无相互依赖，可并行；场景改名影响构建器字段源，放最后。
+
+**两个已知风险**
+
+- `yaml_loader` 接线后，存量 YAML 若已有声明错误 → 启动直接失败。缓解：先以 `RULE_DECLARATION_STRICT=0` 上线一轮（只告警 + 缓存结果供 `health` 页签），错误清零后切 `1`（§12.8 S-3）。
+- `MetaRule` 加字段需在 `parse_rule` 出口与 dataclass 快照断言处同步，否则配置在读写往返中静默丢失（该类无 `to_dict / from_dict`）。
+
+### 12.8 待拍板（不阻塞 M7-1 编码）
+
+| 编号 | 待拍板 | 选项 | 默认倾向 |
+|---|---|---|---|
+| S-1 | 单条规则 CRUD 的数据源 | YAML 直写 / 草稿表 / 双写 | **草稿表**（可回滚、不改仓库、与既有 draft 通道一致） |
+| S-2 | `holds` API 归属 | 并入 `rule_center_api.py` / 独立 `rule_hold_api.py` | **独立**（职责单一，便于分页与权限点拆分） |
+| S-3 | 严格模式切换时机 | 立即严格 / 告警一轮后严格 | **告警一轮后**（避免存量错误阻塞启动） |
+| S-4 | `effective_to` 是否强填 | 强填 / 可选 | **可选**（存量 YAML 均无该字段） |
+
+### 12.9 明确不做
+
+- 不引入 DMN 决策表 / 外部规则引擎；不改 `metadata_validator.py` 字段级校验；不改审批任务状态机。
+- 不做规则版本 diff / 双跑（`simulate.config_modes` 的 `baseline / draft / both` 已够用）。
+- `unique` 语义重叠识别仍为 lint 下界（不识别 `>100` vs `>=100`）。
+- `holds.release_reason`（TBD-12）、`approval_policies.version` 补列不在 M7 范围。

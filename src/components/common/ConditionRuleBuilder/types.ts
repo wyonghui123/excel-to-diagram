@@ -56,6 +56,12 @@ export interface GroupNode {
   type: 'group'
   id: string
   connector: 'AND' | 'OR'
+  /**
+   * [2026-11-13 spec-rule-model §12.6.1 方案 C] 非组标记
+   *   组内强制仅 1 条原子规则，序列化时按运算符取反（= ↔ !=、IN ↔ NOT IN ...），
+   *   不输出 `NOT (...)`，保证后端扁平 AND 文本链路可消费。
+   */
+  negate?: boolean
   children: ConditionNode[]
 }
 

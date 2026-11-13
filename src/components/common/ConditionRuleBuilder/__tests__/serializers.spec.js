@@ -345,6 +345,137 @@ describe('serialize - nested (Phase 4 兼容)', () => {
   })
 })
 
+// [2026-11-13 spec-rule-model §12.6.1 方案 C] NOT 归一化: 非组内唯一原子规则
+//   按映射表在运算符级取反, 输出永不出现 `NOT (`（后端只吃扁平 AND 文本）
+describe('serialize - NOT 归一化 (非组 · 方案 C)', () => {
+  const negateGroup = (rule, extra = {}) => ({
+    type: 'group',
+    id: 'grp-negate',
+    connector: 'AND',
+    negate: true,
+    children: [rule],
+    ...extra
+  })
+
+  const wrap = (child, connector = 'AND') => ({
+    type: 'group',
+    connector: 'AND',
+    children: [{ ...child, connector }]
+  })
+
+  it('= → !=', () => {
+    const tree = wrap(negateGroup({ type: 'rule', id: 'r1', field: 'status', fieldType: 'string', operator: '=', value: 'active' }))
+    expect(serialize(tree)).toBe("status != 'active'")
+  })
+
+  it('!= → =', () => {
+    const tree = wrap(negateGroup({ type: 'rule', id: 'r1', field: 'status', fieldType: 'string', operator: '!=', value: 'active' }))
+    expect(serialize(tree)).toBe("status = 'active'")
+  })
+
+  it('IN → NOT IN', () => {
+    const tree = wrap(negateGroup({ type: 'rule', id: 'r1', field: 'id', fieldType: 'integer', operator: 'IN', value: '1,2,3' }))
+    expect(serialize(tree)).toBe('id NOT IN (1, 2, 3)')
+  })
+
+  it('NOT IN → IN', () => {
+    const tree = wrap(negateGroup({ type: 'rule', id: 'r1', field: 'id', fieldType: 'integer', operator: 'NOT IN', value: '1,2' }))
+    expect(serialize(tree)).toBe('id IN (1, 2)')
+  })
+
+  it('LIKE → NOT LIKE (保留 % 通配)', () => {
+    const tree = wrap(negateGroup({ type: 'rule', id: 'r1', field: 'description', fieldType: 'text', operator: 'LIKE', value: '核心' }))
+    expect(serialize(tree)).toBe("description NOT LIKE '%核心%'")
+  })
+
+  it('NOT LIKE → LIKE', () => {
+    const tree = wrap(negateGroup({ type: 'rule', id: 'r1', field: 'description', fieldType: 'text', operator: 'NOT LIKE', value: '测试' }))
+    expect(serialize(tree)).toBe("description LIKE '%测试%'")
+  })
+
+  it('比较运算符对称取反: > ↔ <=, >= ↔ <, < ↔ >=, <= ↔ >', () => {
+    const cases = [
+      ['>', '<=', '18'],
+      ['>=', '<', '18'],
+      ['<', '>=', '18'],
+      ['<=', '>', '18'],
+    ]
+    cases.forEach(([src, dst, val]) => {
+      const tree = wrap(negateGroup({ type: 'rule', id: 'r1', field: 'age', fieldType: 'integer', operator: src, value: val }))
+      expect(serialize(tree)).toBe(`age ${dst} ${val}`)
+    })
+  })
+
+  it('与小写等价的运算符大小写不敏感 (in → NOT IN)', () => {
+    const tree = wrap(negateGroup({ type: 'rule', id: 'r1', field: 'id', fieldType: 'integer', operator: 'in', value: '9' }))
+    expect(serialize(tree)).toBe('id NOT IN (9)')
+  })
+
+  it('未映射运算符无法安全取反 → 整段跳过 (不产出 NOT ( 脏公式)', () => {
+    const tree = wrap(negateGroup({ type: 'rule', id: 'r1', field: 'name', fieldType: 'string', operator: 'BETWEEN', value: '1,2' }))
+    const expr = serialize(tree)
+    expect(expr).toBe('')
+    expect(expr).not.toContain('NOT (')
+  })
+
+  it('未映射运算符跳过时, 兄弟规则仍正常输出且不带 NOT (', () => {
+    const tree = {
+      type: 'group',
+      connector: 'AND',
+      children: [
+        { type: 'rule', field: 'a', fieldType: 'integer', operator: '=', value: '1' },
+        { ...negateGroup({ type: 'rule', id: 'r1', field: 'name', fieldType: 'string', operator: 'BETWEEN', value: '1,2' }), connector: 'AND' },
+        { type: 'rule', connector: 'AND', field: 'c', fieldType: 'integer', operator: '=', value: '3' }
+      ]
+    }
+    const expr = serialize(tree)
+    expect(expr).toBe('a = 1 AND c = 3')
+    expect(expr).not.toContain('NOT (')
+  })
+
+  it('negate 组只允许单条 rule: 多子节点时不做取反, 按普通组输出括号', () => {
+    // UI 已禁用该形状, 此处验证序列化侧防御: 不误吞子节点、不产生 NOT (
+    const tree = wrap({
+      type: 'group',
+      id: 'grp-bad',
+      connector: 'AND',
+      negate: true,
+      children: [
+        { type: 'rule', id: 'r1', field: 'a', fieldType: 'integer', operator: '=', value: '1' },
+        { type: 'rule', connector: 'AND', id: 'r2', field: 'b', fieldType: 'integer', operator: '=', value: '2' }
+      ]
+    })
+    const expr = serialize(tree)
+    expect(expr).toBe('(a = 1 AND b = 2)')
+    expect(expr).not.toContain('NOT (')
+  })
+
+  it('非组与兄弟规则的连接符沿用 child.connector', () => {
+    const tree = {
+      type: 'group',
+      connector: 'AND',
+      children: [
+        { type: 'rule', field: 'a', fieldType: 'integer', operator: '=', value: '1' },
+        { ...negateGroup({ type: 'rule', id: 'r1', field: 'status', fieldType: 'string', operator: '=', value: 'active' }), connector: 'OR' }
+      ]
+    }
+    expect(serialize(tree)).toBe("a = 1 OR status != 'active'")
+  })
+
+  it('serializeDisplay 非组同构取反 (中文「不等于 / 不属于」)', () => {
+    const tree = wrap(negateGroup({ type: 'rule', id: 'r1', field: 'status', operator: '=', value: 'active' }))
+    expect(serializeDisplay(tree, { status: '状态' })).toBe("状态 不等于 'active'")
+
+    const treeIn = wrap(negateGroup({ type: 'rule', id: 'r2', field: 'id', operator: 'IN', value: '1,2' }))
+    expect(serializeDisplay(treeIn, { id: '业务对象' })).toBe('业务对象 不属于 (1, 2)')
+  })
+
+  it('普通组 negate 缺失/false 时行为不变 (零回归)', () => {
+    const tree = wrap({ type: 'group', id: 'g1', connector: 'OR', children: [{ type: 'rule', id: 'r1', field: 'a', fieldType: 'integer', operator: '=', value: '1' }] })
+    expect(serialize(tree)).toBe('(a = 1)')
+  })
+})
+
 describe('formatValue', () => {
   it('IN 多值数字不加引号', () => {
     expect(formatValue('1,2,3', 'IN', 'integer')).toBe('(1, 2, 3)')

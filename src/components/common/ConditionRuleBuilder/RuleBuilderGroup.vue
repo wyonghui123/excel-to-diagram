@@ -65,7 +65,21 @@
           @click="$emit('removeGroup')"
         ><AppIcon name="close" :size="12" /></button>
       </span>
-      <span></span>
+      <!-- [2026-11-13 spec-rule-model §12.6.1 方案 C] 「非」开关
+       *   放在第三列（chip 右侧），避免挤压 70px 的 connector 列。
+       *   启用后组内仅允许 1 条原子规则，序列化时按运算符取反，
+       *   输出永不出现 `NOT (`（后端只吃扁平 AND 文本）。
+      -->
+      <span class="rule-negate-slot">
+        <button
+          type="button"
+          class="rule-negate-btn"
+          :class="{ 'is-active': isNegate }"
+          :disabled="negateDisabled"
+          :title="negateTitle"
+          @click="toggleNegate"
+        >非</button>
+      </span>
     </div>
 
     <!-- 子节点列表 (rule / group 递归) + 添加按钮行
@@ -121,6 +135,8 @@
           v-if="!disabled"
           type="button"
           class="rule-add-btn"
+          :disabled="isNegate"
+          :title="isNegate ? '非组仅支持单个条件' : ''"
           @click="addRule"
         >
           <AppIcon name="plus" :size="11" />
@@ -130,8 +146,8 @@
           v-if="!disabled"
           type="button"
           class="rule-add-btn rule-add-btn--subgroup"
-          :disabled="!canAddSubgroup"
-          :title="canAddSubgroup ? '添加子组' : `已达最大嵌套深度 ${maxNestingLevel}`"
+          :disabled="!canAddSubgroup || isNegate"
+          :title="isNegate ? '非组仅支持单个条件' : (canAddSubgroup ? '添加子组' : `已达最大嵌套深度 ${maxNestingLevel}`)"
           @click="addSubgroup"
         >
           <AppIcon name="plus" :size="11" />
@@ -208,6 +224,21 @@ const fieldOptions = computed(() => {
 // level=2 已是最后一层 (level+1=3=maxNestingLevel), 不能再生子组
 const canAddSubgroup = computed(() => props.level + 1 < props.maxNestingLevel)
 
+// [2026-11-13 spec-rule-model §12.6.1 方案 C] 「非」组本地状态
+//   形状约束: 非组内必须恰好 1 条 rule（序列化在运算符级取反, 不输出 `NOT (`）
+const isNegate = computed(() => props.node.negate === true)
+const negateBlocked = computed(() => {
+  const ch = props.node.children || []
+  return ch.length !== 1 || ch[0].type !== 'rule'
+})
+// 已启用时始终可点回（取消取反），未启用时形状不符则禁用并提示
+const negateDisabled = computed(() => props.disabled || (!isNegate.value && negateBlocked.value))
+const negateTitle = computed(() => {
+  if (props.disabled) return ''
+  if (isNegate.value) return '取消取反'
+  return negateBlocked.value ? '非组仅支持单个条件' : '对该组取反（组内仅 1 条条件）'
+})
+
 let _idCounter = 1
 function nextId(prefix) {
   return `${prefix}-${Date.now()}-${_idCounter++}`
@@ -281,7 +312,17 @@ function updateConnector(val) {
   emit('change')
 }
 
+// [2026-11-13 spec-rule-model §12.6.1 方案 C] 切换「非」
+//   仅当组内恰好 1 条 rule 时启用；关闭时不清理 negate 之外的数据
+function toggleNegate() {
+  if (negateDisabled.value) return
+  emit('update:node', { ...props.node, negate: !isNegate.value })
+  emit('change')
+}
+
 function addRule() {
+  // 非组仅允许 1 条原子规则（序列化在运算符级取反）
+  if (isNegate.value) return
   const lastChild = props.node.children[props.node.children.length - 1]
   const connector = lastChild ? (lastChild.connector || 'AND') : 'AND'
   const newRule = createEmptyRule(connector)
@@ -289,7 +330,7 @@ function addRule() {
 }
 
 function addSubgroup() {
-  if (!canAddSubgroup.value) return
+  if (!canAddSubgroup.value || isNegate.value) return
   const lastChild = props.node.children[props.node.children.length - 1]
   const connector = lastChild ? (lastChild.connector || 'AND') : 'AND'
   const newGroup = createEmptyGroup(connector)
@@ -480,5 +521,36 @@ function addSubgroup() {
 .rule-builder-group-tag-row .rule-subgroup-remove:disabled {
   cursor: not-allowed;
   opacity: 0.5;
+}
+/* [2026-11-13 spec-rule-model §12.6.1 方案 C] 「非」开关 (第三列, chip 右侧) */
+.rule-builder-group-tag-row .rule-negate-slot {
+  justify-self: start;
+  min-width: 0;
+}
+.rule-builder-group-tag-row .rule-negate-btn {
+  height: 24px;
+  padding: 0 10px;
+  font-size: 12px;
+  line-height: 22px;
+  border: 1px solid var(--color-border, #d9d9d9);
+  border-radius: var(--radius-sm, 4px);
+  background: var(--color-bg-container, #fff);
+  color: var(--color-text-regular, #333);
+  cursor: pointer;
+  transition: background 0.15s, color 0.15s, border-color 0.15s;
+  white-space: nowrap;
+}
+.rule-builder-group-tag-row .rule-negate-btn:hover:not(.is-active):not(:disabled) {
+  border-color: var(--color-primary, #ea580c);
+  color: var(--color-primary, #ea580c);
+}
+.rule-builder-group-tag-row .rule-negate-btn.is-active {
+  background: var(--color-primary, #ea580c);
+  border-color: var(--color-primary, #ea580c);
+  color: #fff;
+}
+.rule-builder-group-tag-row .rule-negate-btn:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
 }
 </style>
