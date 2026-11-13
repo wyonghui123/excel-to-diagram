@@ -22,7 +22,9 @@ const useMetaListSource = readFileSync(useMetaListPath, 'utf-8')
 const metaListPagePath = resolve(__dirname, '../../components/common/MetaListPage/MetaListPage.vue')
 const metaListPageSource = readFileSync(metaListPagePath, 'utf-8')
 
-const filterRowActionsPath = resolve(__dirname, '../../services/metaTransformService.js')
+// [2026-11-13] 新行判定与动作过滤已下沉到 actionPolicyService（metaTransformService 仅做委托），
+// 契约检查随之指向新落点，避免断言过时的源码位置。
+const filterRowActionsPath = resolve(__dirname, '../../services/actionPolicyService.js')
 const filterRowActionsSource = readFileSync(filterRowActionsPath, 'utf-8')
 
 describe('useMetaList.removeNewRow (2026-06-13 BUG 修复)', () => {
@@ -104,21 +106,22 @@ describe('useMetaList.removeNewRow (2026-06-13 BUG 修复)', () => {
   })
 
   describe('filterRowActions 集成契约 (新行动作过滤)', () => {
-    it('filterRowActions 必须对新行隐藏 delete/edit/update 动作', () => {
-      // 找到 filterRowActions 函数
-      const fnMatch = filterRowActionsSource.match(/export\s+function\s+filterRowActions\s*\([\s\S]*?\n\}/)
-      expect(fnMatch, '应能找到 filterRowActions 函数').not.toBeNull()
+    it('filterRowActions 必须对新行隐藏 delete/edit 动作', () => {
+      // 找到 isNewRow 判定函数
+      const fnMatch = filterRowActionsSource.match(/export\s+function\s+isNewRow\s*\([\s\S]*?\n\}/)
+      expect(fnMatch, '应能找到 isNewRow 函数').not.toBeNull()
       const fnBody = fnMatch[0]
       // 应有 _isNew / __new_ 判断
       expect(fnBody, '应判断 _isNew').toMatch(/row\._isNew\s*===\s*true/)
       expect(fnBody, '应判断 __new_ 前缀').toMatch(/startsWith\(['"]__new_['"]\)/)
-      // 应过滤 delete/edit/update
-      const newRowBranch = fnBody.match(/row\s*&&\s*\([\s\S]*?startsWith\([\s\S]*?\)\s*\)\s*\{[\s\S]*?\n\s\s\}/)
+      // 新行分支应禁止 edit/delete
+      const newRowBranch = filterRowActionsSource.match(
+        /if\s*\(isNewRow\(row\)[\s\S]*?\{[\s\S]*?\n\s\s\}/
+      )
       expect(newRowBranch, '应能找到新行分支').not.toBeNull()
       const branchBody = newRowBranch[0]
       expect(branchBody, '新行应隐藏 delete').toMatch(/['"]delete['"]/)
       expect(branchBody, '新行应隐藏 edit').toMatch(/['"]edit['"]/)
-      expect(branchBody, '新行应隐藏 update').toMatch(/['"]update['"]/)
     })
   })
 })

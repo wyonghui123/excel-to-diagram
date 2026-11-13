@@ -138,8 +138,9 @@ describe('useMetaList 集成测试（PR 6）', () => {
       const lines = useMetaListSource.split('\n').length
       // Phase 2 提取 metaTransformService 后行数减少
       // 2026-06-13: 新增 removeNewRow 修复未保存新行删除 BUG, +30 行
+      // 2026-11-13 (T13-9): 元数据换源 ui-meta + 权限/条件/动作求值 fail-closed, +约 200 行
       expect(lines).toBeGreaterThan(1850)
-      expect(lines).toBeLessThan(2200)
+      expect(lines).toBeLessThan(2600)
     })
 
     it('3 个下沉点函数总行数 < 50 行（原 135 行 → 简化后约 33 行）', () => {

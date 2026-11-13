@@ -10,10 +10,191 @@ import { createLogger } from '@/utils/logger'
 
 const logger = createLogger('metaService')
 
+// [T13-2 2026-11-13] ui-meta 迁移期回退旧 3 端点（§13.8），warn 只打一次
+let legacyFallbackWarned = false
+
+/**
+ * 旧端点动作项统一成 UiActionMeta 形状（字符串形态保留 id/label）
+ */
+function toLegacyActionMeta(action) {
+  if (typeof action === 'string') {
+    return { id: action, label: action }
+  }
+  const id = action?.id || action?.key || action?.label || ''
+  return { ...action, id, label: action?.label || id }
+}
+
+/**
+ * 旧 list-view 列（UIListViewColumn）→ UiColumnMeta
+ */
+function toLegacyColumnMeta(column) {
+  const field = column?.key || column?.field || ''
+  return {
+    field,
+    label: column?.title || column?.label || field,
+    width: typeof column?.width === 'number' ? column.width : undefined,
+    sortable: column?.sortable,
+    filterable: column?.filterable,
+    tag_enum: column?.enum_type || undefined
+  }
+}
+
+/**
+ * 旧 detail-view facet / form-view section → UiSectionMeta
+ */
+function toLegacySectionMeta(section) {
+  const key = section?.key || section?.id || ''
+  return {
+    key,
+    label: section?.label || section?.title || key,
+    columns: section?.columns === 1 ? 1 : 2,
+    fields: Array.isArray(section?.fields) ? section.fields : [],
+    col_span_map: section?.col_span_map || {}
+  }
+}
+
+/**
+ * 旧 3 端点载荷拼成 UiMeta 形状（schema_version 标记为 legacy）
+ */
+function buildLegacyUiMeta(objectType, listData, detailData, formData) {
+  const listActions = [
+    ...(listData?.actions || []),
+    ...(listData?.batch_actions || [])
+  ].map(toLegacyActionMeta)
+
+  const formSections = (formData?.sections || []).map(toLegacySectionMeta)
+  // 旧 form-view 不含 fields 声明，按分区字段引用顺序去重派生最小字段元数据
+  const fields = []
+  const seenFields = new Set()
+  for (const section of formSections) {
+    for (const fieldKey of section.fields) {
+      if (seenFields.has(fieldKey)) continue
+      seenFields.add(fieldKey)
+      fields.push({ key: fieldKey, label: fieldKey, widget: 'text' })
+    }
+  }
+
+  return {
+    schema_version: 'legacy',
+    object_type: objectType,
+    label: listData?.title || objectType,
+    partial: true,
+    list: {
+      columns: (listData?.columns || []).map(toLegacyColumnMeta),
+      actions: listActions
+    },
+    detail: {
+      sections: (detailData?.facets || []).map(toLegacySectionMeta),
+      tabs: (detailData?.section_tabs || []).map(tab => ({
+        key: tab.key,
+        label: tab.label || tab.key,
+        section_keys: tab.section_keys || []
+      }))
+    },
+    form: {
+      sections: formSections,
+      tabs: (formData?.tabs || []).map(tab => ({
+        key: tab.key,
+        label: tab.label || tab.key,
+        section_keys: tab.section_keys || []
+      })),
+      fields,
+      layout: formData?.layout
+    },
+    filters: [],
+    field_policies: {},
+    actions: []
+  }
+}
+
 class MetaService extends BaseService {
   constructor() {
     super(100, 10 * 60 * 1000)
     this.preloadedTypes = new Set()
+    // [T13-2] ui-meta 缓存：objectType -> { schema_version, data }
+    this._uiMetaCache = new Map()
+    // [T13-2] 并发去重：objectType -> Promise
+    this._uiMetaInflight = new Map()
+  }
+
+  /**
+   * 聚合 UI 元数据（T13-2）
+   *
+   * 单请求取齐 list/detail/form/filters；按 objectType 缓存并比对 schema_version，
+   * 同 key 并发只发一次。失败时回退旧 list-view / detail-view / form-view 三端点
+   * （仅迁移期，§13.8），回退也失败则原样抛出。
+   *
+   * @param {string} objectType
+   * @param {{ force?: boolean }} [options]
+   * @returns {Promise<object>} UiMeta（§13.3 形状，snake_case）
+   */
+  async getUiMeta(objectType, { force = false } = {}) {
+    if (!objectType) throw new Error('getUiMeta: objectType 不能为空')
+
+    if (!force) {
+      const cached = this._uiMetaCache.get(objectType)
+      if (cached) return cached.data
+    }
+
+    if (this._uiMetaInflight.has(objectType)) {
+      return this._uiMetaInflight.get(objectType)
+    }
+
+    const promise = (async () => {
+      let data
+      try {
+        const result = await this._request('GET', `/meta/${objectType}/ui-meta`, { version: 1 })
+        if (!result?.success) {
+          throw new Error(result?.message || `ui-meta 请求失败: ${objectType}`)
+        }
+        data = result.data || {}
+      } catch (err) {
+        // 迁移期回退（§13.8）：旧 3 端点同源，仅作降级
+        try {
+          data = await this._loadLegacyUiMeta(objectType)
+          if (!legacyFallbackWarned) {
+            legacyFallbackWarned = true
+            logger.warn('ui-meta 不可用，已回退旧 3 端点:', objectType, err?.message || err)
+          }
+        } catch {
+          throw err
+        }
+      }
+
+      const previous = this._uiMetaCache.get(objectType)
+      const entry = { schema_version: data.schema_version || '', data }
+      if (previous && previous.schema_version !== entry.schema_version) {
+        logger.debug('ui-meta 版本变化，整块替换:', objectType, previous.schema_version, '→', entry.schema_version)
+      }
+      this._uiMetaCache.set(objectType, entry)
+      return data
+    })().finally(() => {
+      this._uiMetaInflight.delete(objectType)
+    })
+
+    this._uiMetaInflight.set(objectType, promise)
+    return promise
+  }
+
+  /**
+   * 回退旧 3 端点并拼成 UiMeta 形状（仅迁移期使用）
+   */
+  async _loadLegacyUiMeta(objectType) {
+    const [listResult, detailResult, formResult] = await Promise.all([
+      this._request('GET', `/meta/${objectType}/list-view`, { version: 1 }),
+      this._request('GET', `/meta/${objectType}/detail-view`, { version: 1 }),
+      this._request('GET', `/meta/${objectType}/form-view`, { version: 1 })
+    ])
+    const failed = [listResult, detailResult, formResult].find(result => !result?.success)
+    if (failed) {
+      throw new Error(failed.message || `旧视图端点回退失败: ${objectType}`)
+    }
+    return buildLegacyUiMeta(
+      objectType,
+      listResult.data || {},
+      detailResult.data || {},
+      formResult.data || {}
+    )
   }
 
   async getUIConfig(objectType, options = {}) {
@@ -114,9 +295,11 @@ class MetaService extends BaseService {
   clearCache(objectType = null) {
     if (objectType) {
       this._clearCache(objectType)
+      this._uiMetaCache.delete(objectType)
       this.preloadedTypes.delete(objectType)
     } else {
       this.cache.clear()
+      this._uiMetaCache.clear()
       this.preloadedTypes.clear()
     }
   }

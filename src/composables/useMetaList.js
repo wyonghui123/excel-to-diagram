@@ -30,6 +30,10 @@ import { t as i18nT } from '@/i18n'
 //   刷屏. 产线静默, 排查者调 window.__consoleBuffer.getLogs() 即可取全量.
 const _dbgLog = (...args) => { const d = (typeof window !== 'undefined' && window.__archPage && window.__archPage.debug); if (d && d.isDebug) d.debugLog(...args) }
 const _dbgTrace = (...args) => { const d = (typeof window !== 'undefined' && window.__archPage && window.__archPage.debug); if (d && d.isDebug && typeof d.debugTrace === 'function') d.debugTrace(...args) }
+// [T13-9 2026-11-13] 权限/条件/动作求值异常 fail-closed 的一次性上报标记（模块级，避免每次刷屏）
+let _permissionEvalErrorReported = false
+let _conditionEvalErrorReported = false
+let _actionEvalErrorReported = false
 // [P0-4 2026-07-25] 接入 authStore.hasPermission, 替代 _checkPermission 占位实现
 import { useAuthStore } from '@/stores/authStore'
 import { can } from '@/services/permissionService'
@@ -104,6 +108,7 @@ export function useMetaList(objectTypeOrRef, options = {}) {
     console.error('[useMetaList] useAuthStore() 调用失败, 权限检查 fail-closed:', _e?.message)
   }
   let _authStoreWarned = false
+  let _uiMetaFallbackWarned = false
 
   // [NFR-004] 请求竞态安全：版本号保护
   let _initVersion = 0
@@ -1124,11 +1129,17 @@ export function useMetaList(objectTypeOrRef, options = {}) {
       if (res?.success && res.data && typeof res.data === 'object') {
         actionAvailability.value = res.data
       } else {
-        console.error('[useMetaList] actions/evaluate 返回失败, 行级动作 fail-closed:', res?.message)
+        if (!_actionEvalErrorReported) {
+          _actionEvalErrorReported = true
+          console.error('[useMetaList] actions/evaluate 返回失败, 行级动作 fail-closed:', res?.message)
+        }
         actionAvailability.value = null
       }
     } catch (e) {
-      console.error('[useMetaList] actions/evaluate 请求异常, 行级动作 fail-closed:', e)
+      if (!_actionEvalErrorReported) {
+        _actionEvalErrorReported = true
+        console.error('[useMetaList] actions/evaluate 请求异常, 行级动作 fail-closed:', e)
+      }
       actionAvailability.value = null
     }
   }
@@ -1168,12 +1179,37 @@ export function useMetaList(objectTypeOrRef, options = {}) {
       console.warn('[useMetaList] [WARNING] _loadMetaConfig: objectType 为空')
       return
     }
+
+    // [T13-9 2026-11-13] 优先聚合端点 ui-meta；其内部已含失败回退旧 3 端点（§13.8）
+    try {
+      const uiMeta = await metaService.getUiMeta(objectTypeRef.value)
+      if (uiMeta && typeof uiMeta === 'object') {
+        metaConfig.value = {
+          ...uiMeta,
+          list: {
+            ...(uiMeta.list || {}),
+            // 顶层 filters（ui-meta 形状）优先；兼容 list.filters，保证筛选器可用
+            filters: uiMeta.filters || (uiMeta.list && uiMeta.list.filters) || []
+          }
+        }
+        _transformMetaToComponentFormat()
+        return
+      }
+      console.warn(`[useMetaList] [WARNING] ${objectTypeRef.value} 的 ui-meta 返回为空`)
+    } catch (e) {
+      // 迁移期兼容：ui-meta 不可用时回退 legacy view-config（§13.8）
+      if (!_uiMetaFallbackWarned) {
+        _uiMetaFallbackWarned = true
+        console.warn(`[useMetaList] [WARNING] ui-meta 加载失败, 回退 getViewConfig (${objectTypeRef.value}):`, e?.message || e)
+      }
+    }
+
     try {
       const result = await metaService.getViewConfig(objectTypeRef.value)
-      
+
       if (result.success && result.data) {
         metaConfig.value = result.data
-        
+
         _transformMetaToComponentFormat()
         return
       } else {
@@ -1182,7 +1218,7 @@ export function useMetaList(objectTypeOrRef, options = {}) {
     } catch (e) {
       console.error(`[useMetaList] [X] 加载元数据失败 (${objectTypeRef.value}):`, e)
     }
-    
+
     console.warn(`[useMetaList] [WARNING] 元数据加载失败，使用空配置回退`)
     metaConfig.value = {
       list: {
@@ -1191,7 +1227,7 @@ export function useMetaList(objectTypeOrRef, options = {}) {
         filters: []
       }
     }
-    
+
     _transformMetaToComponentFormat()
   }
 
@@ -1638,7 +1674,16 @@ export function useMetaList(objectTypeOrRef, options = {}) {
       return false
     }
     // 支持权限字符串或数组 (数组时任意一项满足即可)
-    return can(null, { permission: action.permission, authStore: _authStore })
+    // [T13-9 2026-11-13] 权限求值异常 → fail-closed（原异常直接外抛会中断列表渲染）
+    try {
+      return can(null, { permission: action.permission, authStore: _authStore })
+    } catch (e) {
+      if (!_permissionEvalErrorReported) {
+        _permissionEvalErrorReported = true
+        console.error('[useMetaList] 权限求值异常, fail-closed（返回 false）:', e?.message || e)
+      }
+      return false
+    }
   }
 
   /**
@@ -1650,7 +1695,16 @@ export function useMetaList(objectTypeOrRef, options = {}) {
    */
   function _evaluateCondition(condition, row) {
     if (!condition) return true
-    return evaluateCondition(condition, row, 'row')
+    // [T13-9 2026-11-13] 条件求值异常 → fail-closed（原异常直接外抛会中断列表渲染）
+    try {
+      return evaluateCondition(condition, row, 'row')
+    } catch (e) {
+      if (!_conditionEvalErrorReported) {
+        _conditionEvalErrorReported = true
+        console.error('[useMetaList] 条件求值异常, fail-closed（返回 false）:', e?.message || e)
+      }
+      return false
+    }
   }
 
   /**

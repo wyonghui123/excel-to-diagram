@@ -642,4 +642,90 @@ describe('MetaService (singleton)', () => {
       expect(metaService.getViewConfigSync('b')).not.toBeNull()
     })
   })
+
+  // ========== getUiMeta（T13-2） ==========
+  describe('getUiMeta', () => {
+    afterEach(() => {
+      vi.restoreAllMocks()
+    })
+
+    it('should cache ui-meta and dedupe concurrent requests', async () => {
+      const spy = vi.spyOn(metaService, '_request').mockResolvedValue({
+        success: true,
+        data: { schema_version: 'v1', object_type: 'ui_cache_demo', actions: [] }
+      })
+
+      const [first, second] = await Promise.all([
+        metaService.getUiMeta('ui_cache_demo', { force: true }),
+        metaService.getUiMeta('ui_cache_demo', { force: true })
+      ])
+      expect(spy).toHaveBeenCalledTimes(1)
+      expect(first.schema_version).toBe('v1')
+      expect(second).toBe(first)
+
+      // 非 force 直接命中缓存
+      const cached = await metaService.getUiMeta('ui_cache_demo')
+      expect(cached).toBe(first)
+      expect(spy).toHaveBeenCalledTimes(1)
+    })
+
+    it('should replace whole block when schema_version changes', async () => {
+      const spy = vi.spyOn(metaService, '_request')
+        .mockResolvedValueOnce({ success: true, data: { schema_version: 'v1', actions: [] } })
+        .mockResolvedValueOnce({ success: true, data: { schema_version: 'v2', actions: [] } })
+
+      await metaService.getUiMeta('ui_version_demo')
+      const latest = await metaService.getUiMeta('ui_version_demo', { force: true })
+
+      expect(spy).toHaveBeenCalledTimes(2)
+      expect(latest.schema_version).toBe('v2')
+      expect(metaService._uiMetaCache.get('ui_version_demo').schema_version).toBe('v2')
+    })
+
+    it('should fall back to legacy 3 endpoints and warn once when ui-meta fails', async () => {
+      const spy = vi.spyOn(metaService, '_request').mockImplementation(async (method, path) => {
+        if (path.endsWith('/ui-meta')) {
+          return { success: false, message: 'ui-meta not found' }
+        }
+        if (path.endsWith('/list-view')) {
+          return {
+            success: true,
+            data: {
+              title: '任务',
+              columns: [{ key: 'code', title: '编码', enum_type: 'task_status', width: 'auto' }],
+              actions: ['edit'],
+              batch_actions: [{ id: 'delete', label: '删除' }]
+            }
+          }
+        }
+        if (path.endsWith('/detail-view')) {
+          return {
+            success: true,
+            data: { facets: [{ key: 'base', title: '基本信息', fields: ['code'], columns: 1 }] }
+          }
+        }
+        return {
+          success: true,
+          data: {
+            sections: [{ key: 'base', title: '基本信息', fields: ['code', 'name'] }],
+            tabs: [{ key: 'main', label: '主数据', section_keys: ['base'] }],
+            layout: 'vertical'
+          }
+        }
+      })
+
+      const meta = await metaService.getUiMeta('ui_legacy_demo')
+
+      expect(spy).toHaveBeenCalledTimes(4)
+      expect(meta.schema_version).toBe('legacy')
+      expect(meta.list.columns[0]).toMatchObject({ field: 'code', label: '编码', tag_enum: 'task_status' })
+      expect(meta.list.actions.map(a => a.id)).toEqual(['edit', 'delete'])
+      expect(meta.detail.sections[0]).toMatchObject({ key: 'base', label: '基本信息', columns: 1 })
+      expect(meta.form.fields.map(f => f.key)).toEqual(['code', 'name'])
+      expect(meta.form.tabs[0].section_keys).toEqual(['base'])
+      expect(meta.filters).toEqual([])
+      expect(meta.field_policies).toEqual({})
+      expect(meta.actions).toEqual([])
+    })
+  })
 })

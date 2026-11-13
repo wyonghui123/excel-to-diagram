@@ -21,6 +21,7 @@ vi.mock('@/services/boService', () => {
 vi.mock('@/services/metaService', () => {
   const metaService = {
     getViewConfig: vi.fn(),
+    getUiMeta: vi.fn(),
     clearCache: vi.fn()
   }
   return { metaService, default: metaService }
@@ -50,7 +51,24 @@ function viewConfig() {
   }
 }
 
+// [T13-9] ui-meta 聚合端点返回的是数据对象本身（非 {success,data} 包裹）
+function uiMeta() {
+  const legacy = viewConfig().data
+  return {
+    schema_version: 1,
+    object_type: 'demo_object',
+    label: '演示对象',
+    list: legacy.list,
+    detail: { sections: [], tabs: [] },
+    form: { fields: [], tabs: [] },
+    filters: [],
+    field_policies: {},
+    actions: []
+  }
+}
+
 async function initWithRow({ evaluateActions }) {
+  metaService.getUiMeta.mockResolvedValue(uiMeta())
   metaService.getViewConfig.mockResolvedValue(viewConfig())
   boService.query.mockResolvedValue({ success: true, data: { items: [{ id: 1, name: 'a' }], total: 1 } })
   boService.evaluateActions.mockImplementation(evaluateActions)
@@ -119,5 +137,58 @@ describe('useMetaList 行级动作后端批量判定（B1-2 fail-closed）', () 
 
     expect(meta.data.value.length).toBe(1)
     expect(meta.getRowActions({ id: 1 }).map(a => a.key)).toEqual(['submit'])
+  })
+})
+
+describe('useMetaList 元数据来源：ui-meta 优先 + legacy 回退（T13-9）', () => {
+  beforeEach(() => {
+    vi.clearAllMocks()
+    vi.spyOn(console, 'error').mockImplementation(() => {})
+    vi.spyOn(console, 'warn').mockImplementation(() => {})
+    boService.query.mockResolvedValue({ success: true, data: { items: [{ id: 1, name: 'a' }], total: 1 } })
+    boService.evaluateActions.mockResolvedValue({ success: true, data: {} })
+  })
+
+  it('getUiMeta reject 且 getViewConfig resolve 时，回退 legacy 且元数据加载成功', async () => {
+    metaService.getUiMeta.mockRejectedValue(new Error('ui-meta 500'))
+    metaService.getViewConfig.mockResolvedValue(viewConfig())
+
+    const meta = useMetaList('demo_object', {})
+    await meta.init()
+    await flushPromises()
+    await flushPromises()
+
+    expect(metaService.getUiMeta).toHaveBeenCalledWith('demo_object')
+    expect(metaService.getViewConfig).toHaveBeenCalled()
+    expect(meta.columns.value.map(c => c.key)).toHaveLength(2)
+    expect(meta.columns.value.map(c => c.key)).toEqual(expect.arrayContaining(['id', 'name']))
+    expect(meta.data.value.length).toBe(1)
+  })
+
+  it('getUiMeta resolve 时，不再调用 getViewConfig', async () => {
+    metaService.getUiMeta.mockResolvedValue(uiMeta())
+
+    const meta = useMetaList('demo_object', {})
+    await meta.init()
+    await flushPromises()
+    await flushPromises()
+
+    expect(metaService.getUiMeta).toHaveBeenCalledWith('demo_object')
+    expect(metaService.getViewConfig).not.toHaveBeenCalled()
+    expect(meta.columns.value.map(c => c.key)).toHaveLength(2)
+    expect(meta.columns.value.map(c => c.key)).toEqual(expect.arrayContaining(['id', 'name']))
+  })
+
+  it('actions/evaluate 返回 HTTP 500 时行级动作 fail-closed（不可用）', async () => {
+    metaService.getUiMeta.mockResolvedValue(uiMeta())
+    boService.evaluateActions.mockResolvedValue({ success: false, httpStatus: 500, message: 'Internal Server Error' })
+
+    const meta = useMetaList('demo_object', {})
+    await meta.init()
+    await flushPromises()
+    await flushPromises()
+
+    expect(meta.data.value.length).toBe(1)
+    expect(meta.getRowActions({ id: 1 })).toEqual([])
   })
 })
