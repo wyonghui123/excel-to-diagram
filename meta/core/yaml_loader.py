@@ -175,6 +175,7 @@ from meta.core.models import (
     UIFormColumn,
     UIFormSection,
     UIFormViewConfig,
+    UITabConfig,
     UIFilterDefinition,
     UIFilterViewConfig,
     UIViewConfig,
@@ -722,11 +723,82 @@ def parse_value_help(data: Dict[str, Any]) -> Optional["ValueHelpConfig"]:
     )
 
 
+_COL_SPAN_RANGE = (1, 4)
+
+
+def _parse_col_span(value: Any) -> Optional[int]:
+    """解析字段跨列（1..4）。
+
+    [UI 元数据聚合 2026-11-13] 校验放在反序列化处：非法值（非整数 / 越界）
+    降级为 None 并 warning，不抛异常阻断整库加载。
+    """
+    if value is None or isinstance(value, bool):
+        return None
+    try:
+        span = int(value)
+    except (TypeError, ValueError):
+        logger.warning("[YAML Loader] col_span 非整数，已忽略: %r", value)
+        return None
+    if not (_COL_SPAN_RANGE[0] <= span <= _COL_SPAN_RANGE[1]):
+        logger.warning("[YAML Loader] col_span 越界(1..4)，已忽略: %r", value)
+        return None
+    return span
+
+
+def _parse_col_span_map(raw: Any) -> Dict[str, int]:
+    """解析分区级字段跨列表：逐个字段复用 _parse_col_span 过滤非法值。"""
+    if not isinstance(raw, dict):
+        return {}
+    result: Dict[str, int] = {}
+    for field_id, value in raw.items():
+        span = _parse_col_span(value)
+        if span is not None:
+            result[str(field_id)] = span
+    return result
+
+
+def _parse_section_tabs(tabs_data: Any, known_keys) -> List[UITabConfig]:
+    """解析分区分组 tab（section_keys 引用分区 key）。
+
+    引用不存在的 section key 的 tab 丢弃 + warning，其余保留；
+    非分组形态（无 section_keys 的 tab，如内容取数 tab）不在此处处理。
+    """
+    known = {k for k in known_keys if k}
+    result: List[UITabConfig] = []
+    for item in tabs_data or []:
+        if not isinstance(item, dict):
+            continue
+        raw_keys = item.get("section_keys")
+        if not isinstance(raw_keys, list):
+            continue
+        keys = [str(k) for k in raw_keys if k]
+        missing = [k for k in keys if k not in known]
+        if missing:
+            logger.warning(
+                "[YAML Loader] tab %s 引用不存在的 section key: %s，已丢弃",
+                item.get("key") or item.get("id"), missing,
+            )
+            continue
+        result.append(UITabConfig(
+            key=str(item.get("key") or item.get("id") or ""),
+            label=str(item.get("label") or ""),
+            section_keys=keys,
+        ))
+    return result
+
+
 def parse_ui_annotation(data: Dict[str, Any]) -> UIAnnotation:
     """解析 UI 注解"""
     if not data:
         return UIAnnotation()
-    
+
+    visible_when_raw = data.get("visible_when")
+    visible_when = (
+        visible_when_raw
+        if isinstance(visible_when_raw, str) and visible_when_raw.strip()
+        else None
+    )
+
     return UIAnnotation(
         lineItem=data.get("lineItem"),
         fieldGroup=data.get("fieldGroup"),
@@ -749,6 +821,8 @@ def parse_ui_annotation(data: Dict[str, Any]) -> UIAnnotation:
         options=data.get("options", []),
         render_hints=parse_render_hints(data),
         value_help=parse_value_help(data),
+        visible_when=visible_when,
+        col_span=_parse_col_span(data.get("col_span")),
     )
 
 
@@ -991,6 +1065,10 @@ def parse_ui_detail_facet(data: Dict[str, Any]) -> UIDetailFacet:
         # [B 2026-10-23] 1:1 明细面与条件显示：见 UIDetailFacet 同名字段注释。
         cardinality=data.get("cardinality", "many"),
         visibleWhen=data.get("visibleWhen") or {},
+        # [UI 元数据聚合 2026-11-13] 分区 key / 栅格列数 / 字段跨列（声明态）
+        key=data.get("key") or None,
+        columns=data.get("columns") if isinstance(data.get("columns"), int) else 2,
+        col_span_map=_parse_col_span_map(data.get("col_span_map")),
     )
 
 
@@ -1034,7 +1112,16 @@ def parse_ui_detail_view_config(data: Dict[str, Any]) -> UIDetailViewConfig:
     
     facets = [parse_ui_detail_facet(f) for f in data.get("facets", [])]
     tabs_data = data.get("tabs", [])
-    tabs = [parse_ui_detail_tab(t) for t in tabs_data]
+    # [UI 元数据聚合 2026-11-13] 含 section_keys 的 tab 是「分区分组 tab」，
+    #   与既有内容 tab（UIDetailTab）语义不同：前者进 section_tabs，后者照旧解析，
+    #   避免旧 detail-view 端点收到无 id 的空 tab。
+    facet_keys = [f.key or f.id for f in facets]
+    section_tabs = _parse_section_tabs(tabs_data, facet_keys)
+    tabs = [
+        parse_ui_detail_tab(t)
+        for t in tabs_data
+        if not (isinstance(t, dict) and isinstance(t.get("section_keys"), list))
+    ]
     
     logger.debug(f"[YAML Loader] parse_ui_detail_view_config: tabs_data={tabs_data}")
     logger.debug(f"[YAML Loader] parse_ui_detail_view_config: tabs={tabs}")
@@ -1042,6 +1129,7 @@ def parse_ui_detail_view_config(data: Dict[str, Any]) -> UIDetailViewConfig:
     return UIDetailViewConfig(
         facets=facets,
         tabs=tabs,
+        section_tabs=section_tabs,
         title=data.get("title", ""),
         description=data.get("description", ""),
         layout=data.get("layout", "tabs"),
@@ -1078,6 +1166,9 @@ def parse_ui_form_section(data: Dict[str, Any]) -> UIFormSection:
         i18n_key=data.get("i18n_key", ""),
         layout=data.get("layout", "vertical"),
         columns=columns,
+        # [UI 元数据聚合 2026-11-13] 分区 key（tab 引用目标）与字段跨列声明
+        key=data.get("key") or None,
+        col_span_map=_parse_col_span_map(data.get("col_span_map")),
     )
 
 
@@ -1087,10 +1178,14 @@ def parse_ui_form_view_config(data: Dict[str, Any]) -> UIFormViewConfig:
         return UIFormViewConfig()
     
     sections = [parse_ui_form_section(s) for s in data.get("sections", [])]
+    # [UI 元数据聚合 2026-11-13] form.tabs：分区分组 tab，引用 sections.key；
+    #   引用不存在的 key 的 tab 丢弃 + warning（见 _parse_section_tabs）。
+    tabs = _parse_section_tabs(data.get("tabs"), [s.key for s in sections])
     
     return UIFormViewConfig(
         sections=sections,
         layout=data.get("layout", "vertical"),
+        tabs=tabs,
     )
 
 

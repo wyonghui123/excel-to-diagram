@@ -487,6 +487,7 @@ class ApplicationBuilder:
         from meta.api.permission_set_menu_api import permission_set_menu_bp
         from meta.api.permission_dimension_api import permission_dimension_bp, roles_bp, meta_bp as mgmt_meta_bp, ps_matrix_bp
         from meta.api.enum_api import enum_bp
+        from meta.api.meta_enum_api import meta_enum_bp
         from meta.api.menu_permission_api import menu_permission_bp
         from meta.api.permission_bundle_api import permission_bundle_bp
         from meta.api.permission_audit_api import permission_audit_bp
@@ -550,6 +551,7 @@ class ApplicationBuilder:
         app.register_blueprint(ps_matrix_bp)  # /api/v1/permission-sets/<id>/resource-action-matrix (GET+PUT)
         app.register_blueprint(mgmt_meta_bp)  # /api/v1/meta/*
         app.register_blueprint(enum_bp)
+        app.register_blueprint(meta_enum_bp)  # /api/v2/meta/*（B2-1 统一枚举/矩阵 schema）
         app.register_blueprint(menu_permission_bp)
         app.register_blueprint(permission_bundle_bp)
         app.register_blueprint(permission_audit_bp)

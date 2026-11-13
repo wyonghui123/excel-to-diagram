@@ -36,6 +36,98 @@ from meta.core.db_path import get_meta_db_path
 DEV_MODE = os.environ.get('FLASK_DEBUG', '').lower() in ('1', 'true', 'yes') or os.environ.get('DEV_MODE', '').lower() in ('1', 'true', 'yes')
 
 
+# [UI 元数据聚合 2026-11-13] schema_version 复用 /api/v2/meta/schema-version 的算法
+#   （md5 全量 schema YAML 内容前 12 位），本进程内按 (文件名, mtime, size) 签名缓存；
+#   schema 文件变更 → 签名变化 → 自动重算，避免每次请求全量读盘。
+_SCHEMA_HASH_CACHE: Dict[str, Any] = {"sig": None, "value": None}
+
+
+def _compute_schema_dir_hash() -> Optional[str]:
+    """计算全局 schema hash；schema 目录不可用时返回 None（调用方走退化方案）。"""
+    import hashlib
+
+    try:
+        schema_dir = get_yaml_schema_dir()
+        if not schema_dir or not os.path.isdir(schema_dir):
+            return None
+        files = sorted(
+            f for f in os.listdir(schema_dir)
+            if f.endswith('.yaml') and not f.startswith('_')
+        )
+        sig = tuple(
+            (f, os.path.getmtime(os.path.join(schema_dir, f)),
+             os.path.getsize(os.path.join(schema_dir, f)))
+            for f in files
+        )
+        if _SCHEMA_HASH_CACHE["sig"] == sig:
+            return _SCHEMA_HASH_CACHE["value"]
+        hasher = hashlib.md5()
+        for f in files:
+            with open(os.path.join(schema_dir, f), 'rb') as fh:
+                hasher.update(fh.read())
+        value = hasher.hexdigest()[:12]
+        _SCHEMA_HASH_CACHE["sig"] = sig
+        _SCHEMA_HASH_CACHE["value"] = value
+        return value
+    except Exception as exc:  # noqa: BLE001
+        logger.warning("[view-config] schema_version 计算失败，降级为配置指纹: %s", exc)
+        return None
+
+
+def _build_fallback_schema_version(object_type: str, config: UIViewConfig) -> str:
+    """退化方案：sha1(object_type + 视图配置 JSON + 字段 UI 注解摘要)[:12]。
+
+    仅在全局 schema hash 不可用时使用；同一输入稳定产出同一值。
+    """
+    import hashlib
+    import json
+
+    config_payload = {}
+    if config is not None:
+        config_payload = {
+            'list': asdict(config.list) if config.list else {},
+            'detail': asdict(config.detail) if config.detail else {},
+            'form': asdict(config.form) if config.form else {},
+            'filter': asdict(config.filter) if config.filter else {},
+        }
+    annotations: Dict[str, Any] = {}
+    meta_object = registry.get(object_type)
+    if meta_object:
+        for field in meta_object.fields:
+            annotations[field.id] = {
+                'visible_when': getattr(field.ui, 'visible_when', None),
+                'col_span': getattr(field.ui, 'col_span', None),
+            }
+    payload = json.dumps(
+        {'object_type': object_type, 'config': config_payload, 'annotations': annotations},
+        sort_keys=True, default=str,
+    )
+    return hashlib.sha1(payload.encode('utf-8')).hexdigest()[:12]
+
+
+def _slugify_group_key(name: str) -> str:
+    """分区标题 → 稳定 key：可转 ascii slug 的直转，中文等用短 hash 兜底（不可逆但稳定）。"""
+    import hashlib
+    import re
+
+    raw = (name or '').strip()
+    slug = re.sub(r'[^0-9a-zA-Z]+', '-', raw).strip('-').lower()
+    if not slug:
+        slug = 'g-' + hashlib.sha1(raw.encode('utf-8')).hexdigest()[:8]
+    return slug
+
+
+def _collect_col_span_map(meta_object, field_ids: List[str]) -> Dict[str, int]:
+    """汇总字段 ui.col_span 到 {field_id: span}，只收 1..4 的合法整数。"""
+    field_map = {f.id: f for f in getattr(meta_object, 'fields', []) or []}
+    result: Dict[str, int] = {}
+    for field_id in field_ids:
+        span = getattr(getattr(field_map.get(field_id), 'ui', None), 'col_span', None)
+        if isinstance(span, int) and not isinstance(span, bool) and 1 <= span <= 4:
+            result[field_id] = span
+    return result
+
+
 class ViewConfigCache:
     """视图配置缓存（LRU + TTL）"""
     
@@ -333,6 +425,10 @@ class ViewConfigService:
                 title=group_name,
                 type="fieldGroup",
                 fields=field_ids,
+                # [UI 元数据聚合 2026-11-13] 与表单对齐：key / 列数 / 字段跨列
+                key=_slugify_group_key(group_name),
+                columns=2,
+                col_span_map=_collect_col_span_map(meta_object, field_ids),
             )
             facets.append(facet)
         
@@ -374,6 +470,10 @@ class ViewConfigService:
             section = UIFormSection(
                 title=group_name,
                 fields=field_ids,
+                # [UI 元数据聚合 2026-11-13] 分区 key / 字段跨列；
+                #   columns 保持既有的 List[UIFormColumn] 语义（栅格列数在输出侧推导）
+                key=_slugify_group_key(group_name),
+                col_span_map=_collect_col_span_map(meta_object, field_ids),
             )
             sections.append(section)
         
@@ -416,7 +516,14 @@ class ViewConfigService:
                 if meta_object:
                     self._merge_default_actions(config.list, meta_object)
             self._enrich_columns_with_field_meta(object_type, config)
-        
+            # [UI 元数据聚合 2026-11-13] 视图配置版本号：供 ui-meta 前端缓存失效。
+            #   优先复用全局 schema hash（与 /api/v2/meta/schema-version 同值），
+            #   不可用时退化为 object_type + 配置 + 注解的 sha1 指纹。
+            config.schema_version = (
+                _compute_schema_dir_hash()
+                or _build_fallback_schema_version(object_type, config)
+            )
+
         return config
     
     def _enrich_columns_with_field_meta(self, object_type: str, config):

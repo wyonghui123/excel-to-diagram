@@ -6,6 +6,7 @@
 """
 
 import os
+import logging
 from flask import Blueprint, request, jsonify
 from dataclasses import asdict
 from typing import Any
@@ -16,6 +17,9 @@ from meta.services.view_config_service import view_config_service
 from meta.services.i18n_service import i18n_service
 from meta.core.yaml_loader import register_from_directory, get_yaml_schema_dir
 from meta.core.state_side_effects import validate_schema_dir_side_effects
+from meta.core.ui_config.value_help_formatter import value_help_to_dict
+
+logger = logging.getLogger(__name__)
 
 meta_bp = Blueprint('meta', __name__, url_prefix='/api/v1/meta')
 
@@ -354,6 +358,214 @@ def get_form_view_config(object_type: str):
         'object_type': object_type,
         'view_name': view_name or 'default',
     })
+
+
+# ---------------------------------------------------------------------------
+# [T13-5 2026-11-13] UI 元数据聚合端点
+#   只输出「声明态」UI 元数据（字段/分区/动作/筛选/字段策略声明），
+#   不返回任何权限判定结果，不为 action 赋 enabled（启用态仍由 evaluate 决定）。
+# ---------------------------------------------------------------------------
+
+def _empty_block(name: str) -> Any:
+    """block 构建失败时的空块（形状与正常块一致，前端可安全渲染）"""
+    if name == 'list':
+        return {'columns': [], 'actions': []}
+    if name == 'detail':
+        return {'sections': [], 'tabs': []}
+    if name == 'form':
+        return {'sections': [], 'tabs': [], 'fields': []}
+    if name == 'filters':
+        return []
+    if name == 'field_policies':
+        return {}
+    return {}
+
+
+def _action_to_dict(action: Any) -> dict:
+    """动作声明统一成 dict（字符串形态保留 id/label），不注入 enabled。"""
+    if isinstance(action, dict):
+        return dict(action)
+    if isinstance(action, str):
+        return {'id': action, 'label': action}
+    return {}
+
+
+def _section_columns(section) -> int:
+    """表单分区栅格列数：columns 是既有的「行布局列」List，空则按 2 列。"""
+    return len(section.columns) if section.columns else 2
+
+
+def _form_section_dict(section) -> dict:
+    return {
+        'key': section.key or '',
+        'label': section.title or section.i18n_key or '',
+        'fields': list(section.fields),
+        'columns': _section_columns(section),
+        'col_span_map': dict(section.col_span_map or {}),
+    }
+
+
+def _tab_dict(tab) -> dict:
+    return {
+        'key': tab.key,
+        'label': tab.label,
+        'section_keys': list(tab.section_keys),
+    }
+
+
+def _list_block(config, meta_obj) -> dict:
+    lst = getattr(config, 'list', None)
+    if not lst:
+        return _empty_block('list')
+    return {
+        'columns': [
+            {
+                'field': col.key,
+                'label': col.title or col.key,
+                'width': col.width,
+                'sortable': bool(col.sortable),
+                'filterable': bool(col.filterable),
+                'tag_enum': col.enum_type or '',
+            }
+            for col in lst.columns
+        ],
+        'actions': [_action_to_dict(a) for a in lst.actions],
+    }
+
+
+def _detail_block(config, meta_obj) -> dict:
+    detail = getattr(config, 'detail', None)
+    if not detail:
+        return _empty_block('detail')
+    return {
+        'sections': [
+            {
+                'key': facet.key or facet.id or '',
+                'label': facet.label or facet.title or facet.i18n_key or '',
+                'fields': list(facet.fields),
+                'columns': facet.columns or 2,
+                'col_span_map': dict(facet.col_span_map or {}),
+            }
+            for facet in detail.facets
+        ],
+        'tabs': [_tab_dict(t) for t in getattr(detail, 'section_tabs', [])],
+    }
+
+
+def _form_block(config, meta_obj) -> dict:
+    form = getattr(config, 'form', None)
+    if not form:
+        return _empty_block('form')
+    field_map = {f.id: f for f in getattr(meta_obj, 'fields', []) or []}
+    fields = []
+    for section in form.sections:
+        for field_id in section.fields:
+            meta_field = field_map.get(field_id)
+            if not meta_field:
+                continue
+            ui = meta_field.ui
+            item = {
+                'key': field_id,
+                'label': meta_field.name,
+                'widget': ui.widget or meta_field.field_type.value,
+                'required': bool(meta_field.required),
+                'readonly': bool(ui.readonly),
+                'visible': bool(ui.visible),
+                'enum_type': meta_field.enum_type or '',
+            }
+            if ui.visible_when:
+                item['visible_when'] = ui.visible_when
+            if ui.col_span:
+                item['col_span'] = ui.col_span
+            if ui.depends_on:
+                item['depends_on'] = [ui.depends_on]
+            if ui.value_help:
+                item['value_help'] = value_help_to_dict(ui.value_help)
+            fields.append(item)
+    return {
+        'layout': form.layout,
+        'sections': [_form_section_dict(s) for s in form.sections],
+        'tabs': [_tab_dict(t) for t in form.tabs],
+        'fields': fields,
+    }
+
+
+def _filters_block(config, meta_obj) -> Any:
+    filters = getattr(getattr(config, 'filter', None), 'filters', None)
+    if not filters:
+        return []
+    return [_dataclass_to_dict(f) for f in filters]
+
+
+def _policies_block(meta_obj) -> dict:
+    """字段级策略声明（只输出非默认声明，空对象表示全部按默认口径）。"""
+    result = {}
+    for meta_field in getattr(meta_obj, 'fields', []) or []:
+        perm = getattr(meta_field, 'permission', None)
+        if not perm:
+            continue
+        if perm.readable is False or perm.writable is False or perm.roles:
+            result[meta_field.id] = {
+                'readable': bool(perm.readable),
+                'writable': bool(perm.writable),
+                'roles': list(perm.roles or []),
+            }
+    return result
+
+
+@meta_bp.route('/<object_type>/ui-meta', methods=['GET'])
+def get_ui_meta(object_type: str):
+    """[T13-5 2026-11-13] 聚合 UI 元数据（单请求取齐 list/detail/form/filters）。
+
+    鉴权口径与相邻 view-config / form-view 一致（蓝图内无额外装饰器，沿用既有口径）。
+    任一 block 构建失败只降级该块并置 partial=True，不影响其余块。
+    """
+    _ensure_fresh_meta()
+    config = view_config_service.get_or_build_view_config(object_type)
+    meta_obj = registry.get(object_type)
+
+    data: dict = {
+        'schema_version': getattr(config, 'schema_version', '') if config else '',
+    }
+    partial = False
+
+    builders = (
+        ('list', lambda: _list_block(config, meta_obj)),
+        ('detail', lambda: _detail_block(config, meta_obj)),
+        ('form', lambda: _form_block(config, meta_obj)),
+        ('filters', lambda: _filters_block(config, meta_obj)),
+        ('field_policies', lambda: _policies_block(meta_obj)),
+    )
+    for name, builder in builders:
+        try:
+            data[name] = builder()
+        except Exception:  # noqa: BLE001 —— 单块失败不拖垮聚合端点
+            logger.exception("[ui-meta] block 构建失败: %s/%s", object_type, name)
+            data[name] = _empty_block(name)
+            partial = True
+
+    # 动作合并：list 动作 + detail 动作，按 id 去重（先到先得）
+    merged_actions = []
+    seen_action_ids = set()
+    for action in (
+        list((data.get('list') or {}).get('actions') or [])
+        + list((data.get('detail') or {}).get('actions') or [])
+    ):
+        item = _action_to_dict(action)
+        action_id = item.get('id') or item.get('label') or ''
+        if action_id in seen_action_ids:
+            continue
+        seen_action_ids.add(action_id)
+        merged_actions.append(item)
+
+    data.update({
+        'object_type': object_type,
+        'label': (meta_obj.name if meta_obj else '') or object_type,
+        'partial': partial,
+        'actions': merged_actions,
+    })
+
+    return jsonify({'success': True, 'data': data})
 
 
 @meta_bp.route('/<object_type>/defaults-preview', methods=['POST'])

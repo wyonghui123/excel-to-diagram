@@ -95,6 +95,11 @@ class UIDetailFacet:
     #   客户档案或供应商档案之一，故两个分区互斥渲染；不按 role 隐藏会让 UI
     #   允许 DB 禁止的状态（一条关系同时挂两类档案）。
     visibleWhen: Dict[str, Any] = field(default_factory=dict)
+    # [UI 元数据聚合 2026-11-13] 分区稳定 key / 栅格列数 / 字段跨列声明，
+    #   供 ui-meta 输出 UiSectionMeta；不参与旧 detail-view 的渲染含义。
+    key: Optional[str] = None
+    columns: int = 2
+    col_span_map: Dict[str, int] = field(default_factory=dict)
 
 
 @dataclass
@@ -153,6 +158,17 @@ class UIDetailViewConfig:
     #   不含 action 的项沿用声明式按钮语义（edit / delete / print …）。
     #   此前 dataclass 缺该字段 ⇒ YAML detail.actions 在加载时被静默丢弃。
     actions: List[Any] = field(default_factory=list)
+    # [UI 元数据聚合 2026-11-13] 分区分组 tab（section_keys 引用 facets.key）。
+    #   与既有 tabs（UIDetailTab 内容 tab）语义不同，单独存放，避免旧端点形状变化。
+    section_tabs: List['UITabConfig'] = field(default_factory=list)
+
+
+@dataclass
+class UITabConfig:
+    """分区分组 Tab（按 key 引用 section，不承载内容取数）"""
+    key: str
+    label: str = ""
+    section_keys: List[str] = field(default_factory=list)
 
 
 @dataclass
@@ -169,7 +185,13 @@ class UIFormSection:
     fields: List[str] = field(default_factory=list)
     i18n_key: str = ""
     layout: str = "vertical"  # vertical | row
+    # [UI 元数据聚合 2026-11-13] UIFormSection.columns 是既有「行布局列」语义
+    #   （List[UIFormColumn]，YAML columns: 2 简写也落在这里），不能改成 int，
+    #   否则旧 form-view 载荷与 loader 全部破坏。ui-meta 的栅格列数在输出侧
+    #   由 columns 长度推导（空则 2），见 meta_api._form_block。
     columns: List[UIFormColumn] = field(default_factory=list)
+    key: Optional[str] = None
+    col_span_map: Dict[str, int] = field(default_factory=dict)
 
 
 @dataclass
@@ -177,6 +199,8 @@ class UIFormViewConfig:
     """表单视图配置"""
     sections: List[UIFormSection] = field(default_factory=list)
     layout: str = "vertical"
+    # [UI 元数据聚合 2026-11-13] 分区分组 tab（section_keys 引用 sections.key）。
+    tabs: List[UITabConfig] = field(default_factory=list)
 
 
 @dataclass
@@ -313,3 +337,6 @@ class UIViewConfig:
     hub: Dict[str, Any] = field(default_factory=dict)
     # [P9 2026-11-06] 报表页配置；仅显式声明时输出，不参与自动生成。
     report: Optional[UIReportConfig] = None
+    # [UI 元数据聚合 2026-11-13] 视图配置版本号（ui-meta 缓存失效键）；
+    #   由 view_config_service.get_or_build_view_config 赋值，不从 YAML 读取。
+    schema_version: str = ""

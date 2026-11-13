@@ -16,7 +16,7 @@
 import logging
 from typing import Any, Dict, List, Optional
 
-from flask import Blueprint, current_app
+from flask import Blueprint, current_app, request
 
 from meta.api._response_contract import error_response, ok
 from meta.api.auth_api import login_required
@@ -172,6 +172,45 @@ def resolve_enum(name: str) -> Optional[List[Dict[str, Any]]]:
     if source:
         return _load_yaml_enum(*source)
     return None
+
+
+_ENUM_COLOR_VALUES = {"success", "warning", "danger", "info", "primary"}
+
+
+def _sanitize_enum_items(items: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+    """[T13-1 2026-11-13] 过滤非法 color：不在约定集合内直接丢弃键，不下发未知颜色。"""
+    result: List[Dict[str, Any]] = []
+    for item in items or []:
+        entry = dict(item)
+        color = entry.get("color")
+        if color is not None and color not in _ENUM_COLOR_VALUES:
+            entry.pop("color", None)
+        result.append(entry)
+    return result
+
+
+@meta_enum_bp.route("/enums/batch", methods=["GET"])
+@login_required
+def get_enums_batch():
+    """[T13-1 2026-11-13] 批量枚举下发：?names=a,b,c → {a: [items], b: [items]}。
+
+    - 缺 names 参数 → 空对象 {}
+    - 未知 name 跳过（不返回 500，也不塞空数组以外的猜测值）
+    - 每项沿用单个枚举的 extra 机制（color / category / description），非法 color 丢弃
+    """
+    raw = request.args.get("names", "") or ""
+    names = [n.strip() for n in raw.split(",") if n.strip()]
+    result: Dict[str, List[Dict[str, Any]]] = {}
+    for name in names:
+        try:
+            items = resolve_enum(name)
+        except Exception as exc:  # noqa: BLE001 —— 单个枚举失败不影响其余
+            logger.error("[meta/enums] batch 下发 %s 失败: %s", name, exc)
+            continue
+        if not items:
+            continue
+        result[name] = _sanitize_enum_items(items)
+    return ok(result)
 
 
 @meta_enum_bp.route("/enums/<name>", methods=["GET"])

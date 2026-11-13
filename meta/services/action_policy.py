@@ -451,7 +451,10 @@ _OBJECT_BUCKET = '_object'
 
 
 def _action_id(action) -> str:
-    """读取动作 id，兼容 dict / 对象两种结构。"""
+    """读取动作 id，兼容 dict / 对象 / 纯字符串三种结构。"""
+    if isinstance(action, str):
+        # [T13-6] 允许调用方直接传动作 id 字符串（如 actions=['view']）
+        return action.strip().lower()
     return str(_action_field(action, 'id', '') or '').strip().lower()
 
 
