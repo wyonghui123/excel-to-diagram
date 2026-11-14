@@ -170,10 +170,8 @@
 
 | 任务 | 必读文档 |
 |------|----------|
-| **当前生效规范 (active/)** | `.trae/rules/active/` (备用) |
 | **历史归档 (archive/)** | `.trae/rules/archive/` (备用) |
-| **废弃规范 (.deprecated/)** | `.trae/rules/.deprecated/` (禁止作为参考) |
-| **规则演进历史** | `.trae/rules/active/CHANGELOG.md` (备用) |
+| **废弃规范已清理** | 废弃规则已随 2026-11-14 收敛清理，无 `.deprecated/` 目录 |
 | **全局规范** | `d:\filework\.trae\rules\` (跨项目) |
 
 ---

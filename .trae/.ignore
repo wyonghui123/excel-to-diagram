@@ -102,3 +102,8 @@ _meta/
 coverage/
 htmlcov/
 .coverage
+
+# === 大体积非检索目录 ===
+docs/archive/
+.trae/debug/
+.trae/documents/

@@ -18,7 +18,7 @@ globs: "scripts/**"
 > - 🟢 跨会话 stop/restart 保护：其他会话活跃占用时 REFUSED，逃生口 `--force`
 
 > **v5.0 重要变更（2026-09-02 服务治理后）**
-> - 🟢 端口单一真相源 = `.ports.yaml`（禁止硬编码端口）
+> - 🟢 端口单一真相源 = `scripts/ports.json`（禁止硬编码端口）
 > - 🟢 临时文件统一目录 = `.tmp/`（禁止散落 scripts/ 或 root）
 > - 🟢 每周 PM 触发 `reset_workspace.ps1` 自动清理 >7 天的临时文件
 > - 🟢 scripts/ 只保留 4 类核心脚本（start / service_manager / watchdog / reset_workspace）
@@ -51,22 +51,22 @@ powershell -File d:\filework\excel-to-diagram\scripts\reset_workspace.ps1 -Clean
 
 ## 2. 端口分配铁律（v5.0 新增）
 
-**端口单一真相源 = `.ports.yaml`**
+**端口单一真相源 = `scripts/ports.json`**
 
 修改端口流程：
-1. 编辑 `excel-to-diagram/.ports.yaml`
+1. 编辑 `d:\filework\excel-to-diagram\scripts\ports.json`
 2. commit + push
 3. 通知所有 AI 智能体
 
 **严禁**：
 - ❌ 在代码中硬编码端口号（`if port == 3010`）
-- ❌ 在规则文件中写死端口（应引用 `.ports.yaml`）
+- ❌ 在规则文件中写死端口（应引用 `scripts/ports.json`）
 - ❌ 在文档中散布"端口 = 3004/3010"等信息
 
 **读取端口**：
 ```powershell
 # AI 智能体查询端口
-$y = Get-Content d:\filework\excel-to-diagram\.ports.yaml | ConvertFrom-Yaml
+$y = Get-Content d:\filework\excel-to-diagram\scripts\ports.json | ConvertFrom-Json
 $dev_backend = $y.environments.dev.backend.default  # 3010
 ```
 
@@ -134,7 +134,7 @@ $dev_backend = $y.environments.dev.backend.default  # 3010
 
 **前端端口 = 3004**（固定，共享）。
 
-**CORS 配置**（来自 `.ports.yaml`）：
+**CORS 配置**（来自 `scripts/ports.json`）：
 - `http://localhost:3004`
 - `http://localhost:3005`
 - `http://localhost:5173`

@@ -289,7 +289,6 @@ mcp: click → 操作页面元素
 | `test_helpers/browser_auth.py` | Python 认证 helper 模块（推荐入口） |
 | `test_helpers/verify_auth.py` | 认证方案验证脚本（4 tests） |
 | `meta/api/auth_api.py#L167-L218` | dev-login 端点实现 |
-| `.trae/rules/mcp-testing.md` | MCP DevTools 测试规则 |
 | `.trae/rules/e2e-testing.md` | Playwright E2E 测试规则 |
 
 ---

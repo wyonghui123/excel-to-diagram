@@ -101,9 +101,7 @@ description: "上下文窗口管理优化：Token 节省、规则精简策略"
 | 问题类型 | 经验文档位置 | 关键点 |
 |---------|-------------|--------|
 | EdgeLabel 样式问题 | `docs/lessons-learned/mermaid/edgeLabel-styling.md` | SVG rect 控制 |
-| 布局方向问题 | `docs/lessons-learned/layout/direction-fix.md` | 引擎差异处理 |
-| 分组标题显示 | `docs/lessons-learned/layout/group-title.md` | 子图方向配置 |
-| 颜色分组问题 | `docs/lessons-learned/layout/color-grouping.md` | GroupModel 管理 |
+| 布局 / 分组 / 颜色分组问题 | （该系列文档已移除） | - |
 | **理解业务模型** | `meta/schemas/README.md` | YAML 元模型定义 |
 
 **执行步骤**:
@@ -249,7 +247,7 @@ description: "上下文窗口管理优化：Token 节省、规则精简策略"
 如果文件超过限制：
 
 1. **拆分为多个文件**
-   - 例如：`frontend-rules.md`, `backend-rules.md`
+   - 例如：按主题拆分为独立文件
 
 2. **使用索引-详情分离**
    - 索引：简要概述
@@ -289,7 +287,7 @@ description: "上下文窗口管理优化：Token 节省、规则精简策略"
 1. 读取 .trae/context/README.md → 知道 ELK/Dagre 方向相反
 2. 读取本规则 → 看到"布局引擎相关 → 查看 ADR-002"
 3. 读取 .trae/context/decisions/adr-002-elk-direction.md → 了解具体问题
-4. 读取 docs/lessons-learned/layout/direction-fix.md → 查看历史解决方案
+4. 查看 docs/lessons-learned/README.md 索引 → 查找相关历史解决方案
 5. 定位代码并修复
 6. 更新经验记录（如有新发现）
 ```

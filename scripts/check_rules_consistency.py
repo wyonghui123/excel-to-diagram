@@ -116,6 +116,9 @@ DEPRECATED_FILES = {
 # Windows 路径前缀 (file:// 形式, 主工作树根)
 WINDOWS_FILE_URL = re.compile(r"^file:///([a-zA-Z]:[/\\].*)$")
 
+# 写死的 Windows 绝对路径 (d:\filework\...)
+ABS_WIN_PATH = re.compile(r"([a-zA-Z]:\\[^\s`'\"<>|\[\]()]*\.(?:md|ps1|py|sh|js|ts|vue))")
+
 
 def md5(path: Path) -> str:
     """计算文件 md5"""
@@ -167,14 +170,10 @@ def scan_files(root: Path = PROJECT_ROOT) -> List[Path]:
 
 def strip_code_blocks(content: str) -> str:
     """
-    移除代码块 (```...```) 和行内代码中的引用
-    因为代码示例里的字符串不是真引用
+    仅移除围栏代码块 (```...```)
+    保留行内代码: 规则文档中的 `scripts/xxx.py` 是真引用, 必须检查
     """
-    # 移除多行代码块
-    content = re.sub(r"```[^\n]*\n.*?```", "", content, flags=re.DOTALL)
-    # 移除行内代码 `...` 中的内容 (替换为空格保留位置)
-    content = re.sub(r"`[^`\n]+`", " ", content)
-    return content
+    return re.sub(r"```[^\n]*\n.*?```", "", content, flags=re.DOTALL)
 
 
 def extract_refs(path: Path) -> List[str]:
@@ -213,6 +212,9 @@ def extract_refs(path: Path) -> List[str]:
             # 跳过 template variable in URL
             if "${" in url:
                 continue
+            # 过滤明显非路径的行内片段 (裸脚本名/模块名, 如 `decision_log.py`)
+            if "/" not in url and "\\" not in url and not url.lower().endswith(".md"):
+                continue
             # 去掉锚点
             url = url.split("#")[0]
             if url and len(url) > 3:  # 跳过太短的无意义引用
@@ -239,9 +241,15 @@ def resolve_ref(ref: str, source: Path) -> Path:
         return p
     if ref.startswith(("/", "\\")):
         return PROJECT_ROOT / ref.lstrip("/\\")
-    if ref.startswith("~"):
+    if ref.startswith(("~")):
         return Path(ref).expanduser()
-    return (source.parent / ref).resolve()
+    # 相对引用: 先按源文件目录解析, 不存在再按项目根解析 (规则文档常用根相对路径)
+    candidate = (source.parent / ref).resolve()
+    if not candidate.exists():
+        root_candidate = (PROJECT_ROOT / ref).resolve()
+        if root_candidate.exists():
+            return root_candidate
+    return candidate
 
 
 def check_deadlinks(files: List[Path] = None) -> List[Tuple[Path, str, str]]:
@@ -262,6 +270,36 @@ def check_deadlinks(files: List[Path] = None) -> List[Tuple[Path, str, str]]:
                 continue
             dead.append((path, ref, str(resolved)))
     return dead
+
+
+def check_absolute_paths(files: List[Path] = None) -> List[Tuple[Path, str]]:
+    """
+    检查规则文档里写死的 d:\\filework\\... 绝对路径是否存在
+    过滤模板串 ($ / < / *), 这些是动态示例
+    """
+    if files is None:
+        files = scan_files()
+    missing: List[Tuple[Path, str]] = []
+    seen: Set[Tuple[Path, str]] = set()
+    for path in files:
+        if path.name in DEPRECATED_FILES:
+            continue
+        try:
+            raw = path.read_text(encoding="utf-8", errors="ignore")
+        except (OSError, UnicodeDecodeError):
+            continue
+        for match in ABS_WIN_PATH.finditer(strip_code_blocks(raw)):
+            ref = match.group(1)
+            if any(ch in ref for ch in "$<>*"):
+                continue
+            if Path(ref).exists():
+                continue
+            key = (path, ref)
+            if key in seen:
+                continue
+            seen.add(key)
+            missing.append((path, ref))
+    return missing
 
 
 def check_duplicates() -> List[Tuple[str, List[Path], Set[str]]]:
@@ -317,6 +355,10 @@ def check_key_sops_indexed() -> List[str]:
 
     missing = []
     for sop in key_sops:
+        # 只对实际存在的文件检查是否被索引, 不存在则跳过
+        if not (PROJECT_ROOT / sop).is_file():
+            print(f"  [SKIP] 文件不存在: {sop}")
+            continue
         if sop not in content:
             missing.append(sop)
     return missing
@@ -389,6 +431,13 @@ def main() -> int:
         else:
             if not args.quiet:
                 print("  [OK] 0 个死链")
+        abs_missing = check_absolute_paths()
+        if abs_missing:
+            print(f"  [WARN] {len(abs_missing)} 个绝对路径目标不存在:")
+            for src, ref in abs_missing[:10]:
+                print(f"    - {src.relative_to(PROJECT_ROOT)} -> {ref}")
+            if len(abs_missing) > 10:
+                print(f"    ... 还有 {len(abs_missing) - 10} 个")
 
     # 2. 双版本检查
     if run_all or args.duplicates:

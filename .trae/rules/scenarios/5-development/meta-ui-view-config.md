@@ -1,7 +1,6 @@
 ---
 alwaysApply: false
 description: "元数据对象配置 ui_view_config / detail.facets 关联分区 / 动作权限码时查阅此规则。给出三态必填判据、兜底推导导致裸 ID 列与编辑态空白的根因、平台关联端点过滤列写死何时必须改走 customFetcher、权限码双段式口径。"
-globs: "meta/schemas/*.yaml,meta/core/ui_config/*.py,src/components/common/DetailPage/*.vue,src/components/common/ObjectPage/*.vue"
 ---
 
 # 元模型 UI 视图配置规范（v2026.10.23）

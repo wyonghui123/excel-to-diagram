@@ -1,7 +1,6 @@
 ---
 alwaysApply: false
 description: "前端测试标准：Vitest + happy-dom + MSW + Source Map"
-globs: "src/**/*.test.js,src/**/*.spec.js,src/**/__tests__/**"
 ---
 
 # 前端测试标准规范

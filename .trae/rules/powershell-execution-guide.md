@@ -5,7 +5,7 @@ description: "AI 在 PowerShell 终端执行命令、写 PowerShell 脚本、操
 
 # Trae IDE trae-sandbox + PowerShell 完整执行规范 (v2026.06.20)
 
-> **整合自 trae-sandbox-behavior.md + powershell-rules.md**
+> **整合自 `d:\workplace\.trae\rules\agent-ops.md`（沙箱行为）与 `.trae/rules/powershell-curl-alias.md`（PowerShell 铁律）**
 > **本规则涵盖：沙箱行为 + AI 工具策略 + PowerShell 编码陷阱 + Git 兼容性 + 自动执行工作流**
 
 > **[!] 2026-10-22 补：本文件假设 `RunCommand` 可用。若所有命令一律失败
@@ -446,5 +446,5 @@ Step 3: 改用 MCP 工具或 Write 工具替代
 - [PowerShell -replace operator](https://docs.microsoft.com/en-us/powershell/module/microsoft.powershell.core/about/about_comparison_operators#replacement-operator)
 - [File encoding in PowerShell](https://stackoverflow.com/questions/40098914/read-write-files-with-utf-8-encoding-in-powershell)
 - [PowerShell pitfalls](https://docs.microsoft.com/en-us/powershell/scripting/learn/deep-dives/everything-you-wanted-to-know-about-about)
-- 整合来源：`trae-sandbox-behavior.md` (188 行) + `powershell-rules.md` (275 行) -> 本文件 (380 行)
+- 沙箱行为规范：`d:\workplace\.trae\rules\agent-ops.md`；PowerShell 铁律：`.trae/rules/powershell-curl-alias.md`
 - 整合后节省 Token：~500/会话（重叠内容去重 + 重复部分压缩）
