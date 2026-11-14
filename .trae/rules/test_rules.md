@@ -137,4 +137,4 @@ fix_task_manager.py 命令：`sync`、`import-skip`、`status`、`claim <id>`（
 
 - 后端端口由 `AGENT_PORT` 指定（3010-3019），不得写死。
 - per-port DB 快照 + `.service_status_<port>.json`，不共享 DB / 锁 / 状态文件。
-- 共享槽位（FE=3006 / BE=3011）只使用、不重启；改后端需先 `python scripts/service_manager.py acquire-session` 拿私有槽，验证后 `python scripts/service_manager.py release-session --slot N`。
+- 共享槽位（FE=3006 / BE=3010，真源 `scripts/ports.json`）只使用、不重启；改后端需先 `python scripts/service_manager.py acquire-session` 拿私有槽，验证后 `python scripts/service_manager.py release-session --slot N`。
