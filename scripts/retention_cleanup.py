@@ -6,7 +6,7 @@
     python scripts/retention_cleanup.py --apply    # 执行
 
 保留策略:
-    test_temp/            48 小时
+    test_temp/            24 小时
     exports/              7 天
     meta/backups/         48 小时，且至少保留最新 3 个文件
     meta/db_monitor_logs/ 7 天
@@ -21,7 +21,7 @@ DAY = 86400
 
 # (相对路径, 保留小时数, 至少保留最新 N 个)
 TARGETS = [
-    ("test_temp", 48, 0),
+    ("test_temp", 24, 0),
     ("exports", 168, 0),
     ("meta/backups", 48, 3),
     ("meta/db_monitor_logs", 168, 0),
