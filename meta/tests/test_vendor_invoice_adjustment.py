@@ -224,14 +224,19 @@ def test_create_rejects_unposted_source(service):
     assert error.value.rule == 'VI_ADJUSTMENT_SOURCE_NOT_POSTED'
 
 
-def test_create_rejects_credit_memo_source(service):
+def test_credit_memo_source_only_allows_decrease(service):
+    """R-VI-52：贷项可作 decrease 原单，increase 被硬拒。"""
     svc, ds = service
     invoice_id, _ = _posted_invoice(
         ds, category='credit_memo', direction=-1,
         document_type_id=RED_TYPE_ID, net=-100.0, tax=-13.0)
     with pytest.raises(VendorInvoiceError) as error:
         svc.create_adjustment(invoice_id, direction='increase', reason='x')
-    assert error.value.rule == 'VI_ADJUSTMENT_SOURCE_INVALID'
+    assert error.value.rule == 'VI_ADJUSTMENT_INCREASE_UNSUPPORTED'
+
+    created = svc.create_adjustment(invoice_id, direction='decrease', reason='x')
+    assert created['adjustment_of_invoice_id'] == invoice_id
+    assert created['adjustment_direction'] == 'decrease'
 
 
 def test_create_rejects_unknown_source_line(service):

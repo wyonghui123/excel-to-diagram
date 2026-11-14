@@ -28,6 +28,7 @@ from meta.migrations.v271__vendor_invoice_schedule import (
     INDEXES as SCHEDULE_INDEXES,
     SCHEDULE_DDL,
 )
+from meta.migrations.v273__vendor_return_open_amount import RETURN_OPEN_DDL
 from meta.tests.shared.db_schema import create_audit_logs
 
 # ---------------------------------------------------------------- 业务常量
@@ -38,10 +39,16 @@ ORG_ID = 10
 PURCHASE_ORG_ID = 11
 DOC_TYPE_ID = 9101
 RED_TYPE_ID = 9102
+#: R-VI-52：贷项的红字类型（借项单，direction +1）
+DEBIT_TYPE_ID = 9103
 ADJUSTMENT_TYPE_ID = 9105
+#: 退货收货单类型（scope_bo='receipt'，document_category='return'）
+RECEIPT_RETURN_TYPE_ID = 9301
 VI_SEQUENCE_ID = 9201
 VCM_SEQUENCE_ID = 9202
 VIA_SEQUENCE_ID = 9203
+VDM_SEQUENCE_ID = 9204
+VRT_SEQUENCE_ID = 9205
 PO_ID = 7001
 PO_LINE_ID = 7101
 SCHEDULE_ID = 7201
@@ -96,6 +103,7 @@ SUPPORT_DDL = (
     CREATE TABLE IF NOT EXISTS receipts (
         id INTEGER PRIMARY KEY,
         receipt_no VARCHAR(30),
+        document_type_id INTEGER,
         status VARCHAR(20) DEFAULT 'posted'
     )
     """,
@@ -385,17 +393,26 @@ def make_env(tmp_path):
     ensure_doc_flow_rule_table(ds)
     upsert_rules(ds, list(RULES))
     seed_params(ds)
+    create_return_open_view(ds)
     ds.commit()
     return ds
 
 
+def create_return_open_view(ds):
+    """建 v273 退货贷项余量视图（测试态直接执行生产 DDL）。"""
+    ds.execute(RETURN_OPEN_DDL)
+    ds.commit()
+
+
 def seed_type_definitions(ds, *, reversal_type_id=RED_TYPE_ID):
-    """采购发票类型（正向）/ 红字贷项（direction -1）/ 调整单各一行。"""
-    ds.execute('DELETE FROM type_definitions WHERE scope_bo = ?',
-               ['vendor_invoice'])
+    """发票（正）/ 红字贷项（-1）/ 红字借项（+1）/ 调整单 / 退货收货单。"""
+    ds.execute('DELETE FROM type_definitions WHERE scope_bo IN (?, ?)',
+               ['vendor_invoice', 'receipt'])
     _seed_sequence(ds, VI_SEQUENCE_ID, 'VI', 'VI-{DATE:yyyymm}-{SEQ:5}')
     _seed_sequence(ds, VCM_SEQUENCE_ID, 'VCM', 'VCM-{DATE:yyyymm}-{SEQ:5}')
     _seed_sequence(ds, VIA_SEQUENCE_ID, 'VIA', 'VIA-{DATE:yyyymm}-{SEQ:5}')
+    _seed_sequence(ds, VDM_SEQUENCE_ID, 'VDM', 'VDM-{DATE:yyyymm}-{SEQ:5}')
+    _seed_sequence(ds, VRT_SEQUENCE_ID, 'VRT', 'VRT-{DATE:yyyymm}-{SEQ:5}')
     ds.execute(
         'INSERT INTO type_definitions '
         '(id, code, scope_bo, document_role, document_category, direction, '
@@ -404,13 +421,22 @@ def seed_type_definitions(ds, *, reversal_type_id=RED_TYPE_ID):
         [DOC_TYPE_ID, 'VENDOR_INVOICE', 'vendor_invoice', 'invoice',
          'invoice', 1, reversal_type_id, 'header', 1, VI_SEQUENCE_ID, 'active'],
     )
+    # R-VI-52：贷项的红字类型 = 借项（direction +1）
     ds.execute(
         'INSERT INTO type_definitions '
         '(id, code, scope_bo, document_role, document_category, direction, '
         ' reversal_type_id, level, is_default, number_sequence_id, status) '
         'VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)',
         [RED_TYPE_ID, 'VENDOR_CREDIT_MEMO', 'vendor_invoice', 'credit_memo',
-         'credit_memo', -1, None, 'header', 0, VCM_SEQUENCE_ID, 'active'],
+         'credit_memo', -1, DEBIT_TYPE_ID, 'header', 0, VCM_SEQUENCE_ID, 'active'],
+    )
+    ds.execute(
+        'INSERT INTO type_definitions '
+        '(id, code, scope_bo, document_role, document_category, direction, '
+        ' reversal_type_id, level, is_default, number_sequence_id, status) '
+        'VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)',
+        [DEBIT_TYPE_ID, 'VENDOR_DEBIT_MEMO', 'vendor_invoice', 'debit_memo',
+         'debit_memo', 1, RED_TYPE_ID, 'header', 0, VDM_SEQUENCE_ID, 'active'],
     )
     ds.execute(
         'INSERT INTO type_definitions '
@@ -420,6 +446,15 @@ def seed_type_definitions(ds, *, reversal_type_id=RED_TYPE_ID):
         [ADJUSTMENT_TYPE_ID, 'VENDOR_INVOICE_ADJUSTMENT', 'vendor_invoice',
          'adjustment', 'adjustment', 1, None, 'header', 0, VIA_SEQUENCE_ID,
          'active'],
+    )
+    # R-VI-51：退货收货单类型（v273 视图按 scope_bo='receipt' + category='return' 识别）
+    ds.execute(
+        'INSERT INTO type_definitions '
+        '(id, code, scope_bo, document_role, document_category, direction, '
+        ' reversal_type_id, level, is_default, number_sequence_id, status) '
+        'VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)',
+        [RECEIPT_RETURN_TYPE_ID, 'RCV_RETURN', 'receipt', 'return_line',
+         'return', -1, None, 'header', 0, VRT_SEQUENCE_ID, 'active'],
     )
     # W6 行类型种子（Spec §22.10）：测试态 type_definitions 无 name /
     # line_category / delivery_relevant 列，只写公共列；费用行判定只看 code。
@@ -580,11 +615,12 @@ def seed_receipt_line(ds, *, qty_received=10.0, qty_rejected=0.0,
                       disposition=None, receipt_id=RECEIPT_ID,
                       receipt_line_id=RECEIPT_LINE_ID,
                       receipt_status='posted', schedule_id=SCHEDULE_ID,
-                      order_line_id=PO_LINE_ID, uom_id=UOM_ID):
+                      order_line_id=PO_LINE_ID, uom_id=UOM_ID,
+                      document_type_id=None):
     ds.execute(
-        'INSERT OR REPLACE INTO receipts (id, receipt_no, status) '
-        'VALUES (?, ?, ?)',
-        [receipt_id, 'GR-{0}'.format(receipt_id), receipt_status],
+        'INSERT OR REPLACE INTO receipts (id, receipt_no, document_type_id, status) '
+        'VALUES (?, ?, ?, ?)',
+        [receipt_id, 'GR-{0}'.format(receipt_id), document_type_id, receipt_status],
     )
     ds.execute(
         'INSERT OR REPLACE INTO receipt_lines '
@@ -603,18 +639,20 @@ def insert_invoice(ds, *, invoice_no='VI-0001', category='invoice',
                    net_amount=100.0, tax_amount=13.0, gross_amount=113.0,
                    invoice_date='2026-11-01', document_type_id=DOC_TYPE_ID,
                    payment_term_id=None, reversal_of_invoice_id=None,
-                   adjustment_of_invoice_id=None):
+                   adjustment_of_invoice_id=None, currency_id=CURRENCY_ID,
+                   exchange_rate=None):
     ds.execute(
         'INSERT INTO vendor_invoices '
         '(invoice_no, document_type_id, document_category, direction, '
         ' invoice_date, status, match_mode, supplier_account_id, '
-        ' supplier_party_id, currency_id, org_id, supplier_invoice_no, '
-        ' net_amount, tax_amount, gross_amount, match_pricing_mode, '
-        ' payment_term_id, reversal_of_invoice_id, adjustment_of_invoice_id) '
-        'VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)',
+        ' supplier_party_id, currency_id, exchange_rate, org_id, '
+        ' supplier_invoice_no, net_amount, tax_amount, gross_amount, '
+        ' match_pricing_mode, payment_term_id, reversal_of_invoice_id, '
+        ' adjustment_of_invoice_id) '
+        'VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)',
         [invoice_no, document_type_id, category, direction, invoice_date,
          status, match_mode, SUPPLIER_ACCOUNT_ID, SUPPLIER_PARTY_ID,
-         CURRENCY_ID, ORG_ID, supplier_invoice_no or invoice_no,
+         currency_id, exchange_rate, ORG_ID, supplier_invoice_no or invoice_no,
          net_amount, tax_amount, gross_amount, pricing_mode, payment_term_id,
          reversal_of_invoice_id, adjustment_of_invoice_id],
     )

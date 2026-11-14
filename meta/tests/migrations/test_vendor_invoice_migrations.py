@@ -36,6 +36,7 @@ from meta.migrations import (
     v264__vendor_invoice_charge_line_seed as v264,
     v271__vendor_invoice_schedule as v271,
     v272__vendor_invoice_payable_views as v272,
+    v273__vendor_return_open_amount as v273,
 )
 from meta.tests.factories import _vendor_invoice_migration_helpers as MH
 
@@ -677,5 +678,88 @@ def test_v272_payable_and_negative_open_views(db_path):
         # 表与数据保留
         assert conn.execute(
             'SELECT COUNT(*) FROM vendor_invoice_schedules').fetchone()[0] == 3
+    finally:
+        conn.close()
+
+
+def test_v273_return_open_amount_view(db_path):
+    """v273：退货贷项余量视图（退货收货行 × 已过账贷项、幂等、回滚）。"""
+    conn = _connect(db_path)
+    try:
+        conn.execute(
+            'CREATE TABLE IF NOT EXISTS receipts ('
+            'id INTEGER PRIMARY KEY, receipt_no VARCHAR(30), '
+            'document_type_id INTEGER, status VARCHAR(20) DEFAULT "posted")')
+        conn.execute(
+            'CREATE TABLE IF NOT EXISTS receipt_lines ('
+            'id INTEGER PRIMARY KEY, receipt_id INTEGER, qty_received NUMERIC(18,4), '
+            'qty_rejected NUMERIC(18,4), order_line_id INTEGER)')
+        conn.execute(
+            'CREATE TABLE IF NOT EXISTS purchase_order_lines ('
+            'id INTEGER PRIMARY KEY, unit_price NUMERIC(18,6))')
+        conn.commit()
+    finally:
+        conn.close()
+
+    assert v252.migrate(db_path, skip_backup=True) is True
+    assert v273.migrate(db_path, skip_backup=True) is True
+    assert v273.verify(db_path) is True
+    assert v273.migrate(db_path, skip_backup=True) is True
+    assert v273.verify(db_path) is True
+
+    conn = _connect(db_path)
+    try:
+        conn.execute(
+            'INSERT INTO type_definitions (id, code, scope_bo, document_category, '
+            "direction) VALUES (9301, 'RCV_RETURN', 'receipt', 'return', -1)")
+        conn.execute(
+            "INSERT INTO receipts (id, receipt_no, document_type_id, status) "
+            "VALUES (7301, 'GR-1', 9301, 'posted')")
+        conn.execute(
+            'INSERT INTO receipt_lines (id, receipt_id, qty_received, qty_rejected, '
+            'order_line_id) VALUES (1, 7301, -5, 0, 77)')
+        conn.execute(
+            'INSERT INTO purchase_order_lines (id, unit_price) VALUES (77, 10)')
+        # 已过账贷项行 net -20（counted）；草稿贷项行 net -100（ignored）
+        conn.execute(
+            'INSERT INTO vendor_invoices (id, invoice_no, document_type_id, '
+            'document_category, direction, invoice_date, status, supplier_account_id, '
+            'supplier_party_id, currency_id, org_id) '
+            "VALUES (1, 'VCM-1', 9102, 'credit_memo', -1, '2026-11-01', 'posted', "
+            '8001, 9001, 1, 10)')
+        conn.execute(
+            'INSERT INTO vendor_invoices (id, invoice_no, document_type_id, '
+            'document_category, direction, invoice_date, status, supplier_account_id, '
+            'supplier_party_id, currency_id, org_id) '
+            "VALUES (2, 'VCM-2', 9102, 'credit_memo', -1, '2026-11-01', 'draft', "
+            '8001, 9001, 1, 10)')
+        for line_id, invoice_id, net in ((1, 1, -20), (2, 2, -100)):
+            conn.execute(
+                'INSERT INTO vendor_invoice_lines (id, invoice_id, line_no, '
+                'qty, unit_price, net_amount, tax_amount, gross_amount, return_line_id) '
+                'VALUES (?, ?, 1, 2, 10, ?, 0, ?, 1)',
+                [line_id, invoice_id, net, net])
+        conn.commit()
+
+        row = conn.execute(
+            'SELECT return_line_id, qty_returned, amount_returned, '
+            'amount_credited, amount_open FROM v_vendor_return_open_amount') \
+            .fetchone()
+        assert row[0] == 1
+        assert round(row[1], 4) == 5.0
+        assert round(row[2], 4) == 50.0
+        assert round(row[3], 4) == 20.0
+        assert round(row[4], 4) == 30.0
+    finally:
+        conn.close()
+
+    assert v273.rollback(db_path) is True
+    conn = _connect(db_path)
+    try:
+        assert not conn.execute(
+            "SELECT 1 FROM sqlite_master WHERE type = 'view' AND name = ?",
+            [v273.VIEW_NAME]).fetchone()
+        # 表与数据保留
+        assert conn.execute('SELECT COUNT(*) FROM receipts').fetchone()[0] == 1
     finally:
         conn.close()

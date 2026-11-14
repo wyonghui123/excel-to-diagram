@@ -32,6 +32,7 @@ from decimal import Decimal, InvalidOperation
 from typing import Any, Dict, List, Optional
 
 from meta.core.doc_flow_reversal import release_target_edges
+from meta.core.doc_flow_schema import POOL_AP_MATCH
 
 logger = logging.getLogger(__name__)
 
@@ -2635,9 +2636,9 @@ class ReceiptService:
             consumed = self.ds.query(
                 'SELECT source_id, SUM(consumed_qty) AS consumed_qty '
                 'FROM v_doc_flow_consumed_qty '
-                "WHERE source_bo = 'receipt_line' AND pool = 'ap_match' "
-                'AND source_id IN ({0}) GROUP BY source_id'
-                .format(placeholders), line_ids)
+                "WHERE source_bo = 'receipt_line' AND pool = '{0}' "
+                'AND source_id IN ({1}) GROUP BY source_id'
+                .format(POOL_AP_MATCH, placeholders), line_ids)
         except Exception as error:  # noqa: BLE001 - 未启用单据流的库无此视图
             if 'no such table' not in str(error):
                 raise
@@ -2659,9 +2660,9 @@ class ReceiptService:
                 'JOIN vendor_invoice_lines l '
                 'ON l.id = CAST(e.target_id AS INTEGER) '
                 'JOIN vendor_invoices vi ON vi.id = l.invoice_id '
-                "WHERE e.source_bo = 'receipt_line' AND e.pool = 'ap_match' "
+                "WHERE e.source_bo = 'receipt_line' AND e.pool = '{0}' "
                 "AND e.status = 'active' AND e.quantity_sign = 'normal' "
-                'AND e.source_id IN ({0})'.format(placeholders), ids)
+                'AND e.source_id IN ({1})'.format(POOL_AP_MATCH, placeholders), ids)
         except Exception as error:  # noqa: BLE001 - 采购发票域未启用的库
             logger.warning('[receipt] 无法解析占用发票号: %s', error)
             return []

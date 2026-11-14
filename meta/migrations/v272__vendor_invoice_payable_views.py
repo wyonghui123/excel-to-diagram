@@ -21,6 +21,8 @@
 import sqlite3
 from pathlib import Path
 
+from meta.core.doc_flow_schema import POOL_AP_MATCH, POOL_BILLING
+
 MIGRATION_NAME = 'v272__vendor_invoice_payable_views'
 
 PAYABLE_VIEW = 'v_vendor_payable_open'
@@ -49,32 +51,32 @@ JOIN vendor_invoices vi ON vi.id = s.invoice_id
 WHERE s.status IN ('open', 'partial')
 """
 
-NEGATIVE_DDL = """
+NEGATIVE_DDL = f"""
 CREATE VIEW IF NOT EXISTS v_vendor_invoice_negative_open AS
 SELECT
     'receipt_line' AS source_bo,
     r.id           AS source_id,
-    'ap_match'     AS pool,
+    '{POOL_AP_MATCH}'     AS pool,
     (COALESCE(r.qty_received, 0) - COALESCE(r.qty_rejected, 0))
         - COALESCE(c.consumed_qty, 0) AS open_qty
 FROM receipt_lines r
 LEFT JOIN v_doc_flow_consumed_qty c
     ON c.source_bo = 'receipt_line'
    AND c.source_id = CAST(r.id AS TEXT)
-   AND c.pool = 'ap_match'
+   AND c.pool = '{POOL_AP_MATCH}'
 WHERE (COALESCE(r.qty_received, 0) - COALESCE(r.qty_rejected, 0))
         - COALESCE(c.consumed_qty, 0) < -0.000001
 UNION ALL
 SELECT
     'purchase_order_schedule' AS source_bo,
     s.id                      AS source_id,
-    'billing'                 AS pool,
+    '{POOL_BILLING}'                 AS pool,
     COALESCE(s.promised_qty, 0) - COALESCE(c.consumed_qty, 0) AS open_qty
 FROM purchase_order_schedules s
 LEFT JOIN v_doc_flow_consumed_qty c
     ON c.source_bo = 'purchase_order_schedule'
    AND c.source_id = CAST(s.id AS TEXT)
-   AND c.pool = 'billing'
+   AND c.pool = '{POOL_BILLING}'
 WHERE COALESCE(s.promised_qty, 0) - COALESCE(c.consumed_qty, 0) < -0.000001
 """
 

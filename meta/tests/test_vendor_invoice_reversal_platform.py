@@ -21,6 +21,7 @@ from meta.services.vendor_invoice_match_service import (
     VendorInvoiceMatchService,
 )
 from meta.tests.factories._vendor_invoice_helpers import (
+    DEBIT_TYPE_ID,
     DOC_TYPE_ID,
     RED_TYPE_ID,
     RECEIPT_LINE_ID,
@@ -42,9 +43,10 @@ from meta.tests.factories._vendor_invoice_helpers import (
 def service(tmp_path, monkeypatch):
     ds = make_env(tmp_path)
     # 单号服务依赖 numbering 底座；本组用例只验证红冲语义，直接给红字单号
+    seq = iter(range(1, 100))
     monkeypatch.setattr(
         VendorInvoiceMatchService, '_allocate_number',
-        lambda self, invoice_date, document_type_id: 'VCM-T0001')
+        lambda self, invoice_date, document_type_id: 'VCM-T{0:04d}'.format(next(seq)))
     return VendorInvoiceMatchService(ds), ds
 
 
@@ -170,3 +172,35 @@ def test_red_edges_only_for_credit_or_cancellation(service):
     with pytest.raises(VendorInvoiceError) as error:
         svc.write_red_edges_for_red_doc(invoice_id)
     assert error.value.rule == 'VI_RED_INK_INVALID'
+
+
+# --------------------------------------------------- 贷项红冲 → 借项（R-VI-52）
+
+def test_reverse_credit_memo_creates_debit_memo_and_undoes_red_edges(service):
+    """贷项红冲：类型方向与原单相反（+1 借项），并撤销贷项写的红字边。"""
+    svc, ds = service
+    invoice_id, _ = _posted_invoice(ds)
+
+    first = svc.reverse(invoice_id, reason='供应商退货')
+    credit_id = first['red_invoice_id']
+    credit_line_id = get_lines(ds, credit_id)[0]['id']
+    assert consumed_qty(ds, 'receipt_line', RECEIPT_LINE_ID, 'ap_match') == 0.0
+
+    second = svc.reverse(credit_id, reason='贷项开错')
+
+    debit = get_header(ds, second['red_invoice_id'])
+    assert debit['document_category'] == 'debit_memo'
+    assert debit['document_type_id'] == DEBIT_TYPE_ID
+    assert debit['direction'] == 1
+    assert debit['status'] == 'posted'
+    assert debit['gross_amount'] == 113.0
+    debit_lines = get_lines(ds, second['red_invoice_id'])
+    assert debit_lines[0]['invoice_line_id'] == credit_line_id
+    assert debit_lines[0]['qty'] == 10.0
+
+    # A 档 reverse_edge 撤销贷项红字边 → 原发票边恢复可用量
+    assert consumed_qty(ds, 'receipt_line', RECEIPT_LINE_ID, 'ap_match') == 10.0
+    red_edges = ds.query(
+        "SELECT * FROM doc_flow_edges WHERE quantity_sign = 'red' "
+        "AND status = 'active'")
+    assert red_edges == []

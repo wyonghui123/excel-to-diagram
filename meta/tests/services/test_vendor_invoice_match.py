@@ -502,3 +502,85 @@ def test_match_handler_accepts_source_doc_id(ds, service, monkeypatch):
 
     assert result['success'] is True
     assert result['data']['match_status'] == 'matched'
+
+
+# ------------------------------------------- W11-2 汇率（R-VI-53） / 退货贷项余量（R-VI-51）
+
+def _seed_return_receipt(ds, *, qty_returned=5.0, unit_price=10.0):
+    """退货收货单（scope_bo='receipt' / category='return'）+ PO 行单价。"""
+    H.seed_type_definitions(ds)
+    H.seed_purchase_order(ds, promised_qty=10.0, unit_price=unit_price)
+    H.seed_receipt_line(ds, qty_received=-qty_returned,
+                        document_type_id=H.RECEIPT_RETURN_TYPE_ID)
+
+
+def test_base_currency_exchange_rate_normalized_to_one(ds, service):
+    invoice_id = _ready_receipt_invoice(ds)
+    assert _header(ds, invoice_id)['exchange_rate'] in (None, 0)
+
+    service.submit(invoice_id)
+
+    assert float(_header(ds, invoice_id)['exchange_rate']) == 1.0
+
+
+@pytest.mark.parametrize('rate', [None, 0])
+def test_foreign_currency_requires_positive_exchange_rate(ds, service, rate):
+    H.seed_currency(ds, currency_id=2, code='USD', name='美元')
+    invoice_id = H.insert_invoice(
+        ds, invoice_no='VI-USD-1', currency_id=2, exchange_rate=rate)
+    H.insert_line(ds, invoice_id, receipt_line_id=H.RECEIPT_LINE_ID)
+
+    with pytest.raises(VendorInvoiceError) as exc:
+        service.submit(invoice_id)
+
+    assert exc.value.rule == 'VI_EXCHANGE_RATE_REQUIRED'
+
+
+def test_return_open_view_nets_posted_credit_lines(ds):
+    _seed_return_receipt(ds)
+    credit_id = H.insert_invoice(
+        ds, invoice_no='VCM-RET-1', category='credit_memo', direction=-1,
+        document_type_id=H.RED_TYPE_ID, status='posted',
+        net_amount=-20.0, tax_amount=0.0, gross_amount=-20.0)
+    H.insert_line(ds, credit_id, qty=2.0, net_amount=-20.0, tax_amount=0.0,
+                  gross_amount=-20.0, return_line_id=H.RECEIPT_LINE_ID)
+
+    row = ds.query(
+        'SELECT * FROM v_vendor_return_open_amount WHERE return_line_id = ?',
+        [H.RECEIPT_LINE_ID])[0]
+    assert float(row['qty_returned']) == 5.0
+    assert float(row['amount_returned']) == 50.0
+    assert float(row['amount_credited']) == 20.0
+    assert float(row['amount_open']) == 30.0
+
+
+def _return_credit_memo(ds, *, invoice_no, net):
+    credit_id = H.insert_invoice(
+        ds, invoice_no=invoice_no, category='credit_memo', direction=-1,
+        document_type_id=H.RED_TYPE_ID,
+        net_amount=net, tax_amount=0.0, gross_amount=net)
+    H.insert_line(ds, credit_id, qty=abs(net) / 10.0, net_amount=net,
+                  tax_amount=0.0, gross_amount=net,
+                  return_line_id=H.RECEIPT_LINE_ID)
+    return credit_id
+
+
+def test_return_credit_over_open_amount_rejected(ds, service):
+    _seed_return_receipt(ds)
+    credit_id = _return_credit_memo(ds, invoice_no='VCM-RET-2', net=-60.0)
+
+    with pytest.raises(VendorInvoiceError) as exc:
+        service.submit(credit_id)
+
+    assert exc.value.rule == 'VI_RETURN_EXCEEDED'
+
+
+def test_return_credit_equal_to_open_amount_not_blocked(ds, service):
+    _seed_return_receipt(ds)
+    credit_id = _return_credit_memo(ds, invoice_no='VCM-RET-3', net=-50.0)
+
+    try:
+        service.submit(credit_id)
+    except VendorInvoiceError as exc:
+        # 贷项无原票行锚点 → 匹配会报 VI_MATCH_EXCEPTION；但不得被余量拦截
+        assert exc.rule != 'VI_RETURN_EXCEEDED'

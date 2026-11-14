@@ -40,6 +40,11 @@ DOC_FLOW_EDGE_ID = "doc_flow_edge"
 DOC_FLOW_EDGE_TABLE = "doc_flow_edges"
 DOC_FLOW_CONSUMED_VIEW = "v_doc_flow_consumed_qty"
 
+# 池名 = 单据流历史记录的「类别判别符」（采购发票 Spec D-VI-10）：
+# billing（计费池）/ ap_match（应付匹配池）。唯一事实源，禁止在服务/迁移里写字面量。
+POOL_BILLING = "billing"
+POOL_AP_MATCH = "ap_match"
+
 
 def _build_edge_meta() -> MetaObject:
     """构造边表 MetaObject（每次调用返回新实例，避免共享可变状态）。"""
