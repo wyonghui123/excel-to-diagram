@@ -79,7 +79,10 @@ STATUS_POSTED = 'posted'
 STATUS_REVERSED = 'reversed'
 STATUS_CANCELLED = 'cancelled'
 
-SCHEDULE_KIND_ALLOWED = ('delivery', 'service')
+#: 计划行类型（值域真源：meta/schemas/purchase_order_schedule.yaml enum_values）
+SCHEDULE_KIND_DELIVERY = 'delivery'
+SCHEDULE_KIND_SERVICE = 'service'
+SCHEDULE_KIND_ALLOWED = (SCHEDULE_KIND_DELIVERY, SCHEDULE_KIND_SERVICE)
 SCHEDULE_PENDING_STATUSES = ('planned', 'confirmed')
 SCHEDULE_STATUS_COMPLETED = 'completed'
 COMPLETION_SOURCE_RECEIPT = 'receipt'
@@ -1319,6 +1322,12 @@ class ReceiptService:
             line = item.get('line') or {}
             net = float(item.get('net') or 0)
             if net <= 0:
+                continue
+            # 服务类验收不产生实物库存（spec-vendor-invoice §10.1 方案 C）：
+            # receipt 统一承担货物收货 / 服务验收双语义，服务行只回写计划行
+            # 验收量，不写库存分录、不注册批次 / 序列号 / HU。
+            if (item.get('schedule') or {}).get('schedule_kind') == \
+                    SCHEDULE_KIND_SERVICE:
                 continue
             context = {
                 'item_id': line.get('item_id'),

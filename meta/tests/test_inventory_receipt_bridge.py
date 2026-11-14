@@ -160,6 +160,22 @@ def test_po_receipt_post_is_idempotent_for_inventory():
     assert len(_transactions(conn)) == 1
 
 
+def test_service_schedule_post_skips_inventory():
+    """方案 C：服务类验收只回写计划行验收量，不产生库存事务 / 结存。"""
+    conn = _seeded()
+    conn.execute(
+        "UPDATE purchase_order_schedules SET schedule_kind = 'service' WHERE id = 1")
+    conn.commit()
+    receipt = _create_po_receipt(conn)
+    _svc(conn).post(receipt['id'])
+
+    assert _transactions(conn) == []
+    assert _balance(conn) is None
+    schedule = rt.MemDS(conn).query(
+        'SELECT * FROM purchase_order_schedules WHERE id = 1')[0]
+    assert schedule['received_qty'] == pytest.approx(100.0)
+
+
 def test_po_receipt_reverse_writes_reversal():
     conn = _seeded()
     receipt = _create_po_receipt(conn)

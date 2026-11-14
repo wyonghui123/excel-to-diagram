@@ -140,6 +140,38 @@ def test_po_based_uses_promised_minus_returned(ds, service):
     assert 'qty_over_order_tolerance' in (result['match_exception_reason'] or '')
 
 
+def test_service_line_two_way_when_acceptance_not_required(ds, service):
+    """方案 C：服务行不要求验收 → 2-way，按计划行余量匹配，不需收货行。"""
+    H.seed_purchase_order(ds, promised_qty=10.0, schedule_kind='service',
+                          service_acceptance_required=0)
+    invoice_id = H.insert_invoice(ds, invoice_no='VI-SVC-1', match_mode='gr_based')
+    H.insert_line(ds, invoice_id, qty=10.0, schedule_id=H.SCHEDULE_ID)
+
+    result = service.match(invoice_id)
+
+    assert result['match_status'] == 'matched'
+    line = _line(ds, H.get_lines(ds, invoice_id)[0]['id'])
+    assert line['match_status'] == 'matched'
+    assert line['match_exception_reason'] is None
+
+
+def test_service_line_requires_acceptance_when_flag_on(ds, service):
+    """默认 service_acceptance_required=1 → 3-way：缺验收行按 no_receipt 例外。"""
+    H.seed_purchase_order(ds, promised_qty=10.0, schedule_kind='service',
+                          service_acceptance_required=1)
+    invoice_id = H.insert_invoice(ds, invoice_no='VI-SVC-2', match_mode='gr_based')
+    H.insert_line(ds, invoice_id, qty=10.0, schedule_id=H.SCHEDULE_ID)
+
+    result = service.match(invoice_id)
+
+    # 头级聚合把 no_receipt 归入 unmatched，原因保留 VI_NO_RECEIPT
+    assert result['match_status'] == 'unmatched'
+    assert 'VI_NO_RECEIPT' in (result['match_exception_reason'] or '')
+    line = _line(ds, H.get_lines(ds, invoice_id)[0]['id'])
+    assert line['match_status'] == 'no_receipt'
+    assert 'VI_NO_RECEIPT' in (line['match_exception_reason'] or '')
+
+
 def test_price_over_tolerance_is_exception(ds, service):
     invoice_id = _ready_receipt_invoice(
         ds, unit_price=11.0, net=110.0, tax=14.3, gross=124.3)

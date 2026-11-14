@@ -96,7 +96,8 @@ SUPPORT_DDL = (
         line_type_id INTEGER,
         uom_id INTEGER,
         unit_price NUMERIC(18,6),
-        tax_rate_percent NUMERIC(18,6)
+        tax_rate_percent NUMERIC(18,6),
+        service_acceptance_required INTEGER NOT NULL DEFAULT 1
     )
     """,
     """
@@ -584,7 +585,8 @@ def seed_purchase_order(ds, *, promised_qty=10.0, returned_qty=0.0,
                         payment_term_id=None, po_id=PO_ID, order_no='PO-0001',
                         po_line_id=PO_LINE_ID, schedule_id=SCHEDULE_ID,
                         uom_id=UOM_ID, status='confirmed',
-                        tax_rate_percent=None):
+                        tax_rate_percent=None, schedule_kind='delivery',
+                        service_acceptance_required=1):
     ds.execute(
         'INSERT OR REPLACE INTO purchase_orders '
         '(id, order_no, supplier_account_id, supplier_party_id, currency_id, '
@@ -597,15 +599,16 @@ def seed_purchase_order(ds, *, promised_qty=10.0, returned_qty=0.0,
     ds.execute(
         'INSERT OR REPLACE INTO purchase_order_lines '
         '(id, order_id, line_no, item_id, item_group_id, line_type_id, uom_id, '
-        ' unit_price, tax_rate_percent) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)',
+        ' unit_price, tax_rate_percent, service_acceptance_required) '
+        'VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)',
         [po_line_id, po_id, 1, ITEM_ID, None, line_type_id, uom_id, unit_price,
-         tax_rate_percent],
+         tax_rate_percent, service_acceptance_required],
     )
     ds.execute(
         'INSERT OR REPLACE INTO purchase_order_schedules '
         '(id, order_id, line_id, schedule_kind, promised_qty, returned_qty, '
         ' status) VALUES (?, ?, ?, ?, ?, ?, ?)',
-        [schedule_id, po_id, po_line_id, 'delivery', promised_qty,
+        [schedule_id, po_id, po_line_id, schedule_kind, promised_qty,
          returned_qty, 'confirmed'],
     )
     ds.commit()

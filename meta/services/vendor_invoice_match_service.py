@@ -88,6 +88,9 @@ MATCH_NO_RECEIPT = 'no_receipt'
 MODE_PO_BASED = 'po_based'
 MODE_GR_BASED = 'gr_based'
 
+#: 计划行类型（值域真源：meta/schemas/purchase_order_schedule.yaml enum_values）
+SCHEDULE_KIND_SERVICE = 'service'
+
 # R-VI-38：源单状态白名单（不可 override）
 PO_STATUS_BILLABLE = frozenset({'confirmed'})
 RECEIPT_STATUS_MATCHABLE = frozenset({'posted'})
@@ -146,7 +149,6 @@ REASON_ORDER = (
 
 # 行类型（Spec §22.6 种子 / §22.10）：费用行判定按 line_type.code，不新增物理列
 LINE_TYPE_GOODS = 'VI_LINE_GOODS'
-LINE_TYPE_SERVICE = 'VI_LINE_SERVICE'
 LINE_TYPE_FREIGHT = 'VI_LINE_FREIGHT'
 LINE_TYPE_SURCHARGE = 'VI_LINE_SURCHARGE'
 LINE_TYPE_DISCOUNT = 'VI_LINE_DISCOUNT'
@@ -519,6 +521,32 @@ class VendorInvoiceMatchService:
         except Exception:
             resolved = ''
         return resolved if resolved in (MODE_PO_BASED, MODE_GR_BASED) else MODE_PO_BASED
+
+    def _service_two_way(self, line: Dict[str, Any]) -> bool:
+        """服务行是否走 2-way（发票 ↔ 订单，不要求验收单）。
+
+        Spec §10.1（方案 C）：收货单统一承担「货物收货 / 服务验收」双语义，
+        服务是否必须验收由 `purchase_order_lines.service_acceptance_required`
+        （默认 1 = 3-way）决定；派生判定，不新增物理列。
+        """
+        schedule_id = line.get('schedule_id')
+        if schedule_id in (None, ''):
+            return False
+        try:
+            rows = self.ds.query(
+                'SELECT ps.schedule_kind, '
+                'COALESCE(pl.service_acceptance_required, 0) AS acceptance_required '
+                'FROM purchase_order_schedules ps '
+                'JOIN purchase_order_lines pl ON pl.id = ps.line_id '
+                'WHERE ps.id = ?', [_int(schedule_id)])
+        except Exception as exc:
+            logger.debug('[vendor_invoice] 判定服务 2-way 失败: %s', exc)
+            return False
+        if not rows:
+            return False
+        row = rows[0]
+        return (_s(row.get('schedule_kind')) == SCHEDULE_KIND_SERVICE
+                and not _int(row.get('acceptance_required')))
 
     def _resolve_match_pricing_mode(self, header: Dict[str, Any]) -> str:
         """定价模式解析（Spec §22.10）：头部快照 → 四维命中 → 硬编码兜底 po_price。
@@ -1645,6 +1673,9 @@ class VendorInvoiceMatchService:
 
     def _match_line(self, header: Dict[str, Any], line: Dict[str, Any]) -> Dict[str, Any]:
         mode = self._resolve_match_mode(header)
+        # 服务行且不要求服务验收 → 2-way：以订单计划行余量为锚，不等验收单
+        if mode == MODE_GR_BASED and self._service_two_way(line):
+            mode = MODE_PO_BASED
         pricing = self._resolve_match_pricing_mode(header)
         dims = {
             'org_id': header.get('org_id'),

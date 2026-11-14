@@ -1,6 +1,6 @@
 # 采购发票对象模型 Spec（Vendor Invoice Object Model）
 
-> 版本：v1.10 草案（2026-11-14 W11-2 已实施：R-VI-51 / R-VI-52 / R-VI-53 + v273 `v_vendor_return_open_amount`；v1.9 追加 §25.11 规则模型落位与 SSOT 收敛；2026-11-14 追加 §25 端到端 / 逆向 / 异常一致性补强：R-VI-48 ~ R-VI-59，并修订 R-VI-36；v1.7 于 2026-11-14 W10-1 已实施：R-VI-38 ~ R-VI-47 + 枚举收敛；v1.6 于 2026-11-14 追加 §24 三单匹配补强；v1.5 于 2026-11-14 落实施 §23.9 方案 A；v1.4 于 2026-11-13 追加 22.6.2 费用变更与单一事实源约束 / R-1~R-4 / 变更矩阵 A~D；v1.3 同日追加 22.6.1 费用分摊方案 / D-CH-01~12；v1.2 于 2026-11-12 §22 细化，金额计算改为复用统一内核 `SalesOrderAmountService`，D-VI-27）｜ 日期：2026-11-11 ｜ 状态：待评审（§23 已实施，2026-11-14；§24 W10-1 已实施，2026-11-14；§25 W11-1 已实施，2026-11-14；§25 W11-2 已实施，2026-11-14；§25.11 SSOT 收敛已实施，2026-11-14；其余待评审）
+> 版本：v1.11 草案（2026-11-15 方案 C 已实施：服务采购复用收货单双语义验收，服务行跳过库存过账 + `service_acceptance_required` 派生 2-way/3-way；v1.10 于 2026-11-14 W11-2 已实施：R-VI-51 / R-VI-52 / R-VI-53 + v273 `v_vendor_return_open_amount`；v1.9 追加 §25.11 规则模型落位与 SSOT 收敛；2026-11-14 追加 §25 端到端 / 逆向 / 异常一致性补强：R-VI-48 ~ R-VI-59，并修订 R-VI-36；v1.7 于 2026-11-14 W10-1 已实施：R-VI-38 ~ R-VI-47 + 枚举收敛；v1.6 于 2026-11-14 追加 §24 三单匹配补强；v1.5 于 2026-11-14 落实施 §23.9 方案 A；v1.4 于 2026-11-13 追加 22.6.2 费用变更与单一事实源约束 / R-1~R-4 / 变更矩阵 A~D；v1.3 同日追加 22.6.1 费用分摊方案 / D-CH-01~12；v1.2 于 2026-11-12 §22 细化，金额计算改为复用统一内核 `SalesOrderAmountService`，D-VI-27）｜ 日期：2026-11-11 ｜ 状态：待评审（§23 已实施，2026-11-14；§24 W10-1 已实施，2026-11-14；§25 W11-1 已实施，2026-11-14；§25 W11-2 已实施，2026-11-14；§25.11 SSOT 收敛已实施，2026-11-14；§10.1 方案 C 已实施，2026-11-15；其余待评审）
 > 上游契约：[spec-receipt-object-model-2026-11-01.md](./spec-receipt-object-model-2026-11-01.md) §10 / §11
 > 样板：[sales-invoice-pricing-spec-2026-11-10.md](./sales-invoice-pricing-spec-2026-11-10.md)（FR/NFR/IF/TR 编号体系）
 > 平台基线：`document_category / document_role / direction`（v243）、`doc_flow_rule`（v215）、`control_parameter_def`（容差）
@@ -28,7 +28,7 @@
 | A8 | 数量容差**单向**（发票量 > 收货量才拦），对齐 SAP `DQ` | SAP OMR6 `DQ` 单向 | §5.3 | S |
 | A9 | 状态机 `draft/submitted/posted/cancelled/reversed` + `match_status` 子状态；不引入 Park/Blocked 独立状态 | 平台 v236 骨架 + SAP Park/Blocked 折叠为子状态 | §6 | C/S |
 | A10 | 退货 = **物流层 + 财务层两层配对**：`RETURN_PO + VENDOR_RETURN`（物流）+ 贷项发票（财务） | SAP Return PO + 122/161 + Credit Memo | §9 | S |
-| A11 | 服务采购以 `schedule_kind='service'` 的计划行为锚，`gr_based` 下发票行 1:1 挂服务确认行 | SAP SES（服务录入单） | §10 | S |
+| A11 | 服务采购以 `schedule_kind='service'` 的计划行为锚；验收单复用 `receipt`（不建 SES），服务行按 `service_acceptance_required` 走 2-way / 3-way | SAP SES（服务录入单） | §10.1 | S |
 | A12 | 自动结算预留 `settlement_mode ∈ {supplier_invoice, ers}`，本波只做 `supplier_invoice` | SAP ERS | §10.2 | S |
 
 **不采纳（含理由）**
@@ -546,17 +546,22 @@ doc_effect:
 
 ## 10. 服务采购（SES）与自动结算（ERS）
 
-### 10.1 服务采购
+### 10.1 服务采购（收货单双语义验收凭证）
 
-上游收货 Spec 的 `receipt.source_doc_type` 五值中**无** `service_entry`（C），而 §10 发票契约值域含 `service_entry` —— **契约漂移**，本 Spec 给出裁定：
+上游收货 Spec 的 `receipt.source_doc_type` 五值中**无** `service_entry`（C），而 §10 发票契约值域含 `service_entry` —— **契约漂移**。本 Spec 的裁定（**方案 C，2026-11-15 已实施**）：
 
 | 裁定 | 内容 |
 |---|---|
-| 服务确认载体 | 复用 `receipt`，`source_doc_type='purchase_order'` + 计划行 `schedule_kind='service'`；不新增第 6 个 `source_doc_type`（避免扩 CHECK 枚举） |
-| 发票侧 | `gr_based` 下服务发票行 1:1 挂「服务收货行」（SES 等价物）；`po_based` 下直接挂计划行 |
+| 验收凭证 | `receipt` 统一承担**货物收货 / 服务验收**双语义：`source_doc_type='purchase_order'` + 计划行 `schedule_kind='service'`；不新增第 6 个 `source_doc_type`，不新建 SES 对象 |
+| 库存口径 | 服务行过账**跳过库存过账**：不写 `RCV_PO` / 库存事务，不注册批次 / 序列号 / HU；只回写 `purchase_order_schedules.received_qty`（验收量）、需求分配与 doc_flow `ap_match` 边 |
+| 匹配模式 | 服务行按 `purchase_order_lines.service_acceptance_required` 派生：`0` → **2-way**（发票 ↔ 计划行余量，不要求验收单）；`1`（默认）→ **3-way**（`gr_based`，必须有验收行，缺行按 R-VI-45 `no_receipt` 例外可 override） |
+| 判定层级 | 全部为**派生判定**：`schedule_kind='service'` + `service_acceptance_required` 组合，零新增物理列、零迁移 |
+| 付款计划 | 应付期次挂**发票**（`vendor_invoice_schedules`，§23），不挂收货 / 验收单 —— 与 SAP / Oracle Fusion / D365 / NetSuite 一致 |
 | 上游契约修订 | 收货 Spec §10 `source_doc_type` 值域中的 `service_entry` 应**删除**，改为「同 `purchase_order` + `schedule_kind=service`」；**TBD-1 已裁决**（§20.1），待回写收货 Spec |
 
-> 这一裁定的收益：零新增枚举值、零表结构改造、服务与实物共享同一套匹配代码路径。
+> 收益：零新增枚举值、零新增对象、零表结构改造；服务与实物共享同一套收货、匹配、红冲代码路径。
+> 实现落位：`receipt_service._post_receipt_inventory`（服务行跳过库存过账）、`vendor_invoice_match_service._service_two_way` + `_match_line`（`gr_based` 服务 2-way 降级为 `po_based`）。
+> 测试证据：`meta/tests/test_inventory_receipt_bridge.py::test_service_schedule_post_skips_inventory`、`meta/tests/services/test_vendor_invoice_match.py::test_service_line_two_way_when_acceptance_not_required` / `::test_service_line_requires_acceptance_when_flag_on`（2026-11-15 40 passed）。
 
 ### 10.2 自动结算（ERS，预留）
 
