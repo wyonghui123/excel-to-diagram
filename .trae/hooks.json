@@ -23,6 +23,66 @@
             "timeout": 10
           }
         ]
+      },
+      {
+        "matcher": "Bash",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "powershell -Command \"$p = $env:TRAE_PROJECT_DIR; if (-not $p) { $p = (Get-Location).Path }; $input | & (Join-Path $p 'scripts\\debug\\hooks_shell_guard.ps1')\"",
+            "timeout": 10
+          }
+        ]
+      },
+      {
+        "matcher": "Shell",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "powershell -Command \"$p = $env:TRAE_PROJECT_DIR; if (-not $p) { $p = (Get-Location).Path }; $input | & (Join-Path $p 'scripts\\debug\\hooks_shell_guard.ps1')\"",
+            "timeout": 10
+          }
+        ]
+      },
+      {
+        "matcher": "run_command",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "powershell -Command \"$p = $env:TRAE_PROJECT_DIR; if (-not $p) { $p = (Get-Location).Path }; $input | & (Join-Path $p 'scripts\\debug\\hooks_shell_guard.ps1')\"",
+            "timeout": 10
+          }
+        ]
+      },
+      {
+        "matcher": "RunCommand",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "powershell -Command \"$p = $env:TRAE_PROJECT_DIR; if (-not $p) { $p = (Get-Location).Path }; $input | & (Join-Path $p 'scripts\\debug\\hooks_shell_guard.ps1')\"",
+            "timeout": 10
+          }
+        ]
+      },
+      {
+        "matcher": "runCommand",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "powershell -Command \"$p = $env:TRAE_PROJECT_DIR; if (-not $p) { $p = (Get-Location).Path }; $input | & (Join-Path $p 'scripts\\debug\\hooks_shell_guard.ps1')\"",
+            "timeout": 10
+          }
+        ]
+      },
+      {
+        "matcher": "execute_command",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "powershell -Command \"$p = $env:TRAE_PROJECT_DIR; if (-not $p) { $p = (Get-Location).Path }; $input | & (Join-Path $p 'scripts\\debug\\hooks_shell_guard.ps1')\"",
+            "timeout": 10
+          }
+        ]
       }
     ]
   }
