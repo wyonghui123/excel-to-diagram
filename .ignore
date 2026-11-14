@@ -17,3 +17,21 @@
 .trae/specs/
 .trae/state/
 .trae/skills/
+
+# === 生成物 / 大二进制 (AI 检索面与文件监视面排除) ===
+# 这些目录体积大、无源码价值, Grep/Glob 与 IDE watcher 都不应进入
+node_modules/
+dist/
+release/
+test_temp/
+test_output/
+test-results/
+test-results-*/
+exports/
+videos/
+meta/backups/
+meta/db_monitor_logs/
+meta/uploads/
+.tools/
+.runtime/
+frontend_dist_files/
