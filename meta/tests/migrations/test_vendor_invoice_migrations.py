@@ -35,6 +35,7 @@ from meta.migrations import (
     v263__vendor_invoice_pricing_mode_seed as v263,
     v264__vendor_invoice_charge_line_seed as v264,
     v271__vendor_invoice_schedule as v271,
+    v272__vendor_invoice_payable_views as v272,
 )
 from meta.tests.factories import _vendor_invoice_migration_helpers as MH
 
@@ -585,5 +586,96 @@ def test_v271_schedule_table_and_columns(db_path):
         assert 'payment_term_id' in _columns(conn, v271.HEADER_TABLE)
         assert 'default_payment_term_id' in _columns(
             conn, v271.ACCOUNT_TABLE)
+    finally:
+        conn.close()
+
+
+def test_v272_payable_and_negative_open_views(db_path):
+    """v272：应付敞口 / 负余量视图（只读 open|partial、账龄、幂等、回滚）。"""
+    conn = _connect(db_path)
+    try:
+        conn.execute(
+            'CREATE TABLE IF NOT EXISTS receipt_lines ('
+            'id INTEGER PRIMARY KEY, receipt_id INTEGER, '
+            'qty_received NUMERIC(18,4) DEFAULT 0, '
+            'qty_rejected NUMERIC(18,4) DEFAULT 0)')
+        conn.execute(
+            'CREATE TABLE IF NOT EXISTS purchase_order_schedules ('
+            'id INTEGER PRIMARY KEY, promised_qty NUMERIC(18,4) DEFAULT 0)')
+        conn.commit()
+    finally:
+        conn.close()
+
+    assert v252.migrate(db_path, skip_backup=True) is True
+    assert v271.migrate(db_path, skip_backup=True) is True
+    assert v272.migrate(db_path, skip_backup=True) is True
+    assert v272.verify(db_path) is True
+    # 幂等：二次执行不报错
+    assert v272.migrate(db_path, skip_backup=True) is True
+    assert v272.verify(db_path) is True
+
+    conn = _connect(db_path)
+    try:
+        conn.execute(
+            'INSERT INTO vendor_invoices (id, invoice_no, document_type_id, '
+            'invoice_date, supplier_account_id, supplier_party_id, '
+            'currency_id, org_id) '
+            "VALUES (1, 'VI-0001', 9101, '2026-11-01', 8001, 9001, 1, 10)")
+        for schedule_no, ratio, due_date, amount, applied, status in (
+                (1, 30, '2020-01-01', 100, 0, 'open'),
+                (2, 70, '2099-01-01', 200, 50, 'partial'),
+                (3, 0, '2020-01-01', 300, 300, 'closed')):
+            conn.execute(
+                'INSERT INTO vendor_invoice_schedules '
+                '(invoice_id, schedule_no, ratio_percent, due_date, amount, '
+                ' amount_applied, status) VALUES (1, ?, ?, ?, ?, ?, ?)',
+                [schedule_no, ratio, due_date, amount, applied, status])
+        conn.commit()
+
+        rows = conn.execute(
+            'SELECT schedule_no, open_amount, currency_id, aging_bucket '
+            'FROM v_vendor_payable_open ORDER BY schedule_no').fetchall()
+        assert [(row[0], round(row[1], 2), row[2], row[3]) for row in rows] \
+            == [(1, 100.0, 1, '90+'), (2, 150.0, 1, '0-30')]
+
+        # 负余量：收货行 10-2=8 被 normal 边消耗 10 ⇒ -2；PO 计划 5 被消耗 6 ⇒ -1
+        conn.execute(
+            'INSERT INTO receipt_lines (id, receipt_id, qty_received, '
+            'qty_rejected) VALUES (1, 7301, 10, 2)')
+        conn.execute(
+            'INSERT INTO purchase_order_schedules (id, promised_qty) '
+            'VALUES (2, 5)')
+        for edge_id, source_bo, source_id, quantity in (
+                ('e1', 'receipt_line', '1', 10),
+                ('e2', 'purchase_order_schedule', '2', 6)):
+            conn.execute(
+                'INSERT INTO doc_flow_edges (id, rule_id, source_bo, source_id, '
+                ' source_item, target_bo, target_id, target_item, quantity, '
+                ' quantity_sign, edge_kind, pool, status, derived_at) '
+                "VALUES (?, 'r', ?, ?, '', 'vendor_invoice_line', 't', 't', ?, "
+                "'normal', 'normal', ?, 'active', '2026-11-01')",
+                [edge_id, source_bo, source_id, quantity,
+                 'ap_match' if source_bo == 'receipt_line' else 'billing'])
+        conn.commit()
+
+        rows = conn.execute(
+            'SELECT source_bo, source_id, pool, open_qty '
+            'FROM v_vendor_invoice_negative_open ORDER BY source_bo').fetchall()
+        assert [(row[0], row[1], row[2], round(row[3], 4)) for row in rows] \
+            == [('purchase_order_schedule', 2, 'billing', -1.0),
+                ('receipt_line', 1, 'ap_match', -2.0)]
+    finally:
+        conn.close()
+
+    assert v272.rollback(db_path) is True
+    conn = _connect(db_path)
+    try:
+        for view in (v272.PAYABLE_VIEW, v272.NEGATIVE_VIEW):
+            assert not conn.execute(
+                "SELECT 1 FROM sqlite_master WHERE type = 'view' AND name = ?",
+                [view]).fetchone()
+        # 表与数据保留
+        assert conn.execute(
+            'SELECT COUNT(*) FROM vendor_invoice_schedules').fetchone()[0] == 3
     finally:
         conn.close()

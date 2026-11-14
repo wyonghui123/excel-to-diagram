@@ -892,6 +892,20 @@ class ReceiptService:
             raise ReceiptError('该收货单已存在红字单，禁止重复冲销',
                                field_name='status', rule='RC_REVERSAL_EXISTS')
 
+        # R-VI-48 / REV-01：已被采购发票 3-way 匹配占用的收货行不可红冲
+        blocking_lines = self._blocking_invoice_lines(header['id'])
+        if blocking_lines:
+            lines_text = ','.join(str(value) for value in blocking_lines)
+            invoice_nos = self._blocking_invoice_nos(blocking_lines)
+            message = (
+                '收货单行 {0} 已被采购发票 {1} 匹配占用，请先红冲对应发票后再红冲收货单'
+                .format(lines_text, ','.join(invoice_nos))
+                if invoice_nos else
+                '收货单行 {0} 已被采购发票匹配占用，请先红冲对应发票后再红冲收货单'
+                .format(lines_text))
+            raise ReceiptError(message, field_name='receipt_line_id',
+                               rule='RC_CONSUMED_BY_VENDOR_INVOICE')
+
         # R-RC-8：取号必须在开事务前完成（编排器内不再取号）
         if _blank(receipt_no):
             receipt_no = self.allocate_reversal_no(header['id'], receipt_date)
@@ -2603,3 +2617,52 @@ class ReceiptService:
             'AND status <> ? LIMIT 1' % HEADER_TABLE,
             [receipt_id, STATUS_CANCELLED])
         return bool(rows)
+
+    # ------------------------------------------------- R-VI-48 发票占用守卫
+    def _blocking_invoice_lines(self, receipt_id: Any) -> List[Any]:
+        """返回存在未抵消 `ap_match` 消耗的收货行 ID（R-VI-48 / REV-01）。
+
+        口径与 `v_doc_flow_consumed_qty` 一致（active 的 normal − red）。
+        库未启用单据流（无视图）时返回空：不阻断未接入发票域的收货流程。
+        """
+        rows = self.ds.query(
+            'SELECT id FROM %s WHERE receipt_id = ?' % LINE_TABLE, [receipt_id])
+        line_ids = [str(row['id']) for row in rows if row.get('id') is not None]
+        if not line_ids:
+            return []
+        placeholders = ', '.join(['?'] * len(line_ids))
+        try:
+            consumed = self.ds.query(
+                'SELECT source_id, SUM(consumed_qty) AS consumed_qty '
+                'FROM v_doc_flow_consumed_qty '
+                "WHERE source_bo = 'receipt_line' AND pool = 'ap_match' "
+                'AND source_id IN ({0}) GROUP BY source_id'
+                .format(placeholders), line_ids)
+        except Exception as error:  # noqa: BLE001 - 未启用单据流的库无此视图
+            if 'no such table' not in str(error):
+                raise
+            logger.warning('[receipt] 消耗视图不可读，跳过发票占用校验: %s', error)
+            return []
+        return [row['source_id'] for row in consumed
+                if float(row.get('consumed_qty') or 0) > 1e-6]
+
+    def _blocking_invoice_nos(self, line_ids: List[Any]) -> List[str]:
+        """占用发票号（best-effort；发票域未启用 / 无关联边时返回空）。"""
+        ids = [str(value) for value in (line_ids or [])]
+        if not ids:
+            return []
+        placeholders = ', '.join(['?'] * len(ids))
+        try:
+            rows = self.ds.query(
+                'SELECT DISTINCT vi.invoice_no AS invoice_no '
+                'FROM doc_flow_edges e '
+                'JOIN vendor_invoice_lines l '
+                'ON l.id = CAST(e.target_id AS INTEGER) '
+                'JOIN vendor_invoices vi ON vi.id = l.invoice_id '
+                "WHERE e.source_bo = 'receipt_line' AND e.pool = 'ap_match' "
+                "AND e.status = 'active' AND e.quantity_sign = 'normal' "
+                'AND e.source_id IN ({0})'.format(placeholders), ids)
+        except Exception as error:  # noqa: BLE001 - 采购发票域未启用的库
+            logger.warning('[receipt] 无法解析占用发票号: %s', error)
+            return []
+        return [str(row['invoice_no']) for row in rows if row.get('invoice_no')]

@@ -18,6 +18,7 @@ from meta.tests.factories._vendor_invoice_helpers import (
     PAYMENT_TERM_ID,
     SCHEDULE_ID,
     SUPPLIER_ACCOUNT_ID,
+    audit_actions,
     get_header,
     get_schedules,
     insert_invoice,
@@ -121,7 +122,8 @@ def test_schedule_rows_persist_with_open_status_and_sum_to_gross(tmp_path):
         == Decimal('100')
 
 
-def test_credit_memo_generates_no_schedules(tmp_path):
+def test_credit_memo_without_source_skips_schedules(tmp_path):
+    """R-VI-49：无回指源单的贷项不生成期次，audit 记录跳过原因。"""
     ds, _service, _header = _setup(tmp_path)
     credit_id = insert_invoice(ds, invoice_no='VI-CN-0001',
                                category='credit_memo', direction=-1,
@@ -133,6 +135,65 @@ def test_credit_memo_generates_no_schedules(tmp_path):
 
     assert service._generate_schedules(header) == []
     assert get_schedules(ds, credit_id) == []
+    assert audit_actions(ds, credit_id) == ['schedule_skip']
+
+
+def test_red_credit_memo_mirrors_negative_schedules(tmp_path):
+    """R-VI-49：红字贷项按期次比例镜像生成负额期次，与原票净额为 0。"""
+    ds, service, source_header = _setup(tmp_path)
+    service._generate_schedules(source_header)
+    credit_id = insert_invoice(ds, invoice_no='VI-CN-RED-0001',
+                               category='credit_memo', direction=-1,
+                               invoice_date=INVOICE_DATE,
+                               gross_amount=-452.0,
+                               payment_term_id=PAYMENT_TERM_ID,
+                               reversal_of_invoice_id=source_header['id'])
+
+    rows = service._generate_schedules(get_header(ds, credit_id))
+
+    assert [Decimal(str(row['amount'])) for row in rows] \
+        == [Decimal('-135.6'), Decimal('-316.4')]
+    assert [Decimal(str(row['ratio_percent'])) for row in rows] \
+        == [Decimal('-30'), Decimal('-70')]
+    assert [row['status'] for row in rows] == ['open', 'open']
+    assert [row['amount_applied'] for row in rows] == [0, 0]
+    source_due = [row['due_date'] for row in
+                  get_schedules(ds, source_header['id'])]
+    assert [row['due_date'] for row in rows] == source_due
+    net = sum(Decimal(str(row['amount'])) for row in rows) + sum(
+        Decimal(str(row['amount']))
+        for row in get_schedules(ds, source_header['id']))
+    assert net == Decimal('0')
+
+
+def test_adjustment_mirrors_signed_schedules(tmp_path):
+    """R-VI-49：调整单按增减方向镜像正 / 负额期次，原期次不变。"""
+    ds, service, source_header = _setup(tmp_path)
+    service._generate_schedules(source_header)
+    decrease_id = insert_invoice(ds, invoice_no='VI-ADJ-D-0001',
+                                 category='adjustment', direction=1,
+                                 invoice_date=INVOICE_DATE,
+                                 gross_amount=-100.0,
+                                 payment_term_id=PAYMENT_TERM_ID,
+                                 adjustment_of_invoice_id=source_header['id'])
+    increase_id = insert_invoice(ds, invoice_no='VI-ADJ-I-0001',
+                                 category='adjustment', direction=1,
+                                 invoice_date=INVOICE_DATE,
+                                 gross_amount=50.0,
+                                 payment_term_id=PAYMENT_TERM_ID,
+                                 adjustment_of_invoice_id=source_header['id'])
+
+    decrease = service._generate_schedules(get_header(ds, decrease_id))
+    increase = service._generate_schedules(get_header(ds, increase_id))
+
+    assert [Decimal(str(row['amount'])) for row in decrease] \
+        == [Decimal('-30'), Decimal('-70')]
+    assert [Decimal(str(row['amount'])) for row in increase] \
+        == [Decimal('15'), Decimal('35')]
+    # 原票期次只读（R-VI-35 / R-VI-49）
+    assert [Decimal(str(row['amount'])) for row in
+            get_schedules(ds, source_header['id'])] \
+        == [Decimal('135.6'), Decimal('316.4')]
 
 
 # ------------------------------------------------------------------ §23.5 带出链

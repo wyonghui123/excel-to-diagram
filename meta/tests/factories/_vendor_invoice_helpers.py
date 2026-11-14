@@ -602,19 +602,21 @@ def insert_invoice(ds, *, invoice_no='VI-0001', category='invoice',
                    match_mode='gr_based', pricing_mode='po_price',
                    net_amount=100.0, tax_amount=13.0, gross_amount=113.0,
                    invoice_date='2026-11-01', document_type_id=DOC_TYPE_ID,
-                   payment_term_id=None):
+                   payment_term_id=None, reversal_of_invoice_id=None,
+                   adjustment_of_invoice_id=None):
     ds.execute(
         'INSERT INTO vendor_invoices '
         '(invoice_no, document_type_id, document_category, direction, '
         ' invoice_date, status, match_mode, supplier_account_id, '
         ' supplier_party_id, currency_id, org_id, supplier_invoice_no, '
         ' net_amount, tax_amount, gross_amount, match_pricing_mode, '
-        ' payment_term_id) '
-        'VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)',
+        ' payment_term_id, reversal_of_invoice_id, adjustment_of_invoice_id) '
+        'VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)',
         [invoice_no, document_type_id, category, direction, invoice_date,
          status, match_mode, SUPPLIER_ACCOUNT_ID, SUPPLIER_PARTY_ID,
          CURRENCY_ID, ORG_ID, supplier_invoice_no or invoice_no,
-         net_amount, tax_amount, gross_amount, pricing_mode, payment_term_id],
+         net_amount, tax_amount, gross_amount, pricing_mode, payment_term_id,
+         reversal_of_invoice_id, adjustment_of_invoice_id],
     )
     rows = ds.query('SELECT id FROM vendor_invoices WHERE invoice_no = ?',
                     [invoice_no])
@@ -802,3 +804,11 @@ def get_schedules(ds, invoice_id):
     return ds.query(
         'SELECT * FROM vendor_invoice_schedules WHERE invoice_id = ? '
         'ORDER BY schedule_no', [invoice_id])
+
+
+def audit_actions(ds, object_id, object_type='vendor_invoice'):
+    """按对象读取审计动作序列（新 → 旧不保证，按自增 id 升序）。"""
+    rows = ds.query(
+        'SELECT action FROM audit_logs WHERE object_type = ? AND object_id = ? '
+        'ORDER BY id', [object_type, object_id])
+    return [row['action'] for row in rows]

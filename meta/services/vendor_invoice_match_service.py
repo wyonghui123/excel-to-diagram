@@ -748,19 +748,23 @@ class VendorInvoiceMatchService:
     def _generate_schedules(self, header: Dict[str, Any],
                             lines: Optional[List[Dict[str, Any]]] = None
                             ) -> List[Dict[str, Any]]:
-        """过账时按付款条件生成应付期次（R-VI-34~37，严格镜像 AR）。
+        """过账时按付款条件生成应付期次（R-VI-34~35、R-VI-49，修订 R-VI-36）。
 
-        · 红字单 / 取消单不生成（R-VI-36）；调整单只调原票敞口，也不是应付期次来源
+        · 蓝票按付款条件摊分（R-VI-34）；`cancellation` 仍不生成（从未生成过期次）
+        · 红字 / 贷项 / 借项 / 调整单按期次镜像生成带符号期次（R-VI-49）：
+          原期次只读，负额 / 正额期次追加，净额由求和表达，不就地扣减
         · Σ 期次金额 = 发票 gross_amount，尾差归最后一期（R-VI-34）
         · 头表付款条件为空时按带出链补（PO → 供应商默认 → 即期），并回写快照
         · 全额即期：空条件或条件无行 ⇒ 1 期 100%，due_date = invoice_date
         · 期次到期日早于发票日期 ⇒ VENDOR_INVOICE_TERM_INVALID
         """
         category = _s(header.get('document_category'))
-        if (category in (CATEGORY_CREDIT_MEMO, CATEGORY_CANCELLATION,
+        if category == CATEGORY_CANCELLATION:
+            return []
+        if (category in (CATEGORY_CREDIT_MEMO, CATEGORY_DEBIT_MEMO,
                          CATEGORY_ADJUSTMENT)
                 or _int(header.get('direction')) < 0):
-            return []
+            return self._generate_mirror_schedules(header)
 
         invoice_date_text = _date_text(header.get('invoice_date'))
         payment_term_id = header.get('payment_term_id')
@@ -891,6 +895,63 @@ class VendorInvoiceMatchService:
             last = raw[-1]
             merged = [dict(last, amount=Decimal('0'), ratio=Decimal('100'))]
         return merged
+
+    def _generate_mirror_schedules(self, header: Dict[str, Any]
+                                   ) -> List[Dict[str, Any]]:
+        """R-VI-49：红字 / 调整单按期次镜像生成带符号期次（原期次只读）。
+
+        · 源单 = `reversal_of_invoice_id` 或 `adjustment_of_invoice_id`
+        · 按源期次 `ratio_percent` 把本单带符号 gross 摊到各期，尾差归最后一期
+        · `due_date` / `payment_term_line_id` 沿用源期次；负额期次 `ratio_percent` 取负
+        · 源单无期次（缺付款条件 / 无回指）⇒ 不生成，audit 记
+          `schedule_skip_reason='source_has_no_schedule'`
+        """
+        invoice_id = _int(header.get('id'))
+        source_id = _int(header.get('reversal_of_invoice_id')
+                         or header.get('adjustment_of_invoice_id'))
+        source_rows = []
+        if source_id:
+            source_rows = self._rows(
+                'SELECT payment_term_line_id, ratio_percent, due_date FROM {0} '
+                'WHERE invoice_id = ? ORDER BY schedule_no'.format(
+                    INVOICE_SCHEDULE_TABLE),
+                [source_id])
+        if not source_rows:
+            self._audit(invoice_id, 'schedule_skip', extra={
+                'schedule_skip_reason': 'source_has_no_schedule',
+                'source_invoice_id': source_id or None,
+            })
+            return []
+
+        gross = _dec(header.get('gross_amount'))
+        decimals = self._amount_decimals(header)
+        now = _now()
+        allocated = Decimal('0')
+        rows = []
+        for index, source in enumerate(source_rows):
+            ratio = _dec(source.get('ratio_percent'))
+            if index < len(source_rows) - 1:
+                amount = round_amount(
+                    gross * ratio / Decimal('100'), decimals)
+                allocated += amount
+            else:
+                amount = round_amount(gross - allocated, decimals)
+            row = {
+                'invoice_id': invoice_id,
+                'schedule_no': index + 1,
+                'payment_term_line_id': source.get('payment_term_line_id'),
+                'ratio_percent': float(round_amount(
+                    -abs(ratio) if amount < 0 else ratio, 4)),
+                'due_date': source.get('due_date'),
+                'amount': float(round_amount(amount, decimals)),
+                'amount_applied': 0,
+                'status': 'open',
+                'created_at': now,
+                'updated_at': now,
+            }
+            row['id'] = self._insert_schedule(row)
+            rows.append(row)
+        return rows
 
     def _load_payment_term(self, term_id: Any) -> Optional[Dict[str, Any]]:
         rows = self.ds.query(
@@ -2049,6 +2110,8 @@ class VendorInvoiceMatchService:
         if not red_id:
             raise VendorInvoiceError('红字贷项凭证创建失败', 'VI_REVERSAL_FAILED', 'invoice_no')
         red_line_ids = self._insert_lines(red_id, lines, now)
+        # R-VI-49：红字单绕过 post()，直接插入 posted，期次在此镜像生成
+        self._generate_schedules(dict(data, id=red_id))
         return {
             'id': red_id,
             'invoice_id': red_id,

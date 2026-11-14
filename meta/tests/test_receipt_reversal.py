@@ -186,3 +186,45 @@ def test_reverse_goes_through_reversal_orchestrator(monkeypatch):
 
     assert seen == [('receipt', original['id'])]
     assert result['reversal_receipt_id']
+
+
+def test_blocking_invoice_lines_counts_normal_minus_red(tmp_path):
+    """R-VI-48：收货行被 ap_match 消耗未抵消时命中；红字边抵消后放行。"""
+    from meta.tests.factories._vendor_invoice_helpers import (
+        RECEIPT_ID, RECEIPT_LINE_ID, insert_edge, insert_invoice, insert_line,
+        make_env, seed_receipt_line,
+    )
+
+    ds = make_env(tmp_path)
+    seed_receipt_line(ds, qty_received=10.0)
+    invoice_id = insert_invoice(ds)
+    line_one = insert_line(ds, invoice_id, line_no=1)
+    line_two = insert_line(ds, invoice_id, line_no=2)
+    service = ReceiptService(ds)
+
+    insert_edge(ds, target_line_id=line_one, quantity=10.0)
+    assert service._blocking_invoice_lines(RECEIPT_ID) \
+        == [str(RECEIPT_LINE_ID)]
+    assert service._blocking_invoice_nos([str(RECEIPT_LINE_ID)]) \
+        == ['VI-0001']
+
+    insert_edge(ds, target_line_id=line_two, quantity=10.0,
+                quantity_sign='red')
+    assert service._blocking_invoice_lines(RECEIPT_ID) == []
+
+
+def test_reverse_blocked_by_vendor_invoice_consumption(monkeypatch):
+    """R-VI-48：被采购发票占用的收货单拒绝红冲（错误契约）。"""
+    conn = seeded_db()
+    original = _posted(conn)
+    monkeypatch.setattr(ReceiptService, '_blocking_invoice_lines',
+                        lambda self, receipt_id: ['7401'])
+    monkeypatch.setattr(ReceiptService, '_blocking_invoice_nos',
+                        lambda self, line_ids: ['VI-0001'])
+
+    with pytest.raises(ReceiptError) as exc:
+        _svc(conn).reverse(original['id'])
+
+    assert exc.value.rule == 'RC_CONSUMED_BY_VENDOR_INVOICE'
+    assert exc.value.field_name == 'receipt_line_id'
+    assert 'VI-0001' in exc.value.message

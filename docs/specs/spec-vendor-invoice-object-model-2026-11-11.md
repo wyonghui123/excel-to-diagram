@@ -1,6 +1,6 @@
 # 采购发票对象模型 Spec（Vendor Invoice Object Model）
 
-> 版本：v1.7 草案（2026-11-14 W10-1 已实施：R-VI-38 ~ R-VI-47 + 枚举收敛；v1.6 于 2026-11-14 追加 §24 三单匹配补强；v1.5 于 2026-11-14 落实施 §23.9 方案 A；v1.4 于 2026-11-13 追加 22.6.2 费用变更与单一事实源约束 / R-1~R-4 / 变更矩阵 A~D；v1.3 同日追加 22.6.1 费用分摊方案 / D-CH-01~12；v1.2 于 2026-11-12 §22 细化，金额计算改为复用统一内核 `SalesOrderAmountService`，D-VI-27）｜ 日期：2026-11-11 ｜ 状态：待评审（§23 已实施，2026-11-14；§24 W10-1 已实施，2026-11-14）
+> 版本：v1.8 草案（2026-11-14 追加 §25 端到端 / 逆向 / 异常一致性补强：R-VI-48 ~ R-VI-59，并修订 R-VI-36；v1.7 于 2026-11-14 W10-1 已实施：R-VI-38 ~ R-VI-47 + 枚举收敛；v1.6 于 2026-11-14 追加 §24 三单匹配补强；v1.5 于 2026-11-14 落实施 §23.9 方案 A；v1.4 于 2026-11-13 追加 22.6.2 费用变更与单一事实源约束 / R-1~R-4 / 变更矩阵 A~D；v1.3 同日追加 22.6.1 费用分摊方案 / D-CH-01~12；v1.2 于 2026-11-12 §22 细化，金额计算改为复用统一内核 `SalesOrderAmountService`，D-VI-27）｜ 日期：2026-11-11 ｜ 状态：待评审（§23 已实施，2026-11-14；§24 W10-1 已实施，2026-11-14；§25 W11-1 已实施，2026-11-14；其余待评审）
 > 上游契约：[spec-receipt-object-model-2026-11-01.md](./spec-receipt-object-model-2026-11-01.md) §10 / §11
 > 样板：[sales-invoice-pricing-spec-2026-11-10.md](./sales-invoice-pricing-spec-2026-11-10.md)（FR/NFR/IF/TR 编号体系）
 > 平台基线：`document_category / document_role / direction`（v243）、`doc_flow_rule`（v215）、`control_parameter_def`（容差）
@@ -1161,6 +1161,8 @@ doc_effect:
 | G-15 | 调整单 `direction=1` + 负金额可能双重取负 | P3 | 22.5 |
 | G-16 | 调整行 `unit_price` 与 `net_amount` 不同步；`qty=0` 纯金额行可能被跳过 | P3 | 22.5 |
 
+> 编号约定：本节 `G-1 ~ G-16` 只属 2026-11-12 的金额/费用审查；2026-11-14「端到端 / 逆向 / 异常」复盘另行发现 12 条缺口，改用 `E2E-* / REV-* / EXC-*` 前缀，**不复用** `G-*`，清单见 §25.0。
+
 ### 22.1 三层计算链与唯一入口
 
 | 层 | 载体 | 职责 | 禁止 |
@@ -1496,6 +1498,7 @@ SAP 的分摊基数是「**迄今已开票金额 + 本凭证金额**」，比本
 | R-VI-32 | `qty ≥ 0`；负向只由红字复制 / `adjustment_direction` 表达 | schema + 服务 |
 | R-VI-33 | 金额算术**单一实现**：VI 只允许继承 `SalesOrderAmountService` 并覆写钩子，禁止复制公式 / 新建平行金额服务 | 代码评审 + lint（禁止 `vendor_invoice` 内出现 `round(` / `× 税率` 硬编码） |
 | R-VI-38 ~ R-VI-47 | 三单匹配补强（源单状态 / 费用对账 / UOM / 多异常 / 枚举闭合 / PO 税额 / 容差方向）；明细见 §24.4，本节不重复 | §24 |
+| R-VI-48 ~ R-VI-59 | 端到端 / 逆向 / 异常一致性补强（收货红冲守卫 / 期次净额化 / 应付视图 / 退货贷项余量 / 贷项逆向 / 汇率 / PO 守卫 / 发票号 / 期间 / 供应商状态 / 取消收敛 / rematch）；明细见 §25.4 | §25 |
 
 > 编号衔接：R-VI-19 仍留空（保留给 SES / ERS 结算模式），R-VI-20~23 属调整单（§21.1），本节从 24 起。
 
@@ -2017,3 +2020,202 @@ if abs(total - target) > tol: → REASON_FREIGHT
 - 不做 UOM **自动换算**（需要换算率主数据，属基础资料波次）。
 - 不做匹配**审批流** / 付款挂起（D-VI-12 / D-VI-17 已裁决）。
 - 不做行级多币种（D-VI-18 永久关闭）。
+
+---
+
+## 25. 端到端 / 逆向 / 异常一致性补强（2026-11-14 复盘追加）
+
+> 触发：2026-11-14 以「业务单据流端到端 → 逆向 → 异常」三视角对 `vendor_invoice` 域做只读代码复核（证据等级 `C`：逐文件读实现，非推断）。
+> 结论：§22 ~ §24 已把**正向匹配**（三单对碰 / 费用 / 税 / 容差 / UOM）做扎实；缺口集中在**跨域联动**（收货 / PO / 应付期次 / 退货）与**逆向路径闭合**。本节不改已实施条款行为（R-VI-38 ~ 47 维持），只补链路。
+> 编号约定：本节缺口用 `E2E-*`（正向端到端）/ `REV-*`（逆向）/ `EXC-*`（异常），**不复用** §22.0 的 `G-1 ~ G-16`；新不变量从 **R-VI-48** 起。
+
+### 25.0 缺口台账（分档）
+
+| # | 缺口 | 档位 | 证据（C） | 落点 |
+|---|---|---|---|---|
+| E2E-01 | 应付期次只写不读：`vendor_invoice_schedules` 全仓仅 INSERT（`vendor_invoice_match_service.py` 期次写入点），无 UPDATE / DELETE、无生产读方；`amount_applied` 恒 0、无逾期 / 账龄出口 ⇒ §23 生成的期次是「死数据」 | 承诺未实现 | 期次唯一写入点 + 全仓 grep 无读方 | R-VI-50 / 25.6 视图 |
+| E2E-02 | 退货贷项无敞口追踪：`v_vendor_return_open_amount` 仅存在于本 Spec 未实现；`return_line` 锚点贷项行 `invoice_line_id` 为空 ⇒ 不写冲减边；无「贷项金额 ≤ 退货可贷金额」校验（全仓无 `VI_RETURN_EXCEEDED`） | 真遗漏 | `_insert_lines` 回指逻辑 + 全仓 grep | R-VI-51 |
+| E2E-03 | PO 侧无 billing 消耗守卫：`purchase_order_guard_service` 无任何 `invoiced / billing / consumed` 判定 ⇒ 已开票的 PO 仍可关闭 / 改量 / 删行，在途发票变悬挂 | 真遗漏 | 同目录 grep No matches | R-VI-54 |
+| REV-01 | 收货红冲不校验发票消耗（**P0 最高**）：`receipt_service.reverse()` 仅校验 posted / red / 重复红冲；`receipt.yaml` 的 `doc_flow` 补偿 `rule_ids` 不含 `receipt_line_to_vendor_invoice_line`（`ap_match`）⇒ 已 3-way 匹配的收货单可红冲，`ap_match` 边悬挂；再叠加 `_open_qty` 的 `max(..., 0.0)` ⇒ 负余量被静默吞掉 | 真遗漏（最高） | `receipt_service.py` `reverse()` + `receipt.yaml` `doc_flow` | R-VI-48 |
+| REV-02 | 逆向不联动应付期次：红字单 / 调整单 / 取消单一律不生成期次（`_generate_schedules` 直接 `return []`），原票期次又只读（R-VI-35）⇒ 红冲后应付台账仍显示全额待付（**负债虚增**） | 真遗漏 | `_generate_schedules` docstring / 分支 | R-VI-49（修订 R-VI-36） |
+| REV-03 | 贷项 / 借项不可再更正：`_assert_reversible` 要求 `document_role='invoice'` + `direction=1`；`create_adjustment` 原单仅接受 `invoice / adjustment` ⇒ 贷项开错（多贷）无红冲、无调整路径，只能取消重开且取消不适用 posted | 真遗漏 | `_assert_reversible` / `create_adjustment` | R-VI-52 |
+| EXC-01 | 外币汇率零校验：`_validate_amounts` 只校行 / 头算术恒等式，全仓 `exchange_rate` 在匹配服务无命中 ⇒ `exchange_rate = 0 / NULL` 的外币发票可过账，本位币金额无意义 | 真遗漏 | `_validate_amounts` | R-VI-53 |
+| EXC-02 | 空供应商发票号可过账：查重键含 `supplier_invoice_no`，空号归一为 `''`，对空号不构成硬拦 ⇒ 多张空号发票并存、无法与供应商对账 | 真遗漏 | `normalize_supplier_invoice_no` + 查重路径 | R-VI-55 |
+| EXC-03 | 期间 / 过账日期无约束：`posting_date` 缺省取 `invoice_date`，可回填任意历史月；无「期间已关闭」概念 | 真遗漏 | 过账 / 红冲日期取值 | R-VI-56 |
+| EXC-04 | 供应商主数据有效性未校验：停用 / 冻结供应商仍可建票过账（只校 `supplier_account_id` 存在且与 PO 一致） | 真遗漏 | `_validate_supplier` | R-VI-57 |
+| EXC-05 | `cancellation` 类型是死枚举：`document_category='cancellation'` 已 seed（`VENDOR_INVOICE_CANCEL`）、`line_source_policy` 已声明，但动作面只有 `cancel`（draft/submitted → cancelled）与 `reverse`（生成 `credit_memo`），**无 `create_cancellation`** | 真遗漏（口径不一致） | `vendor_invoice_actions.py` | R-VI-58 |
+| EXC-06 | `no_receipt` 放行后无重匹配入口：置 `no_receipt` 可强制过账，但收货到货后无幂等 `rematch` 动作回填 `ap_match` 边 | 真遗漏（可用性） | 动作面 grep | R-VI-59 |
+
+**已裁决、不重复立项**（复核确认属既有边界）：付款事实层 / 付款批 / 账龄（§23.9 独立波次）、预付与现金折扣（同）、GL / GR-IR（§1.2 无 GL 域）、W10-2（`gr_based` PO 行聚合锚点）、W10-3（匹配工作台）、匹配方案对象（D-VI-20）、行级多币种（D-VI-18）。
+
+### 25.1 正向端到端对账矩阵
+
+| 环节 | 上游事实 | 本域动作 | 下游联动 | 现状 | 补齐 |
+|---|---|---|---|---|---|
+| PO → 发票 | `purchase_order_schedule` 计划量 | `billing` 边 | PO 已开票量 | 有边；PO 侧无守卫 | R-VI-54 |
+| 收货 → 发票 | `receipt_line.qty_received` | `ap_match` 边 | 收货行已开票量 | 有边；收货红冲不查边 | R-VI-48 |
+| 退货 → 贷项 | `vendor_return` 行 | 贷项行（`return_line` 锚点） | 退货敞口 | 无追踪、无边 | R-VI-51 |
+| 发票 → 应付 | 过账 | `vendor_invoice_schedules` | 付款波次 | 只写不读 | R-VI-50 |
+| 发票 → 逆向 | 红冲 / 调整 | 红字单 / 调整单 | 应付净额 | 期次不联动 | R-VI-49 |
+
+### 25.2 逆向链路（红冲 / 取消 / 调整 / 退货）
+
+#### 25.2.1 收货红冲前置守卫（REV-01 / R-VI-48）
+
+- 规则：收货单 `reverse()` 前必须检查其行是否存在**未被红字抵消**的 `ap_match` 消耗（`normal − red > 0`，按 `receipt_line_id` 聚合 `v_doc_flow_consumed_qty`）。
+- 命中 ⇒ 拒绝，错误码 `RC_CONSUMED_BY_VENDOR_INVOICE`（`field='receipt_line_id'`，message 列出占用发票号）；**不走 override**。
+- 处置指引写进 message：先红冲 / 冲减对应发票行 → 再红冲收货单。
+- **YAML 侧不做补偿**：`receipt.yaml` 的 `doc_flow.rule_ids` **不得**加入 `receipt_line_to_vendor_invoice_line`（发票消耗边是应付事实，不能由收货红冲「代为补偿」）；守卫在 `receipt_service.reverse` 前置执行。
+- 兜底：`_open_qty` 的 `max(..., 0.0)` **保留**（防历史脏数据抛负），但新增负余量告警投影（25.6 `v_vendor_invoice_negative_open`），把静默吞掉改为可观测。
+
+#### 25.2.2 应付期次净额化（REV-02 / R-VI-49，**修订 R-VI-36**）
+
+- `R-VI-36` 原口径「红字单 / 取消单不生成期次」改写为：
+  - `credit_memo`（含红冲生成的红票）与 `adjustment(direction=decrease)`：**生成负额期次**（`amount = -|原期次金额 × 比例|`、`ratio_percent = -|ratio|`、`due_date` 沿用原期次、`status='open'`），使「原期次 + 负期次」净额 = 原票 − 红冲；
+  - `adjustment(direction=increase)`：生成**正额期次**（与蓝票同口径）；
+  - `cancellation`：**仍不生成期次**（取消只作用于 draft/submitted，从未生成过期次，口径不变）。
+- 守住 `R-VI-35`（posted 后期次只读）：原票期次**不就地修改**，只追加反向期次；净额由视图求和（单一事实源）。
+- `due_date` 对齐：负额期次取被冲原期次的 `due_date`；原票无期次（缺付款条件）时负额期次也不生成，`audit_logs` 记 `schedule_skip_reason='source_has_no_schedule'`。
+- 唯一入口：`_generate_schedules(invoice_id, header, lines)` 增加 `sign = -1` 分支；禁止在 `reverse()` / `create_adjustment()` 内另写 INSERT。
+
+#### 25.2.3 贷项 / 借项的更正路径（REV-03 / R-VI-52）
+
+- `_assert_reversible` 放宽 `document_role` 白名单为 `invoice / credit_memo / debit_memo`，并要求目标类型 `reversal_type_id` 已配置且 `direction` 相反（§3.2 已 seed：`credit_memo → debit_memo`、`debit_memo → credit_memo`）。
+- 更正单 `document_category` **由类型派生**，不得硬写 `credit_memo`（现有 `reverse()` 只对发票成立）。
+- `create_adjustment` 原单白名单扩为 `invoice / credit_memo / debit_memo / adjustment`；`increase` 追加限制：原单为 `debit_memo` 时只允许 `decrease`（防「借项再加借」绕过匹配）。
+- 借项通知单仍不写 `billing / ap_match` 消耗边（维持 §21 口径）⇒ 其逆向只影响金额台账与期次，不影响可开票余量。
+
+#### 25.2.4 取消与 `cancellation` 类型收敛（EXC-05 / R-VI-58）
+
+- 现状：`cancel()` 是**状态迁移**（draft/submitted → cancelled，posted 拒绝）；`cancellation` 类型从未被任何动作创建。
+- 裁决（取 **A**）：
+  - **A（推荐，低风险）**：`type_definitions` 中 `VENDOR_INVOICE_CANCEL` 置 `status='inactive'`（保留行以兼容历史引用）；`line_source_policy[CATEGORY_CANCELLATION]` 保留但标注「暂无创建入口」；文档口径明确「取消 = 状态迁移，不是单据」。
+  - B：实现 `create_cancellation`（生成 `cancellation` 单据 + `reversal_of_invoice_id` 回指 + 不生成期次）——成本高、与 `reverse` 语义重叠，本次不取。
+- 若未来出现「供应商开具取消单」的合规硬要求，再走 B（TBD-VI-C1）。
+
+### 25.3 异常与边界（EXC-01 ~ EXC-06）
+
+| # | 规则 | 校验点 | 错误码 | 参数 |
+|---|---|---|---|---|
+| EXC-01 | 头币种 ≠ 本位币时 `exchange_rate` 必填且 `> 0`；本位币时归一为 1 | 过账前 | `VI_EXCHANGE_RATE_REQUIRED` | 无 |
+| EXC-02 | `supplier_invoice_no` 非空方可 submit / post；空号票据只允许停留 draft | submit / post | `VI_SUPPLIER_NO_REQUIRED` | `vi_require_supplier_invoice_no`（默认 true） |
+| EXC-03 | `posting_date` ∈ [当前会计月 − `vi_period_open_months_back`, 系统日 + `vi_posting_date_forward_days`]；红字日期 ≥ 原票 `posting_date`（既有 `VI_REVERSAL_DATE_INVALID` 保留） | 过账 / 红冲 | `VI_PERIOD_CLOSED` / `VI_POSTING_DATE_INVALID` | `vi_period_open_months_back`(2) / `vi_posting_date_forward_days`(0) |
+| EXC-04 | `supplier_account_id` 对应供应商须 `status='active'`（停用 / 冻结拒绝新票；已 posted 票不受影响） | 创建（draft 可留）/ 过账 | `VI_SUPPLIER_INACTIVE` | 无 |
+| EXC-05 | 见 25.2.4（cancellation 收敛） | — | — | — |
+| EXC-06 | 见 25.3.1（`rematch`） | — | — | — |
+
+#### 25.3.1 `no_receipt` 重匹配（EXC-06 / R-VI-59）
+
+- 新增动作 `vendor_invoice.rematch`：`POST /api/v1/vendor_invoices/{id}/rematch`，`from_states: posted`，仅对 `match_status='no_receipt'` 或存在未回填 `receipt_line_id` 的 `gr_based` 行生效。
+- 语义：**只补边、不改金额**——按当前可开票余量重算该行 `ap_match` 边，状态 `overridden → matched` 并留痕（`audit_logs.action='rematch'`）。
+- 幂等：行已有足额 `ap_match` 边时直接返回 `noop`（不重复写边，`uq_doc_flow_idem` 兜底）。
+- 禁止：`posted` 后改数量 / 单价 / 税额（维持 §6 状态机）；`rematch` 拒绝金额字段入参。
+
+### 25.4 新增不变量（R-VI-48 ~ R-VI-59）
+
+| ID | 不变量 | 校验点 | 缺口 |
+|---|---|---|---|
+| R-VI-48 | 收货单红冲前，其行不得存在未抵消的 `ap_match` 消耗（`normal − red > 0`） | `receipt_service.reverse` 前置 | REV-01 |
+| R-VI-49 | 应付敞口 = 原票期次 + 红字负额期次 + 调整正 / 负额期次之和；原票期次只读，禁止就地扣减 | `_generate_schedules` + 视图 | REV-02 |
+| R-VI-50 | 期次表必须有生产读方（≥1 个视图 / 接口）；`amount_applied` 只由付款域写，付款域落地前恒 0，视图中以 `open_amount = amount` 表达 | `v_vendor_payable_open` | E2E-01 |
+| R-VI-51 | 退货贷项金额 ≤ 对应退货行未贷金额（`v_vendor_return_open_amount.amount_open`） | 贷项 submit / 过账 | E2E-02 |
+| R-VI-52 | 贷项 / 借项 / 调整单均可逆向更正；更正单方向必须与原单相反（由 `reversal_type_id` 保证） | `_assert_reversible` | REV-03 |
+| R-VI-53 | 外币发票 `exchange_rate` 必填且 `> 0`；本位币归一为 1 | 过账前 | EXC-01 |
+| R-VI-54 | PO 关闭 / 改量 / 删行前，不得存在未抵消的 `billing` 消耗 | `purchase_order_guard_service` | E2E-03 |
+| R-VI-55 | `supplier_invoice_no` 非空方可 submit / post（开关可关，默认开） | submit / post | EXC-02 |
+| R-VI-56 | `posting_date` ∈ [当前月 − N 月, 系统日 + M 天]；红字日期 ≥ 原票过账日期 | 过账 / 红冲 | EXC-03 |
+| R-VI-57 | 供应商须 `active` 才可过账（草稿允许暂存） | 过账 | EXC-04 |
+| R-VI-58 | `cancellation` 类无创建入口，`VENDOR_INVOICE_CANCEL` 置 inactive；「取消」= 状态迁移 | 类型种子 + 动作面 | EXC-05 |
+| R-VI-59 | `rematch` 只补 `ap_match` 边、不改金额、幂等 | 动作面 | EXC-06 |
+
+> 编号衔接：R-VI-48 承接 §24 的 R-VI-47；R-VI-19 仍保留给 SES / ERS。
+
+### 25.5 错误码增量
+
+| 错误码 | 触发 | 可 override | 层级 |
+|---|---|---|---|
+| `RC_CONSUMED_BY_VENDOR_INVOICE` | 收货行已被 3-way 匹配，红冲被拒 | 否 | 收货域 |
+| `PO_CONSUMED_BY_VENDOR_INVOICE` | PO 计划行存在未抵消 `billing` 消耗，关闭 / 改量被拒 | 否 | PO 域 |
+| `VI_RETURN_EXCEEDED` | 贷项金额超过退货可贷余量 | 否 | 发票域 |
+| `VI_EXCHANGE_RATE_REQUIRED` | 外币缺汇率或 `≤ 0` | 否 | 发票域 |
+| `VI_SUPPLIER_NO_REQUIRED` | 供应商发票号为空 | 是（开关关闭时不触发） | 发票域 |
+| `VI_PERIOD_CLOSED` | 过账日期早于开放期间 | 否 | 发票域 |
+| `VI_POSTING_DATE_INVALID` | 过账日期晚于允许的未来天数 | 否 | 发票域 |
+| `VI_SUPPLIER_INACTIVE` | 供应商非 active | 否 | 发票域 |
+| `VI_REMATCH_NOT_APPLICABLE` | 行无需重匹配 / 无可开票余量 | 否 | 发票域 |
+
+> 既有 `VI_REVERSAL_DATE_INVALID` / `VI_NOT_REVERSIBLE` / `VI_REVERSAL_EXISTS` 保留；R-VI-52 后 `VI_NOT_REVERSIBLE` 仅在类型未配 `reversal_type_id` 时触发。
+
+### 25.6 数据模型 / 视图 / 迁移（建议 v272）
+
+| 变更 | 内容 | 迁移 |
+|---|---|---|
+| `vendor_invoice_schedules.amount / ratio_percent` | 允许负值（红字负额期次）；若存在 `CHECK (amount >= 0)` 放宽为 `amount <> 0` | v272 |
+| 新视图 `v_vendor_payable_open` | `supplier_account_id / invoice_id / schedule_no / due_date / amount / amount_applied / open_amount(= amount − amount_applied) / aging_bucket(0-30/31-60/61-90/90+) / currency_id`，供付款波次与逾期报表读取 | v272（`generated_schema.sql` 重建） |
+| 新视图 `v_vendor_return_open_amount` | `return_line_id / qty_returned / amount_returned / amount_credited / amount_open`（按 `return_line` 锚点贷项 + 红边净额聚合） | v272 |
+| 新视图 `v_vendor_invoice_negative_open` | 负余量告警投影：`(source_bo, source_id, pool, open_qty)` where `open_qty < 0`（把 `max(0)` 静默吞掉变为可观测） | v272 |
+| `receipt.yaml` | `doc_flow.rule_ids` **保持不含** `receipt_line_to_vendor_invoice_line`（25.2.1）；补注释说明守卫位置 | YAML 注释 + `sync_schema --generate` |
+| `control_parameter_def` | 新增 `vi_require_supplier_invoice_no`(bool, true)、`vi_period_open_months_back`(int, 2)、`vi_posting_date_forward_days`(int, 0) | v272 seed |
+| `type_definitions` | `VENDOR_INVOICE_CANCEL.status='inactive'` | v272 |
+| 动作面 | 新增 `vendor_invoice.rematch` | YAML `actions` + handler |
+| 表结构 | 其余 **无新增列**（汇率、供应商状态均读上游，不落副本） | — |
+
+### 25.7 波次划分（W11 / W12 / W13）
+
+| 波次 | 范围 | 迁移 | 风险 |
+|---|---|---|---|
+| **W11-1（P0，建议先做）** ✅ 已实施（2026-11-14） | R-VI-48（收货红冲守卫）+ R-VI-49（期次净额化，修订 R-VI-36）+ R-VI-50（`v_vendor_payable_open`）+ `v_vendor_invoice_negative_open` | v272 | 触及收货域与期次写入分支；需回归 §23 既有 9 例期次测试 |
+| **W11-2（P1）** | R-VI-51（退货贷项余量 + `v_vendor_return_open_amount`）+ R-VI-52（贷项逆向）+ R-VI-53（汇率） | v272 | 类型白名单放宽，需补「贷项红冲 → 借项」用例 |
+| **W12（P2）** | R-VI-54（PO 守卫）+ R-VI-55（发票号必填）+ R-VI-56（期间）+ R-VI-57（供应商状态） | v272 | PO 守卫可能影响既有 PO 关闭测试；参数默认值须保守 |
+| **W13（P3）** | R-VI-58（cancellation 收敛）+ R-VI-59（`rematch`） | v272 / 无 | 低风险；`rematch` 需前端按钮与权限码 |
+
+> 顺序理由：W11-1 修的是「账不实」（红冲后负债虚增、收货红冲留悬挂边），必须先于任何付款域工作；W11-2 修「退货与错单的处理路径」；W12 / W13 是防护性校验与可用性补强。
+
+### 25.8 对既有条款的修订索引
+
+| 既有条款 | 修订 |
+|---|---|
+| §23.6 / **R-VI-36**（红字单 / 取消单不生成期次） | **改写**为「红字 / 贷项与调整 decrease 生成负额期次；cancellation 仍不生成」，见 25.2.2 |
+| §23.6 / R-VI-35（posted 后期次只读） | **维持**；补「只读 = 不就地改，净额靠追加反向期次」 |
+| §23.6 / R-VI-37（`amount_applied` 恒 0） | **维持**；补 R-VI-50 视图出口（`open_amount = amount − 0`） |
+| §22.8 第 1 条 / R-VI-28（禁止静默截断） | **维持** `max(...,0.0)` 作为脏数据兜底，新增 `v_vendor_invoice_negative_open` 告警 |
+| §22.9 不变量表 | 追加 R-VI-48 ~ R-VI-59（25.4） |
+| §6 状态机 / `_assert_reversible` | 逆向白名单由 `invoice` 扩为 `invoice / credit_memo / debit_memo`（R-VI-52） |
+| §3.2 类型种子（`VENDOR_INVOICE_CANCEL`） | `status='inactive'`（R-VI-58） |
+| §1.2 边界（不做匹配工作台） | 维持；`rematch` 属单行幂等补边，不是工作台 |
+| §24.8 波次（W10-2 / W10-3） | 维持；W11+ 见 25.7 |
+
+### 25.9 明确不做 / 待决
+
+- 不做 GL 凭证 / GR-IR 科目（§1.2 维持）。
+- 不做付款域（`vendor_payment` / `payment_allocation` / 付款批 / 核销逻辑）：本节只提供 `v_vendor_payable_open` 读出口与账龄桶**字段口径**，实际逾期计算与核销归付款波次。
+- 不做期间**账务锁定表**（`accounting_period` 对象）：R-VI-56 用参数做**软约束**，真锁定待会计域。
+- 不做 PO 自动改量重匹配（R-VI-54 只拒绝，不自动调整）。
+- **TBD-VI-C1**：供应商取消单（`cancellation` 单据化）——仅当出现合规硬要求时再评估（25.2.4 方案 B）。
+- **TBD-VI-C2**：退货贷项自动生成（维持 D-VI-11 软配对，只做上限校验不强制配对）。
+
+### 25.10 测试矩阵（建议）
+
+| # | 用例 | 期望 |
+|---|---|---|
+| 1 | 收货行已被 3-way 匹配（`ap_match` active），红冲收货单 | `RC_CONSUMED_BY_VENDOR_INVOICE` |
+| 2 | 先红冲发票（红边抵消 `ap_match`），再红冲收货单 | 成功，边净额为 0 |
+| 3 | 红冲 posted 蓝票（有 2 条期次） | 生成 2 条**负额**期次，`v_vendor_payable_open` 净额 = 0 |
+| 4 | 调整 decrease（-100）于已过账票 | 生成 -100 期次，净额 = 原 − 100 |
+| 5 | 调整 increase | 生成正额期次 |
+| 6 | 取消 draft 发票 | 不生成期次（口径不变） |
+| 7 | 贷项（`credit_memo`, posted）红冲 | 生成 `debit_memo`，方向相反；期次净额同向抵扣 |
+| 8 | 贷项 `create_adjustment(decrease)` / `(increase)` | decrease 成功；increase 被拒（R-VI-52） |
+| 9 | 外币发票 `exchange_rate` 为空 / 0 | `VI_EXCHANGE_RATE_REQUIRED` |
+| 10 | 供应商发票号空串直接 submit | `VI_SUPPLIER_NO_REQUIRED` |
+| 11 | `vi_require_supplier_invoice_no=false` + 空号 | 允许过账 |
+| 12 | `posting_date` 早于 3 个月前（参数=2） | `VI_PERIOD_CLOSED` |
+| 13 | `posting_date` 为明天（forward=0） | `VI_POSTING_DATE_INVALID` |
+| 14 | 停用供应商建票 + 过账 | 草稿可建；过账 `VI_SUPPLIER_INACTIVE` |
+| 15 | PO 有 active `billing` 边，关闭 PO | `PO_CONSUMED_BY_VENDOR_INVOICE` |
+| 16 | `no_receipt` 已过账 → 收货到货 → `rematch` | 写 `ap_match` 边、置 `matched`，金额不变 |
+| 17 | 同一行重复 `rematch` | `noop`，不重复写边 |
+| 18 | 退货行 `amount_credited` 已满，再开贷项 | `VI_RETURN_EXCEEDED` |
+| 19 | 回归：§23 既有 9 例期次 + §24 的 14 例 | 全绿（默认参数行为不变） |
+
+> 实施前置：迁移 v272 与视图需 `sync_schema --generate` 后跑 `python d:\filework\test.py --file meta/tests/services/test_vendor_invoice_match_service.py` + 收货域回归。
