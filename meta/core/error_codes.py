@@ -89,6 +89,24 @@ class ErrorCode(str, Enum):
     INVALID_DIMENSION_KEY = 'invalid_dimension_key'              # 400
     INVALID_DIMENSION_VALUE = 'invalid_dimension_value'          # 400
 
+    # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+    # 平台级附件 (v269 2026-11-13 attachment-platform)
+    # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+    # 详见 docs/specs/spec-platform-attachment-2026-11-13.md §6.7
+    ATTACHMENT_NOT_FOUND = 'attachment_not_found'                                # 404
+    ATTACHMENT_LINK_NOT_FOUND = 'attachment_link_not_found'                      # 404
+    ATTACHMENT_TARGET_INVALID = 'attachment_target_invalid'                      # 400
+    ATTACHMENT_TOO_LARGE = 'attachment_too_large'                                # 400（Flask 层 413 同码）
+    ATTACHMENT_LIMIT_EXCEEDED = 'attachment_limit_exceeded'                      # 400
+    ATTACHMENT_INVALID_MIME = 'attachment_invalid_mime'                          # 400
+    ATTACHMENT_DUPLICATE_LINK = 'attachment_duplicate_link'                      # 200 false
+    ATTACHMENT_DUPLICATE_PRIMARY = 'attachment_duplicate_primary'                # 200 false
+    ATTACHMENT_IN_USE = 'attachment_in_use'                                      # 200 false
+    ATTACHMENT_MISSING_FILE = 'attachment_missing_file'                          # 410
+    ATTACHMENT_STORAGE_ERROR = 'attachment_storage_error'                        # 500
+    ATTACHMENT_TARGET_DELETED = 'attachment_target_deleted'                      # 400
+    ATTACHMENT_VISIBILITY_UNSUPPORTED = 'attachment_visibility_unsupported'      # 400
+
 
 # 用于脚本生成的常量
 ALL_CODES = [c.value for c in ErrorCode]

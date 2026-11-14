@@ -18,7 +18,7 @@ from meta.core.action_constants import (
 from meta.core.models_enums import (
     FieldType, ObjectType, FieldStorage, FieldSource,
     RelationType, ActionType, InstanceScope, ValidationSeverity, QueryOperator, AggregateType,
-    RuleType, RuleScope, RuleTrigger, DataCategory, AnnotationCategory, ArchObjectType,
+    RuleType, RuleScope, RuleTrigger, DataCategory, AnnotationCategory, AttachmentCategory, ArchObjectType,
     DimensionKey, BusinessRelationType, RelationCategory, Direction,
     HierarchyScopeType,
     BusinessObjectCategory, BoSubCategory, EnumBindingStrength, DimensionReferenceType,

@@ -52,6 +52,8 @@ RESOURCE_METADATA_MAP: Dict[str, Dict[str, Any]] = {
     'product': {'type': RESOURCE_INDEPENDENT, 'table': 'products'},
     'user': {'type': RESOURCE_INDEPENDENT, 'table': 'users'},
     'role': {'type': RESOURCE_INDEPENDENT, 'table': 'roles'},
+    # [附件平台 v269 2026-11-13] 附件本体不独立授权，权限随链接目标（D-AT-05）
+    'attachment': {'type': RESOURCE_INDEPENDENT, 'table': 'attachments'},
 
     # Hierarchy (层级资源)
     'version': {

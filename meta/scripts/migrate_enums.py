@@ -53,6 +53,7 @@ from meta.core.models import (
     RelationCategory,
     Direction,
     HierarchyScopeType,
+    AttachmentCategory,
 )
 from meta.core.datasource import get_data_source
 
@@ -73,6 +74,7 @@ ENUM_CLASSES = [
     DerivationType,
     DerivationStrategy,
     AnnotationCategory,
+    AttachmentCategory,
     ArchObjectType,
     DimensionKey,
     BusinessRelationType,
@@ -139,6 +141,11 @@ ENUM_DIMENSION_CONFIG = {
             'REFERENCES': '源对象引用目标对象',
         },
     },
+    # [v0.7 P0.2-1] 附件分类：业务枚举，扩展走枚举管理页（预置值 is_system=1 保护）
+    'attachment_category': {
+        'category': 'business',
+        'mutability': 'extensible',
+    },
 }
 
 
@@ -203,6 +210,16 @@ ENUM_VALUE_NAME_MAP = {
         'warning': '警告',
         'info': '信息',
         'tip': '提示',
+    },
+    # [v0.7 P0.2-1] 与 AttachmentCategory 码值一一对应
+    'attachment_category': {
+        'contract': '合同/协议',
+        'invoice_image': '发票影像',
+        'delivery_note': '签收/送货单',
+        'drawing': '图纸/技术文件',
+        'inspection': '质检报告',
+        'approval': '审批件',
+        'other': '其他',
     },
     'arch_object_type': {
         'product': '产品',

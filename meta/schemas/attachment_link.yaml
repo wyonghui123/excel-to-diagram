@@ -1,0 +1,148 @@
+id: attachment_link
+name: 附件关联
+table_name: attachment_links
+description: 附件与任意业务对象的多态链接（链接角色 / 顺序 / 主文件 / 可见性）。
+
+resource:
+  type: subordinate
+  parent_type_field: target_type      # 物理列 target_type（TR-AT-007，不沿用 annotation 的 parent_type 命名）
+  parent_id_field: target_id
+  inherit_owner: true
+
+semantics:
+  meaning: 附件与业务对象的多态关联
+  category: auxiliary
+  aliases: [附件链接, AttachmentLink]
+
+aspects: [audit_aspect]
+
+audit:
+  enabled: true
+  create: {enabled: true, fields: all}
+  update: {enabled: true, fields: changed_only, exclude: [id, created_at, updated_at, created_by, updated_by]}
+  delete: {enabled: true, fields: business_only, exclude: [id, created_at, updated_at, created_by, updated_by]}
+
+ui_view_config:
+  list:
+    pageSize: 20
+    columns:
+      - {key: target_type, title: 对象类型, width: 140, position: 1, importance: high, sortable: false}
+      - {key: link_role, title: 角色, width: 110, position: 2, importance: high, sortable: false}
+      - {key: is_primary, title: 主文件, width: 80, position: 3, importance: medium, sortable: false}
+      - {key: seq, title: 顺序, width: 80, position: 4, importance: low, sortable: true}
+  detail:
+    facets:
+      - {title: 关联信息, type: fieldGroup, fields: [attachment_id, target_type, target_id, link_role, is_primary, seq]}
+      - {title: 可见性与状态, type: fieldGroup, fields: [visibility, status, description]}
+      - {title: 系统信息, type: fieldGroup, fields: [created_at, created_by, updated_at, updated_by]}
+  form:
+    sections:
+      - {title: 关联信息, fields: [link_role, is_primary, seq, description]}
+    layout: vertical
+
+fields:
+  - id: id
+    name: ID
+    type: integer
+    db_column: id
+    required: true
+    unique: true
+    description: 技术主键
+    semantics: {meaning: 自增主键，系统内部使用, export_visible: false}
+    ui: {visible: false, editable: false}
+  - id: attachment_id
+    name: 附件
+    type: integer
+    db_column: attachment_id
+    required: true
+    semantics: {immutable: true}
+    ui: {widget: number, title: 附件 ID}
+  - id: target_type
+    name: 关联对象类型
+    type: string
+    db_column: target_type
+    required: true
+    semantics: {meaning: 附件挂接的 BO 类型, export_visible: false, import_visible: true, immutable: true, parent_key: true, import_order: 1}
+    ui: {widget: select, title: 关联对象类型, width: 140}
+  - id: target_id
+    name: 关联对象 ID
+    type: integer
+    db_column: target_id
+    required: true
+    semantics: {export_visible: false, import_visible: false, immutable: true, parent_key: true, import_order: 2}
+    ui: {widget: number, title: 关联对象 ID, width: 120}
+  - id: link_role
+    name: 链接角色
+    type: string
+    db_column: link_role
+    required: true
+    default: supporting
+    ui: {widget: select, title: 链接角色, width: 110, options: [{value: primary, label: 主凭证}, {value: supporting, label: 辅助材料}, {value: signed, label: 已签署}, {value: invoice_image, label: 发票影像}, {value: contract, label: 合同文件}, {value: other, label: 其他}]}
+  - id: seq
+    name: 顺序
+    type: integer
+    db_column: seq
+    required: true
+    default: 10
+    ui: {widget: number, title: 顺序, width: 80}
+  - id: is_primary
+    name: 是否主文件
+    type: integer
+    db_column: is_primary
+    required: true
+    default: 0
+    ui: {widget: switch, title: 主文件, width: 80}
+  - id: visibility
+    name: 可见性
+    type: string
+    db_column: visibility
+    required: true
+    default: internal
+    semantics: {meaning: P0 仅 internal 生效}
+    ui: {widget: select, title: 可见性, width: 100, options: [{value: internal, label: 内部}, {value: partner, label: 伙伴}, {value: public, label: 公开}]}
+  - id: status
+    name: 状态
+    type: string
+    db_column: status
+    required: true
+    default: active
+    ui: {widget: select, title: 状态, width: 100, options: [{value: active, label: 有效}, {value: hidden, label: 隐藏}, {value: deleted, label: 已删除}]}
+  - id: description
+    name: 说明
+    type: text
+    db_column: description
+    ui: {widget: textarea, title: 说明}
+  - id: target_code
+    name: 关联对象编号
+    type: string
+    semantics: {virtual: true, export_visible: false}
+    ui: {visible: false}
+  - id: target_name
+    name: 关联对象名称
+    type: string
+    semantics: {virtual: true, export_visible: false}
+    ui: {visible: false}
+
+associations:
+  - name: target
+    target_type: polymorphic
+    type: many_to_one
+    polymorphic_type_field: target_type
+    polymorphic_id_field: target_id
+    # [v0.7 P0.2-5] 置 false：目标删除由 CascadeInterceptor 软失效链接（status='deleted'，字节保留，D-AT-08）。
+    # 置 true 会被 deletion_service._delete_polymorphic_children_sync 硬删 attachment_links 行，
+    # 与「软失效、字节保留」决策冲突，且与拦截器形成双写。
+    cascade_delete: false
+    async_delete: false
+    description: 附件挂接的目标对象（多态关联，目标删除时链接软失效、附件字节保留）
+    display: {label: 关联对象, target_display_field: target_name, target_code_field: target_code}
+
+actions:
+  - {id: list_by_target, type: custom, method: GET, path: /api/v1/attachments/by-target}
+  - {id: attachment_link_create, type: custom, method: POST, path: "/api/v1/attachments/{id}/links"}
+  - {id: attachment_link_delete, type: custom, method: DELETE, path: "/api/v1/attachment-links/{id}"}
+
+routes: {detail: /detail/attachment_link/attachment-link-detail, list: /attachment-management}
+list: {pagination: {default_page_size: 20, page_size_options: [10, 20, 50, 100]}}
+nested: {enabled: false}
+persistence: {strategy: audit_log, survive_reload: true}

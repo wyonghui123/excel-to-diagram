@@ -67,6 +67,13 @@
                     @embedded-action="(payload, section) => $emit('row-action', { ...payload, section })"
                   />
 
+                  <AttachmentSection
+                    v-else-if="mainSection.type === 'attachment'"
+                    :object-type="objectType"
+                    :object-id="objectId"
+                    :section="mainSection"
+                  />
+
                   <HistorySection
                     v-else-if="mainSection.type === 'history'"
                     :ref="el => setHistoryRef(mainSection.key, el)"
@@ -138,6 +145,13 @@
             @embedded-action="(payload, section) => $emit('row-action', { ...payload, section })"
           />
 
+          <AttachmentSection
+            v-else-if="section.type === 'attachment'"
+            :object-type="objectType"
+            :object-id="objectId"
+            :section="section"
+          />
+
           <FieldGroupSection
             v-else
             :section="section"
@@ -176,6 +190,7 @@ import { nextTick } from 'vue'
 import AppIcon from '../AppIcon/AppIcon.vue'
 import FieldGroupSection from './FieldGroupSection.vue'
 import AssociationSection from './AssociationSection.vue'
+import AttachmentSection from './AttachmentSection.vue'
 import HistorySection from './HistorySection.vue'
 import PermissionConfigPanel from '@/views/SystemManagement/components/PermissionConfigPanel.vue'
 import ReadonlyAggregateSection from '../ReadonlyAggregateSection/ReadonlyAggregateSection.vue'

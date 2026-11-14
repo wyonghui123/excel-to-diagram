@@ -1,0 +1,177 @@
+id: attachment
+name: 附件
+table_name: attachments
+description: 平台级附件内容，1 行 = 1 个不可变文件；业务对象经 attachment_links 多态挂接。
+
+resource:
+  type: independent
+  # 矩阵行真源 = meta/schemas/resource_types.yaml，本对象不在其中（D-AT-05：授权按链接目标判定，
+  # 不产生独立矩阵行）；此块仅供 owner / 继承解析（RESOURCE_METADATA_MAP 同源人工登记）。
+  inherit_owner: false
+
+semantics:
+  meaning: 平台级附件内容（字节不可变）
+  category: auxiliary
+  aliases: [附件, Attachment, 文件]
+
+aspects: [audit_aspect]
+
+audit:
+  enabled: true
+  create: {enabled: true, fields: all}
+  update: {enabled: true, fields: changed_only, exclude: [id, created_at, updated_at, created_by, updated_by]}
+  delete: {enabled: true, fields: business_only, exclude: [id, created_at, updated_at, created_by, updated_by]}
+
+ui_view_config:
+  list:
+    pageSize: 20
+    columns:
+      - {key: display_name, title: 文件名, width: 260, position: 1, importance: high, sortable: false}
+      - {key: category, title: 分类, width: 120, position: 2, importance: medium, sortable: false}
+      - {key: size_bytes, title: 大小, width: 100, position: 3, importance: medium, sortable: true}
+      - {key: uploaded_by, title: 上传人, width: 120, position: 4, importance: medium, sortable: false}
+      - {key: uploaded_at, title: 上传时间, width: 165, position: 5, importance: medium, sortable: true}
+  detail:
+    facets:
+      - {title: 文件信息, type: fieldGroup, fields: [display_name, original_file_name, mime_type, size_bytes, sha256]}
+      - {title: 分类与状态, type: fieldGroup, fields: [category, status, scan_status, supersedes_id]}
+      - {title: 上传信息, type: fieldGroup, fields: [uploaded_by, uploaded_at, description]}
+      - {title: 系统信息, type: fieldGroup, fields: [created_at, created_by, updated_at, updated_by]}
+  form:
+    sections:
+      - {title: 附件信息, fields: [display_name, category, description]}
+    layout: vertical
+
+fields:
+  - id: id
+    name: ID
+    type: integer
+    db_column: id
+    required: true
+    unique: true
+    description: 技术主键
+    semantics: {meaning: 自增主键，系统内部使用, export_visible: false}
+    ui: {visible: false, editable: false}
+  - id: original_file_name
+    name: 原始文件名
+    type: string
+    db_column: original_file_name
+    required: true
+    semantics: {meaning: 上传时的原始文件名（仅展示，不参与路径）, export_visible: true, import_visible: false, immutable: true}
+    ui: {widget: input, title: 原始文件名, width: 260, readonly: true}
+  - id: display_name
+    name: 显示名
+    type: string
+    db_column: display_name
+    semantics: {meaning: 业务展示名，缺省取 original_file_name}
+    ui: {widget: input, title: 显示名, width: 260}
+  - id: mime_type
+    name: MIME 类型
+    type: string
+    db_column: mime_type
+    required: true
+    semantics: {immutable: true, export_visible: false}
+    ui: {widget: input, title: MIME 类型, width: 160, readonly: true}
+  - id: size_bytes
+    name: 字节数
+    type: integer
+    db_column: size_bytes
+    required: true
+    semantics: {immutable: true}
+    ui: {widget: number, title: 大小(字节), width: 110, readonly: true}
+  - id: sha256
+    name: 内容指纹
+    type: string
+    db_column: sha256
+    required: true
+    semantics: {immutable: true, export_visible: false}
+    ui: {visible: false}
+  - id: storage_backend
+    name: 存储后端
+    type: string
+    db_column: storage_backend
+    required: true
+    default: fs
+    semantics: {immutable: true, export_visible: false}
+    ui: {widget: select, title: 存储后端, width: 100, readonly: true, options: [{value: fs, label: 本地文件系统}, {value: db, label: 数据库}, {value: object, label: 对象存储}]}
+  - id: storage_key
+    name: 存储键
+    type: string
+    db_column: storage_key
+    required: true
+    semantics: {immutable: true, export_visible: false}
+    ui: {visible: false}
+  - id: category
+    name: 附件分类
+    type: string
+    db_column: category
+    required: true
+    default: other
+    value_help:
+      source: {type: enum, enum_type_id: attachment_category, sort_by: sort_order}
+      behavior: {validation: true, binding_strength: strict}
+      presentation: {result_type: dropdown}
+    ui: {widget: select, title: 分类, width: 120}
+  - id: status
+    name: 状态
+    type: string
+    db_column: status
+    required: true
+    default: active
+    semantics: {immutable: false}
+    ui: {widget: select, title: 状态, width: 100, readonly: true, options: [{value: active, label: 有效}, {value: superseded, label: 已被替换}, {value: deleted, label: 已删除}]}
+  - id: scan_status
+    name: 扫描状态
+    type: string
+    db_column: scan_status
+    required: true
+    default: unchecked
+    ui: {widget: select, title: 扫描状态, width: 100, readonly: true, options: [{value: unchecked, label: 未检查}, {value: pending, label: 待检查}, {value: clean, label: 干净}, {value: infected, label: 已感染}]}
+  - id: supersedes_id
+    name: 替代的附件
+    type: integer
+    db_column: supersedes_id
+    semantics: {export_visible: false}
+    ui: {visible: false}
+  - id: uploaded_by
+    name: 上传人
+    type: string
+    db_column: uploaded_by
+    required: true
+    semantics: {immutable: true}
+    ui: {widget: text, title: 上传人, width: 120, readonly: true}
+  - id: uploaded_at
+    name: 上传时间
+    type: datetime
+    db_column: uploaded_at
+    required: true
+    semantics: {immutable: true}
+    ui: {widget: datetime, title: 上传时间, width: 165, readonly: true}
+  - id: description
+    name: 说明
+    type: text
+    db_column: description
+    ui: {widget: textarea, title: 说明}
+  - id: code
+    name: 附件编号
+    type: string
+    semantics: {virtual: true}
+    ui: {visible: true, editable: false, width: 110}
+  - id: download_url
+    name: 下载地址
+    type: string
+    semantics: {virtual: true, export_visible: false}
+    ui: {visible: false}
+
+actions:
+  - {id: attachment_upload, type: custom, method: POST, path: /api/v1/attachments}
+  - {id: attachment_by_target, type: custom, method: GET, path: /api/v1/attachments/by-target}
+  - {id: attachment_link_create, type: custom, method: POST, path: "/api/v1/attachments/{id}/links"}
+  - {id: attachment_content, type: custom, method: GET, path: "/api/v1/attachments/{id}/content"}
+  - {id: attachment_link_delete, type: custom, method: DELETE, path: "/api/v1/attachment-links/{id}"}
+  - {id: attachment_delete, type: custom, method: DELETE, path: "/api/v1/attachments/{id}"}
+
+routes: {detail: /detail/attachment/attachment-detail, list: /attachment-management}
+list: {pagination: {default_page_size: 20, page_size_options: [10, 20, 50, 100]}}
+nested: {enabled: false}
+persistence: {strategy: audit_log, survive_reload: true}

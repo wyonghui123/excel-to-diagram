@@ -504,6 +504,8 @@ class ApplicationBuilder:
         from meta.api.value_help_api import value_help_bp
         from meta.api.special_routes_api import special_bp
         from meta.api.annotation_routes_api import annotation_bp
+        # [附件平台 v269 2026-11-13] 平台级附件（内容 + 多态链接）。
+        from meta.api.attachment_api import attachment_bp
         from meta.api.audit_management_api import audit_mgmt_bp
         from meta.api.meta_utility_routes_api import meta_util_bp
         from meta.api.key_template_api import key_template_bp, set_engine as set_kt_engine
@@ -577,6 +579,8 @@ class ApplicationBuilder:
         app.register_blueprint(value_help_bp)
         app.register_blueprint(special_bp)
         app.register_blueprint(annotation_bp)
+        # [附件平台 v269 2026-11-13] /api/v1/attachments/* + /api/v1/attachment-links/*
+        app.register_blueprint(attachment_bp)
         app.register_blueprint(audit_mgmt_bp)
         app.register_blueprint(meta_util_bp)
         app.register_blueprint(key_template_bp)
@@ -780,6 +784,9 @@ class ApplicationBuilder:
 
     def _create_flask_app(self):
         self._app = Flask(__name__)
+        # [附件平台 v269 2026-11-13] 请求体上限 = 单文件上限 + 1MB 表单余量
+        from meta.services.attachment_storage import max_file_bytes
+        self._app.config['MAX_CONTENT_LENGTH'] = max_file_bytes() + 1024 * 1024
         return self._app
 
     def _register_middleware(self):

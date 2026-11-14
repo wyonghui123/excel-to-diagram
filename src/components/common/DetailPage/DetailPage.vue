@@ -77,6 +77,12 @@
               :record-id="id"
               @recalculated="handleRefresh()"
             />
+            <AttachmentSection
+              v-else-if="section.key === 'attachments'"
+              :object-type="objectType"
+              :object-id="id"
+              :section="section"
+            />
             <slot v-else :name="`section-${section.key}`" :data="data" />
           </template>
         </ObjectPage>
@@ -165,6 +171,12 @@
             :object-type="objectType"
             :record-id="id"
             @recalculated="handleRefresh()"
+          />
+          <AttachmentSection
+            v-else-if="section.key === 'attachments'"
+            :object-type="objectType"
+            :object-id="id"
+            :section="section"
           />
           <!-- Always render slot if provided by parent -->
           <slot v-else :name="`section-${section.key}`" :data="data" />
@@ -265,6 +277,7 @@ import PermissionAuditDialog from '@/views/SystemManagement/components/Permissio
 import SalesOrderExpandDialog from '@/components/business/SalesOrderExpandDialog.vue'
 import RuleTracePanel from '@/components/common/RuleTrace/RuleTracePanel.vue'
 import AmountBreakdownPanel from '@/components/common/AmountTrace/AmountBreakdownPanel.vue'
+import AttachmentSection from '@/components/common/ObjectPage/AttachmentSection.vue'
 import DocFlowTracePanel from '@/components/business/DocFlow/DocFlowTracePanel.vue'
 import { listRules } from '@/services/docFlowService'
 import { useAuthStore } from '@/stores/authStore'
@@ -1266,6 +1279,18 @@ const computedSections = computed(() => {
         display: 'always'
       })
     }
+  }
+
+  // [平台附件 2026-11-13] 附件分区：平台级能力，默认对所有可读对象开放；
+  //   如对象 YAML 的 ui_view_config.detail.attachments.enabled === false 则关闭。
+  if (!isAddMode && detailConfig?.attachments?.enabled !== false) {
+    sections.push({
+      key: 'attachments',
+      label: detailConfig?.attachments?.label || '附件',
+      icon: 'file',
+      type: 'attachment',
+      display: 'always'
+    })
   }
 
   if (hasAuditAspect.value && !sections.some(s => s.type === 'history') && !isAddMode) {

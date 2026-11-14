@@ -102,6 +102,45 @@ CREATE TABLE IF NOT EXISTS annotations (
     content TEXT
 )
 
+-- 附件: 平台级附件内容，1 行 = 1 个不可变文件；业务对象经 attachment_links 多态挂接。
+CREATE TABLE IF NOT EXISTS attachments (
+    created_at DATETIME,
+    created_by VARCHAR(200),
+    updated_by VARCHAR(200),
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    original_file_name VARCHAR(200) NOT NULL,
+    display_name VARCHAR(200),
+    mime_type VARCHAR(200) NOT NULL,
+    size_bytes INTEGER NOT NULL,
+    sha256 VARCHAR(200) NOT NULL,
+    storage_backend VARCHAR(200) NOT NULL DEFAULT 'fs',
+    storage_key VARCHAR(200) NOT NULL,
+    category VARCHAR(200) NOT NULL DEFAULT 'other',
+    status VARCHAR(200) NOT NULL DEFAULT 'active',
+    scan_status VARCHAR(200) NOT NULL DEFAULT 'unchecked',
+    supersedes_id INTEGER,
+    uploaded_by VARCHAR(200) NOT NULL,
+    uploaded_at DATETIME NOT NULL,
+    description TEXT
+)
+
+-- 附件关联: 附件与任意业务对象的多态链接（链接角色 / 顺序 / 主文件 / 可见性）。
+CREATE TABLE IF NOT EXISTS attachment_links (
+    created_at DATETIME,
+    created_by VARCHAR(200),
+    updated_by VARCHAR(200),
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    attachment_id INTEGER NOT NULL,
+    target_type VARCHAR(200) NOT NULL,
+    target_id INTEGER NOT NULL,
+    link_role VARCHAR(200) NOT NULL DEFAULT 'supporting',
+    seq INTEGER NOT NULL DEFAULT 10,
+    is_primary INTEGER NOT NULL DEFAULT 0,
+    visibility VARCHAR(200) NOT NULL DEFAULT 'internal',
+    status VARCHAR(200) NOT NULL DEFAULT 'active',
+    description TEXT
+)
+
 -- 属性定义: 属性字典定义层——租户级/平台级可扩展属性的类型、值域与使用分级
 CREATE TABLE IF NOT EXISTS attribute_definitions (
     created_by VARCHAR(200),
@@ -4488,6 +4527,10 @@ CREATE INDEX IF NOT EXISTS idx_allocation_rules_name ON allocation_rules(name)
 
 -- Indexes for 备注信息
 CREATE INDEX IF NOT EXISTS idx_annotations_target_type ON annotations(target_type)
+
+-- Indexes for 附件关联
+CREATE INDEX IF NOT EXISTS idx_attachment_links_target_type ON attachment_links(target_type)
+CREATE INDEX IF NOT EXISTS idx_attachment_links_target_id ON attachment_links(target_id)
 
 -- Indexes for 属性定义
 CREATE UNIQUE INDEX IF NOT EXISTS idx_attribute_definition_tenant_code ON attribute_definitions(tenant_id, code)

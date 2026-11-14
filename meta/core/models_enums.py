@@ -148,6 +148,17 @@ class AnnotationCategory(Enum):
     TIP = "tip"
 
 
+class AttachmentCategory(Enum):
+    """附件分类"""
+    CONTRACT = "contract"
+    INVOICE_IMAGE = "invoice_image"
+    DELIVERY_NOTE = "delivery_note"
+    DRAWING = "drawing"
+    INSPECTION = "inspection"
+    APPROVAL = "approval"
+    OTHER = "other"
+
+
 class ArchObjectType(Enum):
     """架构对象类型 — 用于 annotation.target_type 等字段的 value_help
 

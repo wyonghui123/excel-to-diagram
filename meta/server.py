@@ -1097,6 +1097,10 @@ def create_app(db_path=None):
 
     app.register_blueprint(query_bp)
     app.register_blueprint(annotation_bp)
+    # [平台附件 v269 2026-11-13] /api/v1/attachments/* + /api/v1/attachment-links/*。
+    #   两条启动路径必须同址登记（waitress 走本函数，app_builder 另有一份）。
+    from meta.api.attachment_api import attachment_bp
+    app.register_blueprint(attachment_bp)
     app.register_blueprint(special_bp)
     app.register_blueprint(manage_bp)
     app.register_blueprint(meta_bp)
@@ -1364,6 +1368,10 @@ def create_app(db_path=None):
         # [P8 2026-11-06] 库存库龄报表/明细是独立 Blueprint 的只读聚合端点，
         # 非 BO CRUD；缺白名单会被本中间件误判为 410。
         'inventory-aging',  # /api/v1/inventory-aging/report、/detail
+        # [平台附件 v269 2026-11-13] 附件是独立 Blueprint（多态旁挂对象，非 BO CRUD），
+        # 缺白名单会被本中间件误判为 410（实测 GET /api/v1/attachments/by-target → 410）。
+        'attachments',       # /api/v1/attachments、/attachments/by-target 等
+        'attachment-links',  # /api/v1/attachment-links/<id>（解绑）
     }
 
     # v1.4 P8 Sunset (2026-06-05): 应当 sunset 到 v2 的主表 CRUD 资源

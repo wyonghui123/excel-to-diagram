@@ -29,6 +29,8 @@ class CascadeInterceptor(Interceptor):
             return
 
         self._cleanup_annotations(context)
+        # [平台附件 v269 2026-11-13] 目标删除 → 附件链接失效（字节保留，按无有效链接延迟 GC）
+        self._invalidate_attachment_links(context)
         self._cleanup_association_tables(context)
         self._cascade_delete_children(context)
 
@@ -43,6 +45,22 @@ class CascadeInterceptor(Interceptor):
             )
         except Exception as e:
             logger.debug(f"[CascadeInterceptor] No annotations to clean: {e}")
+
+    def _invalidate_attachment_links(self, context: ActionContext) -> None:
+        """附件链接随目标失效：仅把 status 置 deleted，不删附件字节。
+
+        附件是平台级旁挂证据（spec D-AT-08）：同一个文件可能还挂着别的单据，
+        因此目标删除时只失效链接；无人挂接的附件由 GC 巡检回收。
+        """
+        try:
+            context.data_source.execute(
+                "UPDATE attachment_links SET status = 'deleted' "
+                "WHERE target_type = ? AND target_id = ? AND status = 'active'",
+                [context.object_type, context.object_id]
+            )
+        except Exception as e:
+            # 附件表未建（老库/精简测试库）时静默跳过，不影响主对象删除
+            logger.debug(f"[CascadeInterceptor] No attachment_links to invalidate: {e}")
 
     def _cleanup_association_tables(self, context: ActionContext) -> None:
         meta_obj = context.meta_object
