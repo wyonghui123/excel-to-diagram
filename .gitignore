@@ -377,6 +377,9 @@ probe_out.txt
 
 # Playwright 测试日志 (注意是 hyphen 不是下划线)
 test-results/
+# Playwright 并行跑测产物 / 截图目录 (含 webm 录制, 勿入库)
+test-results-*/
+test_screenshots/
 
 # E2E 登录态快照 (运行时产物, 含 token/cookie, 由 global.setup.js 重新生成)
 e2e/.auth/
