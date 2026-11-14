@@ -1,3 +1,8 @@
+---
+alwaysApply: false
+description: "E2E 核心经验（12 条 CRITICAL）：分页响应、认证、等待策略、POM"
+---
+
 # E2E 测试规范（精简索引）
 
 > 最后更新: 2026-06-07 | 状态: 活跃

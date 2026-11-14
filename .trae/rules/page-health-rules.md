@@ -1,7 +1,6 @@
 ---
 alwaysApply: false
 description: "页面健康检测规范：四层错误检测、console.error 监控、白屏检测"
-globs: "src/**/*.vue,tests/e2e/**/*"
 ---
 
 # 页面健康检测规范

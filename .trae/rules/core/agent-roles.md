@@ -1,3 +1,8 @@
+---
+alwaysApply: false
+description: "智能体角色与 Skills 体系"
+---
+
 # 智能体角色与 Skills 体系
 
 > 最后更新: 2026-06-07 | 状态: 活跃

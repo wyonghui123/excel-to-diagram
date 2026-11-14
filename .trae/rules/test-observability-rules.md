@@ -1,7 +1,6 @@
 ---
 alwaysApply: false
 description: "测试可观测性规范：trace_id、结构化日志、metrics、diagnostics"
-globs: "meta/tests/**/*,meta/core/trace_id*,meta/api/diagnostics*"
 ---
 
 # 测试可观测性规范

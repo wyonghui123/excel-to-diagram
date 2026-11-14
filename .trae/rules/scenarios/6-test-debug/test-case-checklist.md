@@ -1,7 +1,6 @@
 ---
 alwaysApply: false
 description: "测试用例反模式 + 检查清单 + 快速诊断"
-globs: "meta/tests/**/*,tests/**/*"
 ---
 
 # 测试用例检查清单

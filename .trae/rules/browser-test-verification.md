@@ -1,7 +1,6 @@
 ---
 alwaysApply: false
 description: "浏览器测试验证方法：四层错误检测、页面健康检查"
-globs: "tests/e2e/**/*,meta/tests/e2e/**/*"
 ---
 
 # 浏览器测试验证方法速查表

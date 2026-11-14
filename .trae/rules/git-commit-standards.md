@@ -1,4 +1,5 @@
 ---
+alwaysApply: false
 scene: git_message
 description: Git Commit Message 格式规范 - type(scope): description [pm-authorized]
 ---

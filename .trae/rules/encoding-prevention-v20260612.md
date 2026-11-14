@@ -1,10 +1,11 @@
 ---
 alwaysApply: false
-description: "编码问题防护 v20260612：mojibake 修复和预防措施"
-globs: "scripts/*.ps1,*.py"
+description: "编码问题防护 v20260612：mojibake 修复和预防措施（事故复盘；现行规范见 file-encoding-rules.md）"
 ---
 
 # Encoding Corruption Prevention Guide (v20260612)
+
+> **现行规范**：`file-encoding-rules.md`（强制规则）；本文件保留为 2026-06-12 事故复盘与诊断方法。
 
 > **Post-Incident Guide** for the 2026-06-12 GBK-mojibake event.
 > New file (not appended to existing rules) to avoid pre-commit hook

@@ -1,7 +1,6 @@
 ---
 alwaysApply: false
 description: "前端测试认证规范：httpOnly cookie、dev-login、Session 管理"
-globs: "meta/tests/**/*,tests/e2e/**/*"
 ---
 
 # 前端测试认证规范（单一事实源）

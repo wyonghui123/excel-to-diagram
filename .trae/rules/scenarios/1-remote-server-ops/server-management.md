@@ -1,3 +1,8 @@
+---
+alwaysApply: false
+description: "服务器管理规范：service_manager / start.ps1 / staging_watchdog 统一入口"
+---
+
 # 服务器管理规范
 
 > **最后更新**: 2026-09-02 | **状态**: 活跃

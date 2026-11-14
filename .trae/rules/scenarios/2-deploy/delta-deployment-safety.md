@@ -1,7 +1,6 @@
 ---
 alwaysApply: false
 description: "AI 在执行远程 staging 服务重启、PID 杀除、DB 直接变更或 staging 部署时查阅此规则。源自 2026-09-01 spec16 Plan D staging 事故：pkill -f 误杀 core_service + DB symlink 自环丢数据。强制 7 条铁律：禁 pkill -f / 双重确认 PID / staging_services.sh / check_db_symlink.sh / verify-before-completion / DB 变更 24h 内迁移化 / BEFORE-AFTER 行数断言。"
-globs: "**/staging*"
 ---
 
 # Delta Deployment Safety Rules (v5.2)

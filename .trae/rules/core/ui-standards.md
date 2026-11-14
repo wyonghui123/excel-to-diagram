@@ -1,3 +1,8 @@
+---
+alwaysApply: false
+description: "UI 样式规范 + YonDesign 设计规范"
+---
+
 # UI 样式规范
 
 > 最后更新: 2026-06-07 | 状态: 活跃

@@ -1,3 +1,8 @@
+---
+alwaysApply: false
+description: "Trae IDE sandbox 故障根因与命令规范（终端交互/卡死/假成功）"
+---
+
 # Trae IDE Sandbox 故障根因与命令规范
 
 **版本**: V3.5 P5 (2026-06-22 修正版)

@@ -1,7 +1,6 @@
 ---
 alwaysApply: false
 description: "测试运行时安全：共享 App/Client + Registry + 缓存 + 并发"
-globs: "meta/tests/**/*,tests/**/*"
 ---
 
 # 测试运行时安全

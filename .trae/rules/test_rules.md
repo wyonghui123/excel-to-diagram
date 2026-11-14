@@ -1,7 +1,6 @@
 ---
 alwaysApply: false
 description: 测试运行规则 - pytest禁止、test.py入口、DB保护
-globs: "meta/tests/**, tests/**"
 ---
 # 测试运行规则
 
