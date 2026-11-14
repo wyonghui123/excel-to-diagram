@@ -178,8 +178,8 @@ python scripts/bug_triage.py --list
 
 - [ ] 读过本文件（AGENT_GUIDELINES.md）
 - [ ] 读过 `.agent-status.json`
-- [ ] 读过 `multi-agent-coordination.md` v3.19
-- [ ] 读过 `INCIDENT_2026-06-17.md`
+- [ ] 读过 `.trae/rules/scenarios/7-ai-collaboration/multi-agent-coordination.md` v3.19
+- [ ] 读过 6/17 事故复盘（历史文档，已移出仓库）
 - [ ] 执行 `agent_bootstrap.ps1 -AgentName <name> -Port <port>`
 - [ ] 创建 `spec.md`（在 worktree 根目录）
 - [ ] 在 worktree 中工作（不在主工作树）
@@ -205,9 +205,9 @@ python scripts/bug_triage.py --list
 | 文档 | 路径 |
 |------|------|
 | **本文件** | `AGENT_GUIDELINES.md` (worktree 根目录) |
-| 多 Agent 协调规范 v3.19 | `.trae/rules/multi-agent-coordination.md` |
+| 多 Agent 协调规范 v3.19 | `.trae/rules/scenarios/7-ai-collaboration/multi-agent-coordination.md` |
 | 18 铁律 | `.trae/rules/SESSION_REMINDER.md` |
-| 6/17 事故复盘 | `.trae/rules/INCIDENT_2026-06-17.md` |
+| 6/17 事故复盘 | 历史文档，已移出仓库 |
 | Spec 模板 | `d:\filework\spec_template.md` |
 | **端口隔离规范** | `docs/port-isolation.md` |
 | **Agent Bootstrap** | `scripts/agent_bootstrap.ps1` |

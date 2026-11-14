@@ -50,7 +50,7 @@ Shell（当前挂载）──► toolhost 原生通道 ──► 正常执行 �
 
 ### 3.1 与历史沙箱故障的区别（必读）
 
-历史经验档（`.deprecated/multi-agent-infrastructure-v20260620-v2.md`、`multi-agent-coordination.md`）描述的沙箱三态：
+历史经验档（`../../multi-agent-infrastructure-v20260620-v2.md`、`../7-ai-collaboration/multi-agent-coordination.md`）描述的沙箱三态：
 
 ```
 [healthy] ──exec_too_long──► [isolated] ──持续异常──► [deadlock] ──► 重启 Trae IDE

@@ -56,7 +56,7 @@ version: v4.0
 
 ### 2.1 超期处置（自动 + 手动）
 
-**自动巡检**（每周日 `scripts/check_worktree_health.sh`）：
+**自动巡检**（每周日执行 `git worktree list` 巡检；下述脚本为建议稿，未落地）：
 - 列出所有 worktree + HEAD 时间
 - 超期 worktree 写入 `tools/_scratch/wt-red-list.txt`
 - PM 周一收到提醒
@@ -273,7 +273,7 @@ git cherry-pick <lost-commit>
 
 ## 8. 巡检自动化（建议加入项目）
 
-### 8.1 scripts/check_worktree_health.sh
+### 8.1 worktree 巡检脚本（建议稿）
 
 ```bash
 #!/usr/bin/env bash

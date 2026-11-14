@@ -73,9 +73,9 @@ AI 对话输入框 → 输入 @ → 浮起面板底部"创建智能体"按钮
 | 文件 | 触发场景 | 工具 |
 |------|---------|------|
 | `code-reviewer.md` | 用户要求代码审查 | Read, Glob, Grep |
-| `unit-test-writer.md` | 用户要求生成/补单测 | Read, Write, Edit, Bash |
-| `project-guide.md` | 用户询问项目结构/规范 | Read, Glob, Grep |
-| `security-auditor.md` | 用户要求安全审计 | Read, Glob, Grep |
+| unit-test-writer（示例名，按需创建） | 用户要求生成/补单测 | Read, Write, Edit, Bash |
+| project-guide（示例名，按需创建） | 用户询问项目结构/规范 | Read, Glob, Grep |
+| security-auditor（示例名，按需创建） | 用户要求安全审计 | Read, Glob, Grep |
 
 **处理建议**：
 - ✅ **保留**：作为提示词参考 + 未来在 UI 创建时复用

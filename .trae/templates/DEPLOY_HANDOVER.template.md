@@ -219,7 +219,7 @@ curl http://localhost:3011/api/v1/health
 
 | 文档 | 链接 |
 |------|------|
-| PARALLEL_DEV_SOP | `PARALLEL_DEV_SOP.md` |
+| 多 Agent 基础设施 | `docs/AGENT_INFRA.md` |
 | worktree 修复 commit | `<git-show-url>` |
 | integration 集成 commit | `<git-show-url>` |
 | 主服务验证记录 | `d:\filework\logs\backend_v3011.out` |

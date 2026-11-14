@@ -27,7 +27,7 @@ icon: "1."
 
 1. **[remote-server-alert-avoidance.md](./remote-server-alert-avoidance.md)** — 远程运维告警规避 (ssh/yexec 安全)
 1. **[staging-process-guardian.md](./staging-process-guardian.md)** — Staging 进程守护 (18081/19200/19101/13011)
-1. **[postmortem-2026-09-02-staging.md](./postmortem-2026-09-02-staging.md)** — 2026-09-02 Staging 事故复盘 (知识沉淀)
+1. **[postmortem-2026-09-02-staging.md](../../../../docs/postmortems/postmortem-2026-09-02-staging.md)** — 2026-09-02 Staging 事故复盘 (知识沉淀)
 1. **[server-management.md](./server-management.md)** — 服务管理基础 (旧版核心规范)
 
 ---
@@ -38,7 +38,7 @@ icon: "1."
 |------|------|
 | [remote-server-alert-avoidance.md](./remote-server-alert-avoidance.md) | 远程运维告警规避 (ssh/yexec 安全) |
 | [staging-process-guardian.md](./staging-process-guardian.md) | Staging 进程守护 (18081/19200/19101/13011) |
-| [postmortem-2026-09-02-staging.md](./postmortem-2026-09-02-staging.md) | 2026-09-02 Staging 事故复盘 (知识沉淀) |
+| [postmortem-2026-09-02-staging.md](../../../../docs/postmortems/postmortem-2026-09-02-staging.md) | 2026-09-02 Staging 事故复盘 (知识沉淀) |
 | [server-management.md](./server-management.md) | 服务管理基础 (旧版核心规范) |
 
 ---

@@ -197,7 +197,7 @@ playwright.config.js
 
 ### 7.1 写新 features 测试
 
-1. **复制模板**（参考 `e2e/features/arch-data-crud-v2.spec.js`）
+1. **复制模板**（参考 `tests/e2e/` 下的现有用例；历史示例 arch-data-crud-v2.spec.js 已随 Phase E 收敛移除）
 2. **修改 import 路径**（用 `auto-fixtures.js`）
 3. **解构 fixtures**：`{ page, navigateTo, dataFinder, isolation, waitForApiFn }`
 4. **业务逻辑**：每个步骤 `withStep` 包裹
@@ -231,7 +231,7 @@ playwright.config.js
 | `await test.step('name', fn)` | `await withStep(page, testInfo, 'name', fn)` | [OK] |
 | `await getAuthHeaders(page)` + `page.request` | `await isolation.createTracked()` 内部已处理 | [OK] |
 
-**已迁移示例**：`e2e/features/arch-data-crud-v2.spec.js`（80 行 vs 原版 148 行）
+**已迁移示例**：原 arch-data-crud-v2.spec.js（80 行 vs 原版 148 行，已移除）
 
 ---
 

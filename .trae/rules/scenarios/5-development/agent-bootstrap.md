@@ -272,7 +272,7 @@ git status  # 无意外修改
 - `SESSION_REMINDER.md` — 全局规则入口 (18 铁律 + 23 踩坑)
 - `service-management-rules.md` — 服务管理详细规范
 - `multi-agent-coordination.md` — 5 层隔离完整设计
-- `e2e-testing.md` — E2E 测试规则
+- `core/e2e-testing.md` — E2E 测试规则
 - `frontend-test-auth.md` — 前端认证规范 (Cookie / dev-login)
 - `test-observability-rules.md` — 测试可观测性 (trace_id / metrics / diagnostics)
 

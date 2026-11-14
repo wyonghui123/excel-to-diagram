@@ -178,7 +178,7 @@ pwsh -File D:\filework\scripts\check-sha-consistency.ps1
 
 ### 3.8 通知 PM
 
-更新 `DEPLOY_HANDOVER_BUG_V044.md`:
+更新 `docs/DEPLOY_HANDOVER_V007_44.md`:
 
 ```markdown
 ## 11. 协调智能体 sync 结果

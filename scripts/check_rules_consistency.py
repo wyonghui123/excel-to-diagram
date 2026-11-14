@@ -91,10 +91,21 @@ SKIP_REF_SUBSTRINGS = [
     "playwright-report",  # 测试报告
     "test-results",
     ".pytest_cache",
-    "v[0-9]+\\.[0-9]+\\.[0-9]+",  # 版本号
-    "v\\d{8}_",  # 部署版本目录
     "{{", "}}",  # 模板变量
     "node:", "npm:", "git:",
+    "path/to/",  # 模板占位示例
+    "Xxx", "_xxx", "xxx",  # 模板类名占位示例
+]
+
+# 远程主机绝对路径 / 部署产物路径 (非仓库内文件, 不参与死链判定)
+SKIP_REF_PREFIXES = (
+    "/opt/", "/tmp/", "/var/", "/etc/", "/usr/", "/home/", "/root/", "/srv/", "/data/",
+)
+
+# 需要按正则跳过的引用 (版本号 / 部署版本目录)
+SKIP_REF_REGEX = [
+    re.compile(r"v\d+\.\d+\.\d+"),  # 版本号
+    re.compile(r"v\d{8}_"),  # 部署版本目录
 ]
 
 # 排除文件扩展名 (内联示例常误匹配)
@@ -117,7 +128,7 @@ DEPRECATED_FILES = {
 WINDOWS_FILE_URL = re.compile(r"^file:///([a-zA-Z]:[/\\].*)$")
 
 # 写死的 Windows 绝对路径 (d:\filework\...)
-ABS_WIN_PATH = re.compile(r"([a-zA-Z]:\\[^\s`'\"<>|\[\]()]*\.(?:md|ps1|py|sh|js|ts|vue))")
+ABS_WIN_PATH = re.compile(r"([a-zA-Z]:\\[^\s`'\"<>|\[\]()]*\.(?:md|ps1|py|sh|js|ts|vue)\b)")
 
 
 def md5(path: Path) -> str:
@@ -206,6 +217,15 @@ def extract_refs(path: Path) -> List[str]:
             # 跳过包含跳过子串的
             if any(skip in url for skip in SKIP_REF_SUBSTRINGS):
                 continue
+            # 跳过远程主机绝对路径 (非仓库内文件)
+            if url.startswith(SKIP_REF_PREFIXES):
+                continue
+            # 跳过版本号 / 部署版本目录
+            if any(p.search(url) for p in SKIP_REF_REGEX):
+                continue
+            # 跳过服务器端 shell 脚本示例 (./xxx.sh, 仅存在于部署包内)
+            if url.startswith("./") and url.lower().endswith(".sh"):
+                continue
             # 跳过内联示例扩展名
             if any(url.lower().endswith(ext) for ext in SKIP_REF_EXTENSIONS):
                 continue
@@ -220,6 +240,51 @@ def extract_refs(path: Path) -> List[str]:
             if url and len(url) > 3:  # 跳过太短的无意义引用
                 refs.append(url)
     return refs
+
+
+# 后缀索引: 仓库内所有文件 (按规范化相对路径), 用于补全省略的目录前缀
+_SUFFIX_INDEX: List[str] = []
+
+INDEX_EXCLUDE_DIRS = {
+    ".git", "node_modules", "dist", "build", "coverage",
+    "playwright-report", "test-results", "__pycache__", ".pytest_cache",
+    ".venv", "venv", "logs", "backups",
+}
+
+
+def _build_suffix_index() -> List[str]:
+    """构建仓库文件路径索引 (项目根相对, posix 分隔, 小写)"""
+    global _SUFFIX_INDEX
+    if _SUFFIX_INDEX:
+        return _SUFFIX_INDEX
+    paths: List[str] = []
+    for path in PROJECT_ROOT.rglob("*"):
+        if not path.is_file():
+            continue
+        try:
+            rel = path.relative_to(PROJECT_ROOT)
+        except ValueError:
+            continue
+        if any(part in INDEX_EXCLUDE_DIRS for part in rel.parts):
+            continue
+        paths.append(rel.as_posix().lower())
+    _SUFFIX_INDEX = paths
+    return paths
+
+
+def find_by_suffix(ref: str) -> List[Path]:
+    """
+    按后缀查找文件: 规则文档常省略目录前缀 (如 env/diagnose.py)
+    返回所有以 ref 结尾的仓库文件 (唯一命中才算解析成功)
+    """
+    norm = ref.replace("\\", "/").strip()
+    if len(norm) < 5 or ".." in norm:
+        return []
+    matched: List[Path] = []
+    for rel in _build_suffix_index():
+        if rel == norm.lower() or rel.endswith("/" + norm.lower()):
+            matched.append(PROJECT_ROOT / rel)
+    return matched
 
 
 def resolve_ref(ref: str, source: Path) -> Path:
@@ -239,6 +304,11 @@ def resolve_ref(ref: str, source: Path) -> Path:
         except ValueError:
             pass
         return p
+    # 去掉误写的项目目录名前缀 (如 excel-to-diagram/meta/tests/conftest.py)
+    for prefix in ("excel-to-diagram/", "excel-to-diagram\\"):
+        if ref.lower().startswith(prefix):
+            ref = ref[len(prefix):]
+            break
     if ref.startswith(("/", "\\")):
         return PROJECT_ROOT / ref.lstrip("/\\")
     if ref.startswith(("~")):
@@ -249,13 +319,18 @@ def resolve_ref(ref: str, source: Path) -> Path:
         root_candidate = (PROJECT_ROOT / ref).resolve()
         if root_candidate.exists():
             return root_candidate
+        # 工作区级文档 (如 d:\filework\INFRA_HANDOVER.md, spec_template.md)
+        ws_candidate = (PROJECT_ROOT.parent / ref).resolve()
+        if ws_candidate.exists():
+            return ws_candidate
     return candidate
 
 
-def check_deadlinks(files: List[Path] = None) -> List[Tuple[Path, str, str]]:
+def check_deadlinks(files: List[Path] = None, prefix_fixed: List[Tuple[Path, str, str]] = None) -> List[Tuple[Path, str, str]]:
     """
     检查死链 (跳过已废弃文件)
     返回: [(source_file, ref, resolved_path), ...]
+    prefix_fixed: 可选输出参数, 收集"省略目录前缀但实际存在"的引用
     """
     if files is None:
         files = scan_files()
@@ -267,6 +342,12 @@ def check_deadlinks(files: List[Path] = None) -> List[Tuple[Path, str, str]]:
         for ref in extract_refs(path):
             resolved = resolve_ref(ref, path)
             if resolved.exists():
+                continue
+            # 后缀补全: 规则文档常省略目录前缀, 唯一命中视为存在 (仅提示, 不判失败)
+            matches = find_by_suffix(ref)
+            if len(matches) == 1:
+                if prefix_fixed is not None:
+                    prefix_fixed.append((path, ref, str(matches[0].relative_to(PROJECT_ROOT))))
                 continue
             dead.append((path, ref, str(resolved)))
     return dead
@@ -409,6 +490,7 @@ def main() -> int:
     parser.add_argument("--stale", action="store_true", help="仅检查过期脚本引用")
     parser.add_argument("--strict", action="store_true", help="严格模式 (发现任意问题即返回 2)")
     parser.add_argument("--quiet", action="store_true", help="仅显示错误，不显示 OK")
+    parser.add_argument("--limit", type=int, default=30, help="每条检查最多显示的明细条数 (0=全部)")
     args = parser.parse_args()
 
     run_all = not (args.deadlinks or args.duplicates or args.indexed or args.stale)
@@ -418,16 +500,24 @@ def main() -> int:
     # 1. 死链检查
     if run_all or args.deadlinks:
         print("[1] 死链检查...")
-        dead = check_deadlinks()
+        prefix_fixed: List[Tuple[Path, str, str]] = []
+        dead = check_deadlinks(prefix_fixed=prefix_fixed)
+        if prefix_fixed:
+            print(f"  [INFO] {len(prefix_fixed)} 处引用省略了目录前缀（已自动补全，建议改为完整相对路径）:")
+            for src, ref, real in prefix_fixed[:10]:
+                print(f"    - {src.relative_to(PROJECT_ROOT)}: {ref} -> {real}")
+            if len(prefix_fixed) > 10:
+                print(f"    ... 还有 {len(prefix_fixed) - 10} 个")
         if dead:
             has_error = True
+            limit = len(dead) if args.limit == 0 else args.limit
             print(f"  [FAIL] {len(dead)} 个死链:")
-            for src, ref, resolved in dead[:30]:
+            for src, ref, resolved in dead[:limit]:
                 print(f"    - {src.relative_to(PROJECT_ROOT)}")
                 print(f"        ref: {ref}")
                 print(f"        ->  {resolved}")
-            if len(dead) > 30:
-                print(f"    ... 还有 {len(dead) - 30} 个")
+            if len(dead) > limit:
+                print(f"    ... 还有 {len(dead) - limit} 个")
         else:
             if not args.quiet:
                 print("  [OK] 0 个死链")

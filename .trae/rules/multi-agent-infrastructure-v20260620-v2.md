@@ -630,7 +630,7 @@ V1 (multi-agent-infrastructure-v20260620.md) 的 5 条铁律保留，新增 7 �
 
 ## 九、参考
 
-- **V1 规则**: `.trae/rules/multi-agent-infrastructure-v20260620.md`
+- **V1 规则**: `.trae/rules/archive/multi-agent-infrastructure-v20260620.md`
 - **现有规则**: `multi-agent-coordination.md` v3.24 → v3.25
 - **现有规则**: `SESSION_REMINDER.md` 19 铁律 → 26 铁律
 - **事故复盘**: 2026-06-20 沙箱 terminal 死锁 2.5 小时
