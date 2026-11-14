@@ -28,7 +28,8 @@ class TestValidationDetail:
             params={},
         )
         d = detail.to_dict()
-        assert 'field_id' not in d  # field_id 不暴露给前端
+        assert d['field_id'] == 'fld_001'  # FR-005: errors[] 暴露字段定位
+        assert d['error_code'] == 'data_invalid'
         assert d['field_name'] == '姓名'
         assert d['rule'] == 'required'
         assert d['i18n_key'] == 'validation.field.required'

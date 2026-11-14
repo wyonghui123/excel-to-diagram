@@ -22,7 +22,6 @@
 事务边界:
   本服务自行开事务（`with self.ds.transaction()`）；调用方再包一层也无害（嵌套空转）。
 """
-import json
 import logging
 from contextlib import contextmanager
 from datetime import date, datetime, timedelta
@@ -261,19 +260,20 @@ class EngineeringChangeService:
                 'old_status': old_status,
                 'new_status': new_status,
             }
-            self._insert('change_events', {
-                'object_type': 'engineering_change',
-                'object_id': int(change_id),
-                'event_type': 'state_change',
-                'changed_fields': json.dumps(['status'], ensure_ascii=False),
-                'old_values': json.dumps({'status': old_status},
-                                         ensure_ascii=False),
-                'new_values': json.dumps({'status': new_status},
-                                         ensure_ascii=False),
-                'payload': json.dumps(payload, ensure_ascii=False),
-                'status': 'pending',
-                'created_at': _now(),
-            })
+            # P1-a 统一发布入口：不直插 change_events
+            from meta.services.change_notification_service import (
+                ChangeEventRequest, ChangeNotificationService,
+            )
+            ChangeNotificationService(self.ds).publish_event(ChangeEventRequest(
+                object_type='engineering_change',
+                object_id=int(change_id),
+                event_type='state_changed',
+                old_data={'status': old_status},
+                new_data={'status': new_status},
+                payload=payload,
+                changed_fields=['status'],
+                force=True,
+            ))
         except Exception as e:  # 事件底座不可用时审计不阻断业务
             logger.warning('[engineering_change] 写入 change_event 失败: %s', e)
 

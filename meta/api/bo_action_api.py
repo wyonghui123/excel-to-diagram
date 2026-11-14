@@ -106,7 +106,7 @@ def execute_action(action_id: str):
     # [DECORATIVE] v3.1: 从 registry 读 requires_auth
     meta = bo_action_registry.get(action_id)
     if not meta:
-        return error_response(f'Unknown action: {action_id}', status=404)
+        return error_response(f'未知的操作：{action_id}', error_code='action_not_found', status=404)
 
     # 1. 鉴权
     if meta.requires_auth:
@@ -115,22 +115,22 @@ def execute_action(action_id: str):
         from meta.services.token_blacklist_service import token_blacklist_service
         token = _extract_token()
         if not token:
-            return error_response('未登录', status=401)
+            return error_response('请先登录后再操作', error_code='unauthorized', status=401)
         try:
             if token_blacklist_service.is_blacklisted(token):
-                return error_response('登录状态已失效，请重新登录', status=401)
+                return error_response('登录凭证已失效，请重新登录', error_code='token_blacklisted', status=401)
         except Exception:
-            return error_response('认证服务异常，请稍后重试', status=401)
+            return error_response('认证服务暂时不可用，请稍后重试', error_code='auth_service_error', status=401)
         user_info = TokenService.verify_token(token)
         if not user_info:
-            return error_response('会话已过期，请重新登录', status=401)
+            return error_response('登录已过期，请重新登录', error_code='token_expired', status=401)
         g.current_user = user_info
 
         # [DECORATIVE] v3.1: admin 鉴权
         if meta.requires_admin:
             from meta.api.auth_api import is_admin
             if not is_admin():
-                return error_response('您没有执行此操作的权限，需要管理员权限', status=403)
+                return error_response('您没有执行此操作的权限，需要管理员权限', error_code='admin_required', status=403)
 
     # 2. 提取参数
     if request.method == 'GET':
@@ -229,10 +229,10 @@ def execute_action(action_id: str):
 
     status_code = 200
     if not result.get('success'):
-        msg = result.get('message', '')
-        if 'Permission denied' in msg:
+        error_code = result.get('error_code') or result.get('code') or ''
+        if error_code in ('action_permission_denied', 'forbidden', 'admin_required'):
             status_code = 403
-        elif 'Unknown action' in msg:
+        elif error_code in ('action_not_found', 'not_found'):
             status_code = 404
 
     return jsonify(result), status_code
@@ -270,15 +270,15 @@ def execute_subflow_endpoint():
 
     token = _extract_token()
     if not token:
-        return error_response('未登录', status=401)
+        return error_response('请先登录后再操作', error_code='unauthorized', status=401)
     try:
         if token_blacklist_service.is_blacklisted(token):
-            return error_response('登录状态已失效，请重新登录', status=401)
+            return error_response('登录凭证已失效，请重新登录', error_code='token_blacklisted', status=401)
     except Exception:
-        return error_response('认证服务异常，请稍后重试', status=401)
+        return error_response('认证服务暂时不可用，请稍后重试', error_code='auth_service_error', status=401)
     user_info = TokenService.verify_token(token)
     if not user_info:
-        return error_response('会话已过期，请重新登录', status=401)
+        return error_response('登录已过期，请重新登录', error_code='token_expired', status=401)
     g.current_user = user_info
     user_info['ip_address'] = _extract_token.__module__ and g.get('_remote_addr')
 
@@ -421,10 +421,10 @@ def list_subflow_templates():
     from meta.services.token_service import TokenService
     token = _extract_token()
     if not token:
-        return error_response('未登录', status=401)
+        return error_response('请先登录后再操作', error_code='unauthorized', status=401)
     user_info = TokenService.verify_token(token)
     if not user_info:
-        return error_response('会话已过期，请重新登录', status=401)
+        return error_response('登录已过期，请重新登录', error_code='token_expired', status=401)
 
     from meta.services.subflow_template_store import SubflowTemplateStore
     templates = SubflowTemplateStore.list_templates()
@@ -438,10 +438,10 @@ def upsert_subflow_template(name):
     from meta.services.token_service import TokenService
     token = _extract_token()
     if not token:
-        return error_response('未登录', status=401)
+        return error_response('请先登录后再操作', error_code='unauthorized', status=401)
     user_info = TokenService.verify_token(token)
     if not user_info:
-        return error_response('会话已过期，请重新登录', status=401)
+        return error_response('登录已过期，请重新登录', error_code='token_expired', status=401)
 
     from flask import request
     body = request.get_json(force=True, silent=True) or {}
@@ -449,7 +449,7 @@ def upsert_subflow_template(name):
     steps = body.get('steps', [])
 
     if not steps:
-        return error_response('执行步骤不能为空', status=400)
+        return error_response('执行步骤不能为空', error_code='subflow_empty', status=400)
 
     from meta.services.subflow_template_store import SubflowTemplateStore
     result = SubflowTemplateStore.set(
@@ -468,10 +468,10 @@ def delete_subflow_template(name):
     from meta.services.token_service import TokenService
     token = _extract_token()
     if not token:
-        return error_response('未登录', status=401)
+        return error_response('请先登录后再操作', error_code='unauthorized', status=401)
     user_info = TokenService.verify_token(token)
     if not user_info:
-        return error_response('会话已过期，请重新登录', status=401)
+        return error_response('登录已过期，请重新登录', error_code='token_expired', status=401)
 
     from meta.services.subflow_template_store import SubflowTemplateStore
     result = SubflowTemplateStore.delete(name)
@@ -485,15 +485,15 @@ def get_subflow_template(name):
     from meta.services.token_service import TokenService
     token = _extract_token()
     if not token:
-        return error_response('未登录', status=401)
+        return error_response('请先登录后再操作', error_code='unauthorized', status=401)
     user_info = TokenService.verify_token(token)
     if not user_info:
-        return error_response('会话已过期，请重新登录', status=401)
+        return error_response('登录已过期，请重新登录', error_code='token_expired', status=401)
 
     from meta.services.subflow_template_store import SubflowTemplateStore
     steps = SubflowTemplateStore.get(name)
     if not steps:
-        return error_response(f'模板 {name} 不存在', status=404)
+        return error_response(f'模板 {name} 不存在', error_code='subflow_template_not_found', status=404)
     return ok({'name': name, 'steps': steps, 'step_count': len(steps)}, message='OK')
 
 
@@ -507,10 +507,10 @@ def subflow_metrics():
     from meta.services.token_service import TokenService
     token = _extract_token()
     if not token:
-        return error_response('未登录', status=401)
+        return error_response('请先登录后再操作', error_code='unauthorized', status=401)
     user_info = TokenService.verify_token(token)
     if not user_info:
-        return error_response('会话已过期，请重新登录', status=401)
+        return error_response('登录已过期，请重新登录', error_code='token_expired', status=401)
 
     from meta.services.subflow_metrics import SubflowMetrics
     return ok({

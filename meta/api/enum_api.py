@@ -10,7 +10,11 @@ import os
 import logging
 from datetime import datetime
 
-from meta.api._response_contract import json_response
+from meta.api._response_contract import (
+    error_response,
+    json_response,
+    normalize_error_code,
+)
 from meta.core.query_spec import parse_query_spec
 
 logger = logging.getLogger(__name__)
@@ -131,14 +135,14 @@ def _get_data_source():
 
 
 def _api_error(message, error_code='INTERNAL_ERROR', status_code=400, detail=None):
-    response = {
-        'success': False,
-        'error_code': error_code,
-        'message': message
-    }
-    if detail and os.environ.get('FLASK_DEBUG') == '1':
-        response['detail'] = detail
-    return json_response(response, status_code)
+    # [FR-004 2026-11-14] 收敛到统一错误出口，历史大写码经 normalize 映射
+    normalized = normalize_error_code(error_code)
+    if normalized == 'internal_error' and status_code == 400:
+        logger.warning("[enum-api] 内部错误（原始码=%s）: %s", error_code, message)
+        status_code = 500
+        message = '系统内部错误，请稍后重试'
+    details = {'detail': detail} if detail and os.environ.get('FLASK_DEBUG') == '1' else None
+    return error_response(message, error_code=normalized, status=status_code, details=details)
 
 
 def _api_success(data=None, message='Success', **kwargs):

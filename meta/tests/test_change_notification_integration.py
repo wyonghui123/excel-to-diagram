@@ -47,11 +47,28 @@ _CHANGE_EVENTS_DDL = """
         payload TEXT,
         channels TEXT,
         status TEXT NOT NULL DEFAULT 'pending',
+        status_reason TEXT,
+        idempotency_key TEXT,
         retry_count INTEGER DEFAULT 0,
         created_at TEXT,
         delivered_at TEXT,
         audit_log_id INTEGER,
         retention_until TEXT
+    )
+"""
+
+_CHANGE_SUBSCRIPTIONS_DDL = """
+    CREATE TABLE IF NOT EXISTS change_subscriptions (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        user_id INTEGER,
+        object_type TEXT NOT NULL,
+        event_types TEXT,
+        channel TEXT DEFAULT 'in_app',
+        filter_condition TEXT,
+        webhook_url TEXT,
+        webhook_secret TEXT,
+        enabled INTEGER DEFAULT 1,
+        created_at TEXT
     )
 """
 
@@ -73,6 +90,7 @@ def _create_tables(adapter):
     adapter.execute(_TEST_PRODUCTS_DDL)
     create_audit_logs(adapter)
     adapter.execute(_CHANGE_EVENTS_DDL)
+    adapter.execute(_CHANGE_SUBSCRIPTIONS_DDL)
     adapter.commit()
 
 
@@ -224,7 +242,8 @@ class TestChangeNotificationIntegration:
         assert result.success
         events = adapter.find('change_events', filters={'object_type': 'test_product'})
         assert len(events) == 1
-        assert events[0]['event_type'] == 'create'
+        # 配置里写的是旧别名 create，落库必须是 canonical 的 created
+        assert events[0]['event_type'] == 'created'
         assert events[0]['object_id'] == result.last_insert_id
         assert json.loads(events[0]['changed_fields']) == ['name', 'status', 'price']
 
@@ -245,7 +264,7 @@ class TestChangeNotificationIntegration:
         assert result.success
         events = adapter.find(
             'change_events',
-            filters={'object_type': 'test_product', 'event_type': 'update'}
+            filters={'object_type': 'test_product', 'event_type': 'updated'}
         )
         assert len(events) == 1
         assert json.loads(events[0]['changed_fields']) == ['price']
@@ -269,7 +288,7 @@ class TestChangeNotificationIntegration:
         assert result.success
         assert adapter.find(
             'change_events',
-            filters={'object_type': 'test_product', 'event_type': 'update'}
+            filters={'object_type': 'test_product', 'event_type': 'updated'}
         ) == []
 
     def test_delete_publishes_event(self, change_notification_test):
@@ -288,7 +307,7 @@ class TestChangeNotificationIntegration:
         assert result.success
         events = adapter.find(
             'change_events',
-            filters={'object_type': 'test_product', 'event_type': 'delete'}
+            filters={'object_type': 'test_product', 'event_type': 'deleted'}
         )
         assert len(events) == 1
         assert json.loads(events[0]['changed_fields']) == ['name', 'status']
@@ -348,7 +367,7 @@ class TestChangeNotificationIntegration:
 
         events = adapter.find(
             'change_events',
-            filters={'object_type': 'test_product', 'event_type': 'create'}
+            filters={'object_type': 'test_product', 'event_type': 'created'}
         )
         assert len(events) == 1
 
@@ -371,6 +390,7 @@ def _create_simple_tables(adapter):
     """)
     create_audit_logs(adapter)
     adapter.execute(_CHANGE_EVENTS_DDL)
+    adapter.execute(_CHANGE_SUBSCRIPTIONS_DDL)
     adapter.commit()
 
 

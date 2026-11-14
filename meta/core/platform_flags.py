@@ -31,6 +31,7 @@ OFF = "off"
 ENV_STRICT_CONTRACT = "PLATFORM_STRICT_CONTRACT"
 ENV_TX_GUARD = "PLATFORM_TX_GUARD"
 ENV_PERMISSION_GATE = "PLATFORM_PERMISSION_GATE"
+ENV_ERROR_CONTRACT = "PLATFORM_ERROR_CONTRACT_MODE"
 
 _STRICT_VALUES = {"1", "true", "yes", "on", "strict", "enforce"}
 _SHADOW_VALUES = {"shadow", "log", "warn", "observe"}
@@ -71,4 +72,16 @@ def permission_gate_mode() -> str:
     """功能权限判定（FR-005）的模式。"""
     return parse_mode(
         os.environ.get(ENV_PERMISSION_GATE), STRICT, ENV_PERMISSION_GATE
+    )
+
+
+def error_contract_mode() -> str:
+    """统一错误出口（FR-001/TR-001）的模式。
+
+    - strict：错误体必须带 error_code / request_id，否则自检失败
+    - shadow：按新契约输出，附加断言只记日志（默认）
+    - off：回滚为旧式 {success:false, error, message} 响应
+    """
+    return parse_mode(
+        os.environ.get(ENV_ERROR_CONTRACT), SHADOW, ENV_ERROR_CONTRACT
     )

@@ -50,13 +50,68 @@ API 响应格式统一契约
         return error_response('资源不存在', code='NOT_FOUND', status=404)
 """
 import logging
+import uuid
 from typing import Any, List, Optional
 
-from flask import jsonify, request
+from flask import g, jsonify, request
 
+from meta.core.error_codes import ALL_CODES, ERROR_HTTP_STATUS
 from meta.core.platform_flags import OFF, STRICT, contract_mode
 
 logger = logging.getLogger(__name__)
+
+# 历史大写错误码 → 统一码表值（兼容期内保留映射）
+_LEGACY_CODE_ALIASES = {
+    'INTERNAL_ERROR': 'internal_error',
+    'UNAUTHORIZED': 'unauthorized',
+    'FORBIDDEN': 'forbidden',
+    'NOT_FOUND': 'not_found',
+    'VALIDATION_ERROR': 'data_invalid',
+    'INVALID_QUERY': 'invalid_query',
+    'DUPLICATE_ID': 'data_conflict',
+    'DUPLICATE_CODE': 'duplicate_code',
+    'DUPLICATE_NAME': 'duplicate_name',
+    'INVALID_MUTABILITY': 'invalid_mutability',
+    'INVALID_CODE_FORMAT': 'invalid_code_format',
+    'SYSTEM_ENUM_IMMUTABLE': 'system_enum_immutable',
+    'SYSTEM_VALUE_IMMUTABLE': 'system_value_immutable',
+    'ENUM_TYPE_LOCKED': 'enum_type_locked',
+    'ENUM_VALUE_LOCKED': 'enum_value_locked',
+    'HAS_VALUES': 'has_values',
+    'CODE_IMMUTABLE': 'code_immutable',
+    'ID_IMMUTABLE': 'id_immutable',
+    'MISSING_DIMENSION_KEY': 'missing_dimension_key',
+    'INVALID_DIMENSION_KEY': 'invalid_dimension_key',
+    'INVALID_DIMENSION_VALUE': 'invalid_dimension_value',
+    'MUTABILITY_CHANGE_REQUIRES_SUPER_ADMIN': 'mutability_change_requires_super_admin',
+    'FILE_TOO_LARGE': 'file_too_large',
+    'FILE_GENERATION_FAILED': 'file_generation_failed',
+    'DATA_NOT_FOUND': 'data_not_found',
+    'DATA_CONFLICT': 'data_conflict',
+    'DATA_INVALID': 'data_invalid',
+    'DATA_REFERENCED': 'data_referenced',
+    'ACTION_NOT_FOUND': 'action_not_found',
+    'ACTION_VALIDATION_ERROR': 'action_validation_error',
+    'ACTION_HANDLER_ERROR': 'action_handler_error',
+    'ACTION_PARAMS_MISSING': 'action_params_missing',
+    'ACTION_PERMISSION_DENIED': 'action_permission_denied',
+    'STATE_MACHINE_VIOLATION': 'STATE_MACHINE_VIOLATION',
+    'DEEP_INSERT_FAILED': 'DEEP_INSERT_FAILED',
+    'TRANSACTION_ROLLBACK': 'TRANSACTION_ROLLBACK',
+}
+
+
+def normalize_error_code(code: Optional[str], default: str = 'internal_error') -> str:
+    """把历史错误码映射到统一码表；无法识别时回落到 ``default``。"""
+    if not code:
+        return default
+    if code in ALL_CODES:
+        return code
+    alias = _LEGACY_CODE_ALIASES.get(code)
+    if alias:
+        return alias
+    lowered = code.lower()
+    return lowered if lowered in ALL_CODES else default
 
 
 class ResponseContractViolation(ValueError):
@@ -143,27 +198,48 @@ def ok_message(message: str, data: Optional[Any] = None):
     return jsonify(response)
 
 
+def _current_request_id() -> str:
+    """取当前请求 trace_id；无上下文时回退生成，保证响应必带 request_id。"""
+    try:
+        from meta.services.trace_service import get_trace_id
+
+        trace_id = get_trace_id()
+    except Exception as exc:  # intentionally-ignored: 无请求上下文时回退 uuid
+        logger.debug("[response-contract] trace_id 不可用: %s", exc)
+        trace_id = None
+    if not trace_id:
+        trace_id = getattr(g, 'trace_id', None)
+    return trace_id or uuid.uuid4().hex
+
+
 def error_response(
     message: str,
     code: Optional[str] = None,
-    status: int = 400,
+    status: Optional[int] = None,
     details: Optional[Any] = None,
     error_code: Optional[str] = None,
     errors: Optional[Any] = None,
 ):
     """
-    错误响应
+    错误响应（唯一错误出口，FR-001）
 
-    格式：{success: false, message: str, code?: str, error_code?: str, details?: any, errors?: any}
+    格式：{success: false, message: str, code: str, error_code: str,
+           errors?: any, details?: any, request_id: str}
 
-    `code` 为历史字段；`error_code` 为统一契约字段。两者同时输出，
-    保证已使用 `code` 的调用方不受影响，同时满足新契约。
-
-    `errors` 为历史字段（部分端点返回错误项数组），传入即原样输出，
-    用于在迁移中保持既有响应结构不变。
+    - `code` 为历史字段；`error_code` 为统一契约字段，两者同值输出。
+    - `status` 缺省时按 error_codes.ERROR_HTTP_STATUS 推导，未知码回落 400。
+    - `errors` 为字段级错误数组（ValidationDetail.to_dict() 结构）。
+    - `details` 由调用方决定内容；技术细节（堆栈等）仅在非生产环境传入。
     """
-    response = {'success': False, 'message': message}
     final_code = error_code or code
+    if status is None:
+        status = ERROR_HTTP_STATUS.get(final_code, 400) if final_code else 400
+
+    response = {
+        'success': False,
+        'message': message,
+        'request_id': _current_request_id(),
+    }
     if final_code:
         response['code'] = final_code
         response['error_code'] = final_code

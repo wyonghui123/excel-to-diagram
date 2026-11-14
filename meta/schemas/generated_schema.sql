@@ -1,5 +1,5 @@
 -- 自动生成的 Schema
--- 生成时间: 2026-11-13 14:04:28.136388
+-- 生成时间: 2026-11-13 22:53:02.294549
 
 -- 地址: 结构化地址库（支持对象）：国家 / 省 / 市 / 区 / 街道 / 门牌 / 邮编分列 + 格式化全文；只被引用，不承载用途 / 角色
 CREATE TABLE IF NOT EXISTS addresses (
@@ -3970,7 +3970,7 @@ CREATE TABLE IF NOT EXISTS type_definitions (
     name VARCHAR(50) NOT NULL,
     scope_bo VARCHAR(40) NOT NULL,
     level VARCHAR(200) NOT NULL CHECK (level IN ('header', 'line')),
-    document_category VARCHAR(200) NOT NULL DEFAULT 'standard' CHECK (document_category IN ('standard', 'rush', 'return', 'credit_memo', 'debit_memo', 'consignment', 'loan', 'invoice', 'cancellation')),
+    document_category VARCHAR(200) DEFAULT 'standard' CHECK (document_category IN ('standard', 'rush', 'return', 'credit_memo', 'debit_memo', 'consignment', 'loan', 'invoice', 'cancellation')),
     document_role VARCHAR(32),
     direction INTEGER NOT NULL DEFAULT 1,
     reversal_type_id INTEGER,

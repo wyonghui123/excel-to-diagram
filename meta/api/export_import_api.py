@@ -10,7 +10,7 @@ import uuid
 import threading
 from pathlib import Path
 from flask import Blueprint, request, jsonify, send_file, abort, g, copy_current_request_context
-from meta.api._response_contract import error_response, ok
+from meta.api._response_contract import error_response, normalize_error_code, ok
 from werkzeug.utils import secure_filename
 from urllib.parse import unquote
 
@@ -40,14 +40,13 @@ ALLOWED_EXTENSIONS = {'xlsx'}
 
 
 def _api_error(message, error_code='INTERNAL_ERROR', status_code=400, detail=None):
-    response = {
-        'success': False,
-        'error_code': error_code,
-        'message': message
-    }
-    if detail and os.environ.get('FLASK_DEBUG') == '1':
-        response['detail'] = detail
-    return jsonify(response), status_code
+    # [FR-004 2026-11-14] 收敛到统一错误出口
+    normalized = normalize_error_code(error_code)
+    if normalized == 'internal_error' and status_code == 400:
+        status_code = 500
+        message = '系统内部错误，请稍后重试'
+    details = {'detail': detail} if detail and os.environ.get('FLASK_DEBUG') == '1' else None
+    return error_response(message, error_code=normalized, status=status_code, details=details)
 
 
 def _api_success(data=None, message='Success', **kwargs):
@@ -101,7 +100,7 @@ def _set_audit_user():
                 from meta.services.token_service import TokenService
                 current_user = TokenService.verify_token(token)
             except Exception:
-                pass
+                logger.debug('[ExportImport] Bearer token 校验失败，按匿名处理', exc_info=True)
     
     current_user = current_user or {}
     user_id = current_user.get('user_id') or request.headers.get('X-User-Id')
@@ -286,7 +285,7 @@ def export_data():
             if g_user:
                 set_thread_user(g_user)
         except Exception:
-            pass
+            logger.debug('[ExportImport] set_thread_user 失败', exc_info=True)
 
         if scope == 'template':
             if not selected_types:

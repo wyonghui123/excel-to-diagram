@@ -55,7 +55,7 @@ fields:
     required: true
     description: 事件类型
     semantics:
-      meaning: 事件类型（create, update, delete, state_change）
+      meaning: 事件类型（canonical 词表：created, updated, deleted, state_changed）
 
   - id: changed_fields
     name: 变更字段

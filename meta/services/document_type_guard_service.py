@@ -15,6 +15,8 @@
 import logging
 from typing import Any, Dict, List, Optional, Tuple
 
+from meta.core.message_registry import t
+
 logger = logging.getLogger(__name__)
 
 DOCUMENT_TYPE_FIELD = 'document_type_id'
@@ -107,7 +109,7 @@ class DocumentTypeGuardService:
         type_id = (payload or {}).get(DOCUMENT_TYPE_FIELD)
         if is_create:
             if _blank(type_id):
-                raise ValueError('单据类型不能为空')
+                raise ValueError(t('validation.document_type.required'))
         else:
             if _blank(type_id):
                 return
@@ -117,7 +119,7 @@ class DocumentTypeGuardService:
                     return
                 current_status = (old_data or {}).get('status')
                 if not _blank(current_status) and str(current_status) != STATUS_DRAFT:
-                    raise ValueError('单据类型离开草稿后不可修改')
+                    raise ValueError(t('validation.document_type.immutable_after_draft'))
         self._assert_type(object_type, type_id)
 
     def _assert_type(self, object_type: str, type_id: Any) -> None:
@@ -125,12 +127,12 @@ class DocumentTypeGuardService:
             'SELECT id, scope_bo, level, status FROM {0} WHERE id = ?'.format(self.TABLE),
             [type_id])
         if not rows:
-            raise ValueError('单据类型不存在')
+            raise ValueError(t('validation.document_type.not_found'))
         row = rows[0]
         if str(row.get('scope_bo')) != str(object_type) \
                 or str(row.get('level')) != HEADER_LEVEL:
             raise ValueError(
-                '单据类型不属于{0}（须 scope_bo={0} / level=header）'.format(
-                    _object_display_name(object_type)))
+                t('validation.document_type.scope_mismatch',
+                  object_name=_object_display_name(object_type)))
         if str(row.get('status')) != STATUS_ACTIVE:
-            raise ValueError('单据类型已停用')
+            raise ValueError(t('validation.document_type.inactive'))

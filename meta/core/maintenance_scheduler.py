@@ -77,6 +77,9 @@ DEFAULT_JOBS: List[Dict] = [
     # ── 导入队列 ──
     {'code': 'import_queue_processor', 'handler': 'import_queue_processor',
      'schedule': '*/2 * * * *', 'trigger_mode': 'cron', 'enabled': True},
+    # ── 消息平台运维 ──
+    {'code': 'change_event_archive', 'handler': 'change_event_archive',
+     'schedule': '0 3 * * *', 'trigger_mode': 'cron', 'enabled': True},
 ]
 
 #: 任务域专属作业 —— **不由本调度器管辖**。
@@ -112,6 +115,8 @@ class MaintenanceScheduler:
         self._handlers: Dict[str, Callable] = {}
         self._next_run: Dict[str, Optional[datetime]] = {}
         self._last_result: Dict[str, object] = {}
+        # [FR-010] 运行态暴露：last_run_at / last_error / consecutive_failures
+        self._run_stats: Dict[str, Dict] = {}
         self._running = False
         self._thread: Optional[threading.Thread] = None
         self._interval = self.config.get('check_interval', 60)
@@ -206,12 +211,49 @@ class MaintenanceScheduler:
             'data_source': self.data_source,
             'handler_config': job.get('handler_config') or {},
         }
+        stats = self._run_stats.setdefault(code, {
+            'last_run_at': None, 'last_status': None, 'last_error': None,
+            'consecutive_failures': 0,
+        })
+        stats['last_run_at'] = datetime.now().isoformat(timespec='seconds')
+        error: Optional[str] = None
         try:
-            self._last_result[code] = handler(job.get('handler_config') or {}, context)
+            result = handler(job.get('handler_config') or {}, context)
+            self._last_result[code] = result
+            if isinstance(result, dict) and result.get('success') is False:
+                error = str(result.get('message') or result.get('error') or 'handler returned success=false')[:300]
+                stats['last_result_message'] = error
         except Exception as e:
             logger.error("[MaintenanceScheduler] job %s raised: %s", code, e)
             self._last_result[code] = e
+            error = str(e)[:300]
+        self._record_run_outcome(code, error)
         return True
+
+    def _record_run_outcome(self, code: str, error: Optional[str]) -> None:
+        """[FR-009/010] 记录失败次数并触发/恢复告警。"""
+        stats = self._run_stats.setdefault(code, {
+            'last_run_at': None, 'last_status': None, 'last_error': None,
+            'consecutive_failures': 0,
+        })
+        if error:
+            stats['last_status'] = 'failed'
+            stats['last_error'] = error
+            stats['consecutive_failures'] = int(stats.get('consecutive_failures') or 0) + 1
+            try:
+                from meta.core.alert_service import report_alert
+                report_alert('scheduler_job_failed', object_type=code, message=error)
+            except Exception:
+                pass
+        else:
+            stats['last_status'] = 'success'
+            stats['last_error'] = None
+            stats['consecutive_failures'] = 0
+            try:
+                from meta.core.alert_service import resolve_alert
+                resolve_alert(error_code='scheduler_job_failed', endpoint=code)
+            except Exception:
+                pass
 
     def status(self) -> Dict[str, Dict]:
         """自检视图：作业配置 / 下次触发 / 是否已注册 handler。"""
@@ -222,6 +264,11 @@ class MaintenanceScheduler:
                 if self._next_run.get(job['code']) else None,
                 'handler_registered': self.is_registered(job['code']),
                 'enabled': job.get('enabled', True),
+                'last_run_at': self._run_stats.get(job['code'], {}).get('last_run_at'),
+                'last_status': self._run_stats.get(job['code'], {}).get('last_status'),
+                'last_error': self._run_stats.get(job['code'], {}).get('last_error'),
+                'consecutive_failures':
+                    self._run_stats.get(job['code'], {}).get('consecutive_failures', 0),
             }
             for job in self._jobs
         }

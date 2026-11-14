@@ -113,13 +113,15 @@ class AttributeGuardInterceptor(Interceptor):
         from meta.core.exceptions import ValidationFailedError
 
         message = str(error)
+        rule = getattr(error, 'rule', '') or ''
         raise ValidationFailedError(
             message=message,
             details=[{
                 'field_name': error.field_name,
-                'rule': error.rule,
+                'rule': rule,
                 'message': message,
-                'i18n_key': '',
+                'error_code': 'data_invalid',
+                'i18n_key': f'validation.attribute.{rule}' if rule else '',
                 'params': {},
             }],
         )

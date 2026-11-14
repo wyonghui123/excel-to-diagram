@@ -3,7 +3,7 @@
 GAP-009: notification_api 端到端测试 (10 用例)
 
 [NEW] 2026-06-07 批次: 补齐 notification_api (9 端点) 的端到端测试
-- /stats (公开)
+- /stats (仅管理员)
 - /subscriptions (GET/POST/PUT/DELETE)
 - /subscriptions/<id> (GET)
 - WebSocket 端点 (仅验证注册存在, 不实际连接)
@@ -48,19 +48,31 @@ class TestNotificationAPI:
         # 401 (g.user_id 缺失) 或 400 (校验失败) 或 500 (服务未初始化)
         assert resp.status_code in (400, 401, 500)
 
-    def test_create_subscription_websocket(self, api_client, admin_headers):
-        """POST /subscriptions channel=websocket 创建订阅"""
+    def test_create_subscription_in_app(self, api_client, admin_headers):
+        """POST /subscriptions channel=in_app 创建订阅"""
         resp = api_client.post(
             f'{NOTIF_URL}/subscriptions',
             json={
                 'object_type': 'user',
                 'event_types': ['created', 'updated'],
-                'channel': 'websocket',
+                'channel': 'in_app',
             },
             headers=admin_headers,
         )
         # 服务未初始化时 500
         assert resp.status_code in (201, 401, 500)
+
+    def test_create_subscription_invalid_channel_400(self, api_client, admin_headers):
+        """POST /subscriptions 非法 channel → 400（与 DDL chk_channel 对齐）"""
+        resp = api_client.post(
+            f'{NOTIF_URL}/subscriptions',
+            json={
+                'object_type': 'user',
+                'channel': 'websocket',
+            },
+            headers=admin_headers,
+        )
+        assert resp.status_code in (400, 500)
 
     def test_create_subscription_webhook_missing_url_400(self, api_client, admin_headers):
         """POST /subscriptions channel=webhook 缺 url → 400"""

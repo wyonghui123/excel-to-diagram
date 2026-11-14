@@ -505,11 +505,13 @@ class ActionResult:
 
     def __init__(self, success: bool = True, data: Any = None,
                  message: str = "", error: str = "", errors: list = None,
-                 status_code: int = None):  # [FIX v1.2.21 2026-06-20] 加 status_code
+                 status_code: int = None, code: str = ""):
+        # [FR-004 2026-11-14] 统一错误码字段 code；error 保留为历史兼容别名
         self.success = success
         self.data = data
         self.message = message
-        self.error = error
+        self.error = error or code
+        self.code = code or error
         self.errors = errors or []
         self.status_code = status_code
         self.affected_rows = 0
@@ -522,6 +524,7 @@ class ActionResult:
             "data": self.data,
             "message": self.message,
             "error": self.error,
+            "code": self.code,
             "errors": self.errors,
             "status_code": self.status_code,
             "affected_rows": self.affected_rows,
@@ -534,9 +537,10 @@ class ActionResult:
 
     @classmethod
     def fail(cls, error: str = "", message: str = "", errors: list = None,
-             status_code: int = None) -> "ActionResult":
-        # [FIX v1.2.21 2026-06-20] 支持 status_code kwarg
-        return cls(success=False, error=error, message=message, errors=errors, status_code=status_code)
+             status_code: int = None, code: str = "") -> "ActionResult":
+        # [FR-004 2026-11-14] 优先 code；error 作为历史别名继续可用
+        return cls(success=False, error=error, code=code, message=message,
+                   errors=errors, status_code=status_code)
 
 class _FunnelAbort(Exception):
     """[M3] 漏斗内部信号：某一步返回失败，需要回滚外层事务并沿用其 ActionResult"""

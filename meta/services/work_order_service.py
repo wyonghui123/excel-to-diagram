@@ -312,7 +312,7 @@ class WorkOrderService:
                            payload.get('actor'),
                            {'severity': severity,
                             'channel': payload.get('channel')})
-        self._append_change_event(work_order_id, 'state_change',
+        self._append_change_event(work_order_id, 'state_changed',
                                   {'status': (None, row['status'])})
 
         match = self.match_coverage({
@@ -546,7 +546,7 @@ class WorkOrderService:
         work_order_id = self._insert(WORK_ORDER_TABLE, row)
 
         # 生产工单无 SLA：只写 change_events 一条 state_change（P-3）
-        self._append_change_event(work_order_id, 'state_change',
+        self._append_change_event(work_order_id, 'state_changed',
                                   {'status': (None, row['status'])})
 
         expansion = self._maybe_expand_components(
@@ -963,7 +963,7 @@ class WorkOrderService:
             % WORK_ORDER_TABLE,
             [STATUS_IN_PROGRESS, occurred, work_order.get('id')])
         self._append_event(work_order.get('id'), 'start', occurred, actor, {})
-        self._append_change_event(work_order.get('id'), 'state_change',
+        self._append_change_event(work_order.get('id'), 'state_changed',
                                   {'status': (STATUS_NEW, STATUS_IN_PROGRESS)})
         return {'id': work_order.get('id'), 'status': STATUS_IN_PROGRESS,
                 'task_ids': task_ids}
@@ -995,7 +995,7 @@ class WorkOrderService:
                 % MILESTONE_TABLE, [MILESTONE_PAUSED, occurred, milestone.get('id')])
             paused.append(milestone.get('id'))
 
-        self._append_change_event(work_order.get('id'), 'state_change',
+        self._append_change_event(work_order.get('id'), 'state_changed',
                                   {'status': (STATUS_IN_PROGRESS, STATUS_WAITING)})
         return {'id': work_order.get('id'), 'status': STATUS_WAITING,
                 'paused_milestones': paused}
@@ -1038,7 +1038,7 @@ class WorkOrderService:
             [STATUS_IN_PROGRESS, occurred, work_order.get('id')])
         self._append_event(work_order.get('id'), 'resume', occurred, actor,
                            {'note': note, 'paused_minutes': paused_minutes})
-        self._append_change_event(work_order.get('id'), 'state_change',
+        self._append_change_event(work_order.get('id'), 'state_changed',
                                   {'status': (STATUS_WAITING, STATUS_IN_PROGRESS)})
         return {'id': work_order.get('id'), 'status': STATUS_IN_PROGRESS,
                 'paused_minutes': paused_minutes, 'milestones': shifted}
@@ -1085,7 +1085,7 @@ class WorkOrderService:
                 % SCHEDULE_TABLE, [occurred, schedule_id])
             schedule_status = 'completed'
 
-        self._append_change_event(work_order.get('id'), 'state_change',
+        self._append_change_event(work_order.get('id'), 'state_changed',
                                   {'status': (status, STATUS_RESOLVED)})
         return {'id': work_order.get('id'), 'status': STATUS_RESOLVED,
                 'resolved_at': occurred, 'schedule_id': schedule_id,
@@ -1396,21 +1396,23 @@ class WorkOrderService:
 
     def _append_change_event(self, work_order_id: Any, event_type: str,
                              changes: Dict[str, Any]) -> None:
-        """§10.7：复用 change_events（object_type='work_order'），失败 fail-open。"""
+        """§10.7：复用 change_events（object_type='work_order'），失败 fail-open。
+
+        P1-a 统一发布入口：不再直插 change_events，改由
+        ChangeNotificationService.publish_event 落库 + 派发订阅。
+        """
         try:
-            changed_fields = list(changes.keys())
-            old_values = {k: v[0] for k, v in changes.items()}
-            new_values = {k: v[1] for k, v in changes.items()}
-            self._insert(CHANGE_EVENT_TABLE, {
-                'object_type': 'work_order',
-                'object_id': int(work_order_id),
-                'event_type': event_type,
-                'changed_fields': json.dumps(changed_fields, ensure_ascii=False),
-                'old_values': json.dumps(old_values, ensure_ascii=False),
-                'new_values': json.dumps(new_values, ensure_ascii=False),
-                'payload': None,
-                'status': 'pending',
-                'created_at': _now(),
-            })
+            from meta.services.change_notification_service import (
+                ChangeEventRequest, ChangeNotificationService,
+            )
+            ChangeNotificationService(self.ds).publish_event(ChangeEventRequest(
+                object_type='work_order',
+                object_id=int(work_order_id),
+                event_type=event_type,
+                old_data={k: v[0] for k, v in changes.items()},
+                new_data={k: v[1] for k, v in changes.items()},
+                changed_fields=list(changes.keys()),
+                force=True,
+            ))
         except Exception as e:  # 事件底座不可用时不阻断业务写入
             logger.warning('[work_order] 写入 change_event 失败: %s', e)

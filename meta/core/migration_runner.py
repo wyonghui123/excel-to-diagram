@@ -1125,14 +1125,19 @@ class MigrationRunner:
 
     def run_change_notification_migration(self) -> bool:
         """
-        执行变更通知表迁移
+        执行消息中心表迁移（事件/订阅 → 投递记录/站内收件箱）
+
+        两个脚本各自记录执行状态，均使用 IF NOT EXISTS，重复调用安全。
 
         Returns:
             是否执行成功
         """
         self.ensure_migrations_table()
-        migration_name = "add_change_notification_tables.sql"
-        return self.run_migration(migration_name)
+        ok_events = self.run_migration("add_change_notification_tables.sql")
+        ok_inbox = self.run_migration("add_notification_inbox_tables.sql")
+        # P1-c：status_reason / idempotency_key + 事件索引（ALTER 重复列幂等跳过）
+        ok_retry = self.run_migration("add_change_event_retry_columns.sql")
+        return ok_events and ok_inbox and ok_retry
 
 
 def init_change_notification_tables(data_source) -> bool:

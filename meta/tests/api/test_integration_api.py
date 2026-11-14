@@ -23,6 +23,12 @@ _ENV_KEYS = (
     'ZHIPU_API_KEY',
     'FEISHU_APP_ID',
     'FEISHU_APP_SECRET',
+    'FEISHU_CHAT_ID',
+    # 历史命名（tools/_setup_lark_env.ps1 写入用户级变量），
+    # 不清会污染"未配置"场景，导致契约用例读真实凭证
+    'LARK_APP_ID',
+    'LARK_APP_SECRET',
+    'LARK_CHAT_ID',
     'AI_PROVIDER',
 )
 
@@ -74,6 +80,7 @@ class Test集成配置视图:
         data = resp.get_json()['data']
         assert data['feishu'] == {
             'app_id': '', 'has_secret': False, 'app_secret_masked': '',
+            'has_chat_id': False,
         }
         assert data['ai']['has_key'] is False
 

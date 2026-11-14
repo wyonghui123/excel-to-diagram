@@ -54,6 +54,8 @@ def adapter():
             payload TEXT,
             channels TEXT,
             status TEXT NOT NULL DEFAULT 'pending',
+            status_reason TEXT,
+            idempotency_key TEXT,
             retry_count INTEGER DEFAULT 0,
             created_at TEXT,
             delivered_at TEXT,

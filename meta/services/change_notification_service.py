@@ -15,6 +15,7 @@ from datetime import datetime, timedelta
 
 from meta.core.datasource import DataSource
 from meta.core.models import registry, ChangeNotificationConfig, ChangeEventConfig
+from meta.core.change_event_types import normalize, UPDATED
 
 logger = logging.getLogger(__name__)
 
@@ -28,6 +29,17 @@ class ChangeEventRequest:
     old_data: Optional[Dict[str, Any]] = None
     new_data: Optional[Dict[str, Any]] = None
     audit_log_id: Optional[int] = None
+    #: 旁路服务（state_changed 等）显式声明事件事实，跳过
+    #: ui_view_config.change_notification 配置闸门（P1-a 统一发布入口）
+    force: bool = False
+    #: 显式载荷；不传则取 new_data/old_data 并剔除系统字段
+    payload: Optional[Dict[str, Any]] = None
+    #: 显式通道；不传则 ['in_app']。仅作审计语义，订阅匹配与它无关
+    channels: Optional[List[str]] = None
+    #: 显式变更字段；不传则按 old_data/new_data 全字段比对
+    changed_fields: Optional[List[str]] = None
+    #: 发布幂等键（P1-c）：同一 key 重复发布只保留一条事件
+    idempotency_key: Optional[str] = None
 
 
 @dataclass
@@ -88,49 +100,85 @@ class ChangeNotificationService:
             ChangeEventResult: 事件发布结果
         """
         try:
-            config = self._get_notification_config(request.object_type)
-            
-            if not config or not config.enabled:
-                logger.debug(
-                    "Change notification not enabled for object_type: %s",
-                    request.object_type
+            # 词表唯一入口：任意别名（create/update/delete/state_change、大写）
+            # 在此归一为 canonical 过去式，落库 / 广播 / 聚合 / 派发全部使用该值。
+            event_type = normalize(request.event_type) or request.event_type
+
+            if request.idempotency_key:
+                existing = self._find_event_by_idempotency_key(request.idempotency_key)
+                if existing:
+                    logger.info(
+                        "Duplicate change event ignored: idempotency_key=%s event_id=%s",
+                        request.idempotency_key, existing.get('id')
+                    )
+                    return ChangeEventResult(
+                        success=True,
+                        event_id=existing.get('id'),
+                        message="Duplicate event ignored (idempotency_key)"
+                    )
+
+            if request.force:
+                # 旁路服务（work_order / fulfillment_order / engineering_change
+                # 的 state_changed）：调用方即事实来源，不受
+                # ui_view_config.change_notification 配置闸门约束。
+                if request.changed_fields is not None:
+                    changed_fields = list(request.changed_fields)
+                else:
+                    changed_fields = self._detect_all_changes(
+                        request.old_data, request.new_data)
+                payload = (
+                    request.payload
+                    if request.payload is not None
+                    else self._build_full_payload(
+                        request.new_data or request.old_data)
                 )
-                return ChangeEventResult(
-                    success=True,
-                    message="Change notification not configured or disabled"
+                channels = request.channels or ['in_app']
+            else:
+                config = self._get_notification_config(request.object_type)
+
+                if not config or not config.enabled:
+                    logger.debug(
+                        "Change notification not enabled for object_type: %s",
+                        request.object_type
+                    )
+                    return ChangeEventResult(
+                        success=True,
+                        message="Change notification not configured or disabled"
+                    )
+
+                event_config = self._find_event_config(config, event_type)
+
+                if not event_config:
+                    logger.debug(
+                        "Event type %s not configured for object_type: %s",
+                        event_type,
+                        request.object_type
+                    )
+                    return ChangeEventResult(
+                        success=True,
+                        message=f"Event type {event_type} not configured"
+                    )
+
+                changed_fields = self._detect_changes(
+                    event_config.track_fields,
+                    request.old_data,
+                    request.new_data
                 )
-            
-            event_config = self._find_event_config(config, request.event_type)
-            
-            if not event_config:
-                logger.debug(
-                    "Event type %s not configured for object_type: %s",
-                    request.event_type,
-                    request.object_type
-                )
-                return ChangeEventResult(
-                    success=True,
-                    message=f"Event type {request.event_type} not configured"
-                )
-            
-            changed_fields = self._detect_changes(
-                event_config.track_fields,
-                request.old_data,
-                request.new_data
-            )
-            
-            if request.event_type == 'update' and not changed_fields:
-                logger.debug(
-                    "No tracked fields changed for object_type: %s, object_id: %s",
-                    request.object_type,
-                    request.object_id
-                )
-                return ChangeEventResult(
-                    success=True,
-                    message="No tracked fields changed"
-                )
-            
-            payload = self._build_payload(event_config, request.new_data or request.old_data)
+
+                if event_type == UPDATED and not changed_fields:
+                    logger.debug(
+                        "No tracked fields changed for object_type: %s, object_id: %s",
+                        request.object_type,
+                        request.object_id
+                    )
+                    return ChangeEventResult(
+                        success=True,
+                        message="No tracked fields changed"
+                    )
+
+                payload = self._build_payload(
+                    event_config, request.new_data or request.old_data)
+                channels = event_config.channels
             
             old_values = {}
             new_values = {}
@@ -142,23 +190,28 @@ class ChangeNotificationService:
             event_data = {
                 'object_type': request.object_type,
                 'object_id': request.object_id,
-                'event_type': request.event_type,
+                'event_type': event_type,
                 'changed_fields': changed_fields,
                 'old_values': old_values,
                 'new_values': new_values,
                 'payload': payload,
-                'channels': event_config.channels,
+                'channels': channels,
                 'status': 'pending',
                 'retry_count': 0,
                 'created_at': datetime.now().isoformat(),
-                'audit_log_id': request.audit_log_id
+                'audit_log_id': request.audit_log_id,
+                'idempotency_key': request.idempotency_key,
+                # 与 change_events 保留期一致，供收件箱行直接复用
+                'retention_until': (
+                    datetime.now() + timedelta(days=self.RETENTION_DAYS)
+                ).isoformat()
             }
             
             event_id = self._save_event(event_data)
             
             self._broadcast_event(
                 request.object_type,
-                request.event_type,
+                event_type,
                 {
                     'event_id': event_id,
                     'object_id': request.object_id,
@@ -172,16 +225,20 @@ class ChangeNotificationService:
             self._trigger_aggregate_refresh(
                 request.object_type,
                 request.object_id,
-                request.event_type,
+                event_type,
                 changed_fields
             )
+            
+            # P1-d：发布只写库，由异步 worker 轮询派发；仅唤醒 worker 缩短等待
+            event_data['id'] = event_id
+            self._notify_worker(event_id)
             
             logger.info(
                 "Change event published: id=%s, object_type=%s, object_id=%s, event_type=%s",
                 event_id,
                 request.object_type,
                 request.object_id,
-                request.event_type
+                event_type
             )
             
             return ChangeEventResult(
@@ -222,19 +279,25 @@ class ChangeNotificationService:
         """
         if not data:
             return {}
-        
-        payload = {}
-        
+
         if not config.payload:
-            payload = dict(data)
-            for sys_field in self.SYSTEM_FIELDS:
-                payload.pop(sys_field, None)
-            return payload
-        
+            return self._build_full_payload(data)
+
+        payload = {}
+
         for field_name in config.payload:
             if field_name in data:
                 payload[field_name] = data[field_name]
-        
+
+        return payload
+
+    def _build_full_payload(self, data: Optional[Dict[str, Any]]) -> Dict[str, Any]:
+        """全字段载荷（剔除系统字段），供 force 模式使用。"""
+        if not data:
+            return {}
+        payload = dict(data)
+        for sys_field in self.SYSTEM_FIELDS:
+            payload.pop(sys_field, None)
         return payload
     
     def _detect_changes(
@@ -285,7 +348,25 @@ class ChangeNotificationService:
                 changed_fields.append(field_name)
         
         return changed_fields
-    
+
+    def _detect_all_changes(
+        self,
+        old_data: Optional[Dict[str, Any]],
+        new_data: Optional[Dict[str, Any]]
+    ) -> List[str]:
+        """无 track_fields 声明时按全字段比对（force 模式）。"""
+        if old_data is None and new_data is None:
+            return []
+        if old_data is None:
+            return [k for k in new_data if k not in self.SYSTEM_FIELDS]
+        if new_data is None:
+            return [k for k in old_data if k not in self.SYSTEM_FIELDS]
+        return [
+            k for k, v in new_data.items()
+            if k not in self.SYSTEM_FIELDS
+            and self._values_differ(old_data.get(k), v)
+        ]
+
     def _values_differ(self, old_value: Any, new_value: Any) -> bool:
         """
         比较两个值是否不同
@@ -351,11 +432,24 @@ class ChangeNotificationService:
             return None
         
         for event_config in config.events:
-            if event_config.type == event_type:
+            if normalize(event_config.type) == normalize(event_type):
                 return event_config
         
         return None
     
+    def _notify_worker(self, event_id: int) -> None:
+        """唤醒异步派发 worker（未启动时静默跳过）。
+
+        fail-open：任何异常只记 warning，不影响业务写入与事件已发布的事实。
+        """
+        try:
+            from meta.services.change_event_worker import notify_pending
+            notify_pending(event_id)
+        except Exception as e:
+            logger.warning(
+                "[change_event] notify worker failed: event_id=%s err=%s", event_id, e
+            )
+
     def _save_event(self, event_data: Dict[str, Any]) -> int:
         """
         持久化事件到数据库
@@ -386,10 +480,35 @@ class ChangeNotificationService:
                 datetime.now() + timedelta(days=self.RETENTION_DAYS)
             ).isoformat(),
         }
+        # 幂等键列由 add_change_event_retry_columns.sql 引入；为空时不写该列，
+        # 兼容测试/历史库中未执行该迁移的 change_events 表。
+        if event_data.get('idempotency_key'):
+            record['idempotency_key'] = event_data['idempotency_key']
         
-        event_id = self.ds.insert(self.CHANGE_EVENTS_TABLE, record)
-        
-        return event_id
+        try:
+            return self.ds.insert(self.CHANGE_EVENTS_TABLE, record)
+        except Exception as e:
+            # 并发发布同一幂等键：唯一索引冲突时回读已存在事件
+            key = record.get('idempotency_key')
+            if key and 'unique' in str(e).lower():
+                existing = self._find_event_by_idempotency_key(key)
+                if existing:
+                    return existing.get('id')
+            raise
+
+    def _find_event_by_idempotency_key(self, key: str) -> Optional[Dict[str, Any]]:
+        if not key:
+            return None
+        try:
+            rows = self.ds.find(
+                self.CHANGE_EVENTS_TABLE,
+                filters={'idempotency_key': key},
+                limit=1
+            )
+        except Exception as e:
+            logger.warning("Query idempotency_key failed: %s", e)
+            return None
+        return rows[0] if rows else None
     
     def get_pending_events(self, limit: int = 100) -> List[Dict[str, Any]]:
         """

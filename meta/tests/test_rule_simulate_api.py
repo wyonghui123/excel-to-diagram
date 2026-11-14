@@ -552,7 +552,7 @@ class TestRuleCenterP2Endpoints:
         assert resp.status_code == 403
         body = resp.get_json()
         assert body['success'] is False
-        assert body['error'] == 'FORBIDDEN'
+        assert body['error_code'] == 'forbidden'
 
     def test_trace_http_rejects_invalid_scenario(self, monkeypatch):
         """scenarios 不在白名单 → 400，不允许静默丢弃。"""

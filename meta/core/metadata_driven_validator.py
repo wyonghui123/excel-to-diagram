@@ -21,6 +21,7 @@ import logging
 from decimal import Decimal, InvalidOperation
 from typing import List, Dict, Any, Optional, TYPE_CHECKING
 
+from meta.core.message_registry import t
 from meta.core.validation_messages import ValidationDetail, ValidationMessageRegistry
 
 if TYPE_CHECKING:
@@ -231,10 +232,12 @@ class MetadataDrivenValidator:
             num = Decimal(str(value))
         except (InvalidOperation, ValueError, TypeError):
             return [self._numeric_detail(field, field_name, 'not_a_number',
-                                         f"{field_name}必须是数值")]
+                                         t('validation.numeric.not_a_number',
+                                           field_name=field_name))]
         if not num.is_finite():
-            return [self._numeric_detail(field, field_name, 'not_a_number',
-                                         f"{field_name}必须是有限数值")]
+            return [self._numeric_detail(field, field_name, 'not_finite',
+                                         t('validation.numeric.not_finite',
+                                           field_name=field_name))]
 
         errors: List[ValidationDetail] = []
         for rule in rules:
@@ -242,16 +245,28 @@ class MetadataDrivenValidator:
             lt, lte = rule.get('lt'), rule.get('lte')
             if gt is not None and num <= Decimal(str(gt)):
                 errors.append(self._numeric_detail(
-                    field, field_name, 'gt', f"{field_name}必须大于 {gt}"))
+                    field, field_name, 'gt',
+                    t('validation.numeric.gt',
+                      field_name=field_name, limit=gt),
+                    limit=gt))
             if gte is not None and num < Decimal(str(gte)):
                 errors.append(self._numeric_detail(
-                    field, field_name, 'gte', f"{field_name}不能小于 {gte}"))
+                    field, field_name, 'gte',
+                    t('validation.numeric.gte',
+                      field_name=field_name, limit=gte),
+                    limit=gte))
             if lt is not None and num >= Decimal(str(lt)):
                 errors.append(self._numeric_detail(
-                    field, field_name, 'lt', f"{field_name}必须小于 {lt}"))
+                    field, field_name, 'lt',
+                    t('validation.numeric.lt',
+                      field_name=field_name, limit=lt),
+                    limit=lt))
             if lte is not None and num > Decimal(str(lte)):
                 errors.append(self._numeric_detail(
-                    field, field_name, 'lte', f"{field_name}不能大于 {lte}"))
+                    field, field_name, 'lte',
+                    t('validation.numeric.lte',
+                      field_name=field_name, limit=lte),
+                    limit=lte))
 
             max_dp = rule.get('decimal_places')
             if max_dp is not None:
@@ -260,15 +275,18 @@ class MetadataDrivenValidator:
                 if dp > int(max_dp):
                     errors.append(self._numeric_detail(
                         field, field_name, 'decimal_places',
-                        f"{field_name}最多允许 {max_dp} 位小数（当前 {dp} 位）"))
+                        t('validation.numeric.decimal_places',
+                          field_name=field_name, max_places=max_dp,
+                          places=dp),
+                        max_places=max_dp, places=dp))
         return errors
 
     def _numeric_detail(self, field: 'MetaField', field_name: str,
-                        rule: str, message: str) -> ValidationDetail:
+                        rule: str, message: str, **extra) -> ValidationDetail:
         return ValidationDetail(
             field_id=field.id, field_name=field_name, rule=f"numeric_range.{rule}",
-            message=message, i18n_key="",
-            params={"field_name": field_name},
+            message=message, i18n_key=f"validation.numeric.{rule}",
+            params={"field_name": field_name, **extra},
         )
 
     def _check_enum_values(self, field: 'MetaField', value: Any, field_name: str) -> List[ValidationDetail]:

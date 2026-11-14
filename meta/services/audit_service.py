@@ -257,7 +257,7 @@ class BatchAuditContext:
             try:
                 self.audit.update(self.header_id, outcome='failure', error_message=self._error_msg)
             except Exception:
-                pass
+                _logger.warning('[Audit] 失败审计 header 更新失败', exc_info=True)
         return False  # 不吞异常
 
 
@@ -880,8 +880,8 @@ class AuditService:
                 })
                 if not getattr(self.ds, 'in_transaction', False):
                     self.ds.commit()
-            except:
-                pass
+            except Exception:
+                _logger.warning('[Audit] 失败审计记录写入失败', exc_info=True)
             
             return False
 
@@ -1009,7 +1009,7 @@ class AuditService:
                 if mobj and getattr(mobj, 'table_name', None):
                     type_to_table[ot] = mobj.table_name
         except Exception:
-            pass
+            _logger.warning('[Audit] object_type → table 映射解析失败', exc_info=True)
 
         for t, id_list in grouped.items():
             unique_ids = set(str(i) for i in id_list)
@@ -1019,6 +1019,7 @@ class AuditService:
                 try:
                     rows = self.ds.find(table_name, filters={'id': list(unique_ids)}) or []
                 except Exception:
+                    # silent-ok: find 不支持 id 过滤器时回退全表，属于预期降级
                     rows = self.ds.find(table_name) or []
                 for row in rows:
                     rid = str(row.get('id'))
@@ -1027,6 +1028,7 @@ class AuditService:
                         if dn:
                             result[f"{t}::{rid}"] = dn
             except Exception:
+                _logger.warning('[Audit] 批量解析显示名失败 table=%s', table_name, exc_info=True)
                 continue
 
         return result
@@ -1059,8 +1061,8 @@ class AuditService:
                     else:
                         child['_source'] = 'cascade_child'
                 records = list(records) + list(children_records)
-            except Exception as e:
-                pass
+            except Exception:
+                _logger.warning('[Audit] 子记录查询失败 object_type=%s', object_type, exc_info=True)
 
         for r in records:
             parent_type = r.get('parent_object_type')

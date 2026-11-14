@@ -61,6 +61,12 @@ const HTTP_STATUS_TO_ERROR_CODE = {
   504: ErrorCode.ERR_504_TIMEOUT,
 }
 
+// [FR-007/008] 记录后端 request_id，供 logger 上报时关联（ErrorBoundary / 全局错误）
+function _rememberRequestId(requestId) {
+  if (!requestId) return
+  if (typeof window !== 'undefined') window.__currentRequestId = requestId
+}
+
 // ---------------------------------------------------------------------------
 // 拦截器 & 回调
 // ---------------------------------------------------------------------------
@@ -183,6 +189,9 @@ function getCacheKey(method, url, body) {
 // 核心请求函数
 // ---------------------------------------------------------------------------
 const SLOW_REQUEST_THRESHOLD_MS = 1000
+// [FR-007] 默认超时：普通请求 15s，上传/下载 120s（AbortController 中断，不悬挂）
+const DEFAULT_TIMEOUT_MS = 15000
+const UPLOAD_TIMEOUT_MS = 120000
 
 /**
  * 统一请求入口
@@ -276,10 +285,12 @@ async function _doRequest(method, url, options, traceId, startTime) {
   // timeout: 通过 AbortController 实现
   let timeoutId = null
   let controller = null
-  if (options.timeout && !options.signal) {
+  const effectiveTimeout = options.timeout
+    || ((isFormData || options.responseType === 'blob') ? UPLOAD_TIMEOUT_MS : DEFAULT_TIMEOUT_MS)
+  if (effectiveTimeout && !options.signal) {
     controller = new AbortController()
     fetchOptions.signal = controller.signal
-    timeoutId = setTimeout(() => controller.abort(), options.timeout)
+    timeoutId = setTimeout(() => controller.abort(), effectiveTimeout)
   }
 
   // 执行请求拦截器
@@ -298,9 +309,12 @@ async function _doRequest(method, url, options, traceId, startTime) {
     const result = {
       success: false,
       data: null,
-      message: isTimeout ? '请求超时' : (isAbort ? '请求已取消' : '网络错误'),
+      message: isTimeout ? '请求超时，请稍后重试' : (isAbort ? '请求已取消' : '网络错误'),
       code: isTimeout ? ErrorCode.ERR_TIMEOUT : (isAbort ? ErrorCode.ERR_ABORT : ErrorCode.ERR_NETWORK),
+      errorCode: isTimeout ? ErrorCode.ERR_TIMEOUT : (isAbort ? ErrorCode.ERR_ABORT : ErrorCode.ERR_NETWORK),
+      requestId: traceId,
       traceId,
+      silent: options.silent === true,
     }
 
     for (const interceptor of responseInterceptors) {
@@ -329,8 +343,11 @@ async function _doRequest(method, url, options, traceId, startTime) {
       data: null,
       message: '未授权，请重新登录',
       code: ErrorCode.ERR_401_UNAUTHORIZED,
+      errorCode: ErrorCode.ERR_401_UNAUTHORIZED,
       httpStatus: 401,
+      requestId: traceId,
       traceId,
+      silent: options.silent === true,
     }
     for (const interceptor of responseInterceptors) {
       try { interceptor(result) } catch (_) { /* ignore */ }
@@ -356,8 +373,11 @@ async function _doRequest(method, url, options, traceId, startTime) {
         data: null,
         message: errorMsg,
         code: errorCode,
+        errorCode,
         httpStatus: resp.status,
+        requestId: traceId,
         traceId,
+        silent: options.silent === true,
       }
       for (const interceptor of responseInterceptors) {
         try { interceptor(result) } catch (_) { /* ignore */ }
@@ -387,8 +407,11 @@ async function _doRequest(method, url, options, traceId, startTime) {
       data: null,
       message: `响应解析失败 (status=${resp.status})`,
       code: ErrorCode.ERR_PARSE,
+      errorCode: ErrorCode.ERR_PARSE,
       httpStatus: resp.status,
+      requestId: traceId,
       traceId,
+      silent: options.silent === true,
     }
     for (const interceptor of responseInterceptors) {
       try { interceptor(result) } catch (_) { /* ignore */ }
@@ -398,22 +421,27 @@ async function _doRequest(method, url, options, traceId, startTime) {
 
   // 非 2xx
   if (!resp.ok) {
-    const errorCode = HTTP_STATUS_TO_ERROR_CODE[resp.status] || ErrorCode.ERR_UNKNOWN
+    const transportCode = HTTP_STATUS_TO_ERROR_CODE[resp.status] || ErrorCode.ERR_UNKNOWN
     const result = {
       success: false,
       data: body.data || body.errors || null,
       message: body.message || `请求失败: ${resp.status}`,
-      code: errorCode,
+      // [FR-007] `code` 不再被 HTTP 状态覆盖：后端给了业务码就保留，传输层码另存 errorCode
+      code: body.code || transportCode,
+      errorCode: transportCode,
       httpStatus: resp.status,
+      requestId: body.request_id || traceId,
       traceId,
+      silent: options.silent === true,
     }
     // [P1-Base-03] 透传后端结构化错误码（如 400 {"error":"SCOPE_CODE_INVALID", ...}），
     //   供 permissionService 识别 scopeCode 匹配失败并抛 ScopeCodeInvalidError（5.5.4 P0 红线）
     // 业务错误码与错误明细（契约响应 {success:false, code, message, details}）:
-    //   `code` 已被本次映射覆盖为 HTTP 状态码，故另存 businessCode 供调用方分流。
+    //   `code` 保留后端业务码（缺失时回落 HTTP 映射码），`errorCode` 恒为传输层码。
     if (body.code) {
       result.businessCode = body.code
     }
+    _rememberRequestId(result.requestId)
     if (body.details) {
       result.details = body.details
     }
@@ -446,10 +474,20 @@ async function _doRequest(method, url, options, traceId, startTime) {
     success: body.success !== undefined ? body.success : true,
     data: body.data !== undefined ? body.data : body,
     message: body.message || '',
+    requestId: body.request_id || traceId,
     traceId,
+    silent: options.silent === true,
   }
+  if (body.code) {
+    result.code = body.code
+    result.businessCode = body.code
+  }
+  _rememberRequestId(result.requestId)
   if (body.errors) {
     result.errors = body.errors
+  }
+  if (body.details) {
+    result.details = body.details
   }
   if (body.error_code) {
     result.error_code = body.error_code

@@ -192,7 +192,7 @@ def test_seal_without_permission_403(api):
 
     resp = _post(client, '/api/v1/handling-units/%s/seal' % hu_id)
     assert resp.status_code == 403
-    assert resp.get_json()['code'] == 'FORBIDDEN'
+    assert resp.get_json()['code'] == 'forbidden'
 
 
 def test_batch_seal_mixed_result_keeps_success(api):

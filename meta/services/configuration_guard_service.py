@@ -20,6 +20,7 @@ import logging
 import re
 from typing import Any, Dict, Mapping, Optional
 
+from meta.core.message_registry import t
 from meta.services.item_structure_guard_service import _is_blank, _to_decimal
 
 logger = logging.getLogger(__name__)
@@ -98,12 +99,13 @@ class ConfigurationGuardService:
 
         if old_status == 'superseded':
             raise ConfigurationGuardError(
-                '已被替代的实例不再接受修改',
+                t('validation.configuration.replaced_immutable'),
                 rule='configuration_locked', field_name='status')
 
         if status not in _TRANSITIONS.get(old_status, {old_status}):
             raise ConfigurationGuardError(
-                f'状态不能从 {old_status} 变为 {status}',
+                t('validation.configuration.status_transition_invalid',
+                  old_status=old_status, status=status),
                 rule='configuration_status_transition_invalid',
                 field_name='status')
 
@@ -111,7 +113,8 @@ class ConfigurationGuardService:
             changed = self._changed_fields(data, old)
             if changed - {'status'}:
                 raise ConfigurationGuardError(
-                    f"已冻结实例不可修改: {sorted(changed - {'status'})}",
+                    t('validation.configuration.frozen_locked',
+                      fields=sorted(changed - {'status'})),
                     rule='configuration_frozen_locked', field_name='status')
             return
 
@@ -119,7 +122,7 @@ class ConfigurationGuardService:
             if 'config_hash' in data and not _same(data.get('config_hash'),
                                                    old.get('config_hash')):
                 raise ConfigurationGuardError(
-                    'config_hash 在 solved 后不可修改；变更请生成新实例',
+                    t('validation.configuration.hash_immutable'),
                     rule='configuration_hash_immutable', field_name='config_hash')
 
     def validate_head_delete(self, configuration_id: Any) -> None:
@@ -129,7 +132,7 @@ class ConfigurationGuardService:
         status = str(head.get('status') or '')
         if status != 'draft':
             raise ConfigurationGuardError(
-                f'{status} 状态的配置实例不可删除',
+                t('validation.configuration.delete_locked', status=status),
                 rule='configuration_delete_locked', field_name='id')
 
     # ---------- configuration_value ----------

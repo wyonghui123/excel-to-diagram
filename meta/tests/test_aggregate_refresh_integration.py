@@ -336,7 +336,8 @@ class TestAggregateRefreshViaChangeNotification:
                 object_type TEXT, object_id INTEGER, event_type TEXT,
                 changed_fields TEXT, old_values TEXT, new_values TEXT,
                 payload TEXT, channels TEXT,
-                status TEXT, retry_count INTEGER,
+                status TEXT, status_reason TEXT, idempotency_key TEXT,
+                retry_count INTEGER,
                 created_at TEXT, delivered_at TEXT, audit_log_id INTEGER,
                 retention_until TEXT
             )

@@ -12,7 +12,6 @@
   · 不写 `fulfillment_status`（INV-1 唯一写入口仍归 sales_order_fulfillment_service）。
 """
 
-import json
 import logging
 from datetime import datetime
 from typing import Any, Dict, Optional
@@ -103,7 +102,7 @@ class FulfillmentOrderService:
         }
         fulfillment_id = self._insert(ORDERS_TABLE, row)
 
-        self._append_change_event(fulfillment_id, 'state_change',
+        self._append_change_event(fulfillment_id, 'state_changed',
                                   {'status': (None, status)})
         return {
             'id': fulfillment_id,
@@ -194,21 +193,23 @@ class FulfillmentOrderService:
 
     def _append_change_event(self, fulfillment_id: Any, event_type: str,
                              changes: Dict[str, Any]) -> None:
-        """§10.17 关系 C：复用 change_events（object_type='fulfillment_order'），fail-open。"""
+        """§10.17 关系 C：复用 change_events（object_type='fulfillment_order'），fail-open。
+
+        P1-a 统一发布入口：不再直插 change_events，改由
+        ChangeNotificationService.publish_event 落库 + 派发订阅。
+        """
         try:
-            changed_fields = list(changes.keys())
-            old_values = {k: v[0] for k, v in changes.items()}
-            new_values = {k: v[1] for k, v in changes.items()}
-            self._insert(CHANGE_EVENT_TABLE, {
-                'object_type': 'fulfillment_order',
-                'object_id': int(fulfillment_id),
-                'event_type': event_type,
-                'changed_fields': json.dumps(changed_fields, ensure_ascii=False),
-                'old_values': json.dumps(old_values, ensure_ascii=False),
-                'new_values': json.dumps(new_values, ensure_ascii=False),
-                'payload': None,
-                'status': 'pending',
-                'created_at': _now(),
-            })
+            from meta.services.change_notification_service import (
+                ChangeEventRequest, ChangeNotificationService,
+            )
+            ChangeNotificationService(self.ds).publish_event(ChangeEventRequest(
+                object_type='fulfillment_order',
+                object_id=int(fulfillment_id),
+                event_type=event_type,
+                old_data={k: v[0] for k, v in changes.items()},
+                new_data={k: v[1] for k, v in changes.items()},
+                changed_fields=list(changes.keys()),
+                force=True,
+            ))
         except Exception as e:  # 事件底座不可用时不阻断业务写入
             logger.warning('[fulfillment_order] 写入 change_event 失败: %s', e)

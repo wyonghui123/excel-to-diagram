@@ -9,6 +9,7 @@
 - Lazy import Prometheus (无硬依赖, fallback to log)
 """
 import logging
+import threading
 import time
 from typing import Dict, Optional
 
@@ -16,6 +17,10 @@ logger = logging.getLogger(__name__)
 
 # Counter dict (lazy)
 _prometheus_counters: Dict[str, any] = {}
+# [FR-010] 带标签计数器（code/endpoint、channel/result）与无 prometheus 时的内存镜像
+_prometheus_labeled: Dict[tuple, any] = {}
+_internal_labeled: Dict[tuple, int] = {}
+_INTERNAL_METRICS_LOCK = threading.Lock()
 
 OBS_COUNTERS = {
     # commit/rollback
@@ -102,7 +107,7 @@ def metrics_inc(counter_key: str, value: int = 1):
     if counter is not None:
         try:
             counter.inc(value)
-        except Exception:
+        except Exception:  # silent-ok: 指标失败不影响主流程
             pass
 
 
@@ -112,8 +117,68 @@ def metrics_set_state(state_code: int):
     if gauge is not None:
         try:
             gauge.set(state_code)
-        except Exception:
+        except Exception:  # silent-ok: 指标失败不影响主流程
             pass
+
+
+def _get_labeled_counter(name: str, description: str, labelnames: tuple):
+    key = (name, labelnames)
+    if key in _prometheus_labeled:
+        return _prometheus_labeled[key]
+    try:
+        from prometheus_client import Counter
+        obj = Counter(name, description, list(labelnames))
+        _prometheus_labeled[key] = obj
+        return obj
+    except ImportError:
+        return None
+
+
+def _record_internal_labeled(name: str, values: tuple, value: int = 1) -> None:
+    with _INTERNAL_METRICS_LOCK:
+        key = (name,) + tuple(values)
+        _internal_labeled[key] = _internal_labeled.get(key, 0) + value
+
+
+def metrics_labeled_inc(name: str, description: str, labelnames: tuple,
+                        values: tuple, value: int = 1) -> None:
+    """[FR-010] 通用带标签计数器；无 prometheus 时写入内存镜像供 /ops/metrics 使用。"""
+    _record_internal_labeled(name, values, value)
+    counter = _get_labeled_counter(name, description, labelnames)
+    if counter is None:
+        return
+    try:
+        counter.labels(*values).inc(value)
+    except Exception:  # silent-ok: 指标失败不影响主流程
+        pass
+
+
+def metrics_error_inc(error_code: str, endpoint: Optional[str] = None) -> None:
+    """error_total{code,endpoint} —— 所有 HTTP/系统错误计数。"""
+    metrics_labeled_inc(
+        'platform_error_total', 'Platform error count by code and endpoint',
+        ('code', 'endpoint'), (error_code or 'unknown', endpoint or 'unknown'),
+    )
+
+
+def metrics_alert_inc(channel: str, result: str) -> None:
+    """alert_total{channel,result} —— 告警投递结果计数。"""
+    metrics_labeled_inc(
+        'platform_alert_total', 'Alert delivery count by channel and result',
+        ('channel', 'result'), (channel or 'unknown', result or 'unknown'),
+    )
+
+
+def get_internal_metrics() -> Dict[str, Dict[str, int]]:
+    """返回无 prometheus 依赖的指标快照，供 /ops/metrics 使用。"""
+    with _INTERNAL_METRICS_LOCK:
+        snapshot = dict(_internal_labeled)
+    out: Dict[str, Dict[str, int]] = {}
+    for key, value in snapshot.items():
+        name, labels = key[0], key[1:]
+        bucket = out.setdefault(name, {})
+        bucket[','.join(labels)] = value
+    return out
 
 
 def log_tx_event(event_type: str, tx_id: Optional[str], status: str, detail: Optional[str]):

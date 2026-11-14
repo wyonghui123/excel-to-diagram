@@ -209,7 +209,7 @@ class AggregateManager:
             try:
                 self.ds.execute("ROLLBACK")
             except Exception:
-                pass
+                logger.warning("[AggregateManager] ROLLBACK 失败", exc_info=True)
             return 0
     
     def refresh_on_change(

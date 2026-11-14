@@ -48,7 +48,7 @@ class TestRequirePermissionDecorator:
             response = client.get('/test')
 
         assert response.status_code == 401
-        assert response.get_json()['error'] == 'UNAUTHORIZED'
+        assert response.get_json()['error_code'] == 'unauthorized'
 
     def test_has_permission_passes(self, authed_app):
         """TC-DEC-002: 有权限时正常访问"""
@@ -81,8 +81,8 @@ class TestRequirePermissionDecorator:
 
         assert response.status_code == 403
         data = response.get_json()
-        assert data['error'] == 'FORBIDDEN'
-        assert 'Permission denied' in data['message']
+        assert data['error_code'] == 'forbidden'
+        assert '权限' in data['message']
 
     def test_permission_check_exception_propagates(self, authed_app):
         """TC-DEC-004: 权限判定抛异常时在 TESTING 下向上传播"""

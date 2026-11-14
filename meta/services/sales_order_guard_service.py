@@ -132,6 +132,7 @@ import re
 from decimal import Decimal, InvalidOperation, ROUND_HALF_UP
 from typing import Any, Dict, Optional
 
+from meta.core.message_registry import t
 from meta.core.state_machine_loader import get_state_machine
 from meta.services import project_task_guard
 from meta.services.uom_quantity_service import UomQuantityService
@@ -365,14 +366,14 @@ class SalesOrderGuardService:
             current = self._load_fulfillment_status(data.get('id'))
             if current is not None and current not in CLOSE_ALLOWED_FULFILLMENT:
                 raise SalesOrderGuardError(
-                    f'订单尚未履约完成（当前 {current}），不能关闭',
+                    t('validation.sales_order.order_not_fulfilled', status=current),
                     field_name='fulfillment_status',
                     rule='ORDER_NOT_FULFILLED')
             # D46：开票进行中（partial）阻断关闭；none / full 放行
             billing_status = self._load_billing_status(data.get('id'))
             if billing_status == 'partial':
                 raise SalesOrderGuardError(
-                    '订单仍有未开票金额（billing_status=partial），不能关闭',
+                    t('validation.sales_order.order_billing_incomplete'),
                     field_name='billing_status', rule='ORDER_BILLING_INCOMPLETE')
             if billing_status == 'none':
                 logger.info(
@@ -387,7 +388,8 @@ class SalesOrderGuardService:
                     continue
                 if str(data.get(field)) != str(old.get(field)):
                     raise SalesOrderGuardError(
-                        f'订单已离开草稿态（{old_status}），不允许修改 {field}',
+                        t('validation.sales_order.field_frozen_after_draft',
+                          status=old_status, field_name=field),
                         field_name=field, rule='field_frozen_after_draft')
 
         # R9：确认后汇率快照冻结（汇率 / 汇率类型 / 汇率日期）
@@ -397,14 +399,14 @@ class SalesOrderGuardService:
             if 'exchange_rate' in data and new_rate is not None \
                     and old_rate is not None and new_rate != old_rate:
                 raise SalesOrderGuardError(
-                    '订单已确认，汇率快照已冻结，不可修改', field_name='exchange_rate',
-                    rule='exchange_rate_frozen')
+                    t('validation.sales_order.exchange_rate_frozen'),
+                    field_name='exchange_rate', rule='exchange_rate_frozen')
             for field in _EXCHANGE_SNAPSHOT_FIELDS:
                 if field == 'exchange_rate' or field not in data:
                     continue
                 if str(data.get(field) or '') != str(old.get(field) or ''):
                     raise SalesOrderGuardError(
-                        '订单已确认，汇率快照已冻结，不可修改',
+                        t('validation.sales_order.exchange_rate_frozen'),
                         field_name=field, rule='exchange_rate_frozen')
 
         # W0-R13：存在折算（exchange_rate != 1）时汇率日期必填；本币 rate = 1 允许留空

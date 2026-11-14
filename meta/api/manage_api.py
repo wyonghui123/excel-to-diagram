@@ -1,5 +1,5 @@
 from flask import Blueprint, request, g
-from meta.api._response_contract import ok, ok_message, error_response, json_response
+from meta.api._response_contract import ok, ok_message, error_response, json_response, normalize_error_code
 from meta.core.query_spec import parse_query_spec
 from meta.services.manage_service import ManageService, CreateRequest, UpdateRequest, DeleteRequest
 from meta.services.query_service import QueryService, SearchRequest, QueryCondition
@@ -193,7 +193,7 @@ def _set_audit_user():
                 from meta.services.token_service import TokenService
                 current_user = TokenService.verify_token(token)
             except Exception:
-                pass
+                logger.debug('[Manage] Bearer token 校验失败，按匿名处理', exc_info=True)
 
     current_user = current_user or {}
     user_id = current_user.get('user_id') or request.headers.get('X-User-Id')
@@ -228,14 +228,13 @@ def _set_audit_user():
 
 
 def _api_error(message, error_code='INTERNAL_ERROR', status_code=400, detail=None):
-    response = {
-        'success': False,
-        'error_code': error_code,
-        'message': message
-    }
-    if detail and os.environ.get('FLASK_DEBUG') == '1':
-        response['detail'] = detail
-    return json_response(response, status_code)
+    # [FR-004 2026-11-14] 收敛到统一错误出口
+    normalized = normalize_error_code(error_code)
+    if normalized == 'internal_error' and status_code == 400:
+        status_code = 500
+        message = '系统内部错误，请稍后重试'
+    details = {'detail': detail} if detail and os.environ.get('FLASK_DEBUG') == '1' else None
+    return error_response(message, error_code=normalized, status=status_code, details=details)
 
 
 def _api_success(data=None, message='Success', **kwargs):
@@ -452,7 +451,12 @@ def _apply_data_permission_filter(object_type, conditions):
 @_auth_required
 def create_record(object_type):
     if not _check_permission(object_type, "create"):
-        return json_response({'error': f'需要权限: {_get_permission_code(object_type, "create")}', 'code': 'FORBIDDEN'}, 403)
+        return error_response(
+            '您没有执行该操作的权限',
+            error_code='forbidden',
+            status=403,
+            details={'required_permission': _get_permission_code(object_type, "create")},
+        )
     _set_audit_user()
     data = request.get_json(silent=True) or {}
     
@@ -501,7 +505,12 @@ def create_record(object_type):
     
     if result.success:
         return ok(result.data, message=result.message), 201
-    return json_response({'success': False, 'data': result.data, 'message': result.message}, 400)
+    return error_response(
+        result.message or '创建失败',
+        error_code=getattr(result, 'code', None) or getattr(result, 'error', None) or 'data_invalid',
+        status=result.status_code or 400,
+        details=result.data,
+    )
 
 
 @manage_bp.route('/<object_type>/deep', methods=['POST'])
@@ -530,14 +539,19 @@ def deep_insert(object_type):
     }
     """
     if not _check_permission(object_type, "create"):
-        return json_response({'error': f'需要权限: {_get_permission_code(object_type, "create")}', 'code': 'FORBIDDEN'}, 403)
+        return error_response(
+            '您没有执行该操作的权限',
+            error_code='forbidden',
+            status=403,
+            details={'required_permission': _get_permission_code(object_type, "create")},
+        )
     
     _set_audit_user()
     body = request.get_json(silent=True) or {}
     
     meta_obj = registry.get(object_type)
     if not meta_obj:
-        return error_response(f'Object type not found: {object_type}', status=404)
+        return error_response(f'对象类型不存在：{object_type}', error_code='not_found', status=404)
     
     from meta.core.deep_insert_engine import DeepInsertEngine
     engine = DeepInsertEngine()
@@ -547,22 +561,28 @@ def deep_insert(object_type):
         return ok(result.data, message=result.message), 201
     else:
         status_code = 400
-        if result.data and result.data.get('rolled_back'):
+        rolled_back = bool(result.data and result.data.get('rolled_back'))
+        if rolled_back:
             status_code = 409
-        return json_response({
-            'success': False,
-            'message': result.message,
-            'error_code': 'TRANSACTION_ROLLBACK' if (result.data and result.data.get('rolled_back')) else 'DEEP_INSERT_FAILED',
-            'data': result.data,
-            'errors': result.errors,
-        }, status_code)
+        return error_response(
+            result.message or 'Deep Insert 失败',
+            error_code='TRANSACTION_ROLLBACK' if rolled_back else 'DEEP_INSERT_FAILED',
+            status=status_code,
+            errors=result.errors,
+            details=result.data,
+        )
 
 
 @manage_bp.route('/<object_type>/<id>', methods=['GET'])
 @_auth_required
 def get_record(object_type, id):
     if not _check_permission(object_type, "read"):
-        return json_response({'error': f'需要权限: {_get_permission_code(object_type, "read")}', 'code': 'FORBIDDEN'}, 403)
+        return error_response(
+            '您没有执行该操作的权限',
+            error_code='forbidden',
+            status=403,
+            details={'required_permission': _get_permission_code(object_type, "read")},
+        )
     conditions = [
         QueryCondition(field='id', operator='eq', value=int(id) if str(id).isdigit() else id)
     ]
@@ -647,7 +667,12 @@ def _get_single_record(table_name, record_id):
 @_auth_required
 def list_records(object_type):
     if not _check_permission(object_type, "read"):
-        return json_response({'error': f'需要权限: {_get_permission_code(object_type, "read")}', 'code': 'FORBIDDEN'}, 403)
+        return error_response(
+            '您没有执行该操作的权限',
+            error_code='forbidden',
+            status=403,
+            details={'required_permission': _get_permission_code(object_type, "read")},
+        )
     if object_type == 'relationship':
         return list_relationships()
 
@@ -742,7 +767,12 @@ def list_records(object_type):
 def list_records_post(object_type):
     """POST 方式的列表查询，用于参数过多导致 URL 过长的情况"""
     if not _check_permission(object_type, "read"):
-        return json_response({'error': f'需要权限: {_get_permission_code(object_type, "read")}', 'code': 'FORBIDDEN'}, 403)
+        return error_response(
+            '您没有执行该操作的权限',
+            error_code='forbidden',
+            status=403,
+            details={'required_permission': _get_permission_code(object_type, "read")},
+        )
     if object_type == 'relationship':
         return list_relationships()
 
@@ -848,7 +878,12 @@ def list_records_post(object_type):
 @_auth_required
 def update_record(object_type, id):
     if not _check_permission(object_type, "update"):
-        return json_response({'error': f'需要权限: {_get_permission_code(object_type, "update")}', 'code': 'FORBIDDEN'}, 403)
+        return error_response(
+            '您没有执行该操作的权限',
+            error_code='forbidden',
+            status=403,
+            details={'required_permission': _get_permission_code(object_type, "update")},
+        )
     _set_audit_user()
     data = request.get_json(silent=True) or {}
     
@@ -889,18 +924,24 @@ def update_record(object_type, id):
     result = _get_manage_service().update(req)
     if result.success:
         return ok(result.data, message=result.message)
-    payload = {'success': False, 'data': result.data, 'message': result.message}
-    # [G7 2026-11-02] 状态机等业务拒绝携带 error_code（如 STATE_MACHINE_VIOLATION）
-    if result.error:
-        payload['error_code'] = result.error
-    return json_response(payload, result.status_code or 400)
+    return error_response(
+        result.message or '更新失败',
+        error_code=getattr(result, 'code', None) or getattr(result, 'error', None) or 'data_invalid',
+        status=result.status_code or 400,
+        details=result.data,
+    )
 
 
 @manage_bp.route('/<object_type>/<id>', methods=['DELETE'])
 @_auth_required
 def delete_record(object_type, id):
     if not _check_permission(object_type, "delete"):
-        return json_response({'error': f'需要权限: {_get_permission_code(object_type, "delete")}', 'code': 'FORBIDDEN'}, 403)
+        return error_response(
+            '您没有执行该操作的权限',
+            error_code='forbidden',
+            status=403,
+            details={'required_permission': _get_permission_code(object_type, "delete")},
+        )
     _set_audit_user()
     force = request.args.get('force', 'false').lower() in ('true', '1', 'yes')
     cascade = request.args.get('cascade', 'false').lower() in ('true', '1', 'yes')
@@ -935,13 +976,18 @@ def delete_record(object_type, id):
 def recover_from_log(object_type, id):
     """从 audit_log 恢复已删除的记录"""
     if not _check_permission(object_type, "update"):
-        return json_response({'error': f'需要权限: {_get_permission_code(object_type, "update")}', 'code': 'FORBIDDEN'}, 403)
+        return error_response(
+            '您没有执行该操作的权限',
+            error_code='forbidden',
+            status=403,
+            details={'required_permission': _get_permission_code(object_type, "update")},
+        )
     
     _set_audit_user()
     
     meta_obj = registry.get(object_type)
     if not meta_obj:
-        return error_response(f'Object type not found: {object_type}', status=404)
+        return error_response(f'对象类型不存在：{object_type}', error_code='not_found', status=404)
     
     try:
         object_id = int(id)
@@ -1006,7 +1052,12 @@ def recover_from_log(object_type, id):
 def list_deleted_objects(object_type):
     """从 audit_log 查询已删除对象列表"""
     if not _check_permission(object_type, "read"):
-        return json_response({'error': f'需要权限: {_get_permission_code(object_type, "read")}', 'code': 'FORBIDDEN'}, 403)
+        return error_response(
+            '您没有执行该操作的权限',
+            error_code='forbidden',
+            status=403,
+            details={'required_permission': _get_permission_code(object_type, "read")},
+        )
     
     spec = parse_query_spec(request.args)
     page, per_page = spec.page, spec.page_size
@@ -1072,7 +1123,7 @@ def list_deleted_objects(object_type):
                     if user_record:
                         deleted_by_name = user_record.get('name', user_record.get('username', ''))
                 except Exception:
-                    pass
+                    logger.debug('[Manage] 解析删除人名称失败 id=%s', deleted_by_id, exc_info=True)
             
             items.append({
                 'object_id': oid,
@@ -1189,13 +1240,13 @@ def list_actions(object_type, id):
     """获取对象可执行的 Action 列表"""
     meta_obj = registry.get(object_type)
     if not meta_obj:
-        return error_response(f'Object type not found: {object_type}', status=404)
+        return error_response(f'对象类型不存在：{object_type}', error_code='not_found', status=404)
 
     record = None
     try:
         record = _data_source.find_by_id(meta_obj.table_name, id)
     except Exception:
-        pass
+        logger.warning('[Manage] 查询记录失败 table=%s id=%s', meta_obj.table_name, id, exc_info=True)
 
     if not record:
         return error_response('记录不存在', status=404)
@@ -1241,7 +1292,7 @@ def execute_action(object_type, id, action_id):
     """执行自定义 Action"""
     meta_obj = registry.get(object_type)
     if not meta_obj:
-        return error_response(f'Object type not found: {object_type}', status=404)
+        return error_response(f'对象类型不存在：{object_type}', error_code='not_found', status=404)
 
     action = meta_obj.get_action(action_id)
     if not action:
@@ -1254,12 +1305,18 @@ def execute_action(object_type, id, action_id):
 
     result = _get_manage_service().executor.execute(meta_obj, action_id, params)
 
-    return json_response({
-        'success': result.success,
-        'data': result.data,
-        'message': result.message,
-        'error': result.error,
-    }, 200 if result.success else 400)
+    if result.success:
+        return json_response({
+            'success': True,
+            'data': result.data,
+            'message': result.message,
+        })
+    return error_response(
+        result.message or '操作执行失败',
+        error_code=getattr(result, 'code', None) or getattr(result, 'error', None) or 'action_handler_error',
+        status=result.status_code or 400,
+        errors=getattr(result, 'errors', None),
+    )
 
 
 
@@ -1272,7 +1329,7 @@ def get_state_transitions(object_type, id):
     """获取当前可用的状态转换规则"""
     meta_obj = registry.get(object_type)
     if not meta_obj:
-        return error_response(f'Object type not found: {object_type}', status=404)
+        return error_response(f'对象类型不存在：{object_type}', error_code='not_found', status=404)
     
     try:
         object_id = int(id)
@@ -1327,7 +1384,7 @@ def get_state_history(object_type, id):
     
     meta_obj = registry.get(object_type)
     if not meta_obj:
-        return error_response(f'Object type not found: {object_type}', status=404)
+        return error_response(f'对象类型不存在：{object_type}', error_code='not_found', status=404)
     
     field = request.args.get('field', 'status')
     
@@ -1391,7 +1448,7 @@ def get_state_history(object_type, id):
                 duration_seconds = (curr_dt - prev_dt).total_seconds()
                 record['duration_in_prev_state'] = round(duration_seconds / 86400, 2)
             except Exception:
-                pass
+                logger.debug('[Manage] 计算状态停留时长失败', exc_info=True)
         
         result.append(record)
     
@@ -1406,7 +1463,7 @@ def get_stage_metrics(object_type, id):
     
     meta_obj = registry.get(object_type)
     if not meta_obj:
-        return error_response(f'Object type not found: {object_type}', status=404)
+        return error_response(f'对象类型不存在：{object_type}', error_code='not_found', status=404)
     
     field = request.args.get('field', 'status')
     
@@ -1455,7 +1512,7 @@ def get_stage_metrics(object_type, id):
                 entered_dt = current_state_entered_at
             current_duration_days = round((datetime.now() - entered_dt).total_seconds() / 86400, 2)
         except Exception:
-            pass
+            logger.debug('[Manage] 计算当前状态时长失败', exc_info=True)
     
     sql = """
         SELECT old_value, new_value, created_at
@@ -1499,7 +1556,7 @@ def get_stage_metrics(object_type, id):
                     stage_breakdown[from_state]['duration_days'] += duration
                     total_days += duration
             except Exception:
-                pass
+                logger.debug('[Manage] 计算阶段时长失败', exc_info=True)
     
     total_days += current_duration_days
     if current_state:

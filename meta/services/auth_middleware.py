@@ -4,7 +4,8 @@
 """
 
 from functools import wraps
-from flask import request, g, jsonify, make_response, current_app
+from flask import request, g, make_response, current_app
+from meta.api._response_contract import error_response
 from meta.services.token_service import TokenService
 from meta.services.token_blacklist_service import token_blacklist_service
 from meta.core.permission_gate import evaluate_code, evaluate
@@ -42,23 +43,23 @@ def login_required(f):
         token = _extract_token()
 
         if not token:
-            return jsonify({'error': '未登录', 'code': 'UNAUTHORIZED'}), 401
+            return error_response('请先登录后再操作', error_code='unauthorized', status=401)
 
         try:
             if token_blacklist_service.is_blacklisted(token):
-                return jsonify({'error': 'Token已失效', 'code': 'TOKEN_INVALID'}), 401
+                return error_response('登录凭证已失效，请重新登录', error_code='token_blacklisted', status=401)
         except Exception:
-            return jsonify({'error': '认证服务异常', 'code': 'AUTH_SERVICE_ERROR'}), 401
+            return error_response('认证服务暂时不可用，请稍后重试', error_code='auth_service_error', status=401)
 
         user_info = TokenService.verify_token(token)
         if not user_info:
-            return jsonify({'error': '登录已过期', 'code': 'TOKEN_EXPIRED'}), 401
+            return error_response('登录已过期，请重新登录', error_code='token_expired', status=401)
 
         from meta.services.token_version_service import token_version_service
         user_id = user_info.get('user_id', 0)
         token_version = user_info.get('token_version', 0)
         if user_id and token_version and not token_version_service.check(user_id, token_version):
-            return jsonify({'error': '权限已变更，请重新登录', 'code': 'TOKEN_STALE'}), 401
+            return error_response('权限已变更，请重新登录', error_code='stale_session', status=401)
 
         g.current_user = user_info
 
@@ -89,11 +90,12 @@ def require_permission(permission_code: str):
 
             # [FR-005] 功能权限判定统一走 PermissionGate
             if not evaluate_code(g.current_user, permission_code):
-                return jsonify({
-                    'error': f'需要权限: {permission_code}',
-                    'code': 'FORBIDDEN',
-                    'required_permission': permission_code
-                }), 403
+                return error_response(
+                    '您没有执行该操作的权限',
+                    error_code='forbidden',
+                    status=403,
+                    details={'required_permission': permission_code},
+                )
 
             return f(*args, **kwargs)
         return decorated
@@ -116,11 +118,12 @@ def require_permission_any(*permission_codes):
 
             # [FR-005] 功能权限判定统一走 PermissionGate
             if not any(evaluate_code(g.current_user, code) for code in permission_codes):
-                return jsonify({
-                    'error': f'需要权限之一: {", ".join(permission_codes)}',
-                    'code': 'FORBIDDEN',
-                    'required_permission_any': list(permission_codes)
-                }), 403
+                return error_response(
+                    '您没有执行该操作的权限',
+                    error_code='forbidden',
+                    status=403,
+                    details={'required_permission_any': list(permission_codes)},
+                )
 
             return f(*args, **kwargs)
         return decorated
@@ -147,13 +150,16 @@ def require_permission_unified(resource_type: str, action_code: str):
 
             # [FR-005] 功能权限判定统一走 PermissionGate
             if not evaluate_code(g.current_user, permission_code):
-                return jsonify({
-                    'error': f'需要权限: {permission_code}',
-                    'code': 'FORBIDDEN',
-                    'required_permission': permission_code,
-                    'resource_type': resource_type,
-                    'action_code': action_code
-                }), 403
+                return error_response(
+                    '您没有执行该操作的权限',
+                    error_code='forbidden',
+                    status=403,
+                    details={
+                        'required_permission': permission_code,
+                        'resource_type': resource_type,
+                        'action_code': action_code,
+                    },
+                )
 
             return f(*args, **kwargs)
         return decorated

@@ -39,6 +39,7 @@
 <script setup>
 import { ref, computed } from 'vue'
 import { useRouter } from 'vue-router'
+import { logger } from '@/utils/logger'
 
 const props = defineProps({
   /** 是否在开发环境显示堆栈 */
@@ -66,8 +67,9 @@ const errorStack = computed(() => {
 import { onErrorCaptured } from 'vue'
 onErrorCaptured((err, instance, info) => {
   error.value = err
-  // 上报已由 main.js 的 app.config.errorHandler 处理
-  // 此处只负责显示 fallback UI
+  // [FR-008] 携带组件名 + info 上报；logger 会自动补 traceId / requestId / 路由
+  const componentName = instance?.$?.type?.__name || instance?.$?.type?.name || 'unknown'
+  logger.error('[ErrorBoundary]', componentName, info, err)
   return false
 })
 

@@ -4,6 +4,7 @@ from typing import Dict, Any, List, Optional
 from meta.core.safe_expr_evaluator import safe_evaluate
 
 from meta.core.action_context import ActionContext
+from meta.core.message_registry import t
 
 logger = logging.getLogger(__name__)
 
@@ -63,7 +64,8 @@ class ConstraintEngine:
                             if old_value is not None and str(old_value) != str(new_value):
                                 violations.append(ConstraintViolation(
                                     field_id=field_id,
-                                    message=f"{field.name}创建后不可修改",
+                                    message=t('validation.field.immutable',
+                                              field_name=field.name),
                                     constraint_type='immutable',
                                 ))
 
@@ -130,7 +132,9 @@ class ConstraintEngine:
             cursor = context.data_source.execute(sql, params)
             existing = cursor.fetchone()
             if existing:
-                message = constraint.get('message', f"{field.name}在范围内不唯一")
+                message = constraint.get(
+                    'message',
+                    t('validation.field.unique_scope', field_name=field.name))
                 return ConstraintViolation(
                     field_id=field.id,
                     message=message,
@@ -153,7 +157,9 @@ class ConstraintEngine:
         if context.old_data:
             old_value = context.old_data.get(field_id)
             if old_value is not None and str(old_value) != str(new_value):
-                message = constraint.get('message', f"{field.name}不可修改")
+                message = constraint.get(
+                    'message',
+                    t('validation.field.immutable', field_name=field.name))
                 return ConstraintViolation(
                     field_id=field_id,
                     message=message,
@@ -173,7 +179,10 @@ class ConstraintEngine:
             if value:
                 trigger_value = constraint.get('trigger_value', True)
                 if self._values_match(value, trigger_value):
-                    message = constraint.get('message', f"该记录不可删除（{field.name}={value}）")
+                    message = constraint.get(
+                        'message',
+                        t('validation.field.no_delete',
+                          field_name=field.name, value=value))
                     return ConstraintViolation(
                         field_id=field_id,
                         message=message,
@@ -265,6 +274,9 @@ class ConstraintEngine:
         # 条件满足但字段为空 → 违反约束
         return ConstraintViolation(
             field_id=field_id,
-            message=constraint.get('message', f'{getattr(field, "name", field_id)}为条件必填字段'),
+            message=constraint.get(
+                'message',
+                t('validation.field.conditional_required',
+                  field_name=getattr(field, "name", field_id))),
             constraint_type='conditional_required',
         )

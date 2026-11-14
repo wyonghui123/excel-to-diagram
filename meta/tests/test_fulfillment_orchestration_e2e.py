@@ -136,7 +136,9 @@ CREATE TABLE service_events (
 CREATE TABLE change_events (
     id INTEGER PRIMARY KEY AUTOINCREMENT, object_type TEXT, object_id INTEGER,
     event_type TEXT, changed_fields TEXT, old_values TEXT, new_values TEXT,
-    payload TEXT, status TEXT, created_at TEXT
+    payload TEXT, channels TEXT, status TEXT, retry_count INTEGER DEFAULT 0,
+    created_at TEXT, delivered_at TEXT, audit_log_id INTEGER,
+    retention_until TEXT
 );
 CREATE TABLE item_structures (
     id INTEGER PRIMARY KEY, item_id INTEGER, usage TEXT,

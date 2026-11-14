@@ -253,6 +253,6 @@ class TestAuth:
 
         assert resp.status_code == 401
         payload = resp.get_json()
-        assert payload['code'] == 'UNAUTHORIZED'
+        assert payload['code'] == 'unauthorized'
         assert 'list_revisions' not in env.service.calls
         assert 'diff' not in env.service.calls

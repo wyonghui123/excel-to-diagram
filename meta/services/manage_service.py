@@ -403,7 +403,7 @@ class ManageService:
                 check_meta_object_status_update(meta_obj, old_data, params)
             except TaskTransitionError as e:
                 return ActionResult.fail(
-                    error="STATE_MACHINE_VIOLATION",
+                    code="STATE_MACHINE_VIOLATION",
                     message=str(e),
                     status_code=400,
                 )

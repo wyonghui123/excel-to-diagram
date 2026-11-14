@@ -499,7 +499,7 @@ class PermissionDerivationPipeline:
                         if bo_id in bo_conditions:
                             bo_conditions[bo_id] = dyn_sql
             except Exception:
-                pass
+                logger.warning('[Derivation] 维度权限配置加载失败，回退静态条件', exc_info=True)
 
         # [P5 修复 2026-07-26] 提取 exclude 配置 (用于附加到 data_scope.exclude)
         # 这样 IntentScopeAdapter 在 read 时会生成 NOT (id IN (...)) 条件

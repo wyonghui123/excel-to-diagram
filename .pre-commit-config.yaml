@@ -1,8 +1,11 @@
-# Pre-commit hooks for AI content protection
+# Pre-commit hooks for AI content protection + 静态检查
 # 自动阻止包含问题内容的代码被提交
 #
-# 安装: pre-commit install
+# 安装: pip install -r requirements-dev.txt && pre-commit install
 # 跳过: git commit --no-verify
+#
+# 路径约定: entry 中的相对路径以仓库根目录为基准（pre-commit 的运行 cwd），
+# 不要再写 d:/filework/... 这类本机绝对路径。
 
 repos:
   - repo: local
@@ -10,7 +13,7 @@ repos:
       # 1. AI 内容防护检查
       - id: scan-ai-content
         name: AI Content Protection (CRITICAL/HIGH)
-        entry: python d:/filework/scan_ai_content.py
+        entry: python ../scan_ai_content.py
         language: system
         pass_filenames: true
         types_or: [python, javascript, ts, tsx, vue, css, html]
@@ -19,27 +22,46 @@ repos:
       # 2. AI 内容防护严格模式（包含 MEDIUM）
       - id: scan-ai-content-strict
         name: AI Content Protection (Strict)
-        entry: python d:/filework/scan_ai_content.py --strict
+        entry: python ../scan_ai_content.py --strict
         language: system
         pass_filenames: false
         always_run: true
         stages: [pre-push]
 
-      # 3. 自动修复 + 提示
-      - id: fix-ai-content
-        name: Auto-fix AI Content (Dry Run)
-        entry: python d:/filework/fix_ai_content.py --dry-run --force
+      # 3. Python 语法错误 —— 阻断（模板文件含占位符，不参与解析）
+      - id: ruff-syntax
+        name: Ruff (E9 syntax-error)
+        entry: python -m ruff check --select E9 --force-exclude
         language: system
+        types_or: [python]
         pass_filenames: true
-        stages: [manual]
+        exclude: ^meta/(api/API_TEMPLATE\.py|tests/_tools/SUGGESTED_TEST_CASES\.py)$
+        stages: [pre-commit]
 
-      # 4. 编码检查（防止 GBK 文件混入）
-      # [removed 2026-09-18] check_encoding.py no longer exists; hook fails every commit
+      # 4. 未定义名 / 未使用导入 —— 只提示不阻断
+      #    存量基线: F821 x58, F401 大量；清零后再把 F821 提升为阻断
+      - id: ruff-advisory
+        name: Ruff (F821 + F401, advisory)
+        entry: python -m ruff check --select F821,F401 --exit-zero --force-exclude
+        language: system
+        types_or: [python]
+        pass_filenames: true
+        exclude: ^meta/(api/API_TEMPLATE\.py|tests/_tools/SUGGESTED_TEST_CASES\.py)$
+        stages: [pre-commit]
 
-      # 5. 规范文件 Emoji 检查
+      # 5. 元模型 YAML 与生成物漂移检查
+      - id: schema-drift
+        name: Schema drift (YAML -> generated_schema.sql)
+        entry: python -m meta.tools.sync_schema --check --against snapshot
+        language: system
+        pass_filenames: false
+        files: ^meta/schemas/.*\.(yaml|yml|sql)$
+        stages: [pre-commit]
+
+      # 6. 规范文件 Emoji 检查
       - id: scan-rules-emoji
         name: Scan Rules Emoji
-        entry: python d:/filework/scan_ai_content.py d:/filework/excel-to-diagram/.trae/rules/
+        entry: python ../scan_ai_content.py .trae/rules/
         language: system
         pass_filenames: false
         always_run: true

@@ -31,6 +31,7 @@ import multiprocessing
 import os
 import sys
 import time
+import json
 import sqlite3
 import atexit
 import signal
@@ -162,8 +163,25 @@ def _is_pid_alive(pid):
             return False
 
 
+def _emit_startup_failure(error_code, message, suggestion, details=None):
+    """[FR-014] 启动失败结构化输出（JSON + 中文修复建议），由调用方 sys.exit(1)。"""
+    payload = {
+        'event': 'startup_failure',
+        'success': False,
+        'error_code': error_code,
+        'message': message,
+        'suggestion': suggestion,
+        'details': details or {},
+    }
+    print(json.dumps(payload, ensure_ascii=False))
+    print(f'[WAITRESS][P0 启动失败] {message}')
+    for key, value in (details or {}).items():
+        print(f'  {key}: {value}')
+    print(f'  建议: {suggestion}')
+
+
 def _check_db_integrity_at_startup():
-    """[DECORATIVE] 启动时 fail-fast integrity check, 损坏则不启动。"""
+    """[DECORATIVE] 启动时 fail-fast integrity check, 损坏/被锁则不启动。"""
     db_path = os.path.join(
         os.path.dirname(os.path.abspath(__file__)),
         'meta', 'architecture.db'
@@ -175,14 +193,32 @@ def _check_db_integrity_at_startup():
         result = conn.execute("PRAGMA integrity_check").fetchone()
         conn.close()
         if result and result[0] != 'ok':
-            print(f'[WAITRESS][P0 启动失败] DB 完整性校验失败: {result[0]}')
-            print(f'  DB 路径: {db_path}')
-            print(f'  解决方案: python d:\\filework\\test.py --force-recover-db')
+            _emit_startup_failure(
+                'startup_db_corrupted', f'DB 完整性校验失败: {result[0]}',
+                'python d:\\filework\\test.py --force-recover-db',
+                {'DB 路径': db_path},
+            )
             sys.exit(1)
+    except sqlite3.OperationalError as e:
+        if 'locked' in str(e).lower() or 'busy' in str(e).lower():
+            _emit_startup_failure(
+                'startup_db_locked', 'DB 被锁定（其他进程正在写库，无法启动）',
+                'python scripts/service_manager.py doctor --fix 清理残留锁后重启服务',
+                {'DB 路径': db_path, '错误详情': str(e)},
+            )
+            sys.exit(1)
+        _emit_startup_failure(
+            'startup_db_unavailable', f'DB 不可用: {e}',
+            'python scripts/service_manager.py doctor --fix',
+            {'DB 路径': db_path},
+        )
+        sys.exit(1)
     except sqlite3.DatabaseError as e:
-        print(f'[WAITRESS][P0 启动失败] DB 已损坏: {e}')
-        print(f'  DB 路径: {db_path}')
-        print(f'  解决方案: python d:\\filework\\test.py --force-recover-db')
+        _emit_startup_failure(
+            'startup_db_corrupted', f'DB 已损坏: {e}',
+            'python d:\\filework\\test.py --force-recover-db',
+            {'DB 路径': db_path},
+        )
         sys.exit(1)
 
 
@@ -199,9 +235,11 @@ def _on_starting():
 
     # [DECORATIVE] 获取跨进程文件锁
     if not _acquire_db_lock():
-        print(f'[WAITRESS][P0 启动失败] DB 锁被占用, 退出')
-        print(f'  锁文件: {_DB_LOCK_FILE}')
-        print(f'  解决方案: 杀掉所有 meta.server.py 进程后重试, 或删除锁文件')
+        _emit_startup_failure(
+            'startup_db_locked', 'DB 锁被占用，无法启动（已有其他服务实例持有 DB 锁）',
+            'python scripts/service_manager.py doctor --fix 清理残留锁后重启服务',
+            {'锁文件': _DB_LOCK_FILE},
+        )
         sys.exit(1)
     print(f'[WAITRESS] DB process lock acquired: {_DB_LOCK_FILE}')
 

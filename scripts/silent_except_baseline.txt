@@ -1,0 +1,407 @@
+# FR-011 静默异常基线（由 scripts/lint_silent_except.py --update-baseline 生成）
+# 格式：文件|函数|异常类型||出现次数
+meta/api/_audit_helper.py|_enrich_data|Exception||1
+meta/api/annotation_routes_api.py|_get_annotation_category_labels|Exception||1
+meta/api/annotation_routes_api.py|_get_valid_annotation_categories|Exception||1
+meta/api/annotation_routes_api.py|_set_audit_user_for_annotation|Exception||1
+meta/api/association_api.py|get_deletion_policy|Exception||1
+meta/api/audit_api.py|_format_field_value|(ValueError, TypeError)||1
+meta/api/audit_api.py|_format_field_value|Exception||1
+meta/api/audit_api.py|_generate_business_key|(ValueError, TypeError)||1
+meta/api/audit_api.py|_get_field_name_label|Exception||1
+meta/api/audit_api.py|_get_object_type_label|Exception||1
+meta/api/audit_api.py|get_audit_logs|Exception||1
+meta/api/bo_api.py|_read_audit_log_via_v1|Exception||1
+meta/api/bo_api.py|_set_user_context|Exception||1
+meta/api/bo_api.py|get_bo_revision|(TypeError, ValueError)||1
+meta/api/bo_api.py|get_role_unified_permissions|bare||2
+meta/api/db_admin_api.py|db_health|Exception||3
+meta/api/diagnostics_api.py|_build_dim_scope_stats|Exception||1
+meta/api/diagnostics_api.py|_build_dim_scope_stats|ImportError||1
+meta/api/diagnostics_api.py|build_diagnostics|Exception||4
+meta/api/enum_api.py|create_enum_type|bare||1
+meta/api/enum_api.py|delete_enum_type|bare||1
+meta/api/enum_api.py|delete_enum_value|bare||1
+meta/api/enum_api.py|get_enum_value|bare||2
+meta/api/enum_api.py|list_enum_values|bare||2
+meta/api/enum_api.py|query_enum_values|bare||2
+meta/api/enum_api.py|update_enum_type|bare||1
+meta/api/export_import_api.py|export_data_async|Exception||1
+meta/api/export_import_api.py|import_data_async._run_import|Exception||1
+meta/api/export_import_api.py|import_data_async|Exception||1
+meta/api/ops_api.py|_db_checks|Exception||1
+meta/api/org_api.py|_bump_org_subtree_users|Exception||1
+meta/api/permission_dimension_api.py|get_permission_meta|Exception||1
+meta/api/permission_set_menu_api.py|_derive_bo_permission_groups|Exception||1
+meta/api/permission_set_menu_api.py|get_permission_set_menu_permissions|bare||2
+meta/api/permission_set_menu_api.py|update_permission_set_menu_permissions|Exception||2
+meta/api/role_menu_api.py|_derive_bo_permission_groups|Exception||1
+meta/api/role_menu_api.py|get_role_menu_permissions|bare||2
+meta/api/role_menu_api.py|update_role_menu_permissions|Exception||1
+meta/api/special_routes_api.py|_compute_relation_stats|Exception||1
+meta/api/stats_api.py|_get_user_domain_scopes|(json.JSONDecodeError, TypeError)||1
+meta/api/test_api.py|ready|Exception||1
+meta/core/action_executor.py|_check_reverse_fk_references|Exception||1
+meta/core/action_executor.py|_check_write_scope|(ImportError, RuntimeError)||1
+meta/core/action_executor.py|_check_write_scope|Exception||1
+meta/core/action_executor.py|_current_actor|(ImportError, RuntimeError)||1
+meta/core/action_executor.py|_do_delete|Exception||1
+meta/core/action_executor.py|_do_delete|bare||1
+meta/core/action_executor.py|_do_list|Exception||2
+meta/core/action_executor.py|_do_update|bare||1
+meta/core/action_executor.py|_enrich_read_record|Exception||1
+meta/core/action_executor.py|_execute_declarative_business|Exception||3
+meta/core/action_executor.py|_make_fk_message|Exception||1
+meta/core/action_executor.py|_resolve_field_display_name|Exception||1
+meta/core/action_executor.py|_resolve_handler|Exception||1
+meta/core/action_executor.py|_resolve_parent_context_for_addability|Exception||1
+meta/core/action_executor.py|_validate_business_key_uniqueness|Exception||1
+meta/core/action_executor.py|_write_audit_log_v2|(ImportError, RuntimeError)||1
+meta/core/action_executor.py|_write_audit_log_v2|Exception||2
+meta/core/action_executor.py|_write_audit_log_v2|RuntimeError||1
+meta/core/action_executor.py|log|Exception||1
+meta/core/action_executor.py|translate_error_message|Exception||1
+meta/core/aggregate_manager.py|_load_state|Exception||1
+meta/core/aggregate_manager.py|get_freshness|(ValueError, TypeError)||1
+meta/core/aggregate_manager.py|refresh|(ValueError, TypeError)||1
+meta/core/audit_derived_fields.py|_object_type_to_table_name|Exception||1
+meta/core/bo_framework.py|__exit__|ImportError||1
+meta/core/bo_framework.py|commit|Exception||1
+meta/core/bo_framework.py|rollback|Exception||1
+meta/core/cdc_bus.py|unsubscribe|ValueError||1
+meta/core/constraint_engine.py|_values_match|(ValueError, TypeError)||2
+meta/core/datasource.py|_clear_data_source_cache_for_testing|Exception||1
+meta/core/datasource.py|create|Exception||1
+meta/core/datasource.py|get_data_source|Exception||3
+meta/core/datasource.py|get_platform_data_source|Exception||1
+meta/core/db_corruption_monitor.py|_log_corruption|Exception||1
+meta/core/db_corruption_monitor.py|log_access|Exception||1
+meta/core/db_health_monitor.py|_count_temp_files|Exception||1
+meta/core/db_health_monitor.py|_detect_concurrent|Exception||1
+meta/core/db_heartbeat.py|<module>|OSError||1
+meta/core/db_heartbeat.py|_record_failure|ImportError||1
+meta/core/declaration_guard.py|_row_value|Exception||1
+meta/core/derivation_pipeline.py|_get_wildcard_affected_bos|ValueError||1
+meta/core/derivation_pipeline.py|_load_dim_scope_configs|Exception||1
+meta/core/derivation_pipeline.py|_load_manual_intents|sqlite3.Error||1
+meta/core/derivation_pipeline.py|_load_object_owd|sqlite3.Error||1
+meta/core/derivation_pipeline.py|_load_role_actions_for_dim|Exception||1
+meta/core/derivation_pipeline.py|_load_role_menus|sqlite3.Error||1
+meta/core/derivation_pipeline.py|_parse_conditions|(json.JSONDecodeError, TypeError)||1
+meta/core/dim_scope_overlap_detector.py|_parse_condition|(json.JSONDecodeError, TypeError)||1
+meta/core/enrichment_engine.py|enrich_fk_display_names|Exception||2
+meta/core/error_handlers.py|_observe_error|Exception||1
+meta/core/incremental_index_strategy.py|_get_existing_index_info|Exception||1
+meta/core/index_management_service.py|_get_existing_indexes|Exception||1
+meta/core/index_monitor.py|_get_existing_indexes|Exception||1
+meta/core/interceptors/audit_interceptor.py|_resolve_canonical_user_name|RuntimeError||1
+meta/core/interceptors/context_interceptor.py|before_action|Exception||1
+meta/core/interceptors/data_permission_interceptor.py|_apply_scope_filter|Exception||1
+meta/core/interceptors/data_permission_interceptor.py|_is_admin|Exception||1
+meta/core/interceptors/key_template_interceptor.py|_resolve_parent_fields|Exception||1
+meta/core/interceptors/org_scope_interceptor.py|_is_admin|Exception||1
+meta/core/interceptors/owner_chain_interceptor.py|_check_owner_chain|(TypeError, ValueError)||1
+meta/core/interceptors/owner_chain_interceptor.py|before_action|Exception||2
+meta/core/interceptors/permission_interceptor.py|_check_chain_read|Exception||2
+meta/core/interceptors/permission_interceptor.py|_check_parent_read_advisory|Exception||2
+meta/core/interceptors/permission_interceptor.py|after_action|Exception||1
+meta/core/interceptors/permission_interceptor.py|on_error|ImportError||1
+meta/core/interceptors/persistence_interceptor.py|_resolve_pagination|(ValueError, TypeError)||1
+meta/core/interceptors/version_context_interceptor.py|_resolve_version_id|(ValueError, TypeError, RuntimeError)||1
+meta/core/interceptors/version_context_interceptor.py|_resolve_version_id|Exception||1
+meta/core/interceptors/write_scope_interceptor.py|_add_response_header|Exception||1
+meta/core/interceptors/write_scope_interceptor.py|_check_visibility|Exception||1
+meta/core/interceptors/write_scope_interceptor.py|_get_user_perm_codes|Exception||1
+meta/core/interceptors/write_scope_interceptor.py|_get_user_role_ids|Exception||2
+meta/core/interceptors/write_scope_interceptor.py|_log_rel_func_perm_warning|Exception||1
+meta/core/key_template_engine.py|_ensure_table|Exception||1
+meta/core/key_template_engine.py|_should_reset|(ValueError, TypeError)||1
+meta/core/key_template_engine.py|generate_code|Exception||1
+meta/core/key_template_engine.py|preview_code|Exception||1
+meta/core/maintenance_scheduler.py|_record_run_outcome|Exception||2
+meta/core/metadata_driven_validator.py|_check_business_key_composite|Exception||1
+meta/core/metadata_driven_validator.py|_check_unique_indexes|Exception||1
+meta/core/metadata_driven_validator.py|_check_unique|Exception||1
+meta/core/migration_runner.py|_execute_py_migration|(ValueError, TypeError)||1
+meta/core/migration_runner.py|acquire_migration_lock|Exception||3
+meta/core/models.py|reload|Exception||1
+meta/core/monitor_runner.py|_alert|Exception||1
+meta/core/monitor_runner.py|_resolve|Exception||1
+meta/core/number_sequence_engine.py|_coerce_date|ValueError||1
+meta/core/orphan_tx_detector.py|_recover_orphan|Exception||1
+meta/core/permission_audit.py|clear_permission_decisions|Exception||1
+meta/core/permission_audit.py|log_permission_decision|Exception||1
+meta/core/permission_benchmark_suite.py|benchmark_check_multi_role|Exception||1
+meta/core/permission_benchmark_suite.py|benchmark_check_single|Exception||1
+meta/core/permission_benchmark_suite.py|benchmark_derive_multi_roles|Exception||1
+meta/core/permission_benchmark_suite.py|benchmark_derive_role|Exception||1
+meta/core/permission_label.py|get_permission_label|Exception||1
+meta/core/permission_rule_v2_dao.py|_row_to_dict|(json.JSONDecodeError, TypeError)||1
+meta/core/query_builder.py|_convert_value|(ValueError, TypeError)||1
+meta/core/reference_restrict_checker.py|_fallback_message|Exception||1
+meta/core/rule_executor.py|_execute_enrichment|bare||1
+meta/core/safe_connect.py|_reconnect|Exception||1
+meta/core/safe_connect.py|close|Exception||2
+meta/core/safe_connect.py|safe_connect_for_read|Exception||1
+meta/core/safe_connect.py|safe_connect_for_write|Exception||1
+meta/core/safe_connect.py|safe_connect|Exception||1
+meta/core/schema_generator.py|migrate|Exception||1
+meta/core/sql_adapters.py|_execute_via_write_queue|bare||1
+meta/core/sql_adapters.py|begin_transaction|bare||1
+meta/core/sql_adapters.py|commit|bare||1
+meta/core/sql_adapters.py|rollback|bare||1
+meta/core/sql_config.py|get_safe_connect_config|ValueError||2
+meta/core/sql_connection_pool.py|_invalidate_reader|Exception||2
+meta/core/sql_connection_pool.py|_recycle_connection_unlocked|Exception||1
+meta/core/sql_connection_pool.py|_safe_cleanup_wal_shm|OSError||1
+meta/core/sql_connection_pool.py|acquire_writer|Exception||1
+meta/core/sql_connection_pool.py|health_check|ImportError||1
+meta/core/sql_connection_pool.py|is_valid|Exception||1
+meta/core/sql_connection_pool.py|reader|Exception||1
+meta/core/sql_connection_pool.py|shutdown|Exception||2
+meta/core/sql_write_queue.py|begin_transaction._do_begin|Exception||1
+meta/core/sql_write_queue.py|commit._do_commit|Exception||2
+meta/core/sqlite_tx_state.py|get_tx_state|Exception||2
+meta/core/sqlite_version_guard.py|check_sqlite_version|ImportError||1
+meta/core/structured_logger.py|format|Exception||2
+meta/core/task_scheduler.py|_create_execution_record|Exception||1
+meta/core/task_scheduler.py|_record_dead_letter|Exception||1
+meta/core/task_scheduler.py|_record_dead_letter|OSError||1
+meta/core/unified_query_facade.py|execute|Exception||1
+meta/core/value_help_providers.py|_get_fallback_enum_values|Exception||1
+meta/core/value_help_providers.py|resolve|Exception||1
+meta/core/value_help_providers.py|search|Exception||1
+meta/core/workflow_engine.py|_decode|json.JSONDecodeError||1
+meta/core/workflow_store.py|_row_to_dict|json.JSONDecodeError||1
+meta/core/yaml_loader.py|_check_and_invalidate_shared_cache|Exception||1
+meta/migrations/add_token_version.py|ensure_token_version|sqlite3.OperationalError||1
+meta/migrations/fix_and_migrate.py|<module>|bare||1
+meta/migrations/migrate_dimension_scopes_to_v2.py|_parse_dim_values|(json.JSONDecodeError, TypeError)||1
+meta/migrations/migrate_dimension_scopes_to_v2.py|up|sqlite3.Error||1
+meta/migrations/migrate_rules_to_v2.py|up|sqlite3.Error||1
+meta/migrations/v007_50_add_audit_union_view.py|migrate|Exception||1
+meta/migrations/v084__org_admin_delegation_m2.py|verify|sqlite3.OperationalError||1
+meta/migrations/v227__purchase_return_object.py|rollback|sqlite3.OperationalError||1
+meta/ops_server.py|create_ops_app.audit_stats|bare||4
+meta/ops_server.py|create_ops_app.security_dashboard|bare||5
+meta/scripts/init_auth_tables.py|init_auth_tables|bare||1
+meta/scripts/init_menu_permissions.py|init_menu_permissions|Exception||2
+meta/scripts/migrate_v319_action_fix.py|rollback|Exception||1
+meta/server.py|<module>|Exception||1
+meta/server.py|_cleanup_resources|Exception||3
+meta/server.py|create_app.setup_trace|(OSError, ValueError)||1
+meta/services/allocation_apply.py|_run|Exception||1
+meta/services/association_service.py|get_association|Exception||1
+meta/services/association_service.py|get_table_name|Exception||1
+meta/services/async_audit_writer.py|_extract_obj_info|Exception||3
+meta/services/async_audit_writer.py|_open_thread_local_connection|Exception||2
+meta/services/async_audit_writer.py|_write_with_retry|Exception||1
+meta/services/async_audit_writer.py|close|Exception||1
+meta/services/async_audit_writer.py|flush|Exception||2
+meta/services/async_audit_writer.py|reset|Exception||1
+meta/services/async_audit_writer.py|shutdown|Exception||1
+meta/services/attachment_service.py|_audit|Exception||1
+meta/services/attachment_service.py|_cleanup_blob|Exception||1
+meta/services/attachment_storage.py|save|OSError||1
+meta/services/attribute_promotion_service.py|_commit|Exception||1
+meta/services/audit_export.py|audit_export_handler|OSError||1
+meta/services/audit_interceptor.py|_ensure_audit_tx_context|RuntimeError||2
+meta/services/audit_service.py|get_object_history|Exception||1
+meta/services/audit_service.py|retry_failed_record|bare||1
+meta/services/batch_delete.py|batch_delete_handler|Exception||1
+meta/services/billing_plan_actions.py|_set_user_context|Exception||1
+meta/services/chain_owner_resolver.py|resolve_subordinate_owner|(TypeError, ValueError)||1
+meta/services/change_event_dispatcher.py|normalize_event|Exception||1
+meta/services/change_request_decision.py|_decide|Exception||1
+meta/services/change_request_decision.py|change_request_apply_handler|Exception||1
+meta/services/condition_permission_service.py|_ensure_unified_table|Exception||2
+meta/services/condition_permission_service.py|_get_user_org_info|Exception||1
+meta/services/condition_permission_service.py|_get_user_rules|Exception||1
+meta/services/customer_invoice_actions.py|_set_user_context|Exception||1
+meta/services/data_permission_generator.py|generate_on_create|Exception||2
+meta/services/data_permission_service.py|_get_parent_resource|Exception||1
+meta/services/data_permission_service.py|get_effective_permission_level|Exception||1
+meta/services/deletion_service.py|_delete_polymorphic_children_sync|Exception||1
+meta/services/deletion_service.py|_get_foreign_key_column|Exception||1
+meta/services/deletion_service.py|get_deletion_policy|Exception||1
+meta/services/deletion_service.py|get_table_name|Exception||1
+meta/services/demand_entry_decision.py|_decide|Exception||1
+meta/services/dimension_scope_engine.py|_get_all_resource_types|Exception||1
+meta/services/display_name_service.py|get_association_display|(KeyError, ValueError, IndexError)||1
+meta/services/document_approval_decision.py|_set_user_context|Exception||1
+meta/services/draft_batch_save.py|_pre_validate_fk_scope|Exception||1
+meta/services/draft_batch_save.py|batch_save_handler|Exception||1
+meta/services/excel_design_system.py|auto_column_width|bare||1
+meta/services/import_export_service.py|_get_product_version_info|Exception||1
+meta/services/import_export_service.py|_import_sheet|Exception||2
+meta/services/import_export_service.py|_query_annotations_impl|Exception||1
+meta/services/import_export_service.py|_resolve_bo_lookup|Exception||3
+meta/services/import_export_service.py|export_cascade|bare||1
+meta/services/import_export_service.py|export_selected_types|bare||1
+meta/services/import_export_service.py|import_cascade|Exception||1
+meta/services/manage_service.py|_resolve_parent_context|Exception||1
+meta/services/manage_service.py|batch_check_can_delete|Exception||3
+meta/services/manage_service.py|check_can_delete|Exception||2
+meta/services/manage_service.py|update|Exception||1
+meta/services/menu_auto_generator.py|_mark_menu_synced|Exception||1
+meta/services/menu_auto_generator.py|_schema_mtime_changed|Exception||1
+meta/services/owner_transfer_service.py|validate_transfer|Exception||1
+meta/services/permission_migration.py|_discover_bo_tables_with_visibility|Exception||1
+meta/services/permission_migration.py|deprecate_legacy_tables|Exception||1
+meta/services/permission_resolver.py|_check_field_mask|Exception||1
+meta/services/permission_resolver.py|_check_prohibition|Exception||1
+meta/services/permission_resolver.py|check_owner|(TypeError, ValueError)||1
+meta/services/permission_service.py|_validate_action_code|Exception||1
+meta/services/permission_set_service.py|migrate_role_to_set|Exception||1
+meta/services/permission_sync_service.py|_needs_update|Exception||1
+meta/services/permission_sync_service.py|_schema_mtime_changed|Exception||1
+meta/services/permission_sync_service.py|mark_synced|Exception||2
+meta/services/query_service.py|_get_data_source|Exception||1
+meta/services/query_service.py|enrich_dimension_names|Exception||1
+meta/services/receipt_actions.py|_set_user_context|Exception||1
+meta/services/requisition_po_conversion.py|_set_user_context|Exception||1
+meta/services/resource_inheritance_engine.py|resolve_subordinate_owner|(TypeError, ValueError)||1
+meta/services/revision_service.py|_mark_change_request_failed|Exception||2
+meta/services/revision_service.py|apply|(TypeError, ValueError)||1
+meta/services/revision_service.py|record|Exception||1
+meta/services/sales_order_header_discount_apply.py|sales_order_recalc_header_discount_handler|Exception||1
+meta/services/structured_logger.py|_write_to_audit_logs|Exception||2
+meta/services/subflow_engine.py|_call_with_timeout|(AttributeError, ValueError)||1
+meta/services/subflow_engine.py|_execute_parallel_group._run_step_with_context|Exception||1
+meta/services/subflow_engine.py|execute_subflow|bare||1
+meta/services/subscription_filter_service.py|matches_subscription|json.JSONDecodeError||1
+meta/services/token_version_service.py|bump|Exception||1
+meta/services/transfer_order_actions.py|_set_user_context|Exception||1
+meta/services/transfer_order_from_allocation.py|_set_user_context|Exception||1
+meta/services/transfer_shipment_actions.py|_set_user_context|Exception||1
+meta/services/vendor_invoice_actions.py|_set_user_context|Exception||1
+meta/tools/ref_graph.py|build_ref_graph|Exception||1
+meta/tools/task_execution_ledger_migrate.py|project|Exception||1
+scripts/_coord_commit_guard.py|load_excludes|Exception||1
+scripts/_coord_log.py|_append_with_lock|(OSError, IOError)||2
+scripts/_coord_log.py|cmd_audit|json.JSONDecodeError||1
+scripts/_coord_log.py|cmd_recent|json.JSONDecodeError||1
+scripts/_coord_log.py|cmd_search|json.JSONDecodeError||1
+scripts/_events.py|_append_with_lock|(OSError, IOError)||2
+scripts/_events.py|cmd_recent|json.JSONDecodeError||1
+scripts/_events.py|cmd_since|json.JSONDecodeError||1
+scripts/_events.py|cmd_tail|json.JSONDecodeError||1
+scripts/_hooks/pre_commit_sync_infra.py|<module>|Exception||1
+scripts/_hooks/pre_commit_sync_infra.py|is_worktree|Exception||1
+scripts/_hooks/pre_commit_sync_infra.py|main|(ValueError, IndexError)||1
+scripts/_playwright_test60_ungrant.py|main.on_request|Exception||1
+scripts/_playwright_test60_ungrant.py|main|Exception||2
+scripts/_ports_sync.py|_release_lock|OSError||2
+scripts/_ports_sync.py|cmd_allocate|ValueError||1
+scripts/_ports_sync.py|load_paths|Exception||1
+scripts/_session_cleanup.py|cmd_cleanup|Exception||1
+scripts/_v33_state.py|_log_event|OSError||2
+scripts/_v33_state.py|_release_file_lock|OSError||3
+scripts/_v33_state.py|_write_status|Exception||1
+scripts/_wt_lifecycle.py|cmd_create|ValueError||1
+scripts/_wt_lifecycle.py|cmd_gc|Exception||1
+scripts/_wt_lifecycle.py|cmd_gc|ValueError||1
+scripts/_wt_lifecycle.py|cmd_remove|Exception||1
+scripts/_wt_service.py|_get_listening_ports|(ValueError, IndexError)||1
+scripts/_wt_service.py|_get_listening_ports|Exception||1
+scripts/_wt_service.py|_kill_by_pid|subprocess.SubprocessError||1
+scripts/_wt_service.py|_kill_by_port|(ValueError, subprocess.SubprocessError)||1
+scripts/_wt_service.py|_kill_by_port|subprocess.SubprocessError||1
+scripts/_wt_service.py|_update_ports_runtime|ValueError||1
+scripts/_wt_service.py|check_backend_health|Exception||1
+scripts/_wt_service.py|check_port|OSError||1
+scripts/_wt_service.py|cmd_force_stop_port|ValueError||1
+scripts/_wt_service.py|cmd_reconcile|ValueError||4
+scripts/_wt_service.py|cmd_recover|Exception||2
+scripts/_wt_service.py|find_port_owner|ValueError||1
+scripts/_wt_service.py|load_paths|Exception||1
+scripts/_wt_service.py|save_ports|Exception||1
+scripts/_wt_service.py|save_ports|OSError||2
+scripts/check_file_encoding.py|check_file|UnicodeDecodeError||2
+scripts/check_file_encoding.py|get_head_size|Exception||1
+scripts/check_rules_consistency.py|resolve_ref|ValueError||1
+scripts/check_sandbox_status.py|check_sandbox_logs|Exception||1
+scripts/check_sandbox_status.py|check_sandbox_write_read|Exception||1
+scripts/debug/check_class_consistency.py|<module>|Exception||1
+scripts/debug/check_field_mapping.py|<module>|Exception||1
+scripts/debug/check_log_files.py|<module>|Exception||1
+scripts/debug/check_silent_exceptions.py|<module>|Exception||1
+scripts/debug/dashboard.py|<module>|Exception||1
+scripts/debug/dashboard.py|export_markdown|Exception||1
+scripts/debug/env/diagnose.py|<module>|Exception||1
+scripts/debug/env/diagnose.py|check_backend_status|Exception||1
+scripts/debug/env/diagnose.py|check_backend_status|OSError||1
+scripts/debug/env/diagnose.py|check_port_consistency|OSError||1
+scripts/debug/inspect/code_map.py|<module>|Exception||1
+scripts/debug/inspect/table_schema.py|<module>|Exception||1
+scripts/debug/inspect/user_context.py|<module>|Exception||1
+scripts/debug/log/extractor.py|<module>|Exception||1
+scripts/debug/log/reader.py|<module>|Exception||1
+scripts/debug/restart/restart_safe.py|<module>|Exception||1
+scripts/debug/restart/restart_safe.py|wait_for_port|OSError||1
+scripts/debug/safe_query.py|__exit__|Exception||1
+scripts/debug/safe_query.py|check_sandbox_health|json.JSONDecodeError||1
+scripts/debug/sandbox_health.py|output|Exception||1
+scripts/debug/sandbox_health.py|test_shell_file_write|Exception||1
+scripts/debug/sandbox_watchdog.py|_append_alarm|Exception||1
+scripts/debug/sandbox_watchdog.py|_append_history|Exception||1
+scripts/debug/sandbox_watchdog.py|_is_running|Exception||1
+scripts/debug/sandbox_watchdog.py|_write_state|Exception||1
+scripts/debug/sandbox_watchdog.py|cmd_stop|Exception||1
+scripts/debug/sandbox_watchdog.py|run|(ValueError, AttributeError)||1
+scripts/debug/sandbox_watchdog.py|run|Exception||3
+scripts/debug/sandbox_watchdog.py|tick|Exception||1
+scripts/debug/sessions/auto_record.py|<module>|Exception||1
+scripts/debug/utils/_pre_tool_hook.py|<module>|Exception||1
+scripts/debug/utils/_pre_tool_hook.py|main|Exception||1
+scripts/debug/utils/auto_status.py|check_port|json.JSONDecodeError||1
+scripts/debug/utils/auto_status.py|run_sandbox_health_quick|Exception||1
+scripts/debug/utils/sandbox_safe.py|check_sandbox_via_files|Exception||1
+scripts/debug/utils/sandbox_safe.py|output|Exception||1
+scripts/debug/utils/sandbox_safe.py|safe_print|Exception||1
+scripts/debug/verify/startup_breakdown.py|main|OSError||1
+scripts/debug_backend.py|<module>|(AttributeError, OSError)||1
+scripts/debug_backend.py|check_process_ownership|Exception||2
+scripts/debug_backend.py|check_process_ownership|OSError||1
+scripts/deep_audit_77777.py|<module>|Exception||1
+scripts/deep_audit_77777.py|<module>|bare||1
+scripts/docs_quality_dashboard.py|count_headers|Exception||1
+scripts/gen_dashboard_v2.py|get_violations|Exception||1
+scripts/generate-e2e-from-schema.py|main|Exception||1
+scripts/init_role_permissions.py|get_menu_perms|(json.JSONDecodeError, TypeError)||1
+scripts/monitor_v22.py|get_violations|Exception||1
+scripts/monitor_v22.py|log|Exception||1
+scripts/self_check.py|check_violations|Exception||1
+scripts/self_verify.py|cmd_run|Exception||1
+scripts/self_verify.py|http_get|Exception||1
+scripts/self_verify.py|load_paths|Exception||1
+scripts/self_verify.py|load_self_verify_config|Exception||1
+scripts/service_manager.py|_check_code_version_stale|Exception||1
+scripts/service_manager.py|_check_code_version_stale|OSError||1
+scripts/service_manager.py|_check_port|OSError||1
+scripts/service_manager.py|_cleanup_stale_db_lock|OSError||1
+scripts/service_manager.py|_find_and_kill_process|(ValueError, subprocess.SubprocessError)||1
+scripts/service_manager.py|_find_and_kill_process|subprocess.SubprocessError||1
+scripts/service_manager.py|_find_port_owner_in_ports_json|Exception||1
+scripts/service_manager.py|_find_port_owner_in_ports_json|ValueError||1
+scripts/service_manager.py|_get_current_git_commit|(subprocess.TimeoutExpired, FileNotFoundError)||1
+scripts/service_manager.py|_get_listener_pid|ValueError||1
+scripts/service_manager.py|_get_listener_pid|subprocess.SubprocessError||1
+scripts/service_manager.py|_get_process_name|Exception||1
+scripts/service_manager.py|_kill_all_backend_processes|subprocess.SubprocessError||1
+scripts/service_manager.py|_log|OSError||1
+scripts/service_manager.py|_registry_read|(OSError, json.JSONDecodeError)||1
+scripts/service_manager.py|_release_lock|OSError||1
+scripts/service_manager.py|_write_startup_state|OSError||1
+scripts/service_manager.py|audit_command|(ValueError, TypeError)||1
+scripts/service_manager.py|audit_command|Exception||2
+scripts/service_manager.py|audit_command|ValueError||2
+scripts/service_manager.py|doctor_command|OSError||1
+scripts/service_manager.py|main|ValueError||4
+scripts/service_manager.py|stop_command|subprocess.SubprocessError||1
+scripts/sync_infra.py|<module>|Exception||1
+scripts/sync_infra.py|_read_file_from_tag|Exception||1
+scripts/verify_biz_msg_ux.py|<module>|Exception||4
+scripts/verify_biz_msg_ux_v2.py|<module>|Exception||6
+scripts/violation_auto.py|get_violations|Exception||1
+scripts/write_wrapper.py|check_path|ValueError||1

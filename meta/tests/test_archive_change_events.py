@@ -22,6 +22,50 @@ CHANGE_EVENT_COLS = """
 """
 
 
+_ARCHIVE_DDL = """
+    CREATE TABLE change_events_archive (
+        id INTEGER PRIMARY KEY,
+        archived_at TEXT NOT NULL,
+        {0}
+    )
+""".format(CHANGE_EVENT_COLS)
+
+_INBOX_DDL = """
+    CREATE TABLE notification_inbox (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        event_id INTEGER, subscription_id INTEGER, user_id INTEGER,
+        title TEXT, body TEXT, read_at TEXT, created_at TEXT,
+        retention_until TEXT
+    )
+"""
+
+_DELIVERIES_DDL = """
+    CREATE TABLE notification_deliveries (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        event_id INTEGER, subscription_id INTEGER, user_id INTEGER,
+        channel TEXT, status TEXT, attempts INTEGER,
+        last_error TEXT, next_retry_at TEXT, created_at TEXT
+    )
+"""
+
+_AUDIT_LOGS_DDL = """
+    CREATE TABLE audit_logs (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        object_type TEXT, object_id TEXT, action TEXT,
+        field_name TEXT, old_value TEXT, new_value TEXT,
+        user_id INTEGER, user_name TEXT, ip_address TEXT, user_agent TEXT,
+        created_at TEXT, action_kind TEXT, outcome TEXT, error_message TEXT,
+        retention_until TEXT, log_category TEXT, log_level TEXT, status TEXT
+    )
+"""
+
+_BROKEN_ARCHIVE_DDL = (
+    "CREATE TABLE change_events_archive (id INTEGER PRIMARY KEY, archived_at TEXT NOT NULL)"
+)
+
+_DROP_ARCHIVE_SQL = "DROP TABLE change_events_archive"
+
+
 def _create_change_events_table(cur, table):
     cur.execute("CREATE TABLE {0} (id INTEGER PRIMARY KEY AUTOINCREMENT, {1})".format(
         table, CHANGE_EVENT_COLS))
@@ -35,23 +79,10 @@ class TestArchiveChangeEvents:
         conn = sqlite3.connect(p)
         cur = conn.cursor()
         _create_change_events_table(cur, 'change_events')
-        cur.execute("""
-            CREATE TABLE change_events_archive (
-                id INTEGER PRIMARY KEY,
-                archived_at TEXT NOT NULL,
-                {0}
-            )
-        """.format(CHANGE_EVENT_COLS))
-        cur.execute("""
-            CREATE TABLE audit_logs (
-                id INTEGER PRIMARY KEY AUTOINCREMENT,
-                object_type TEXT, object_id TEXT, action TEXT,
-                field_name TEXT, old_value TEXT, new_value TEXT,
-                user_id INTEGER, user_name TEXT, ip_address TEXT, user_agent TEXT,
-                created_at TEXT, action_kind TEXT, outcome TEXT, error_message TEXT,
-                retention_until TEXT, log_category TEXT, log_level TEXT, status TEXT
-            )
-        """)
+        cur.execute(_ARCHIVE_DDL)
+        cur.execute(_INBOX_DDL)
+        cur.execute(_DELIVERIES_DDL)
+        cur.execute(_AUDIT_LOGS_DDL)
         conn.commit()
         conn.close()
         return p
@@ -110,8 +141,8 @@ class TestArchiveChangeEvents:
         from meta.scripts.archive_change_events import archive_old_change_events
         conn = sqlite3.connect(db_path)
         cur = conn.cursor()
-        cur.execute("DROP TABLE change_events_archive")
-        cur.execute("CREATE TABLE change_events_archive (id INTEGER PRIMARY KEY, archived_at TEXT NOT NULL)")
+        cur.execute(_DROP_ARCHIVE_SQL)
+        cur.execute(_BROKEN_ARCHIVE_DDL)
         conn.commit()
         conn.close()
 
@@ -151,6 +182,46 @@ class TestArchiveChangeEvents:
         cur = conn.cursor()
         cur.execute("SELECT COUNT(*) FROM change_events_archive")
         assert cur.fetchone()[0] == 600
+        conn.close()
+
+    def test_archives_also_cleans_inbox_and_deliveries(self, db_path):
+        """归档过期事件时，同步清理对应收件箱 / 投递行（P1-d A12）"""
+        from meta.scripts.archive_change_events import archive_old_change_events
+        expired = (datetime.now() - timedelta(days=1)).isoformat()
+        future = (datetime.now() + timedelta(days=30)).isoformat()
+        self._insert_event(db_path, expired, '1')
+        self._insert_event(db_path, expired, '2')
+        self._insert_event(db_path, future, '3')
+
+        conn = sqlite3.connect(db_path)
+        for event_id in (1, 2, 3):
+            bridge.insert(
+                conn, 'notification_inbox',
+                event_id=event_id, user_id=7, title='t',
+                created_at=datetime.now().isoformat(),
+                retention_until=expired if event_id < 3 else future,
+            )
+        for event_id in (1, 2):
+            bridge.insert(
+                conn, 'notification_deliveries',
+                event_id=event_id, user_id=7, channel='in_app',
+                status='delivered', attempts=1,
+                created_at=datetime.now().isoformat(),
+            )
+        conn.commit()
+        conn.close()
+
+        result = archive_old_change_events(db_path, dry_run=False)
+        assert result['archived_count'] == 2
+        assert result['inbox_deleted'] == 2
+        assert result['deliveries_deleted'] == 2
+
+        conn = sqlite3.connect(db_path)
+        cur = conn.cursor()
+        cur.execute("SELECT COUNT(*) FROM notification_inbox")
+        assert cur.fetchone()[0] == 1  # 未过期事件的消息保留
+        cur.execute("SELECT COUNT(*) FROM notification_deliveries")
+        assert cur.fetchone()[0] == 0
         conn.close()
 
     def test_archive_action_logged_to_audit(self, db_path):

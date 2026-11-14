@@ -563,12 +563,12 @@ def create_bo(object_type):
         # value_help 校验放在取号之前：校验失败不消耗订单号
         errors = _validate_value_helps(object_type, data)
         if errors:
-            return json_response({
-                'success': False,
-                'error_code': 'VALUE_HELP_VALIDATION_FAILED',
-                'message': '值校验失败: ' + '; '.join(errors),
-                'errors': errors,
-            }, 400)
+            return error_response(
+                '值校验失败: ' + '; '.join(errors),
+                error_code='VALUE_HELP_VALIDATION_FAILED',
+                status=400,
+                errors=[{'message': msg} for msg in errors],
+            )
         data = _allocate_document_no(object_type, data)
         result = bo.create(object_type, data)
         logger.info(f"[bo_api] result: success={result.success}, message={result.message}")
@@ -1446,12 +1446,12 @@ def update_bo(object_type, obj_id):
     data = _reapply_sales_order_salesperson(object_type, obj_id, data)
     errors = _validate_value_helps(object_type, data)
     if errors:
-        return json_response({
-            'success': False,
-            'error_code': 'VALUE_HELP_VALIDATION_FAILED',
-            'message': '值校验失败: ' + '; '.join(errors),
-            'errors': errors,
-        }, 400)
+        return error_response(
+            '值校验失败: ' + '; '.join(errors),
+            error_code='VALUE_HELP_VALIDATION_FAILED',
+            status=400,
+            errors=[{'message': msg} for msg in errors],
+        )
     result = bo.update(object_type, obj_id, data)
     if result.success:
         return ok(result.data, message=result.message)
@@ -1470,12 +1470,12 @@ def update_bo_by_string_id(object_type, obj_id):
     data = _reapply_sales_order_salesperson(object_type, obj_id, data)
     errors = _validate_value_helps(object_type, data)
     if errors:
-        return json_response({
-            'success': False,
-            'error_code': 'VALUE_HELP_VALIDATION_FAILED',
-            'message': '值校验失败: ' + '; '.join(errors),
-            'errors': errors,
-        }, 400)
+        return error_response(
+            '值校验失败: ' + '; '.join(errors),
+            error_code='VALUE_HELP_VALIDATION_FAILED',
+            status=400,
+            errors=[{'message': msg} for msg in errors],
+        )
     result = bo.update(object_type, obj_id, data)
     if result.success:
         return ok(result.data, message=result.message)
@@ -1702,7 +1702,7 @@ def assign_association_v2(object_type, obj_id, association_name):
     except Exception as e:
         import traceback
         logger.error(f"[assign_association_v2] Traceback: {traceback.format_exc()}")
-        return json_response({'success': False, 'error': type(e).__name__, 'message': str(e)}, 500)
+        return error_response('系统内部错误，请稍后重试', error_code='internal_error', status=500)
 
     if result.success:
         return '', 204
@@ -1770,7 +1770,7 @@ def unassign_association_v2(object_type, obj_id, association_name):
     except Exception as e:
         import traceback
         logger.error(f"[unassign_association_v2] Traceback: {traceback.format_exc()}")
-        return json_response({'success': False, 'error': type(e).__name__, 'message': str(e)}, 500)
+        return error_response('系统内部错误，请稍后重试', error_code='internal_error', status=500)
 
     if result.success:
         return '', 204
@@ -1810,7 +1810,7 @@ def batch_assign_associations_v2(object_type, obj_id, association_name):
     except Exception as e:
         import traceback
         logger.error(f"[batch_assign_associations_v2] Traceback: {traceback.format_exc()}")
-        return json_response({'success': False, 'error': type(e).__name__, 'message': str(e)}, 500)
+        return error_response('系统内部错误，请稍后重试', error_code='internal_error', status=500)
 
     if result.success:
         return ok(result.data, message=result.message)
@@ -1872,7 +1872,7 @@ def batch_unassign_associations_v2(object_type, obj_id, association_name):
     except Exception as e:
         import traceback
         logger.error(f"[batch_unassign_associations_v2] Traceback: {traceback.format_exc()}")
-        return json_response({'success': False, 'error': type(e).__name__, 'message': str(e)}, 500)
+        return error_response('系统内部错误，请稍后重试', error_code='internal_error', status=500)
 
     if result.success:
         return ok(result.data, message=result.message)
@@ -3188,12 +3188,13 @@ def get_full_openapi():
 
         return json_response(spec)
     except Exception as e:
-        import traceback
-        return json_response({
-            'error': type(e).__name__,
-            'message': str(e),
-            'traceback': traceback.format_exc(),
-        }, 500)
+        logger.exception("[openapi] 生成 OpenAPI 文档失败")
+        return error_response(
+            '生成 OpenAPI 文档失败',
+            error_code='internal_error',
+            status=500,
+            details={'exception': type(e).__name__},
+        )
 
 
 @meta_v2_bp.route('/<object_type>/field-policies', methods=['GET'])

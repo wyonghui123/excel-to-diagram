@@ -456,6 +456,11 @@ class ApplicationBuilder:
             bo_framework.register_interceptor(OrgPartyMirrorInterceptor())
         bo_framework.register_interceptor(SecurityLogInterceptor())
         bo_framework.register_interceptor(OwnerAutoPermissionInterceptor())
+        # [消息平台 2026-11-14] 变更事件：CRUD 成功后写 change_events（fail-open）。
+        #   priority 92 → after 钩子在 Persistence(95) 之后执行，保证数据已落盘。
+        #   与 server.py 的 create_app() 同位登记 —— 两条启动路径缺一会静默失效。
+        from meta.core.interceptors.change_event_interceptor import ChangeEventInterceptor
+        bo_framework.register_interceptor(ChangeEventInterceptor())
         bo_framework.register_interceptor(OperationLogInterceptor())
 
         logger.info("[AppBuilder] All interceptors registered")
@@ -495,7 +500,7 @@ class ApplicationBuilder:
         from meta.api.owner_transfer_api import owner_transfer_bp
         from meta.api.permission_rule_api import permission_rule_bp
         from meta.api.audit_api import audit_bp
-        from meta.api.notification_api import notification_bp
+        from meta.api.notification_api import notification_bp, init_notification_api
         from meta.api.database_api import database_bp
         from meta.api.filter_variant_api import filter_variant_bp
         from meta.api.identity_api import identity_bp
@@ -564,6 +569,8 @@ class ApplicationBuilder:
         app.register_blueprint(permission_rule_bp)
         app.register_blueprint(audit_bp, url_prefix='/api/v1/audit')
         app.register_blueprint(notification_bp)
+        # [Spec 20 P1-b] 与 meta/server.py 同位补齐：通知模块需要数据源
+        init_notification_api(self._data_source)
         app.register_blueprint(database_bp)
         app.register_blueprint(filter_variant_bp)
         app.register_blueprint(identity_bp)
@@ -622,6 +629,9 @@ class ApplicationBuilder:
         app.register_blueprint(doc_flow_bp)
         # [P0-1 2026-11-13] 三方集成凭证收口：密钥只留后端，前端走代理。
         app.register_blueprint(integration_bp)
+        # [FR-009/010/012] 运维可观测端点（与生产入口一致）。
+        from meta.api.ops_api import ops_bp
+        app.register_blueprint(ops_bp)
         # [规则收敛 v1.6 2026-11-07] 规则中心目录 + 单据规则推导（只读）。
         app.register_blueprint(rule_center_bp)
         app.register_blueprint(rule_trace_bp)
@@ -668,6 +678,16 @@ class ApplicationBuilder:
         # 阶段 3: 中间件 + 错误处理
         self._register_middleware()
         self._register_error_handlers()
+        # [FR-009/010/012] 与生产入口一致的观测接线（失败不阻断启动）。
+        try:
+            from meta.core.structured_logger import setup_json_logging
+            setup_json_logging()
+            from meta.core.alert_service import start_alert_flusher
+            start_alert_flusher()
+            from meta.core.monitor_runner import start_monitor_runner
+            start_monitor_runner()
+        except Exception as exc:  # pragma: no cover
+            logger.warning('[AppBuilder] observability setup failed: %s', exc)
 
         # 阶段 4: 启动后健康记录
         if self._enable_telemetry:
@@ -894,74 +914,10 @@ class ApplicationBuilder:
             return jsonify({'status': 'ok', 'service': 'arch-data-manage-api'})
 
     def _register_error_handlers(self):
-        import traceback
-        from flask import jsonify
-        from werkzeug.exceptions import HTTPException
-
-        app = self._app
-        is_debug = os.environ.get('FLASK_DEBUG', 'false').lower() == 'true'
-
-        @app.errorhandler(500)
-        def handle_500(error):
-            error_msg = str(error)
-            if is_debug:
-                error_trace = traceback.format_exc()
-                return jsonify({
-                    'success': False,
-                    'error': 'INTERNAL_SERVER_ERROR',
-                    'message': error_msg,
-                    'detail': error_trace
-                }), 500
-            else:
-                return jsonify({
-                    'success': False,
-                    'error': 'INTERNAL_SERVER_ERROR',
-                    'message': 'An internal error occurred. Please contact support.'
-                }), 500
-
-        # [FIX FIX-005] 2026-06-07: HTTPException 用专属 handler 保留 status code
-        # 之前 `@app.errorhandler(Exception)` 把所有异常 (含 404 NotFound) 都转为 500
-        # 现在: 4xx (NotFound/MethodNotAllowed/BadRequest 等) 保留原始 status code
-        #       5xx (InternalServerError) 走 500 handler
-        #       真正的 Exception 才走 handle_exception
-        @app.errorhandler(HTTPException)
-        def handle_http_exception(error):
-            """处理 Werkzeug HTTPException (4xx 为主) — 保留原始 status_code"""
-            status_code = error.code or 500
-            return jsonify({
-                'success': False,
-                'error': error.name or 'HTTP_ERROR',
-                'message': error.description or str(error),
-                'status_code': status_code,
-            }), status_code
-
-        @app.errorhandler(Exception)
-        def handle_exception(error):
-            # [FIX FIX-005] 防御性检查: HTTPException 应被更具体的 handler 拦截
-            # 但如果走到了这里, 仍用 error.code (默认值 500) 保留 status
-            if isinstance(error, HTTPException):
-                status_code = error.code or 500
-                return jsonify({
-                    'success': False,
-                    'error': error.name or 'HTTP_ERROR',
-                    'message': error.description or str(error),
-                    'status_code': status_code,
-                }), status_code
-            error_msg = str(error)
-            if is_debug:
-                error_trace = traceback.format_exc()
-                return jsonify({
-                    'success': False,
-                    'error': type(error).__name__,
-                    'message': error_msg,
-                    'detail': error_trace
-                }), 500
-            else:
-                return jsonify({
-                    'success': False,
-                    'error': type(error).__name__,
-                    'message': 'An internal error occurred. Please contact support.'
-                }), 500
+        # [统一错误出口 2026-11-14] 与 meta/server.py 共用同一实现（FR-001），
+        # 禁止在此另起 JSON/HTML 双轨处理器。
+        from meta.core.error_handlers import register_error_handlers
+        register_error_handlers(self._app)
 
 
 def _default_db_path():

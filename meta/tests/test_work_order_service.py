@@ -143,8 +143,13 @@ CREATE TABLE change_events (
     old_values TEXT,
     new_values TEXT,
     payload TEXT,
+    channels TEXT,
     status TEXT,
-    created_at TEXT
+    retry_count INTEGER DEFAULT 0,
+    created_at TEXT,
+    delivered_at TEXT,
+    audit_log_id INTEGER,
+    retention_until TEXT
 );
 """
 
@@ -162,6 +167,16 @@ class _MemDS:
 
     def execute(self, sql, params=None):
         return self.conn.execute(sql, list(params or []))
+
+    def insert(self, table, data):
+        """ChangeNotificationService.publish_event 的最小写入口。"""
+        cols = list(data.keys())
+        cursor = self.conn.execute(
+            'INSERT INTO %s (%s) VALUES (%s)'
+            % (table, ', '.join(cols), ', '.join(['?'] * len(cols))),
+            [data[c] for c in cols]
+        )
+        return cursor.lastrowid
 
 
 def _db():
@@ -447,7 +462,7 @@ def test_resolve_settles_milestone_and_completes_schedule():
     assert 'resolve' in _events(conn, wo_id)
     assert _value(conn,
                   "SELECT COUNT(*) FROM change_events WHERE object_type = "
-                  "'work_order' AND event_type = 'state_change'") >= 1
+                  "'work_order' AND event_type = 'state_changed'") >= 1
 
     again = svc.resolve_event(wo_id, occurred_at='2026-10-30 12:30:00')
     assert again['already_resolved'] is True

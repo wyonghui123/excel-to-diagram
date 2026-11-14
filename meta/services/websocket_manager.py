@@ -160,6 +160,25 @@ class WebSocketManager:
                     except Exception as e:
                         logger.error(f"Failed to send event to sid={sid}: {e}")
     
+    def emit_to_user(self, user_id: int, event: str, data: Dict[str, Any]) -> int:
+        """向指定用户的全部在线连接定向推送（订阅派发的 in_app 通道）。
+
+        Returns:
+            实际推送的连接数（0 表示用户离线）。
+        """
+        if not self._socketio:
+            return 0
+        with self._lock:
+            sids = [sid for sid, c in self._clients.items() if c.user_id == user_id]
+        sent = 0
+        for sid in sids:
+            try:
+                self._socketio.emit(event, data, room=sid)
+                sent += 1
+            except Exception as e:
+                logger.error(f"Failed to emit to user={user_id} sid={sid}: {e}")
+        return sent
+
     def get_client(self, sid: str) -> Optional[ConnectedClient]:
         """获取客户端信息"""
         return self._clients.get(sid)

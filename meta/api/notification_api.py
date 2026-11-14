@@ -6,24 +6,76 @@
 提供订阅管理 API。
 """
 
-from flask import Blueprint, request, jsonify, g
+from flask import Blueprint, request, jsonify
 from meta.api._response_contract import error_response, ok, ok_message
 from meta.core.query_spec import parse_query_spec
 from flask_socketio import SocketIO, emit, join_room, leave_room
 import logging
-import os
 import json
+import time
 from datetime import datetime
 
 from meta.services.websocket_manager import websocket_manager
 from meta.services.token_service import TokenService
+from meta.services.auth_middleware import login_required, get_current_user, is_admin
+from meta.core.change_event_types import normalize as normalize_event_type
 
 logger = logging.getLogger(__name__)
 
 notification_bp = Blueprint('notification', __name__, url_prefix='/api/v1/notifications')
 
+#: 与 change_subscriptions DDL 的 chk_channel 保持一致
+SUBSCRIPTION_CHANNELS = ('in_app', 'email', 'webhook', 'sms')
+
 socketio = None
 ds = None
+
+#: 手动重试去抖窗口（秒）：同一用户对同一事件的重复点击只产生一次新尝试
+RETRY_DEBOUNCE_SECONDS = 5
+_retry_debounce = {}
+
+
+def _can_retry_all(user):
+    """是否具备跨订阅重试权限（管理员或 notification:retry:all）。"""
+    if is_admin(user):
+        return True
+    permissions = (user or {}).get('permissions') or []
+    if isinstance(permissions, str):
+        permissions = [permissions]
+    return 'notification:retry:all' in permissions
+
+
+def _same_user(left, right):
+    """比较用户 id（token 里可能是字符串，DB 里是整数）。"""
+    try:
+        return int(left) == int(right)
+    except (TypeError, ValueError):
+        return left == right
+
+
+def _current_user_id():
+    """当前登录用户 id（鉴权中间件只写 g.current_user，不写 g.user_id）。"""
+    user = get_current_user() or {}
+    return user.get('user_id')
+
+
+def _visible_object_types(user_id):
+    """事件读取隔离（P1-b）：非管理员仅可见自己收件箱中出现过的 object_type。
+
+    返回 None 表示不限制（管理员）；返回空集合表示无任何可见事件。
+    """
+    if is_admin(get_current_user()):
+        return None
+    rows = ds.execute(
+        'SELECT DISTINCT object_type FROM notification_inbox WHERE user_id = ?',
+        (user_id,)
+    ).fetchall() or []
+    return {row[0] for row in rows if row and row[0]}
+
+
+def _inbox_service():
+    from meta.services.notification_inbox_service import NotificationInboxService
+    return NotificationInboxService(ds)
 
 
 def init_notification_api(datasource):
@@ -105,7 +157,9 @@ def init_socketio(app):
         from flask_socketio import request as socket_request
         
         object_type = data.get('object_type')
-        event_types = data.get('event_types', ['created', 'updated', 'deleted'])
+        event_types = data.get('event_types', ['created', 'updated', 'deleted', 'state_changed'])
+        if isinstance(event_types, list):
+            event_types = [t for t in (normalize_event_type(x) for x in event_types) if t]
         
         if not object_type:
             emit('error', {'message': 'object_type is required'})
@@ -151,18 +205,20 @@ def init_socketio(app):
 
 
 @notification_bp.route('/stats', methods=['GET'])
+@login_required
 def get_stats():
-    """获取 WebSocket 连接统计"""
+    """获取 WebSocket 连接统计（仅管理员）"""
+    if not is_admin(get_current_user()):
+        return error_response('您没有执行此操作的权限', status=403)
     return ok(websocket_manager.get_stats())
 
 
 @notification_bp.route('/subscriptions', methods=['GET'])
+@login_required
 def get_subscriptions():
     """获取当前用户的订阅列表"""
-    user_id = g.get('user_id')
-    if not user_id:
-        return error_response('请先登录后再操作', status=401)
-    
+    user_id = _current_user_id()
+
     if not ds:
         stats = websocket_manager.get_stats()
         user_clients = [
@@ -187,27 +243,34 @@ def get_subscriptions():
 
 
 @notification_bp.route('/subscriptions', methods=['POST'])
+@login_required
 def create_subscription():
     """创建订阅"""
-    user_id = g.get('user_id')
-    if not user_id:
-        return error_response('请先登录后再操作', status=401)
-    
+    user_id = _current_user_id()
+
     if not ds:
         return error_response('Service not initialized', status=500)
     
     data = request.get_json() or {}
     
     object_type = data.get('object_type')
-    event_types = data.get('event_types', ['created', 'updated', 'deleted'])
-    channel = data.get('channel', 'websocket')
+    event_types = data.get('event_types', ['created', 'updated', 'deleted', 'state_changed'])
+    if isinstance(event_types, list):
+        event_types = [t for t in (normalize_event_type(x) for x in event_types) if t]
+    channel = data.get('channel', 'in_app')
     webhook_url = data.get('webhook_url', '')
     webhook_secret = data.get('webhook_secret', '')
     filter_condition = data.get('filter_condition', {})
     
     if not object_type:
         return error_response('object_type is required')
-    
+
+    if channel not in SUBSCRIPTION_CHANNELS:
+        return error_response(
+            f"channel 必须是 {'/'.join(SUBSCRIPTION_CHANNELS)} 之一",
+            status=400
+        )
+
     if channel == 'webhook' and not webhook_url:
         return error_response('webhook_url is required for webhook channel')
     
@@ -240,16 +303,15 @@ def create_subscription():
 
 
 @notification_bp.route('/subscriptions/<int:sub_id>', methods=['GET'])
+@login_required
 def get_subscription(sub_id):
     """获取单个订阅详情"""
-    user_id = g.get('user_id')
-    if not user_id:
-        return error_response('请先登录后再操作', status=401)
-    
+    user_id = _current_user_id()
+
     if not ds:
         return error_response('Service not initialized', status=500)
     
-    subscription = ds.find_one('change_subscriptions', filters={'id': sub_id})
+    subscription = ds.find_by_id('change_subscriptions', sub_id)
     
     if not subscription:
         return error_response('订阅不存在', status=404)
@@ -261,16 +323,15 @@ def get_subscription(sub_id):
 
 
 @notification_bp.route('/subscriptions/<int:sub_id>', methods=['PUT'])
+@login_required
 def update_subscription(sub_id):
     """更新订阅"""
-    user_id = g.get('user_id')
-    if not user_id:
-        return error_response('请先登录后再操作', status=401)
-    
+    user_id = _current_user_id()
+
     if not ds:
         return error_response('Service not initialized', status=500)
     
-    subscription = ds.find_one('change_subscriptions', filters={'id': sub_id})
+    subscription = ds.find_by_id('change_subscriptions', sub_id)
     
     if not subscription:
         return error_response('订阅不存在', status=404)
@@ -284,6 +345,8 @@ def update_subscription(sub_id):
     
     if 'event_types' in data:
         event_types = data['event_types']
+        if isinstance(event_types, list):
+            event_types = [t for t in (normalize_event_type(x) for x in event_types) if t]
         update_data['event_types'] = json.dumps(event_types) if isinstance(event_types, list) else event_types
     
     if 'channel' in data:
@@ -310,7 +373,7 @@ def update_subscription(sub_id):
         
         logger.info("Subscription updated: id=%s", sub_id)
         
-        updated = ds.find_one('change_subscriptions', filters={'id': sub_id})
+        updated = ds.find_by_id('change_subscriptions', sub_id)
         
         return ok(updated)
         
@@ -320,16 +383,15 @@ def update_subscription(sub_id):
 
 
 @notification_bp.route('/subscriptions/<int:sub_id>', methods=['DELETE'])
+@login_required
 def delete_subscription(sub_id):
     """删除订阅"""
-    user_id = g.get('user_id')
-    if not user_id:
-        return error_response('请先登录后再操作', status=401)
-    
+    user_id = _current_user_id()
+
     if not ds:
         return error_response('Service not initialized', status=500)
     
-    subscription = ds.find_one('change_subscriptions', filters={'id': sub_id})
+    subscription = ds.find_by_id('change_subscriptions', sub_id)
     
     if not subscription:
         return error_response('订阅不存在', status=404)
@@ -350,23 +412,36 @@ def delete_subscription(sub_id):
 
 
 @notification_bp.route('/events', methods=['GET'])
+@login_required
 def get_events():
-    """获取变更事件列表"""
-    user_id = g.get('user_id')
-    if not user_id:
-        return error_response('请先登录后再操作', status=401)
-    
+    """获取变更事件列表（按用户可见范围隔离）"""
     if not ds:
         return error_response('Service not initialized', status=500)
-    
+
+    visible = _visible_object_types(_current_user_id())
+
     object_type = request.args.get('object_type')
     status = request.args.get('status')
     spec = parse_query_spec(request.args)
     page, page_size = spec.page, spec.page_size
-    
+
     filters = {}
     if object_type:
+        if visible is not None and object_type not in visible:
+            return error_response('您没有执行此操作的权限', status=403)
         filters['object_type'] = object_type
+    elif visible is not None:
+        if not visible:
+            return jsonify({
+                'success': True,
+                'data': [],
+                'pagination': {
+                    'page': page,
+                    'page_size': page_size,
+                    'total': 0
+                }
+            })
+        filters['object_type__in'] = sorted(visible)
     if status:
         filters['status'] = status
     
@@ -392,91 +467,168 @@ def get_events():
 
 
 @notification_bp.route('/events/<int:event_id>', methods=['GET'])
+@login_required
 def get_event(event_id):
     """获取单个事件详情"""
-    user_id = g.get('user_id')
-    if not user_id:
-        return error_response('请先登录后再操作', status=401)
-    
     if not ds:
         return error_response('Service not initialized', status=500)
-    
-    event = ds.find_one('change_events', filters={'id': event_id})
-    
+
+    visible = _visible_object_types(_current_user_id())
+
+    event = ds.find_by_id('change_events', event_id)
+
     if not event:
         return error_response('Event not found', status=404)
-    
+
+    if visible is not None and event.get('object_type') not in visible:
+        return error_response('您没有执行此操作的权限', status=403)
+
     return ok(event)
 
 
 @notification_bp.route('/events/<int:event_id>/retry', methods=['POST'])
+@login_required
 def retry_event(event_id):
-    """重试事件投递"""
-    user_id = g.get('user_id')
-    if not user_id:
-        return error_response('请先登录后再操作', status=401)
-    
+    """手动重试事件投递（P1-c）。
+
+    规则（spec FR-5）：
+      - 归属校验：必须是该事件某订阅的收件人，或具备 notification:retry:all
+      - 仅重置 failed/skipped 投递为 pending；delivered 不动（部分失败只重试失败部分）
+      - next_retry_at = now；attempts 单调递增，不清零
+      - 5 秒内重复点击视为同一次重试（幂等）
+    """
     if not ds:
         return error_response('Service not initialized', status=500)
-    
-    event = ds.find_one('change_events', filters={'id': event_id})
-    
+
+    user = get_current_user() or {}
+    user_id = user.get('user_id')
+
+    event = ds.find_by_id('change_events', event_id)
     if not event:
         return error_response('Event not found', status=404)
-    
-    if event.get('status') == 'delivered':
-        return error_response('Event already delivered')
-    
-    try:
-        from meta.services.webhook_service import webhook_service, WebhookConfig, WebhookPayload
-        
-        subscriptions = ds.find(
-            'change_subscriptions',
-            filters={
-                'object_type': event.get('object_type'),
-                'channel': 'webhook',
-                'enabled': 1
-            }
-        )
-        
-        if not subscriptions:
-            return error_response('No webhook subscriptions found', status=404)
-        
-        results = []
-        for sub in subscriptions:
-            config = WebhookConfig(
-                url=sub.get('webhook_url', ''),
-                secret=sub.get('webhook_secret', ''),
-                retry_count=3
-            )
-            
-            payload = WebhookPayload(
-                event_id=event_id,
-                object_type=event.get('object_type'),
-                object_id=event.get('object_id'),
-                event_type=event.get('event_type'),
-                changed_fields=json.loads(event.get('changed_fields', '[]')),
-                old_values=json.loads(event.get('old_values', '{}')),
-                new_values=json.loads(event.get('new_values', '{}'))
-            )
-            
-            result = webhook_service.deliver_with_retry(config, payload)
-            results.append({
-                'subscription_id': sub.get('id'),
-                'success': result.success,
-                'error': result.error
-            })
-        
-        ds.update('change_events', event_id, {
-            'status': 'delivered' if all(r['success'] for r in results) else 'failed',
-            'delivered_at': datetime.now().isoformat()
-        })
-        
+
+    deliveries = ds.find('notification_deliveries', filters={'event_id': event_id}) or []
+    owns_event = any(_same_user(d.get('user_id'), user_id) for d in deliveries)
+    if not (owns_event or _can_retry_all(user)):
+        return error_response('您没有执行此操作的权限', status=403)
+
+    # 同一用户短时间内重复点击：只产生一次有效新尝试
+    debounce_key = (event_id, user_id)
+    now_monotonic = time.monotonic()
+    last = _retry_debounce.get(debounce_key)
+    if last is not None and now_monotonic - last < RETRY_DEBOUNCE_SECONDS:
         return ok({
             'event_id': event_id,
-            'results': results
+            'reset': 0,
+            'attempted': 0,
+            'delivered': 0,
+            'failed': 0,
+            'skipped': 0,
+            'debounced': True,
         })
-        
+    _retry_debounce[debounce_key] = now_monotonic
+
+    try:
+        from meta.services.change_event_dispatcher import ChangeEventDispatcher
+        dispatcher = ChangeEventDispatcher(ds)
+        reset_count = dispatcher.prepare_retry(event_id)
+        stats = dispatcher.redeliver_pending(event_id, event, force=True)
+        return ok({
+            'event_id': event_id,
+            'reset': reset_count,
+            'debounced': False,
+            **stats,
+        })
     except Exception as e:
         logger.error("Failed to retry event: %s", e)
         return error_response(str(e), status=500)
+
+
+# ------------------------------------------------------------------ 收件箱（P1-b）
+@notification_bp.route('/inbox', methods=['GET'])
+@login_required
+def get_inbox():
+    """当前用户收件箱（按事件聚合，分页）"""
+    if not ds:
+        return error_response('Service not initialized', status=500)
+
+    spec = parse_query_spec(request.args)
+    unread_only = str(request.args.get('unread_only', '')).lower() in ('1', 'true', 'yes')
+    service = _inbox_service()
+
+    items, total = service.list(
+        _current_user_id(),
+        unread_only=unread_only,
+        object_type=request.args.get('object_type'),
+        event_type=request.args.get('event_type'),
+        keyword=request.args.get('q'),
+        page=spec.page,
+        page_size=spec.page_size,
+    )
+
+    return jsonify({
+        'success': True,
+        'data': items,
+        'unread_count': service.unread_count(_current_user_id()),
+        'pagination': {
+            'page': spec.page,
+            'page_size': spec.page_size,
+            'total': total,
+        },
+    })
+
+
+@notification_bp.route('/inbox/unread-count', methods=['GET'])
+@login_required
+def get_inbox_unread_count():
+    """未读数（排除已忽略）"""
+    if not ds:
+        return error_response('Service not initialized', status=500)
+    return ok({'unread_count': _inbox_service().unread_count(_current_user_id())})
+
+
+@notification_bp.route('/inbox/read-all', methods=['POST'])
+@login_required
+def read_all_inbox():
+    """全部标记已读"""
+    if not ds:
+        return error_response('Service not initialized', status=500)
+
+    data = request.get_json(silent=True) or {}
+    service = _inbox_service()
+    user_id = _current_user_id()
+    affected = service.mark_all_read(
+        user_id,
+        object_type=data.get('object_type'),
+        event_type=data.get('event_type'),
+    )
+    return ok({
+        'affected': affected,
+        'unread_count': service.unread_count(user_id),
+    })
+
+
+@notification_bp.route('/inbox/<int:inbox_id>/read', methods=['POST'])
+@login_required
+def read_inbox_item(inbox_id):
+    """单条标记已读（仅本人）"""
+    if not ds:
+        return error_response('Service not initialized', status=500)
+
+    row = _inbox_service().mark_read(_current_user_id(), inbox_id)
+    if row is None:
+        return error_response('消息不存在或无权访问', status=404)
+    return ok(row)
+
+
+@notification_bp.route('/inbox/<int:inbox_id>/dismiss', methods=['POST'])
+@login_required
+def dismiss_inbox_item(inbox_id):
+    """单条忽略（保留在「全部」，不计入未读）"""
+    if not ds:
+        return error_response('Service not initialized', status=500)
+
+    row = _inbox_service().dismiss(_current_user_id(), inbox_id)
+    if row is None:
+        return error_response('消息不存在或无权访问', status=404)
+    return ok(row)

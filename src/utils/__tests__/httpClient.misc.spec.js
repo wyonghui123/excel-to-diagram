@@ -304,7 +304,7 @@ describe('httpClient misc scenarios (Spec A P0 落地)', () => {
 
       expect(result.success).toBe(false)
       expect(result.code).toBe(ErrorCode.ERR_TIMEOUT)
-      expect(result.message).toBe('请求超时')
+      expect(result.message).toBe('请求超时，请稍后重试')
     })
 
     it('timeout 内完成的请求应正常返回', async () => {
@@ -580,6 +580,74 @@ describe('httpClient misc scenarios (Spec A P0 落地)', () => {
 
       const ids = new Set([r1.traceId, r2.traceId, r3.traceId])
       expect(ids.size).toBe(3)
+    })
+  })
+
+  // ============================================================
+  // 场景 11: FR-007 统一错误管线（码语义 / traceId / silent / 默认超时）
+  // ============================================================
+  describe('场景 11: FR-007 错误管线归一化', () => {
+    it('后端业务码应保留在 code，传输层码放在 errorCode', async () => {
+      mockFetch.mockImplementation(() =>
+        mockJsonResponse({
+          status: 422,
+          body: {
+            success: false,
+            code: 'validation_failed',
+            message: '校验失败',
+            errors: [{ field_id: 'qty', message: '数量 不能小于 1' }],
+            request_id: 'req-abc-123',
+          },
+        })
+      )
+
+      const result = await apiV1.post('/users', {})
+
+      expect(result.success).toBe(false)
+      expect(result.code).toBe('validation_failed')          // 业务码不再被覆盖
+      expect(result.businessCode).toBe('validation_failed')
+      expect(result.errorCode).toBe(ErrorCode.ERR_422_VALIDATION)
+      expect(result.httpStatus).toBe(422)
+      expect(result.requestId).toBe('req-abc-123')
+      expect(result.errors).toEqual([{ field_id: 'qty', message: '数量 不能小于 1' }])
+    })
+
+    it('后端未给 code 时回落传输层映射码', async () => {
+      mockFetch.mockImplementation(() =>
+        mockJsonResponse({ status: 404, body: { message: '不存在' } })
+      )
+
+      const result = await apiV1.get('/missing')
+
+      expect(result.code).toBe(ErrorCode.ERR_404_NOT_FOUND)
+      expect(result.errorCode).toBe(ErrorCode.ERR_404_NOT_FOUND)
+      expect(result.businessCode).toBeUndefined()
+      expect(result.requestId).toBeTruthy()
+    })
+
+    it('silent 选项应透传到结果，供调用方抑制全局提示', async () => {
+      mockFetch.mockImplementation(() =>
+        mockJsonResponse({ status: 200, body: { success: false, message: '后台轮询失败' } })
+      )
+
+      const result = await apiV1.get('/poll', { silent: true })
+
+      expect(result.silent).toBe(true)
+      expect(result.success).toBe(false)
+    })
+
+    it('未显式传 timeout 时应注入默认 15s 信号（上传/下载为 120s）', async () => {
+      mockFetch.mockImplementation(() =>
+        mockJsonResponse({ status: 200, body: { success: true, data: {} } })
+      )
+
+      await apiV1.get('/default-timeout')
+      const [, getOptions] = mockFetch.mock.calls[0]
+      expect(getOptions.signal).toBeInstanceOf(AbortSignal)
+
+      await apiV1.get('/blob', { responseType: 'blob' })
+      const [, blobOptions] = mockFetch.mock.calls[1]
+      expect(blobOptions.signal).toBeInstanceOf(AbortSignal)
     })
   })
 })

@@ -171,7 +171,7 @@ class TestValidationMessageRegistryIntegration:
             params={"field_name": "用户名"}
         )
         d = detail.to_dict()
-        assert "field_id" not in d  # field_id 不暴露给前端
+        assert d["field_id"] == "username"  # FR-005: errors[] 暴露字段定位
         assert d["rule"] == "required"
         assert d["i18n_key"] == "validation.field.required"
 

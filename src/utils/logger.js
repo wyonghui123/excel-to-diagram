@@ -37,6 +37,8 @@ function sendTelemetry(level, message, extra) {
       message,
       extra: extra || null,
       traceId: (typeof window !== 'undefined' && window.__currentTraceId) || null,
+      requestId: (typeof window !== 'undefined' && window.__currentRequestId) || null,
+      route: typeof location !== 'undefined' ? location.pathname : null,
       url: typeof location !== 'undefined' ? location.href : null,
       userAgent: typeof navigator !== 'undefined' ? navigator.userAgent : null,
       ts: Date.now(),

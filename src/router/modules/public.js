@@ -41,5 +41,13 @@ export default [
     name: 'component-comparison',
     component: () => import('@/views/ComponentComparison.vue'),
     meta: { title: 'UI组件库对比' }
+  },
+  // [FR-008] catch-all 404：未知路径展示 404 页而非白屏。
+  // Vue Router 按路由评分匹配，catch-all 评分最低，不会抢在动态路由前面。
+  {
+    path: '/:pathMatch(.*)*',
+    name: 'not-found',
+    component: () => import('@/components/common/NotFound.vue'),
+    meta: { title: '页面不存在', public: true }
   }
 ]

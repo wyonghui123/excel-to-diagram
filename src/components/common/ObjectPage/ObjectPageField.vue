@@ -1,5 +1,5 @@
 <template>
-  <div class="op-field">
+  <div class="op-field" :class="{ 'op-field--error': fieldError }">
     <label>{{ getFieldLabel(fieldKey) }}<span v-if="isRequired(fieldKey)" class="op-required">*</span></label>
 
     <template v-if="!editing">
@@ -105,6 +105,8 @@
       :placeholder="getFieldPlaceholder(fieldKey)"
       @update:model-value="val => emit('field-update', { key: fieldKey, value: val })"
     />
+    <!-- [FR-005] 后端 errors[] 按 field_id 下发的字段级提示 -->
+    <p v-if="fieldError" class="op-field-error">{{ fieldError }}</p>
   </div>
 </template>
 
@@ -112,7 +114,7 @@
 import ValueHelpField from '../ValueHelpField.vue'
 import FkLinkField from '../FkLinkField/FkLinkField.vue'
 import { dateFormatService } from '@/services/DateFormatService'
-import { inject } from 'vue'
+import { inject, computed } from 'vue'
 // [FIX] 显式导入 Element Plus 组件以支持动态 <component :is> 渲染
 //   - unplugin-vue-components 只能自动导入模板中的字面量标签
 //   - 动态 :is="字符串" 不会触发自动导入，必须显式 import
@@ -252,6 +254,13 @@ const props = defineProps({
 })
 
 const emit = defineEmits(['field-update', 'field-display-update', 'out-mapping'])
+
+// [FR-005] 字段级错误由 DetailPage provide（Ref<Record<field_id, message>>）。
+const fieldErrorsInjected = inject('fieldErrors', null)
+const fieldError = computed(() => {
+  const map = fieldErrorsInjected?.value || fieldErrorsInjected || {}
+  return map[props.fieldKey] || ''
+})
 
 // [NEW 2026-06-10] code 字段输入处理：触发 field-update + 标记 dirty
 function onCodeInput(value) {
@@ -645,11 +654,25 @@ function getFieldReadonlyDisplay(key) {
 .op-field {
   display: flex;
   flex-direction: row;
+  flex-wrap: wrap;
   align-items: baseline;
   gap: 12px;
   min-width: 0;
   width: 100%;
   padding: 4px 0;
+}
+
+/* [FR-005] 字段级错误：标签染红 + 控件下方整行提示 */
+.op-field--error > label {
+  color: var(--el-color-danger);
+}
+
+.op-field-error {
+  flex-basis: 100%;
+  margin: 0;
+  font-size: 12px;
+  line-height: 1.4;
+  color: var(--el-color-danger);
 }
 
 .op-field > .el-input,

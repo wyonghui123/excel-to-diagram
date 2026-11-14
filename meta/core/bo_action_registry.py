@@ -283,7 +283,8 @@ class BoActionRegistry:
             return {
                 'success': False,
                 'data': None,
-                'message': f'Unknown action: {action_id}',
+                'message': f'未知的操作：{action_id}',
+                'error_code': 'action_not_found',
             }
 
         ctx = context or {}
@@ -319,7 +320,9 @@ class BoActionRegistry:
                     return {
                         'success': False,
                         'data': None,
-                        'message': f'Permission denied: {meta.permission_required} required',
+                        'message': '您没有执行该操作的权限',
+                        'error_code': 'action_permission_denied',
+                        'details': {'required_permission': meta.permission_required},
                     }
 
             # [E3 2026-11-11] 组织范围校验（audit_scope；strict 拦截 / warn 告警放行）

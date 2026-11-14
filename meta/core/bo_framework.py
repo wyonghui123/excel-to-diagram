@@ -198,7 +198,7 @@ class BOFramework:
                     return ActionResult(
                         success=False,
                         message=str(e),
-                        error='STATE_MACHINE_VIOLATION',
+                        code='STATE_MACHINE_VIOLATION',
                         status_code=400,
                     )
 
@@ -263,20 +263,27 @@ class BOFramework:
                                     code=getattr(e, 'code', 'FIELD_NOT_EDITABLE'))
             if isinstance(e, ValidationFailedError):
                 logger.info(f"[BOFramework] Validation FAILED: {e}")
-                return ActionResult(success=False, message=str(e), errors=e.details)
+                return ActionResult(success=False, message=str(e), errors=e.details,
+                                    code='action_validation_error', status_code=400)
             from meta.core.interceptors.permission_interceptor import PermissionDenied
             if isinstance(e, PermissionDenied):
                 logger.info(f"[BOFramework] PermissionDenied: {e.detail}")
-                return ActionResult(success=False, message=e.detail, status_code=403)
+                return ActionResult(success=False, message=e.detail, status_code=403,
+                                    code='action_permission_denied')
             # [R0-2 2026-06-11] ComputationNotSupportedError 必须冒泡到 Flask errorhandler
             # 让其返回 422 + 统一错误格式. 不要被通用 except 吞掉转 400.
             from meta.core.computed_field_query import ComputationNotSupportedError
             if isinstance(e, ComputationNotSupportedError):
                 logger.warning(f"[BOFramework] {e}")
                 raise  # 让 bo_api errorhandler 接管 → 422
-            logger.error(f"[BOFramework] Error executing {action} on {object_type}: {e}")
+            logger.exception("[BOFramework] Error executing %s on %s", action, object_type)
             self._execute_error_interceptors(context, e)
-            return ActionResult(success=False, message=str(e), errors=[str(e)])
+            return ActionResult(
+                success=False,
+                message='操作执行失败，请稍后重试',
+                code='action_handler_error',
+                status_code=500,
+            )
 
     def _execute_interceptors_async(self, context: ActionContext):
         self._async_engine.execute_before(context)

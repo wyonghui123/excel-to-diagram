@@ -85,7 +85,7 @@ def test_routes_registered(api_app):
 def test_list_requires_login(api_app):
     resp = api_app.test_client().get('/api/holds?object_type=inventory_count_line')
     assert resp.status_code == 401
-    assert resp.get_json()['code'] == 'UNAUTHORIZED'
+    assert resp.get_json()['code'] == 'unauthorized'
 
 
 def test_list_returns_ok_list(api_app):

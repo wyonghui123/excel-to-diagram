@@ -45,6 +45,11 @@ def set_inprocess_schedulers(maintenance, platform, paused: bool = False) -> Non
     _paused = bool(paused)
 
 
+def get_inprocess_schedulers():
+    """[FR-010] 供 /ops/* 读取调度器状态（不暴露实例给外部修改）。"""
+    return _maintenance, _platform
+
+
 def _find_scheduler(code: str):
     """按作业码定位其归属调度器（`status()` 的键即该调度器的作业集）。"""
     for sched in (_maintenance, _platform):

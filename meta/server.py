@@ -115,7 +115,9 @@ from meta.api.agent_api import agent_bp
 from meta.api.export_import_api import export_import_bp
 from meta.api.stats_api import stats_bp
 from meta.api.schema_api import schema_bp
-from meta.api.notification_api import notification_bp, init_socketio
+from meta.api.notification_api import (
+    notification_bp, init_socketio, init_notification_api,
+)
 from meta.api.database_api import database_bp, init_database_services
 from meta.services.log_filter_service import setup_log_filter
 from meta.services.trace_service import (
@@ -167,6 +169,7 @@ from meta.handlers.audit_handlers import (
 )
 from meta.handlers.import_handlers import ImportQueueHandler
 from meta.handlers.platform_handlers import PlatformTickHandler
+from meta.services.change_event_archive import ChangeEventArchiveHandler
 from meta.api.task_api import task_api_bp, set_scheduler as set_task_scheduler
 from meta.api.scheduler_api import (
     scheduler_bp, set_inprocess_schedulers,
@@ -361,6 +364,28 @@ def _signal_handler(signum, frame, data_source=None):
     logging.getLogger(__name__).info("Received signal %s, shutting down...", signum)
     _cleanup_resources(data_source)
     sys.exit(0)
+
+
+def _start_observability() -> None:
+    """[FR-009/010/012] 统一接线：JSON 日志 / 告警线程 / 监控采集。
+
+    每一步独立 try，任何失败都不得阻断应用启动。
+    """
+    try:
+        from meta.core.structured_logger import setup_json_logging
+        setup_json_logging()
+    except Exception as exc:  # pragma: no cover - 接线失败仅降级
+        logging.getLogger(__name__).warning('[Observability] json logging setup failed: %s', exc)
+    try:
+        from meta.core.alert_service import start_alert_flusher
+        start_alert_flusher()
+    except Exception as exc:  # pragma: no cover
+        logging.getLogger(__name__).warning('[Observability] alert flusher start failed: %s', exc)
+    try:
+        from meta.core.monitor_runner import start_monitor_runner
+        start_monitor_runner()
+    except Exception as exc:  # pragma: no cover
+        logging.getLogger(__name__).warning('[Observability] monitor runner start failed: %s', exc)
 
 
 def _is_test_process() -> bool:
@@ -741,6 +766,11 @@ def create_app(db_path=None):
     # [D3 2026-10-03] 反向事件：BO 状态变更 → bo.status_changed（保留名，专用拦截器）
     from meta.core.interceptors.bo_status_interceptor import BoStatusInterceptor
     bo_framework.register_interceptor(BoStatusInterceptor())
+    # [消息平台 2026-11-14] 变更事件：CRUD 成功后写 change_events（fail-open）。
+    #   priority 92 → after 钩子在 Persistence(95) 之后执行，保证数据已落盘。
+    #   与 app_builder.with_interceptors() 同位登记 —— 两条启动路径缺一会静默失效。
+    from meta.core.interceptors.change_event_interceptor import ChangeEventInterceptor
+    bo_framework.register_interceptor(ChangeEventInterceptor())
     bo_framework.register_interceptor(SecurityLogInterceptor())
     bo_framework.register_interceptor(OwnerAutoPermissionInterceptor())
     # [H13 2026-06-15] WriteScopeInterceptor 写权限数据范围检查
@@ -849,6 +879,7 @@ def create_app(db_path=None):
             'audit_log_cleanup': AuditLogCleanupHandler(),
             'audit_log_archive': AuditLogArchiveHandler(),
             'import_queue_processor': ImportQueueHandler(),
+            'change_event_archive': ChangeEventArchiveHandler(),
         }
 
         maintenance_scheduler = MaintenanceScheduler(
@@ -898,6 +929,25 @@ def create_app(db_path=None):
     set_task_scheduler(task_scheduler)
 
     atexit.register(task_scheduler.stop)
+
+    # [P1-d 2026-11-14] 消息平台异步派发 worker：发布只写库，由本 worker 轮询
+    #   pending change_events + 到期自动重试；META_CHANGE_EVENT_WORKER=off 可关闭
+    #   （测试态由 meta/tests/shared/env_flags.py 统一注入 off）。
+    try:
+        from meta.services.change_event_worker import (
+            is_worker_enabled,
+            start_change_event_worker,
+            stop_change_event_worker,
+        )
+        if is_worker_enabled():
+            start_change_event_worker(data_source)
+            atexit.register(stop_change_event_worker)
+        else:
+            logging.getLogger(__name__).info(
+                "[P1-d] change event worker disabled (META_CHANGE_EVENT_WORKER=off)")
+    except Exception as e:
+        logging.getLogger(__name__).warning(
+            "[P1-d] change event worker not started: %s", e)
 
     # [P3 2026-11-10] 后台作业 dispatcher 通电（spec §6.6 / §10.1 第 1-3 项）。
     #   顺序固定：先 build registry 再打开开关；JOB_DISPATCH_ENABLED 默认 0，
@@ -1039,61 +1089,13 @@ def create_app(db_path=None):
 
     @app.errorhandler(QuerySpecError)
     def handle_query_spec_error(error):
-        return jsonify({
-            'success': False,
-            'error': 'INVALID_QUERY',
-            'message': str(error)
-        }), 400
+        from meta.api._response_contract import error_response
+        return error_response(str(error), error_code='invalid_query', status=400)
 
-    @app.errorhandler(500)
-    def handle_500(error):
-        error_msg = str(error)
-        app_debug = os.environ.get('FLASK_DEBUG', 'False').lower() == 'true'
-        if app_debug:
-            import traceback
-            error_trace = traceback.format_exc()
-            print(f"[500 ERROR] {error_msg}")
-            print(error_trace)
-            return jsonify({
-                'success': False,
-                'error': 'INTERNAL_SERVER_ERROR',
-                'message': error_msg,
-                'detail': error_trace
-            }), 500
-        else:
-            print(f"[500 ERROR] {error_msg}")
-            return jsonify({
-                'success': False,
-                'error': 'INTERNAL_SERVER_ERROR',
-                'message': 'An internal error occurred. Please contact support.'
-            }), 500
-
-    @app.errorhandler(Exception)
-    def handle_exception(error):
-        # HTTPException（404/403/405 等）应保留原状态码，不能被当作 500 吞掉
-        from werkzeug.exceptions import HTTPException
-        if isinstance(error, HTTPException):
-            return error
-        error_msg = str(error)
-        app_debug = os.environ.get('FLASK_DEBUG', 'False').lower() == 'true'
-        if app_debug:
-            import traceback
-            error_trace = traceback.format_exc()
-            print(f"[UNHANDLED ERROR] {error_msg}")
-            print(error_trace)
-            return jsonify({
-                'success': False,
-                'error': type(error).__name__,
-                'message': error_msg,
-                'detail': error_trace
-            }), 500
-        else:
-            print(f"[UNHANDLED ERROR] {error_msg}")
-            return jsonify({
-                'success': False,
-                'error': type(error).__name__,
-                'message': 'An internal error occurred. Please contact support.'
-            }), 500
+    # [统一错误出口 2026-11-14] 与 app_builder 共用同一实现（FR-001）：
+    #   HTTPException / 未捕获异常一律 JSON，禁止返回 Werkzeug HTML。
+    from meta.core.error_handlers import register_error_handlers
+    register_error_handlers(app)
 
     app.register_blueprint(query_bp)
     app.register_blueprint(annotation_bp)
@@ -1137,6 +1139,8 @@ def create_app(db_path=None):
     app.register_blueprint(intent_bp)
     app.register_blueprint(audit_bp, url_prefix='/api/v1/audit')
     app.register_blueprint(notification_bp)
+    # [Spec 20 P1-b] 通知模块此前从未注入数据源，订阅/事件/收件箱端点恒 500
+    init_notification_api(data_source)
     app.register_blueprint(database_bp)
     app.register_blueprint(filter_variant_bp)
     app.register_blueprint(identity_bp)
@@ -1180,6 +1184,9 @@ def create_app(db_path=None):
     #   与 tasks 模块开关无关 —— 故不放进上面被门控的 task_api_bp。
     app.register_blueprint(scheduler_bp)
     app.register_blueprint(job_admin_bp)
+    # [FR-009/010/012] 运维可观测端点：/ops/health /ops/metrics /ops/alerts。
+    from meta.api.ops_api import ops_bp
+    app.register_blueprint(ops_bp)
     # [定价引擎 T1-4 2026-10-06] 定价编排服务 HTTP 暴露（IF-001/002/003）
     from meta.api.pricing_api import pricing_bp
     app.register_blueprint(pricing_bp)
@@ -1489,6 +1496,8 @@ def create_app(db_path=None):
         signal.signal(signal.SIGTERM, lambda s, f, ds=data_source: _signal_handler(s, f, ds))
         signal.signal(signal.SIGINT, lambda s, f, ds=data_source: _signal_handler(s, f, ds))
 
+    # [FR-009/010/012] 结构化日志 + 告警聚合线程 + 监控采集。
+    _start_observability()
     return app
 
 

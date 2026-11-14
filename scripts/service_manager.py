@@ -1394,6 +1394,11 @@ def release_session_command() -> int:
     return ret
 
 
+def _doctor_problem(code, message, suggestion):
+    """[FR-014] doctor 问题项：错误码 + 中文说明 + 修复建议。"""
+    return {'code': code, 'message': message, 'suggestion': suggestion}
+
+
 def doctor_command(fix: bool = False) -> int:
     """环境体检: 端口真源/服务/孤儿/DB锁/状态文件/配置漂移 — 会话第一步"""
     print("=" * 64)
@@ -1411,13 +1416,17 @@ def doctor_command(fix: bool = False) -> int:
         listener = _get_listener_pid(port)
         if listener is None:
             print(f"  {config['display_name']:20} port={port}  NOT RUNNING")
-            problems.append(f"{svc_name} 未启动")
+            problems.append(_doctor_problem(
+                'doctor_service_not_running', f"{svc_name} 未启动",
+                'python scripts/service_manager.py restart'))
         elif _is_managed_listener(svc_name, port, listener):
             print(f"  {config['display_name']:20} port={port}  RUNNING (managed, PID={listener})")
         else:
             pname = _get_process_name(listener)
             print(f"  {config['display_name']:20} port={port}  ORPHAN PID={listener} ({pname})")
-            problems.append(f"{svc_name} 端口被孤儿进程占用")
+            problems.append(_doctor_problem(
+                'doctor_orphan_process', f"{svc_name} 端口被孤儿进程占用 (PID={listener})",
+                'python scripts/service_manager.py doctor --fix'))
 
     # 3. DB 锁
     print("\n[3] DB 锁 (meta/.architecture.lock)")
@@ -1433,18 +1442,26 @@ def doctor_command(fix: bool = False) -> int:
                 print(f"  推断持有者: backend PID={be_listener} (正常)")
             else:
                 print("  [WARN] backend 端口无监听但锁活跃 → 泄漏锁")
-                problems.append("DB 锁被未知进程持有")
+                problems.append(_doctor_problem(
+                    'doctor_db_lock_leaked', 'DB 锁被未知进程持有',
+                    'python scripts/service_manager.py doctor --fix'))
     elif lock_state == "pid_alive":
         print(f"  持有者 PID={lock_probe['pid']}  {lock_probe.get('cmdline', '')}")
         if "waitress_server.py" not in lock_probe.get("cmdline", ""):
             print("  [WARN] 持有者不是本仓 waitress → 可能是泄漏锁")
-            problems.append(f"DB 锁被外部进程持有 (PID {lock_probe['pid']})")
+            problems.append(_doctor_problem(
+                'doctor_db_lock_external', f"DB 锁被外部进程持有 (PID {lock_probe['pid']})",
+                '确认该进程用途后结束它，或执行 doctor --fix 清理残留锁'))
     elif lock_state in ("stale", "empty"):
         print(f"  残留锁 (state={lock_state}, pid={lock_probe.get('pid', '-')}) → 可 doctor --fix")
-        problems.append("DB 锁残留 (持有者已死)")
+        problems.append(_doctor_problem(
+            'doctor_db_lock_stale', 'DB 锁残留 (持有者已死)',
+            'python scripts/service_manager.py doctor --fix'))
     elif lock_state == "corrupt":
         print(f"  锁文件内容异常: {lock_probe.get('raw', '')}")
-        problems.append("DB 锁文件损坏")
+        problems.append(_doctor_problem(
+            'doctor_db_lock_corrupt', 'DB 锁文件损坏',
+            '删除 meta/.architecture.lock 后执行 doctor --fix'))
 
     # 4. 状态文件 vs 现实
     print("\n[4] 状态文件一致性")

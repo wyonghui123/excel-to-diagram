@@ -19,6 +19,8 @@ _SYSTEM_TABLES = frozenset({
     # 由 org_members / org_permission_sets / orgs 替代
     'annotations', 'audit_logs',
     'change_events', 'change_subscriptions', 'filter_variants',
+    # [Spec 20 2026-11-14] 消息中心 P1-b：投递记录 + 站内收件箱
+    'notification_deliveries', 'notification_inbox',
     'menu', 'menu_permissions',
     'permission_rules', 'permission_bundles',
     'enum_values', 'enum_types',

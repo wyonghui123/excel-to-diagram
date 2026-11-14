@@ -3,6 +3,8 @@
 
 密钥唯一来源 = 后端环境变量，前端只拿到 masked 状态：
   DEEPSEEK_API_KEY / ZHIPU_API_KEY / FEISHU_APP_ID / FEISHU_APP_SECRET
+飞书兼容历史命名（tools/_setup_lark_env.ps1 写入的用户级变量）：
+  LARK_APP_ID / LARK_APP_SECRET / LARK_CHAT_ID；FEISHU_* 存在时优先
 可选：
   AI_PROVIDER（deepseek | zhipu，默认按已配置的 key 推导）
 
@@ -110,12 +112,13 @@ class IntegrationCredentialService:
     def get_settings(self) -> Dict[str, Any]:
         """返回脱敏后的集成配置，secret 永不出后端。"""
         provider = self._ai_provider()
-        app_secret = _env('FEISHU_APP_SECRET')
+        app_id, app_secret, chat_id = self._feishu_identity()
         return {
             'feishu': {
-                'app_id': _env('FEISHU_APP_ID'),
+                'app_id': app_id,
                 'has_secret': bool(app_secret),
                 'app_secret_masked': MASKED_SECRET if app_secret else '',
+                'has_chat_id': bool(chat_id),
             },
             'ai': {
                 'provider': provider,
@@ -207,12 +210,25 @@ class IntegrationCredentialService:
         }
 
     # ----------------------------------------------------------------- feishu
+    def _feishu_identity(self) -> tuple:
+        """飞书凭证解析：FEISHU_* 优先，回退历史用户级 LARK_* 变量。"""
+        return (
+            _env('FEISHU_APP_ID') or _env('LARK_APP_ID'),
+            _env('FEISHU_APP_SECRET') or _env('LARK_APP_SECRET'),
+            _env('FEISHU_CHAT_ID') or _env('LARK_CHAT_ID'),
+        )
+
     def _feishu_credentials(self) -> tuple:
-        app_id = _env('FEISHU_APP_ID')
-        app_secret = _env('FEISHU_APP_SECRET')
+        app_id, app_secret, _ = self._feishu_identity()
         if not app_id or not app_secret:
-            raise IntegrationConfigError('飞书 App ID / App Secret 未配置（后端环境变量）')
+            raise IntegrationConfigError(
+                '飞书 App ID / App Secret 未配置（后端环境变量 FEISHU_* 或 LARK_*）'
+            )
         return app_id, app_secret
+
+    def default_feishu_chat_id(self) -> str:
+        """默认飞书群 chat_id（FEISHU_CHAT_ID / LARK_CHAT_ID）。"""
+        return self._feishu_identity()[2]
 
     def _fetch_tenant_token(self, app_id: str, app_secret: str) -> tuple:
         timeout = int(_env('INTEGRATION_HTTP_TIMEOUT') or 60)

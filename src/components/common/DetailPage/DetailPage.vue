@@ -261,7 +261,7 @@
 </template>
 
 <script setup>
-import { ref, computed, watch, nextTick, onMounted, onUnmounted, onActivated, inject } from 'vue'
+import { ref, computed, watch, nextTick, onMounted, onUnmounted, onActivated, inject, provide } from 'vue'
 import { useMessage } from '@/composables/useMessage'
 import { useCrudMessage } from '@/composables/useCrudMessage'
 import { useVersionContext } from '@/composables/useVersionContext'
@@ -283,6 +283,7 @@ import { listRules } from '@/services/docFlowService'
 import { useAuthStore } from '@/stores/authStore'
 import { useBoAction } from '@/composables/useBoAction'
 import { evaluateCondition } from '@/utils/safeExpression'
+import { normalizeValidationErrors } from '@/utils/validationErrors'
 
 // [FIX 2026-06-18] 关键修复：把 `const props = defineProps(...)` 移到 setup 顶部
 //   原因：line 160-164 的 coordinatorRefreshKey computed 内部访问 props.id/objectType，
@@ -402,6 +403,20 @@ const emit = defineEmits(['update:modelValue', 'close', 'refresh', 'delete', 'lo
 const message = useMessage()
 const crudMessage = useCrudMessage()
 
+// [FR-005] 字段级错误：后端 errors[] 按 field_id 归集后，经 provide 下发给
+//   ObjectPageField（避免 ObjectPage → Content → FieldGroupSection 逐层透传）。
+const fieldErrors = ref({})
+provide('fieldErrors', fieldErrors)
+
+function applyValidationErrors(result) {
+  const { fieldErrors: mapped } = normalizeValidationErrors(result)
+  fieldErrors.value = mapped
+}
+
+function clearValidationErrors() {
+  if (Object.keys(fieldErrors.value).length > 0) fieldErrors.value = {}
+}
+
 /**
  * 根据 httpStatus/result.code 把后端错误归类成更友好、更具体的中文消息
  *
@@ -456,6 +471,11 @@ const effectiveMode = computed(() => {
 })
 
 const internalEditing = ref(effectiveMode.value === 'add' || effectiveMode.value === 'edit')
+
+// [FR-005] 进入编辑态时清空上一轮字段错误，避免旧错误一直挂在输入框上。
+watch(internalEditing, (val) => {
+  if (val) clearValidationErrors()
+})
 const saving = ref(false)
 
 const entityMeta = ref(null)
@@ -1971,6 +1991,7 @@ async function handleSave() {
       const result = await boService.deepInsert(props.objectType, payload, children)
 
       if (result.success) {
+        clearValidationErrors()
         crudMessage.created()
         internalEditing.value = false
         const savedData = result.data?.parent || result.data || {}
@@ -1978,6 +1999,8 @@ async function handleSave() {
         emit('saved', savedData)
         emit('created', savedData)
       } else {
+        // [FR-005] 字段级错误落到对应输入框（message 仍保留汇总提示）
+        applyValidationErrors(result)
         // [FIX 2026-06-14] 统一错误码 → 中文消息 (含 403 无权限场景),
         //   与 useCrudMessage 模型一致, 由 NotificationContainer 渲染 (z-index 9999, teleport to body),
         //   避免高 z-index modal/drawer 遮挡导致用户看不到反馈 (参见 PermissionConfigPanel 旧坑)。
@@ -1990,6 +2013,7 @@ async function handleSave() {
       ? await boService.create(props.objectType, payload)
       : await boService.update(props.objectType, props.id, payload)
     if (result.success) {
+      clearValidationErrors()
       if (objectPageRef.value?.hasChildUnsavedChanges?.()) {
         try {
           await objectPageRef.value.saveAllChildMetaLists()
@@ -2028,6 +2052,8 @@ async function handleSave() {
         }
       }
     } else {
+      // [FR-005] 校验失败时把 errors[] 映射到字段
+      applyValidationErrors(result)
       // [FIX 2026-06-14] 同上, 走统一消息解析 (403 → "您没有权限执行此操作")
       message.error(resolveFailureMessage(result, isCreate ? '创建失败' : '保存失败'), 4000)
     }

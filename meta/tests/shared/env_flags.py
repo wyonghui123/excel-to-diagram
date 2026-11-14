@@ -106,6 +106,18 @@ FLAGS: Tuple[EnvFlag, ...] = (
                  "与用例事务争 SQLite 锁并累计线程",
     ),
     EnvFlag(
+        name="META_CHANGE_EVENT_WORKER",
+        value="off",
+        phase="configure",
+        mode="unless_env",
+        purpose="关闭消息平台异步派发 worker（进程内 2s 轮询 pending 事件 + 自动重试）",
+        owner="meta/server.py / meta/services/change_event_worker.py",
+        condition_env="TEST_ALLOW_CHANGE_EVENT_WORKER",
+        condition_value="1",
+        evidence="spec-message-platform §9/FR-6：测试直接调用 dispatch，"
+                 "避免后台线程与用例事务争 SQLite 锁",
+    ),
+    EnvFlag(
         name="SKIP_DB_PREFLIGHT",
         value="1",
         phase="configure",

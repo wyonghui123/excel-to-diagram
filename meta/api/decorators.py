@@ -3,7 +3,7 @@ from functools import wraps
 from flask import g, request
 import logging
 
-from meta.api._response_contract import json_response
+from meta.api._response_contract import error_response
 from meta.core.permission_gate import declare_permission, evaluate_code
 
 logger = logging.getLogger(__name__)
@@ -30,11 +30,7 @@ def require_permission(permission_code):
         def wrapper(*args, **kwargs):
             user_info = g.get('current_user')
             if not user_info:
-                return json_response({
-                    'success': False,
-                    'error': 'UNAUTHORIZED',
-                    'message': '请先登录后再操作'
-                }, 401)
+                return error_response('请先登录后再操作', error_code='unauthorized', status=401)
 
             if not evaluate_code(user_info, permission_code):
                 logger.warning(
@@ -42,11 +38,12 @@ def require_permission(permission_code):
                     f"permission={permission_code}, "
                     f"path={request.path}"
                 )
-                return json_response({
-                    'success': False,
-                    'error': 'FORBIDDEN',
-                    'message': f'Permission denied: {permission_code}'
-                }, 403)
+                return error_response(
+                    '您没有执行该操作的权限',
+                    error_code='forbidden',
+                    status=403,
+                    details={'required_permission': permission_code},
+                )
 
             return f(*args, **kwargs)
         return wrapper
