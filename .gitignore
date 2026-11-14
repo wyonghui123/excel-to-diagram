@@ -413,3 +413,11 @@ logs/*.png
 
 # 第三方工具二进制 (cloudflared 等, 仅本机用于手机访问内网服务, 不入仓)
 .tools/
+
+# ===== v2026.11.14: service_manager / watchdog 运行时状态 (按 slot 生成) =====
+.startup_state_*.json
+.service_manager.log.slot*
+.service_manager.state*.json
+.watchdog.pid
+*.out
+*.err
