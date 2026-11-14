@@ -146,9 +146,49 @@ def test_in_app_delivery_creates_inbox_row(_):
         assert rows[0]['delivery_id'] == delivery['id']
         assert rows[0]['event_id'] == 101
         assert rows[0]['event_type'] == 'state_changed'
-        assert 'status: draft → released' in rows[0]['body']
+        assert 'draft → released' in rows[0]['body']
         assert inbox.unread_count(7) == 1
     finally:
+        _cleanup(ds, db_path)
+
+
+@pytest.mark.parametrize('_', [0])
+def test_inbox_text_uses_metadata_labels(_):
+    """通知文案的对象名 / 字段名取自元数据注册表（单一事实来源）"""
+    from meta.core.models import FieldType, MetaField, MetaObject, registry
+
+    obj = MetaObject(
+        id='inbox_label_test_obj',
+        name='演示单据',
+        table_name='demo_docs',
+        fields=[MetaField(
+            id='status', name='单据状态',
+            field_type=FieldType.STRING, db_column='status',
+        )],
+    )
+    registry.register(obj)
+    ds, db_path = _make_ds()
+    try:
+        event = {
+            'id': 601,
+            'object_type': obj.id,
+            'object_id': 9,
+            'event_type': 'state_changed',
+            'changed_fields': ['status'],
+            'old_values': {'status': 'draft'},
+            'new_values': {'status': 'released'},
+            'payload': {},
+            'created_at': '2026-11-14T10:00:00',
+        }
+        service = NotificationInboxService(ds)
+        service.create_for_event(7, _seed_delivery(ds, 601), event)
+
+        rows, total = service.list(7)
+        assert total == 1
+        assert '演示单据' in rows[0]['title']
+        assert '单据状态: draft → released' in rows[0]['body']
+    finally:
+        registry.unregister(obj.id)
         _cleanup(ds, db_path)
 
 

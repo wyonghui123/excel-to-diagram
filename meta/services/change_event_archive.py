@@ -19,6 +19,8 @@ import sqlite3
 from datetime import datetime, timedelta
 from typing import Dict, List, Optional
 
+from meta.core.change_event_types import DEFAULT_RETENTION_DAYS
+
 logger = logging.getLogger(__name__)
 
 BATCH_SIZE = 500
@@ -26,6 +28,7 @@ EVENTS_TABLE = 'change_events'
 ARCHIVE_TABLE = 'change_events_archive'
 INBOX_TABLE = 'notification_inbox'
 DELIVERIES_TABLE = 'notification_deliveries'
+ARCHIVED_AT_COLUMN = 'archived_at'
 
 
 def _table_exists(cur, table: str) -> bool:
@@ -33,6 +36,52 @@ def _table_exists(cur, table: str) -> bool:
         "SELECT 1 FROM sqlite_master WHERE type='table' AND name=?", (table,)
     )
     return cur.fetchone() is not None
+
+
+def _table_columns(cur, table: str) -> List[str]:
+    """返回表列名（PRAGMA table_info 第 2 列），表不存在时返回空列表。"""
+    cur.execute(f"PRAGMA table_info({table})")
+    return [row[1] for row in cur.fetchall()]
+
+
+def _ensure_archive_table(cur) -> List[str]:
+    """确保归档表存在，且列集合覆盖源表（返回可写入的归档列）。
+
+    归档表结构不单独声明，**从 `change_events` 派生**（单一事实来源）：
+    - 不存在：按源表列定义 + `archived_at` 建表（id 保留主键，供 INSERT OR IGNORE 去重）
+    - 已存在但缺列（历史库由 v228 建表，缺后续新增的 status_reason /
+      idempotency_key 等）：按源表补列，否则复制必然因列不存在而整批失败
+    """
+    cur.execute(f"PRAGMA table_info({EVENTS_TABLE})")
+    source_cols = cur.fetchall()
+    source_names = [row[1] for row in source_cols]
+
+    if not _table_exists(cur, ARCHIVE_TABLE):
+        defs = []
+        for row in source_cols:
+            name, col_type, pk = row[1], (row[2] or 'TEXT'), row[5]
+            defs.append(f"{name} {col_type} PRIMARY KEY" if pk else f"{name} {col_type}")
+        defs.append(f"{ARCHIVED_AT_COLUMN} TEXT NOT NULL")
+        cur.execute(
+            f"CREATE TABLE {ARCHIVE_TABLE} ({', '.join(defs)})"
+        )
+        return source_names + [ARCHIVED_AT_COLUMN]
+
+    archive_names = set(_table_columns(cur, ARCHIVE_TABLE))
+    for row in source_cols:
+        name, col_type = row[1], (row[2] or 'TEXT')
+        if name in archive_names:
+            continue
+        cur.execute(f"ALTER TABLE {ARCHIVE_TABLE} ADD COLUMN {name} {col_type}")
+        archive_names.add(name)
+    if ARCHIVED_AT_COLUMN not in archive_names:
+        cur.execute(
+            f"ALTER TABLE {ARCHIVE_TABLE} ADD COLUMN {ARCHIVED_AT_COLUMN} TEXT"
+        )
+        archive_names.add(ARCHIVED_AT_COLUMN)
+    return [name for name in source_names if name in archive_names] + [
+        ARCHIVED_AT_COLUMN
+    ]
 
 
 def _delete_children(cur, event_ids: List[int]) -> Dict[str, int]:
@@ -154,6 +203,10 @@ def archive_expired(
             result['would_clean_inbox'] = counts['would_clean_inbox']
             return result
 
+        archive_columns = _ensure_archive_table(cur)
+        archive_column_set = set(archive_columns)
+        conn.commit()
+
         last_id = 0
         while True:
             cur.execute(
@@ -170,8 +223,11 @@ def archive_expired(
 
             copied_ids: List[int] = []
             for row in rows:
-                row_dict = dict(row)
-                row_dict['archived_at'] = archived_at
+                # 按归档表实际列投影源行（历史库列集合可能少于源表）
+                row_dict = {
+                    key: row[key] for key in row.keys() if key in archive_column_set
+                }
+                row_dict[ARCHIVED_AT_COLUMN] = archived_at
                 try:
                     cols = ', '.join(row_dict.keys())
                     placeholders = ', '.join(['?'] * len(row_dict))
@@ -293,7 +349,7 @@ def _log_archive_action(
             datetime.now().isoformat(),
             'success' if error_count == 0 else 'failure',
             f"{error_count} errors" if error_count > 0 else None,
-            (datetime.now() + timedelta(days=365)).isoformat(),
+            (datetime.now() + timedelta(days=DEFAULT_RETENTION_DAYS)).isoformat(),
         ))
         conn.commit()
         logger.info("Archive action logged to audit_logs")

@@ -32,7 +32,7 @@ from collections import deque
 from datetime import datetime, timedelta
 from typing import Any, Dict, Iterable, List, Optional
 
-from meta.core.change_event_types import normalize
+from meta.core.change_event_types import EVENT_TYPE_LABELS, normalize
 
 logger = logging.getLogger(__name__)
 
@@ -127,13 +127,6 @@ FEISHU_BOT_MARKERS = (
     'open.larksuite.com/open-apis/bot/v2/hook/',
 )
 FEISHU_BOT_TIMEOUT = 10
-
-_EVENT_TYPE_LABELS = {
-    'created': '新增',
-    'updated': '更新',
-    'deleted': '删除',
-    'state_changed': '状态变更',
-}
 
 
 def is_feishu_bot_url(url: str) -> bool:
@@ -809,7 +802,7 @@ class ChangeEventDispatcher:
     @staticmethod
     def _feishu_text(event: Dict[str, Any]) -> str:
         event_type = normalize(event.get('event_type'))
-        label = _EVENT_TYPE_LABELS.get(event_type, event_type or '变更')
+        label = EVENT_TYPE_LABELS.get(event_type, event_type or '变更')
         object_type = event.get('object_type') or '-'
         object_id = event.get('object_id')
         lines = [f'[变更事件] {object_type} {object_id} 已{label}']

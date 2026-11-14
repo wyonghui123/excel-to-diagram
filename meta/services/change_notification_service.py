@@ -15,7 +15,7 @@ from datetime import datetime, timedelta
 
 from meta.core.datasource import DataSource
 from meta.core.models import registry, ChangeNotificationConfig, ChangeEventConfig
-from meta.core.change_event_types import normalize, UPDATED
+from meta.core.change_event_types import normalize, UPDATED, DEFAULT_RETENTION_DAYS
 
 logger = logging.getLogger(__name__)
 
@@ -81,8 +81,8 @@ class ChangeNotificationService:
     """
     
     CHANGE_EVENTS_TABLE = "change_events"
-    #: [T7.1] 事件在线保留 365 天，之后由 archive_change_events.py 归档
-    RETENTION_DAYS = 365
+    #: [T7.1] 事件在线保留天数，之后由归档任务清理（单一来源见 change_event_types）
+    RETENTION_DAYS = DEFAULT_RETENTION_DAYS
     
     SYSTEM_FIELDS = {'id', 'created_at', 'created_by', 'updated_at', 'updated_by'}
     

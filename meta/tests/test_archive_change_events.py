@@ -17,6 +17,16 @@ CHANGE_EVENT_COLS = """
     object_type TEXT NOT NULL, object_id INTEGER NOT NULL,
     event_type TEXT NOT NULL, changed_fields TEXT, old_values TEXT, new_values TEXT,
     payload TEXT, channels TEXT, status TEXT NOT NULL DEFAULT 'pending',
+    status_reason TEXT, idempotency_key TEXT,
+    retry_count INTEGER NOT NULL DEFAULT 0, created_at TEXT NOT NULL,
+    delivered_at TEXT, audit_log_id INTEGER, retention_until TEXT
+"""
+
+#: 历史库归档表结构（v228 建表，缺后续新增的 status_reason / idempotency_key）
+LEGACY_ARCHIVE_COLS = """
+    object_type TEXT NOT NULL, object_id INTEGER NOT NULL,
+    event_type TEXT NOT NULL, changed_fields TEXT, old_values TEXT, new_values TEXT,
+    payload TEXT, channels TEXT, status TEXT NOT NULL DEFAULT 'pending',
     retry_count INTEGER NOT NULL DEFAULT 0, created_at TEXT NOT NULL,
     delivered_at TEXT, audit_log_id INTEGER, retention_until TEXT
 """
@@ -29,6 +39,14 @@ _ARCHIVE_DDL = """
         {0}
     )
 """.format(CHANGE_EVENT_COLS)
+
+_LEGACY_ARCHIVE_DDL = """
+    CREATE TABLE change_events_archive (
+        id INTEGER PRIMARY KEY,
+        archived_at TEXT NOT NULL,
+        {0}
+    )
+""".format(LEGACY_ARCHIVE_COLS)
 
 _INBOX_DDL = """
     CREATE TABLE notification_inbox (
@@ -63,6 +81,12 @@ _BROKEN_ARCHIVE_DDL = (
     "CREATE TABLE change_events_archive (id INTEGER PRIMARY KEY, archived_at TEXT NOT NULL)"
 )
 
+#: 用触发器模拟归档表不可写（自愈补列后仍无法插入）
+_BROKEN_ARCHIVE_TRIGGER = (
+    "CREATE TRIGGER fail_archive_insert BEFORE INSERT ON change_events_archive "
+    "BEGIN SELECT RAISE(ABORT, 'simulated archive failure'); END"
+)
+
 _DROP_ARCHIVE_SQL = "DROP TABLE change_events_archive"
 
 
@@ -87,13 +111,14 @@ class TestArchiveChangeEvents:
         conn.close()
         return p
 
-    def _insert_event(self, db_path, retention_until, object_id='1'):
+    def _insert_event(self, db_path, retention_until, object_id='1', **extra):
         conn = sqlite3.connect(db_path)
         bridge.insert(
             conn, 'change_events',
             object_type='product', object_id=object_id, event_type='update',
             created_at=datetime.now().isoformat(),
             retention_until=retention_until,
+            **extra,
         )
         conn.commit()
         conn.close()
@@ -137,12 +162,16 @@ class TestArchiveChangeEvents:
         conn.close()
 
     def test_copy_failure_keeps_source_rows(self, db_path):
-        """archive 写入失败时，源表记录不得被删除（防丢数据）"""
+        """archive 写入失败时，源表记录不得被删除（防丢数据）
+
+        归档表结构会先自愈补列，因此用触发器让插入真正失败。
+        """
         from meta.scripts.archive_change_events import archive_old_change_events
         conn = sqlite3.connect(db_path)
         cur = conn.cursor()
         cur.execute(_DROP_ARCHIVE_SQL)
         cur.execute(_BROKEN_ARCHIVE_DDL)
+        cur.execute(_BROKEN_ARCHIVE_TRIGGER)
         conn.commit()
         conn.close()
 
@@ -159,6 +188,39 @@ class TestArchiveChangeEvents:
         cur.execute("SELECT COUNT(*) FROM change_events")
         assert cur.fetchone()[0] == 2
         conn.close()
+
+    def test_legacy_archive_table_gets_missing_columns(self, db_path):
+        """旧库归档表缺 status_reason / idempotency_key 时自动补列且不丢值"""
+        from meta.scripts.archive_change_events import archive_old_change_events
+        conn = sqlite3.connect(db_path)
+        cur = conn.cursor()
+        cur.execute(_DROP_ARCHIVE_SQL)
+        cur.execute(_LEGACY_ARCHIVE_DDL)
+        conn.commit()
+        conn.close()
+
+        expired = (datetime.now() - timedelta(days=1)).isoformat()
+        self._insert_event(
+            db_path, expired, '1',
+            status='failed', status_reason='retry_exhausted',
+            idempotency_key='evt-1',
+        )
+
+        result = archive_old_change_events(db_path, dry_run=False)
+        assert result['archived_count'] == 1
+        assert result['error_count'] == 0
+
+        conn = sqlite3.connect(db_path)
+        cur = conn.cursor()
+        cur.execute(
+            "SELECT status_reason, idempotency_key, archived_at "
+            "FROM change_events_archive WHERE id=1"
+        )
+        status_reason, idempotency_key, archived_at = cur.fetchone()
+        conn.close()
+        assert status_reason == 'retry_exhausted'
+        assert idempotency_key == 'evt-1'
+        assert archived_at
 
     def test_batch_over_500_archives_all(self, db_path):
         """超过一个批次（500）时不得跳行（keyset 分页）"""

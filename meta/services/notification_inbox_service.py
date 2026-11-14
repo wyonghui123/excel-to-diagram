@@ -14,7 +14,11 @@ import logging
 from datetime import datetime, timedelta
 from typing import Any, Dict, List, Optional, Tuple
 
-from meta.core.change_event_types import normalize
+from meta.core.change_event_types import (
+    DEFAULT_RETENTION_DAYS,
+    EVENT_TYPE_LABELS,
+    normalize,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -22,15 +26,7 @@ INBOX_TABLE = 'notification_inbox'
 DELIVERIES_TABLE = 'notification_deliveries'
 
 #: 收件箱保留期（与 change_events 一致，归档任务按该列清理）
-RETENTION_DAYS = 365
-
-_EVENT_LABELS = {
-    'created': '新建',
-    'updated': '更新',
-    'deleted': '删除',
-    'state_changed': '状态变更',
-    'action_required': '待处理',
-}
+RETENTION_DAYS = DEFAULT_RETENTION_DAYS
 
 
 def _now() -> str:
@@ -142,35 +138,62 @@ class NotificationInboxService:
         return rows[0] if rows else None
 
     @staticmethod
-    def _build_title(event: Dict[str, Any], event_type: str) -> str:
+    def _meta_object(object_type: str):
+        """从元数据注册表取对象定义；未注册时返回 None（保持原始值降级）。"""
+        try:
+            from meta.core.models import registry
+            return registry.get(object_type)
+        except Exception:
+            return None
+
+    @classmethod
+    def _object_label(cls, object_type: str) -> str:
+        obj = cls._meta_object(object_type)
+        return (getattr(obj, 'name', None) or object_type or '')
+
+    @classmethod
+    def _field_label(cls, object_type: str, field_name: str) -> str:
+        obj = cls._meta_object(object_type)
+        for field in (getattr(obj, 'fields', None) or []):
+            if field.id == field_name or getattr(field, 'db_column', None) == field_name:
+                return field.name or field_name
+        return field_name
+
+    @classmethod
+    def _build_title(cls, event: Dict[str, Any], event_type: str) -> str:
         payload = event.get('payload')
         if isinstance(payload, dict):
             for key in ('title', 'name', 'subject'):
                 if payload.get(key):
                     return str(payload[key])
-        label = _EVENT_LABELS.get(event_type, event_type or '通知')
-        return '%s: %s #%s' % (label, event.get('object_type') or '', event.get('object_id'))
+        label = EVENT_TYPE_LABELS.get(event_type, event_type or '通知')
+        object_type = event.get('object_type') or ''
+        return '%s: %s #%s' % (label, cls._object_label(object_type), event.get('object_id'))
 
-    @staticmethod
-    def _build_body(event: Dict[str, Any]) -> str:
+    @classmethod
+    def _build_body(cls, event: Dict[str, Any]) -> str:
         payload = event.get('payload')
         if isinstance(payload, dict):
             for key in ('summary', 'message', 'body', 'content', 'note'):
                 if payload.get(key):
                     return str(payload[key])
 
+        object_type = event.get('object_type') or ''
         lines: List[str] = []
         old_values = event.get('old_values') or {}
         new_values = event.get('new_values') or {}
         for field_name in (event.get('changed_fields') or [])[:10]:
             if field_name in old_values or field_name in new_values:
+                label = cls._field_label(object_type, field_name)
                 lines.append(
                     '%s: %s → %s'
-                    % (field_name, old_values.get(field_name), new_values.get(field_name))
+                    % (label, old_values.get(field_name), new_values.get(field_name))
                 )
         if not lines and isinstance(payload, dict):
             for key, value in list(payload.items())[:10]:
-                lines.append('%s: %s' % (key, value))
+                lines.append(
+                    '%s: %s' % (cls._field_label(object_type, key), value)
+                )
         return '\n'.join(lines)
 
     # ------------------------------------------------------------------ 查询
