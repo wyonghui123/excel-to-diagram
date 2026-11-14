@@ -13,6 +13,7 @@
 """
 
 import logging
+import os
 
 from meta.core.job_executor_registry import ExecutorRegistry, JobResult
 
@@ -159,6 +160,77 @@ def make_import_cascade_executor():
             'results': result.results,
             'errors': result.errors,
             'errors_truncated': bool(getattr(result, 'errors_truncated', False)),
+        })
+
+    return _run
+
+
+def make_export_cascade_executor():
+    """`handler='export_cascade'` 的执行体（spec FR-001 唯一执行账本）。
+
+    params（见 v271 作业定义）::
+
+        {object_type, scope, selected_types, filters, sort_by, sort_order,
+         options, user}
+
+    与 `/export/async` 线程路径共用 `export_import_api._execute_export`，
+    进度经 `ctx.report_progress` 落 `task_runs.progress`。
+    取消为协作式：导出本身无安全中断点，仅执行前/后检查。
+    """
+
+    def _run(ctx) -> JobResult:
+        params = ctx.params or {}
+        object_type = params.get('object_type')
+        if not isinstance(object_type, str) or not object_type:
+            return JobResult(False, error='缺少 object_type')
+        if ctx.should_cancel:
+            return JobResult(False, error='cancelled')
+
+        from meta.services.query_service import (
+            set_thread_user, clear_thread_user_id)
+        from meta.api.export_import_api import _execute_export
+
+        user = params.get('user')
+        if isinstance(user, dict) and user:
+            try:
+                set_thread_user(user)
+            except Exception:  # noqa: BLE001 - 身份上下文尽力而为
+                logger.warning('[job-handlers] set_thread_user 失败', exc_info=True)
+
+        def _progress(info):
+            ctx.report_progress({
+                'current': info.get('current_index'),
+                'total': info.get('total_types'),
+                'percent': info.get('progress'),
+                'stage': info.get('current_type'),
+                'stage_name': info.get('current_type_name'),
+                'message': info.get('message'),
+            })
+
+        try:
+            result = _execute_export(params, progress_callback=_progress)
+        except Exception as exc:  # noqa: BLE001 - 失败交给账本重试/告警
+            return JobResult(False, error=str(exc))
+        finally:
+            try:
+                clear_thread_user_id()
+            except Exception:
+                pass
+
+        if ctx.should_cancel:
+            return JobResult(False, error='cancelled')
+        if not result.success:
+            errors = result.errors or ['导出失败']
+            if not isinstance(errors, (list, tuple)):
+                errors = [errors]
+            return JobResult(False, error='; '.join(str(e) for e in errors))
+
+        return JobResult(True, data={
+            'file_path': result.file_path,
+            'download_url': '/api/v1/export/download/%s'
+                            % os.path.basename(result.file_path),
+            'sheets': result.sheets,
+            'total_rows': result.total_rows,
         })
 
     return _run

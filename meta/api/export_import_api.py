@@ -69,11 +69,18 @@ _export_tasks = {}
 #: [FR-006/FR-007 2026-11-14] 导入任务接入统一执行账本（`task_runs`）。
 #: 开关默认 1（走账本）；置 0 回退到纯内存实现（spec TR-002）。
 IMPORT_JOB_CODE = 'import_cascade'
+#: [FR-001 2026-11-14] 异步导出接入同一执行账本，开关 `EXPORT_USE_JOB_LEDGER` 与导入对偶。
+EXPORT_JOB_CODE = 'export_cascade'
 _job_store = None
 
 
 def _use_job_ledger() -> bool:
     return os.environ.get('IMPORT_USE_JOB_LEDGER', '1').strip().lower() not in (
+        '0', 'false', 'no', 'off')
+
+
+def _use_export_job_ledger() -> bool:
+    return os.environ.get('EXPORT_USE_JOB_LEDGER', '1').strip().lower() not in (
         '0', 'false', 'no', 'off')
 
 
@@ -147,6 +154,104 @@ def _progress_payload(info: dict) -> dict:
         'stage': info.get('current_type'),
         'stage_name': info.get('current_type_name'),
         'message': info.get('message'),
+    }
+
+
+def _execute_export(params: dict, progress_callback=None):
+    """按 `scope` 分派导出（`/export/async` 线程与 `export_cascade` 执行体共用）。"""
+    service = get_import_export_service()
+    scope = params.get('scope') or 'single'
+    object_type = params.get('object_type')
+    selected_types = params.get('selected_types') or []
+    filters = params.get('filters')
+    sort_by = params.get('sort_by')
+    sort_order = params.get('sort_order') or 'asc'
+    options = params.get('options') or {
+        "include_hierarchy_path": True,
+        "include_hierarchy_ids": True,
+        "include_metadata_sheet": True,
+        "protect_sheet": False
+    }
+    if scope == 'template':
+        return service.export_template(
+            selected_types, options, progress_callback=progress_callback)
+    if scope == 'cascade':
+        return service.export_cascade(
+            object_type, filters, options, sort_by=sort_by,
+            sort_order=sort_order, progress_callback=progress_callback)
+    if scope == 'selected' and selected_types:
+        return service.export_selected_types(
+            selected_types, filters, options, sort_by=sort_by,
+            sort_order=sort_order, progress_callback=progress_callback)
+    return service.export_selected_types(
+        [object_type], filters, options, sort_by=sort_by,
+        sort_order=sort_order, progress_callback=progress_callback)
+
+
+def _export_payload(result) -> dict:
+    """`ExportResult` → 账本结果 / `/export/status` 的 `result` 结构（逐字兼容）。"""
+    return {
+        'file_path': result.file_path,
+        'download_url': "/api/v1/export/download/{0}".format(
+            os.path.basename(result.file_path)),
+        'sheets': result.sheets,
+        'total_rows': result.total_rows,
+    }
+
+
+def _export_error_text(errors) -> str:
+    """导出失败原因统一为字符串（sqlite TEXT 不接受 list）。"""
+    if not errors:
+        return '导出失败'
+    if isinstance(errors, (list, tuple)):
+        return '; '.join(str(e) for e in errors)
+    return str(errors)
+
+
+def _export_run_to_task_status(run) -> dict:
+    """把 `task_runs` 行投影为 `/export/status` 的旧响应结构（逐字兼容）。"""
+    progress = run.get('progress') or {}
+    if not isinstance(progress, dict):
+        progress = {}
+    try:
+        result = json.loads(run['result']) if run.get('result') else None
+    except (TypeError, ValueError):
+        result = None
+
+    status = run.get('status')
+    error = run.get('error')
+    selected = (run.get('params') or {}).get('selected_types') or []
+    if status == 'succeeded':
+        legacy_status = 'completed'
+        percent = 100
+        message = '导出完成'
+    elif status in ('failed', 'dead'):
+        legacy_status = 'failed'
+        percent = progress.get('percent') or 0
+        message = ('导出失败: %s' % error) if error else (
+            progress.get('message') or '导出失败')
+    elif status == 'cancelled':
+        legacy_status = 'failed'
+        percent = progress.get('percent') or 0
+        error = error or '已取消'
+        message = '导出已取消'
+    else:
+        legacy_status = 'processing'
+        percent = progress.get('percent') or 0
+        message = progress.get('message') or '准备导出...'
+
+    total_types = progress.get('total') or (len(selected) if selected else 1)
+
+    return {
+        'status': legacy_status,
+        'progress': percent,
+        'current_type': progress.get('stage') or '',
+        'current_type_name': progress.get('stage_name') or '',
+        'total_types': total_types,
+        'current_index': progress.get('current') or 0,
+        'message': message,
+        'result': result,
+        'error': error,
     }
 
 
@@ -472,16 +577,6 @@ def export_data_async():
             "protect_sheet": False
         })
 
-        # [FIX 2026-06-17] 从 login_required 已写入的 g.current_user 拿 user_id
-        # 用于后台线程的权限过滤 (避免子线程中 flask.g 不可用导致权限被绕过)
-        export_user_id = None
-        try:
-            g_user = getattr(g, 'current_user', None)
-            if g_user:
-                export_user_id = g_user.get('user_id')
-        except Exception:
-            pass
-
         task_id = str(uuid.uuid4())
         total_types = len(selected_types) if selected_types else 1
         
@@ -497,56 +592,112 @@ def export_data_async():
             'error': None
         }
 
+        export_params = {
+            'object_type': object_type,
+            'scope': scope,
+            'selected_types': selected_types,
+            'filters': filters,
+            'sort_by': sort_by,
+            'sort_order': sort_order,
+            'options': options,
+            'user': g.current_user if isinstance(g.current_user, dict) else None,
+        }
+
+        # [FR-001 2026-11-14] 双写：内存字典保留（开关回退路径），同时落 task_runs。
+        run_id = None
+        store = _get_job_store() if _use_export_job_ledger() else None
+        if store is not None:
+            try:
+                run_id = store.create_run(
+                    EXPORT_JOB_CODE,
+                    params=export_params,
+                    run_key='export:%s' % task_id,
+                    max_attempts=1)
+            except Exception as exc:  # 账本不可用不阻断导出，仅降级为内存模式
+                logger.warning('[export] run 创建失败，降级内存模式: %s', exc)
+                run_id = None
+        if run_id is None and _use_export_job_ledger():
+            logger.warning('[export] 未能创建 task_runs（作业定义缺失或账本未初始化），task=%s',
+                           task_id)
+
+        def _on_progress(info):
+            _update_export_task_progress(task_id, info)
+            if run_id is not None:
+                try:
+                    store.update_progress(run_id, _progress_payload(info))
+                except Exception as exc:  # 进度写失败不影响导出
+                    logger.debug('[export] run=%s 进度写入失败: %s', run_id, exc)
+
         # [FIX 2026-06-17] 用 thread-local user_id 传递 user 身份到子线程
         # 否则 query_service.search() 调 _apply_data_permission 时 get_current_user() 返回 None
         # 导致权限过滤被跳过 (async 导出包含所有数据的安全漏洞)
-        _run_user_id = export_user_id
-        # [FIX v1.2.12 2026-06-17] 同时传完整 user dict (含 permissions) 让 is_admin() 能识别 admin
         _run_user = g.current_user  # full dict with permissions
+
         def _run_export():
             from meta.services.query_service import set_thread_user
             if _run_user:
                 set_thread_user(_run_user)
+            worker_id = None
+            if run_id is not None:
+                from meta.core.job_run_store import current_worker_id
+                worker_id = current_worker_id()
+                try:
+                    claimed = store.claim(run_id, worker_id)
+                    if claimed:
+                        store.start(run_id, worker_id)
+                    else:
+                        # 账本已被其他执行者持有（如 dispatcher）→ 本线程退出，避免重复导出
+                        logger.info('[export] run=%s 已被其他 worker 持有，跳过本次执行', run_id)
+                        return
+                except Exception as exc:
+                    logger.warning('[export] run=%s claim/start 失败: %s', run_id, exc)
+                    try:
+                        store.mark_dead(run_id, error='账本占用失败: %s' % exc)
+                    except Exception:
+                        pass
+                    task = _export_tasks.get(task_id)
+                    if task:
+                        task['status'] = 'failed'
+                        task['error'] = str(exc)
+                        task['message'] = '导出失败: {0}'.format(str(exc))
+                    return
             try:
-                service = get_import_export_service()
-
-                if scope == 'template':
-                    result = service.export_template(selected_types, options, 
-                        progress_callback=lambda info: _update_export_task_progress(task_id, info))
-                elif scope == 'cascade':
-                    result = service.export_cascade(object_type, filters, options, 
-                        sort_by=sort_by, sort_order=sort_order,
-                        progress_callback=lambda info: _update_export_task_progress(task_id, info))
-                elif scope == 'selected' and selected_types:
-                    result = service.export_selected_types(selected_types, filters, options, 
-                        sort_by=sort_by, sort_order=sort_order,
-                        progress_callback=lambda info: _update_export_task_progress(task_id, info))
-                else:
-                    result = service.export_selected_types([object_type], filters, options, 
-                        sort_by=sort_by, sort_order=sort_order,
-                        progress_callback=lambda info: _update_export_task_progress(task_id, info))
-                
+                result = _execute_export(export_params, progress_callback=_on_progress)
+                task = _export_tasks.get(task_id)
                 if result.success:
-                    file_name = os.path.basename(result.file_path)
-                    download_url = "/api/v1/export/download/{0}".format(file_name)
-                    _export_tasks[task_id]['status'] = 'completed'
-                    _export_tasks[task_id]['progress'] = 100
-                    _export_tasks[task_id]['message'] = '导出完成'
-                    _export_tasks[task_id]['result'] = {
-                        'file_path': result.file_path,
-                        'download_url': download_url,
-                        'sheets': result.sheets,
-                        'total_rows': result.total_rows
-                    }
+                    payload = _export_payload(result)
+                    if task:
+                        task['status'] = 'completed'
+                        task['progress'] = 100
+                        task['message'] = '导出完成'
+                        task['result'] = payload
+                    if run_id is not None and worker_id is not None:
+                        store.finish(run_id, worker_id, True, result=payload)
                 else:
-                    _export_tasks[task_id]['status'] = 'failed'
-                    _export_tasks[task_id]['error'] = result.errors or '导出失败'
-                    
+                    error_text = _export_error_text(result.errors)
+                    if task:
+                        task['status'] = 'failed'
+                        task['error'] = error_text
+                    if run_id is not None and worker_id is not None:
+                        store.finish(run_id, worker_id, False, error=error_text)
             except Exception as e:
                 import traceback
-                _export_tasks[task_id]['status'] = 'failed'
-                _export_tasks[task_id]['error'] = str(e)
-                _export_tasks[task_id]['detail'] = traceback.format_exc()
+                if run_id is not None and worker_id is not None:
+                    try:
+                        store.finish(run_id, worker_id, False, error=str(e))
+                    except Exception as finish_exc:
+                        logger.warning('[export] run=%s finish 失败: %s', run_id, finish_exc)
+                task = _export_tasks.get(task_id)
+                if task:
+                    task['status'] = 'failed'
+                    task['error'] = str(e)
+                    task['detail'] = traceback.format_exc()
+            finally:
+                try:
+                    from meta.services.query_service import clear_thread_user_id
+                    clear_thread_user_id()
+                except Exception:
+                    pass
 
         threading.Thread(target=_run_export, daemon=True).start()
         
@@ -564,7 +715,22 @@ def export_data_async():
 @export_import_bp.route('/export/status/<task_id>', methods=['GET'])
 @login_required
 def export_status(task_id):
-    """查询异步导出任务状态"""
+    """查询异步导出任务状态
+
+    [FR-007 2026-11-14] `EXPORT_USE_JOB_LEDGER=1` 时优先读 `task_runs`，
+    响应结构保持与内存实现逐字一致；账本查不到时回退内存（双写容错）。
+    """
+    if _use_export_job_ledger():
+        store = _get_job_store()
+        if store is not None:
+            try:
+                run = store.find_run_by_key('export:%s' % task_id)
+            except Exception as exc:
+                logger.warning('[export] 账本查询失败，回退内存: %s', exc)
+                run = None
+            if run:
+                return ok(_export_run_to_task_status(run))
+
     task = _export_tasks.get(task_id)
     if not task:
         return error_response("任务不存在", status=404)

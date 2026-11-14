@@ -962,6 +962,7 @@ def create_app(db_path=None):
     from meta.handlers.job_handlers import (
         build_default_job_registry,
         make_import_cascade_executor,
+        make_export_cascade_executor,
     )
     job_store = JobRunStore(data_source)
     set_job_store(job_store)
@@ -971,6 +972,10 @@ def create_app(db_path=None):
     # [FR-006 2026-11-14] 批量导入执行体：与 /import/async 共用同一 service。
     _job_registry.register(
         'import_cascade', make_import_cascade_executor(),
+        supports_cancel=True)
+    # [FR-001 2026-11-14] 异步导出执行体：与 /export/async 共用同一 service。
+    _job_registry.register(
+        'export_cascade', make_export_cascade_executor(),
         supports_cancel=True)
     set_job_registry(_job_registry)
     _job_enabled = os.environ.get(
