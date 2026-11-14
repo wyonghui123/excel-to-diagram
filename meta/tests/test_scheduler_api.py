@@ -159,7 +159,7 @@ class Test运维端点鉴权:
             lambda user, code: False)
         resp = _client().post('/api/v2/schedulers/db_analyze/run-now', headers=AUTH)
         assert resp.status_code == 403
-        assert resp.get_json()['required_permission'] == 'job_admin'
+        assert resp.get_json()['details']['required_permission'] == 'job_admin'
 
 
 # ─────────────────────────────────────────────────────────────────────────────

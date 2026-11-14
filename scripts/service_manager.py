@@ -1472,10 +1472,15 @@ def doctor_command(fix: bool = False) -> int:
         real_port = SERVICES[svc_name]["port"]
         if recorded_pid and not _is_pid_alive(recorded_pid):
             print(f"  {svc_name}: status 记录 PID={recorded_pid} 已死 (陈旧条目)")
-            problems.append(f"{svc_name} status 文件陈旧")
+            problems.append(_doctor_problem(
+                'doctor_status_stale', f"{svc_name} status 文件陈旧 (PID={recorded_pid} 已死)",
+                'python scripts/service_manager.py restart'))
         elif recorded_port and recorded_port != real_port:
             print(f"  {svc_name}: status 记录 port={recorded_port} ≠ 真源 {real_port}")
-            problems.append(f"{svc_name} status 文件端口漂移")
+            problems.append(_doctor_problem(
+                'doctor_status_port_drift',
+                f"{svc_name} status 文件端口漂移 (记录={recorded_port} ≠ 真源={real_port})",
+                '确认 scripts/ports.json 后重启服务刷新状态文件'))
         else:
             print(f"  {svc_name}: {'一致' if info else '无记录 (未启动过)'}")
 
@@ -1502,7 +1507,9 @@ def doctor_command(fix: bool = False) -> int:
     if not drift_found:
         print("  无漂移 (各消费方与 ports.json 一致)")
     else:
-        problems.append("存在硬编码端口漂移")
+        problems.append(_doctor_problem(
+            'doctor_config_drift', '存在硬编码端口漂移',
+            '改为读取 scripts/ports.json（禁止硬编码端口）后重启服务'))
 
     # [P0 2026-09-06 多会话] 注册表全景: 谁在占用哪些端口 (活跃会话)
     print("\n[6] 会话注册表 (.runtime/port_registry.json)")
@@ -1528,7 +1535,8 @@ def doctor_command(fix: bool = False) -> int:
         return 0
     print(f"  VERDICT: {len(problems)} 个问题")
     for i, p in enumerate(problems, 1):
-        print(f"    {i}. {p}")
+        print(f"    {i}. [{p['code']}] {p['message']}")
+        print(f"       建议: {p['suggestion']}")
     print("\n  修复路径:")
     print("    python scripts/service_manager.py doctor --fix   # 清孤儿+残留锁")
     print("    python scripts/service_manager.py restart        # 干净重启 (start 自带孤儿对账)")

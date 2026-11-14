@@ -64,8 +64,9 @@ def _db_checks() -> Dict[str, Any]:
             checks['wal_size_mb'] = round(os.path.getsize(wal_path) / (1024 * 1024), 2)
             if checks['wal_size_mb'] > 100:
                 checks['wal_size'] = 'warning'
-    except Exception:
-        pass
+    except Exception as e:
+        logger.debug('[Ops] WAL 大小读取失败', exc_info=True)
+        checks['wal_size'] = 'unknown: {0}'.format(str(e)[:120])
     return checks
 
 
@@ -115,6 +116,7 @@ def ops_health():
         'success': True,
         'status': _health_status(checks),
         'checks': checks,
+        'schedulers': _scheduler_snapshot(),
         'timestamp': time.strftime('%Y-%m-%dT%H:%M:%S'),
     })
 

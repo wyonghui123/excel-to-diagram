@@ -29,7 +29,6 @@ meta/api/enum_api.py|update_enum_type|bare||1
 meta/api/export_import_api.py|export_data_async|Exception||1
 meta/api/export_import_api.py|import_data_async._run_import|Exception||1
 meta/api/export_import_api.py|import_data_async|Exception||1
-meta/api/ops_api.py|_db_checks|Exception||1
 meta/api/org_api.py|_bump_org_subtree_users|Exception||1
 meta/api/permission_dimension_api.py|get_permission_meta|Exception||1
 meta/api/permission_set_menu_api.py|_derive_bo_permission_groups|Exception||1

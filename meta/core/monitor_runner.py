@@ -28,7 +28,7 @@ DB_LOCK_WARN_MS = float(os.environ.get('MONITOR_DB_LOCK_WARN_MS', '3000'))
 CACHE_HIT_MIN_PERCENT = float(os.environ.get('MONITOR_CACHE_HIT_MIN', '60'))
 
 _lock = threading.RLock()
-_snapshot: Dict[str, Any] = {'started': False, 'last_run': {}}
+_snapshot: Dict[str, Any] = {'started': False, 'last_run': {}, 'latest': {}}
 _thread: Optional[threading.Thread] = None
 _started = False
 
@@ -53,13 +53,15 @@ def _check_db() -> Dict[str, Any]:
         monitor = get_monitor(_db_path() or None)
         report = monitor.get_report()
         out['report'] = report
-        wal_mb = float(report.get('wal_size_mb') or 0)
+        # db_health_monitor 把 WAL 大小放在 metrics.wal_size_kb（KB）
+        metrics = report.get('metrics') or {}
+        wal_mb = float(metrics.get('wal_size_kb') or 0) / 1024.0
         if wal_mb > WAL_WARN_MB:
             _alert('db_health_warning', 'database',
                    'WAL size {0:.1f}MB > {1}MB'.format(wal_mb, WAL_WARN_MB))
         else:
             _resolve('db_health_warning', 'database')
-        status = str(report.get('wal_status') or report.get('status') or '').lower()
+        status = str(report.get('status') or '').lower()
         if 'critical' in status or 'error' in status:
             _alert('db_health_warning', 'database', 'db health status: {0}'.format(status))
     except Exception as e:
@@ -68,8 +70,8 @@ def _check_db() -> Dict[str, Any]:
     return out
 
 
-def _check_db_lock() -> None:
-    """用一次带超时的写入探测 DB 锁等待（>3s 视为异常）。"""
+def _check_db_lock() -> Dict[str, Any]:
+    """用一次带超时的探测查询 DB 锁等待（>3s 视为异常）。"""
     start = time.monotonic()
     try:
         from meta.core.datasource import get_platform_data_source
@@ -81,8 +83,10 @@ def _check_db_lock() -> None:
                    'db probe {0:.0f}ms > {1:.0f}ms'.format(elapsed_ms, DB_LOCK_WARN_MS))
         else:
             _resolve('db_health_warning', 'database_lock')
+        return {'latency_ms': round(elapsed_ms, 2)}
     except Exception as e:
         _alert('db_health_warning', 'database_lock', 'db probe failed: {0}'.format(str(e)[:200]))
+        return {'error': str(e)[:200]}
 
 
 def _check_indexes() -> Dict[str, Any]:
@@ -109,11 +113,12 @@ def _check_cache() -> Dict[str, Any]:
         from meta.api.permission_dimension_api import _get_engine
         monitor = CacheMonitor(_get_engine())
         report = monitor.get_performance_report()
-        metrics = report.get('metrics') or report
+        # CacheMonitor 的指标位于 performance_metrics（百分制 hit_rate_value）
+        metrics = report.get('performance_metrics') or {}
         hit_rate = metrics.get('hit_rate_value')
         if hit_rate is None:
             stats = monitor.get_cache_stats() or {}
-            hit_rate = stats.get('hit_rate_value')
+            hit_rate = stats.get('hit_rate_value', stats.get('hit_rate'))
         if hit_rate is not None:
             hit_rate = float(hit_rate)
             if hit_rate < CACHE_HIT_MIN_PERCENT:
@@ -160,7 +165,7 @@ def run_monitor_cycle(now: Optional[float] = None, force: bool = False) -> Dict[
             result['db'] = _check_db()
             last['db'] = now
         if due('db_lock', DB_INTERVAL):
-            _check_db_lock()
+            result['db_lock'] = _check_db_lock()
             last['db_lock'] = now
         if due('index', SLOW_INTERVAL):
             result['index'] = _check_indexes()
@@ -170,6 +175,7 @@ def run_monitor_cycle(now: Optional[float] = None, force: bool = False) -> Dict[
             last['cache'] = now
 
         if result:
+            _snapshot.setdefault('latest', {}).update(result)
             _snapshot['last_run'] = last
             _snapshot['last_result'] = result
             _snapshot['last_at'] = time.strftime('%Y-%m-%dT%H:%M:%S', time.localtime(now))
@@ -182,6 +188,7 @@ def get_monitor_snapshot() -> Dict[str, Any]:
             'started': _snapshot.get('started', False),
             'last_at': _snapshot.get('last_at'),
             'last_result': _snapshot.get('last_result', {}),
+            'latest': _snapshot.get('latest', {}),
         }
 
 
