@@ -57,6 +57,11 @@ fields:
     type: json
     db_column: params
     description: 本次执行参数快照
+  - id: progress
+    name: 进度
+    type: json
+    db_column: progress
+    description: '结构化进度 {current, total, percent, stage, message, ts}'
   - id: attempt
     name: 第几次尝试
     type: integer
@@ -193,5 +198,6 @@ ui_view_config:
         type: fields
         fields:
           - params
+          - progress
           - result
           - error

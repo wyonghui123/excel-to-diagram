@@ -56,5 +56,19 @@ export default [
     name: 'platform-ops-jobs',
     component: () => import('@/views/SystemManagement/PlatformOpsJobs.vue'),
     meta: { title: '平台运维作业', requiresAuth: true, requiresAdmin: true }
+  },
+  {
+    // 统一异步任务账本：执行记录列表 / 详情 / 取消 / 重试（spec IF-002）
+    path: '/system/task-runs',
+    name: 'task-runs',
+    component: () => import('@/views/TaskCenter/TaskRuns.vue'),
+    meta: { title: '执行记录', requiresAuth: true, requiresAdmin: true }
+  },
+  {
+    // 作业定义与触发器：运营参数 / 立即运行 / cron·interval·once（spec IF-007/IF-009）
+    path: '/system/job-schedules',
+    name: 'job-schedules',
+    component: () => import('@/views/SystemManagement/JobSchedules.vue'),
+    meta: { title: '作业调度', requiresAuth: true, requiresAdmin: true }
   }
 ]

@@ -17,7 +17,8 @@ import pytest
 pytestmark = pytest.mark.unit
 
 from meta.core.job_params import (
-    MAX_PARAMS_BYTES, merge_job_params, sanitize_params,
+    MAX_PARAMS_BYTES, is_secret_field, merge_job_params, redact_secrets,
+    sanitize_params, sanitize_params_detailed,
 )
 
 SCHEMA = {
@@ -95,3 +96,53 @@ def test_non_object_params_are_rejected():
     clean, error = sanitize_params(['a'], SCHEMA)
     assert clean == {}
     assert error and 'object' in error
+
+
+# ── 告警明细与脱敏（spec IF-002 / NFR-006）─────────────────────────────
+
+def test_sanitize_detailed_reports_dropped_keys():
+    clean, error, details = sanitize_params_detailed(
+        {'action_id': 'inspection.run', 'unknown': 1}, SCHEMA)
+    assert error is None
+    assert clean == {'action_id': 'inspection.run'}
+    assert details == [
+        {'field': 'unknown', 'message': '未在 params_schema 声明，已忽略'},
+    ]
+
+
+def test_sanitize_detailed_has_no_details_for_fatal_error():
+    clean, error, details = sanitize_params_detailed({}, SCHEMA)
+    assert clean == {} and error and '必填' in error
+    assert details == []
+
+
+def test_is_secret_field_by_key_name_and_x_ui():
+    assert is_secret_field('password') is True
+    assert is_secret_field('api_token') is True
+    assert is_secret_field('client_secret') is True
+    assert is_secret_field('access_key') is True
+    assert is_secret_field('note') is False
+    assert is_secret_field('note', {'x-ui': {'secret': True}}) is True
+
+
+def test_redact_secrets_masks_known_and_nested_keys():
+    schema = {'properties': {
+        'password': {'type': 'string'},
+        'account': {'type': 'string'},
+        'nested': {'type': 'object'},
+    }}
+    redacted = redact_secrets({
+        'password': 'p@ss',
+        'account': 'alice',
+        'nested': {'db_password': 'x', 'keep': 1},
+    }, schema)
+    assert redacted == {
+        'password': '***',
+        'account': 'alice',
+        'nested': {'db_password': '***', 'keep': 1},
+    }
+
+
+def test_redact_secrets_tolerates_non_dict():
+    assert redact_secrets(None) == {}
+    assert redact_secrets(['x']) == {}

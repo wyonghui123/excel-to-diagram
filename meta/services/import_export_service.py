@@ -33,6 +33,10 @@ from meta.services.import_export_types import (
 # 现在一次性 hoist 到模块顶部，所有调用方直接用 `logger` 即可。
 logger = logging.getLogger(__name__)
 
+#: 导入错误全局硬上限（spec FR-006）：单类型 ≤200 由 `_import_sheet` 负责，
+#: 级联汇总时再套一层 2000 条总上限，超限置 `errors_truncated=True`。
+IMPORT_ERRORS_GLOBAL_CAP = 2000
+
 
 
 # [FIX v1.2.55 2026-06-22] 删除模块级 GLOBAL_MENU_PREFIX_MAP
@@ -44,7 +48,7 @@ logger = logging.getLogger(__name__)
 # 业务编码列头 comment 包含 key_template 描述（多行内容），默认 Comment 框太小
 # 导致用户需要手动拖动才能看到全部内容，体验差
 # 解决: 根据内容行数自动调整 Comment 框的 height 和 width
-def _make_header_comment(text: str, author: str = "系统"):
+def _make_header_comment(text: str, author: str = "\u7cfb\u7edf"):
     """创建带自适应尺寸的 openpyxl Comment
 
     [FIX v1.2.43c 2026-06-22] 业务编码列头 comment 包含 key_template 描述，
@@ -5824,6 +5828,7 @@ class ImportExportService:
         
         results = {}
         all_errors = []
+        all_errors_truncated = False
 
         enabled_types = [ot for ot in import_order if registry.get(ot) and registry.get(ot).import_export.import_enabled]
         total_types = len(enabled_types)
@@ -5879,9 +5884,15 @@ class ImportExportService:
             completed_count += 1
 
             if sheet_result.get("errors"):
-                all_errors.extend([
-                    {"object_type": ot, **e} for e in sheet_result["errors"]
-                ])
+                room = IMPORT_ERRORS_GLOBAL_CAP - len(all_errors)
+                picked = sheet_result["errors"] if room <= 0 else sheet_result["errors"][:room]
+                if room > 0:
+                    all_errors.extend([
+                        {"object_type": ot, **e} for e in picked
+                    ])
+                # 单类型已被 _import_sheet 截断，或总上限放不下 → 标记截断
+                if len(picked) < len(sheet_result["errors"]):
+                    all_errors_truncated = True
 
             if progress_callback:
                 progress_callback({
@@ -5961,6 +5972,7 @@ class ImportExportService:
             results=results,
             errors=all_errors,
             trace_id=self._get_current_trace_id(),
+            errors_truncated=all_errors_truncated,
         )
 
     def _sheet_name_to_object_type(self, sheet_name: str) -> Optional[str]:

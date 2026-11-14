@@ -86,6 +86,84 @@ def make_bo_action_executor(action_registry=None):
     return _run
 
 
+def make_import_cascade_executor():
+    """`handler='import_cascade'` 的执行体（spec FR-006）。
+
+    params（见 v270 作业定义）::
+
+        {file_path, conflict_strategy, context,
+         force_override_explicit_mode, audit: {user_id, user_name, ip, user_agent, user}}
+
+    进度通过 `ctx.report_progress` 落 `task_runs.progress`，
+    与 `/import/async` 线程路径共用同一 `import_cascade` 服务。
+    取消为协作式：仅执行前/后检查（导入本身无安全中断点）。
+    """
+
+    def _run(ctx) -> JobResult:
+        params = ctx.params or {}
+        file_path = params.get('file_path')
+        if not isinstance(file_path, str) or not file_path:
+            return JobResult(False, error='缺少 file_path')
+        if ctx.should_cancel:
+            return JobResult(False, error='cancelled')
+
+        from meta.services.query_service import (
+            set_thread_user, clear_thread_user_id)
+        from meta.api.export_import_api import get_import_export_service
+
+        audit = params.get('audit') if isinstance(params.get('audit'), dict) else {}
+        user = audit.get('user')
+        if isinstance(user, dict) and user:
+            try:
+                set_thread_user(user)
+            except Exception:  # noqa: BLE001 - 身份上下文尽力而为
+                logger.warning('[job-handlers] set_thread_user 失败', exc_info=True)
+
+        def _progress(info):
+            ctx.report_progress({
+                'current': info.get('current_index'),
+                'total': info.get('total_types'),
+                'percent': info.get('progress'),
+                'stage': info.get('current_type'),
+                'stage_name': info.get('current_type_name'),
+                'message': info.get('message'),
+            })
+
+        try:
+            service = get_import_export_service()
+            if audit.get('user_id'):
+                service.manage_service.set_audit_user(
+                    audit.get('user_id'), audit.get('user_name') or 'system',
+                    audit.get('ip') or '', audit.get('user_agent') or '')
+            result = service.import_cascade(
+                file_path, 'execute',
+                params.get('conflict_strategy') or 'upsert',
+                params.get('context') or {},
+                progress_callback=_progress,
+                force_override_explicit_mode=bool(
+                    params.get('force_override_explicit_mode', True)),
+            )
+        except Exception as exc:  # noqa: BLE001 - 失败交给账本重试/告警
+            return JobResult(False, error=str(exc))
+        finally:
+            try:
+                clear_thread_user_id()
+            except Exception:
+                pass
+
+        if ctx.should_cancel:
+            return JobResult(False, error='cancelled')
+
+        return JobResult(True, data={
+            'success': result.success,
+            'results': result.results,
+            'errors': result.errors,
+            'errors_truncated': bool(getattr(result, 'errors_truncated', False)),
+        })
+
+    return _run
+
+
 def _make_ops_executor(code, handler, data_source):
     def _run(ctx) -> JobResult:
         if ctx.cancel_event.is_set():

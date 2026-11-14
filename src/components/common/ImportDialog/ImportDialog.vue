@@ -95,7 +95,7 @@
         </div>
 
         <div v-else-if="previewResult" class="preview-result">
-          <!-- [NEW v1.2.14 2026-06-19] 紧凑顶部摘要: 一行展示 alert + 统计条 -->
+          <!-- 步骤 2 紧凑顶部摘要: 一行展示 alert 与统计条 -->
           <div class="preview-summary">
             <el-alert
               v-if="!hasValidationErrors"
@@ -118,7 +118,7 @@
               class="preview-summary__alert"
             />
 
-            <!-- [NEW v1.2.13 2026-06-19] Step 2 总览统计条 (紧凑 inline) -->
+            <!-- 步骤 2 总览统计条 紧凑 inline -->
             <div class="overview-strip overview-strip--inline overview-strip--compact">
               <div class="overview-strip__item overview-strip__item--primary">
                 <span class="overview-strip__value overview-strip__value--primary">{{ totalPreviewRows }}</span>
@@ -139,7 +139,7 @@
             </div>
           </div>
 
-          <!-- [NEW v1.2.12 2026-06-19] Step 2 Sheet 折叠面板 (按对象类型分组) -->
+          <!-- 步骤 2 Sheet 折叠面板 按对象类型分组 -->
           <div v-if="previewResult.sheets && previewResult.sheets.length > 0" class="preview-sheets">
             <h4 class="sheets-info__title">按数据表查看问题：</h4>
             <el-collapse v-model="activePreviewSheets" class="sheet-collapse-list">
@@ -229,10 +229,10 @@
         </div>
       </div>
 
-      <!-- 步骤 4: 导入结果（统计 + 失败/告警明细） -->
+      <!-- 步骤 4 导入结果 统计与失败告警明细 -->
       <div v-else-if="currentStep === 3" class="step-content">
         <div v-if="importResult" class="import-result">
-          <!-- [NEW v1.2.14 2026-06-19] 紧凑顶部摘要: alert + 6 列统计条 一行展示 -->
+          <!-- 步骤 4 紧凑顶部摘要: alert 与 6 列统计条 一行展示 -->
           <div class="import-summary">
             <el-alert
               v-if="!hasAnyFailure && !hasAnyWarning"
@@ -265,7 +265,7 @@
               class="import-summary__alert"
             />
 
-            <!-- [NEW v1.2.13 2026-06-19] Step 4 总览统计条 (紧凑 inline 6 列) -->
+            <!-- 步骤 4 总览统计条 紧凑 inline 6 列 -->
             <div class="overview-strip overview-strip--inline overview-strip--compact overview-strip--result">
               <div class="overview-strip__item overview-strip__item--success">
                 <span class="overview-strip__value overview-strip__value--success">{{ totalCreatedCount }}</span>
@@ -294,7 +294,7 @@
             </div>
           </div>
 
-          <!-- [FIX 2026-06-29] 级联失败 banner 改为模糊描述, 不量化下游条数
+          <!-- 级联失败 banner 改为模糊描述, 不量化下游条数
                原因: 之前的描述 "下游对象类型全部失败 (共 N 条)" 会让用户以为所有 N 条都是因为
                主对象失败导致的, 但实际许多下游 (如 annotation) 失败与主对象无直接或间接关系
                (例: 备注信息失败是 VALIDATION_FAILED - 关联对象ID 不能为空, 与业务对象是否
@@ -311,7 +311,7 @@
             </div>
           </div>
 
-          <!-- [NEW v1.2.12 2026-06-19] Step 4 Sheet 折叠面板 (按对象类型分) -->
+          <!-- 步骤 4 Sheet 折叠面板 按对象类型分组 -->
           <div v-if="importResult.results && Object.keys(importResult.results).length > 0" class="import-sheets">
             <h4 class="sheets-info__title">按对象类型查看：</h4>
             <el-collapse v-model="activeImportSheets" class="sheet-collapse-list">
@@ -463,9 +463,9 @@
     <template #footer>
       <el-button v-if="currentStep > 0 && currentStep < 3" @click="prevStep">上一步</el-button>
       <el-button @click="handleClose">{{ currentStep === 3 ? '关闭' : '取消' }}</el-button>
-      <!-- [NEW v1.2.32] 最小化: 隐藏弹窗, 保留状态, 右下角浮动卡片可恢复 -->
+      <!-- 最小化: 隐藏弹窗, 保留状态, 右下角浮动卡片可恢复 -->
       <el-button
-        v-if="currentStep === 1 || currentStep === 3"
+        v-if="currentStep === 1 || currentStep === 2 || currentStep === 3"
         link
         type="primary"
         @click="minimizeDialog"
@@ -489,7 +489,7 @@
     </template>
   </el-dialog>
 
-  <!-- [NEW v1.2.32] 最小化浮动卡片: 右下角悬浮, 点击恢复弹窗 -->
+  <!-- 最小化浮动卡片: 右下角悬浮, 点击恢复弹窗 -->
   <Teleport to="body">
     <Transition name="mini-slide">
       <div
@@ -511,7 +511,7 @@
 </template>
 
 <script setup>
-import { ref, computed, watch, onMounted } from 'vue'
+import { ref, computed, watch, onMounted, onBeforeUnmount } from 'vue'
 import { useCrudMessage } from '@/composables/useCrudMessage'
 // [NEW v1.2.12 2026-06-19] Warning icon: 级联失败 banner
 import { UploadFilled, Download, Filter, Warning, QuestionFilled, CopyDocument } from '@element-plus/icons-vue'
@@ -564,7 +564,8 @@ const currentStep = ref(0)
 const isMinimized = ref(false)
 const selectedFile = ref(null)
 const fileList = ref([])
-const createIfNotExists = ref(true)  // ON = upsert (有则更新无则创建), OFF = skip (有则跳过无则创建)
+// ON = upsert: 有则更新无则创建, OFF = skip: 有则跳过无则创建
+const createIfNotExists = ref(true)
 // [FIX 2026-07-10] UI 简化为: 仅 1 个开关, 默认 upsert
 //   OFF = skip (已存在则跳过, 不存在则创建) - 用户期望"导入新行"的行为
 //   之前 OFF = update_only (无则跳过), 容易让用户误以为找不到的就不会创建
@@ -574,7 +575,7 @@ const conflictStrategy = computed(() => {
 
 const previewing = ref(false)
 const previewResult = ref(null)
-const previewProgress = ref({ percent: 0, message: '正在解析文件...' })
+const previewProgress = ref({ percent: 0, message: '\u6b63\u5728\u89e3\u6790\u6587\u4ef6...' })
 
 const importing = ref(false)
 const importResult = ref(null)
@@ -582,6 +583,38 @@ const importProgress = ref(0)
 const currentTypeName = ref('')
 const currentIndex = ref(0)
 const totalTypes = ref(0)
+
+// [NEW 2026-11-14 FR-013] 导入任务可恢复：任务标识持久化到 localStorage，
+// 页面刷新/重开后凭 task_id（与后端 run_id 一一对应）重新拉取进度与结果。
+const IMPORT_TASK_KEY = 'import-dialog-active-task-v1'
+const IMPORT_TASK_TTL_MS = 24 * 3600 * 1000
+let pollToken = 0
+let pollFails = 0
+
+function saveActiveImport(task) {
+  try {
+    localStorage.setItem(IMPORT_TASK_KEY, JSON.stringify(task))
+  } catch (e) {
+    console.warn('[ImportDialog] 保存导入任务标识失败(非致命):', e)
+  }
+}
+
+function loadActiveImport() {
+  try {
+    const raw = localStorage.getItem(IMPORT_TASK_KEY)
+    return raw ? JSON.parse(raw) : null
+  } catch {
+    return null
+  }
+}
+
+function clearActiveImport() {
+  try {
+    localStorage.removeItem(IMPORT_TASK_KEY)
+  } catch {
+    // ignore
+  }
+}
 
 // [NEW v1.2.3 2026-06-17] 失败/告警明细分页
 const errorsPageSize = ref(10)
@@ -591,7 +624,8 @@ const warningsCurrentPage = ref(1)
 
 // [NEW v1.2.3 2026-06-17] 失败/告警对象类型过滤
 // 点击统计表中的对象类型可过滤下方明细
-const filterType = ref(null)  // null = 不过滤, 字符串 = object type id
+// null = 不过滤, 字符串 = object type id
+const filterType = ref(null)
 
 // [NEW v1.2.12 2026-06-19] Sheet 折叠面板: 默认展开第一个有问题的 sheet
 const activePreviewSheets = ref([])
@@ -633,7 +667,8 @@ const objectTypeName = computed(() => {
 // [REMOVED v1.2.12 2026-06-17] selectedCascadeFields: 死代码 (cascadeChain 已删)
 
 const dialogTitle = computed(() => {
-  const titles = ['导入数据', '数据校验', '执行导入', '导入结果']
+  const titles = ['\u5bfc\u5165\u6570\u636e', '\u6570\u636e\u6821\u9a8c',
+    '\u6267\u884c\u5bfc\u5165', '\u5bfc\u5165\u7ed3\u679c']
   return titles[currentStep.value] || '导入数据'
 })
 
@@ -1106,15 +1141,41 @@ const progressColor = computed(() => {
 watch(() => props.visible, (newVal) => {
   if (newVal) {
     resetState()
-    loadSchema()
+    // [FR-013] schema 用于类型中文名映射，加载完再尝试恢复未完成任务
+    loadSchema().then(maybeResumeImport)
   }
 })
 
 onMounted(() => {
   if (props.visible) {
-    loadSchema()
+    loadSchema().then(maybeResumeImport)
   }
 })
+
+onBeforeUnmount(() => {
+  // 停止后台轮询链
+  pollToken++
+})
+
+// [NEW 2026-11-14 FR-013] 恢复未完成的导入任务（对话框打开时）
+async function maybeResumeImport() {
+  const saved = loadActiveImport()
+  if (!saved?.taskId) return
+  if (saved.objectType && props.objectType && saved.objectType !== props.objectType) return
+  if (saved.startedAt && Date.now() - saved.startedAt > IMPORT_TASK_TTL_MS) {
+    clearActiveImport()
+    return
+  }
+  currentStep.value = 2
+  importing.value = true
+  importProgress.value = 0
+  currentTypeName.value = ''
+  currentIndex.value = 0
+  totalTypes.value = props.multiTypeMode
+    ? (saved.selectedTypes?.length || selectedMultiTypes.value.length)
+    : 1
+  pollImportProgress(saved.taskId)
+}
 
 async function loadSchema() {
   if (schema.value || loadingSchema.value) return
@@ -1146,6 +1207,9 @@ async function loadSchema() {
 }
 
 function resetState() {
+  // [FR-013] 让旧的轮询链失效，避免重置后仍被上一任务回写
+  pollToken++
+  pollFails = 0
   currentStep.value = 0
   selectedFile.value = null
   fileList.value = []
@@ -1286,6 +1350,15 @@ async function startImport() {
     }
 
     const taskId = response.data.task_id
+    // [FR-013] 记住任务标识（run_id 与 task_id 一一对应），供刷新/重开恢复
+    saveActiveImport({
+      taskId,
+      runId: response.data.run_id || null,
+      objectType: props.objectType,
+      multiTypeMode: Boolean(props.multiTypeMode),
+      selectedTypes: [...selectedMultiTypes.value],
+      startedAt: Date.now()
+    })
     pollImportProgress(taskId)
   } catch (e) {
     importResult.value = {
@@ -1297,11 +1370,35 @@ async function startImport() {
 }
 
 async function pollImportProgress(taskId) {
+  // [FR-013] 每轮轮询持有一个 token：重置/重新发起/卸载后旧链自动失效；
+  //          连续失败 3 次即终止（旧实现 404 会每秒无限重试）。
+  const token = ++pollToken
+  pollFails = 0
+
+  const schedule = (delay) => {
+    if (token !== pollToken) return
+    setTimeout(() => {
+      if (token === pollToken) poll()
+    }, delay)
+  }
+
+  const abortWithError = (msg) => {
+    importing.value = false
+    importResult.value = { success: false, errors: [{ message: msg }] }
+    currentStep.value = 3
+    // 不可恢复（连续失败）：清标识，避免每次打开对话框都重试同一失效任务
+    clearActiveImport()
+    message.error(msg)
+  }
+
   const poll = async () => {
+    if (token !== pollToken) return
     try {
       const statusRes = await boService.getImportStatus(taskId)
+      if (token !== pollToken) return
 
       if (statusRes.success && statusRes.data) {
+        pollFails = 0
         const data = statusRes.data
         importProgress.value = data.progress || 0
         currentTypeName.value = data.current_type_name || ''
@@ -1358,16 +1455,28 @@ async function pollImportProgress(taskId) {
             errors: [{ message: data.error || '导入失败' }]
           }
           importing.value = false
+          currentStep.value = 3
+          clearActiveImport()
           message.error(data.error || '导入失败')
         } else {
-          setTimeout(poll, 1000)
+          schedule(1000)
         }
       } else {
-        setTimeout(poll, 1000)
+        pollFails += 1
+        if (pollFails >= 3) {
+          abortWithError('无法获取导入进度，任务可能已过期，请到任务中心查看')
+        } else {
+          schedule(2000)
+        }
       }
     } catch (e) {
       console.error('[ImportDialog] 轮询状态失败:', e)
-      setTimeout(poll, 1000)
+      pollFails += 1
+      if (pollFails >= 3) {
+        abortWithError('获取导入进度失败，请稍后到任务中心查看结果')
+      } else {
+        schedule(2000)
+      }
     }
   }
 
@@ -1417,6 +1526,21 @@ const miniSummary = computed(() => {
     const rows = previewResult.value.totalRows ?? 0
     return { step: '数据校验', detail: `${rows} 行 | ${errs} 错误 | ${warns} 告警` }
   }
+  // [FR-013] 导入中最小化：浮卡展示百分比与当前类型
+  if (currentStep.value === 2 && importing.value) {
+    const pct = Math.round(importProgress.value || 0)
+    return {
+      step: '导入中',
+      detail: `${pct}%${currentTypeName.value ? ' | ' + currentTypeName.value : ' | 处理中...'}`
+    }
+  }
+  // [FR-013] 结果步但无明细（如失败/取消）：浮卡明确展示终态，避免误显"处理中"
+  if (currentStep.value === 3 && importResult.value && !importResult.value.results) {
+    return {
+      step: '导入结果',
+      detail: importResult.value.success === false ? '导入失败' : '导入完成'
+    }
+  }
   if (currentStep.value === 3 && importResult.value?.results) {
     // [FIX] 用与 dialog 一致的 reduce 逻辑计算成功/失败
     //   success = created + updated
@@ -1439,6 +1563,8 @@ function handleClose() {
   // [NEW v1.2.3 2026-06-17] 第 4 步点"关闭"时通知父组件导入完成，让父组件刷新列表
   if (currentStep.value === 3 && importResult.value) {
     emit('success', importResult.value)
+    // [FR-013] 结果已确认展示，清除可恢复任务标识
+    clearActiveImport()
   }
   // [NEW v1.2.32 2026-06-25] 关闭时重置最小化状态
   isMinimized.value = false

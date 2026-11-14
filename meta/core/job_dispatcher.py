@@ -74,6 +74,9 @@ class JobDispatcher:
         self._pool = executor_pool
         self._stop_event = threading.Event()
         self._thread = None
+        #: IF-010 调度器状态快照（只读，不触发 tick）
+        self.last_tick_at = None
+        self.last_summary = None
 
     # ── 单次 tick ─────────────────────────────────────────────────────────
 
@@ -89,6 +92,9 @@ class JobDispatcher:
         }
         if not self.enabled:
             return summary
+
+        self.last_tick_at = now
+        self.last_summary = summary
 
         # 先放行到期的重试，再建新 run：本轮回收的租约留到下一轮 promote，
         # 使 `retrying` 状态可被观测（spec §10 P2 验收）。
@@ -137,6 +143,14 @@ class JobDispatcher:
         if self.dry_run and not existing:
             if self.store.mark_skipped(run_id, note='dry_run', now=now):
                 summary['skipped'] += 1
+
+        # once：一次性执行，完成即软删除（enabled=0 + next_run_at=NULL），
+        # 不走 `_next_run_at`（返回 None 会被误记为 error）。
+        if str(trigger.get('trigger_type') or '') == 'once':
+            if self.store.complete_once_trigger(
+                    int(trigger['id']), scheduled_for, now=now):
+                summary['advanced'] += 1
+            return
 
         next_at = self._next_run_at(trigger, now)
         if next_at is None:
@@ -197,6 +211,8 @@ class JobDispatcher:
             attempt=int(run.get('attempt') or 1),
             deadline_monotonic=time.monotonic() + timeout,
             cancel_event=threading.Event(),
+            store=self.store,
+            worker_id=worker_id,
         )
         result = self.registry.execute(job['handler'], ctx, timeout=timeout)
         try:
@@ -226,6 +242,8 @@ class JobDispatcher:
         raw = trigger.get('params_override')
         if not raw:
             return {}
+        if isinstance(raw, dict):
+            return raw
         try:
             parsed = json.loads(raw)
         except (TypeError, ValueError):
@@ -246,6 +264,22 @@ class JobDispatcher:
             logger.warning('[dispatcher] cron 解析失败 %r: %s', expr, exc)
             return None
         return nxt.timestamp() if nxt else None
+
+    # ── 状态快照（spec IF-010，只读）────────────────────────────────────
+
+    def status_snapshot(self, now=None) -> dict:
+        return {
+            'enabled': self.enabled,
+            'dry_run': self.dry_run,
+            'running': bool(self._thread and self._thread.is_alive()),
+            'tick_interval': self.tick_interval,
+            'last_tick_at': self.last_tick_at,
+            'last_summary': self.last_summary,
+            'backlog': {
+                'pending': self.store.count_runs('pending'),
+                'due_triggers': self.store.count_due_triggers(now),
+            },
+        }
 
     # ── 常驻循环（server.py 由 JOB_DISPATCH_ENABLED 控制接入）────────────
 

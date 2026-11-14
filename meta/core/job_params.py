@@ -25,6 +25,9 @@ MAX_PARAMS_BYTES = 16 * 1024
 #: 出现即拒绝的键名片段（防反射 / 防注入执行器配置）。
 FORBIDDEN_KEY_PARTS = ('handler', 'module', 'class')
 
+#: 命中即视为 secret 的键名片段（供 API 投影脱敏；与前端 password 映射同源）。
+SECRET_KEY_PARTS = ('password', 'token', 'secret', 'key')
+
 _TYPE_MAP = {
     'string': lambda v: isinstance(v, str),
     'object': lambda v: isinstance(v, dict),
@@ -66,21 +69,31 @@ def merge_job_params(job, override=None) -> dict:
 
 def sanitize_params(params, schema) -> 'tuple[dict, str | None]':
     """返回 `(clean_params, error)`；`error` 非 None 表示拒绝执行。"""
+    clean, error, _ = sanitize_params_detailed(params, schema)
+    return clean, error
+
+
+def sanitize_params_detailed(params, schema) -> 'tuple[dict, str | None, list]':
+    """与 `sanitize_params` 同一实现，额外返回 `details[{field, message}]`。
+
+    `details` 仅记录非致命告警（未声明键被丢弃）；致命错误仍由 `error` 返回。
+    """
+    details = []
     if params is None:
         params = {}
     if not isinstance(params, dict):
-        return {}, 'params 必须是 object'
+        return {}, 'params 必须是 object', details
     try:
         size = len(json.dumps(params, ensure_ascii=False,
                               sort_keys=True).encode('utf-8'))
     except (TypeError, ValueError):
-        return {}, 'params 无法序列化为 JSON'
+        return {}, 'params 无法序列化为 JSON', details
     if size > MAX_PARAMS_BYTES:
-        return {}, 'params 超过 %d 字节' % MAX_PARAMS_BYTES
+        return {}, 'params 超过 %d 字节' % MAX_PARAMS_BYTES, details
 
     bad_key = _find_forbidden_key(params)
     if bad_key:
-        return {}, '参数键被禁止: %s' % bad_key
+        return {}, '参数键被禁止: %s' % bad_key, details
 
     schema = schema if isinstance(schema, dict) else {}
     properties = schema.get('properties')
@@ -91,16 +104,44 @@ def sanitize_params(params, schema) -> 'tuple[dict, str | None]':
         spec = properties.get(key)
         if not isinstance(spec, dict):
             logger.warning('[job-params] 丢弃未声明参数键: %s', key)
+            details.append({'field': key, 'message': '未在 params_schema 声明，已忽略'})
             continue
         error = _check_value(key, value, spec)
         if error:
-            return {}, error
+            return {}, error, details
         clean[key] = value
 
     for key in schema.get('required') or []:
         if key not in clean:
-            return {}, '缺少必填参数: %s' % key
-    return clean, None
+            return {}, '缺少必填参数: %s' % key, details
+    return clean, None, details
+
+
+def is_secret_field(key, spec=None) -> bool:
+    """secret 判定：`x-ui.secret=true` 或键名命中 `SECRET_KEY_PARTS`。"""
+    if isinstance(spec, dict):
+        ui = spec.get('x-ui')
+        if isinstance(ui, dict) and ui.get('secret'):
+            return True
+    name = str(key).lower()
+    return any(part in name for part in SECRET_KEY_PARTS)
+
+
+def redact_secrets(params, schema=None) -> dict:
+    """返回副本：secret 键值替换为 `***`（仅用于 API 投影，不写库）。"""
+    if not isinstance(params, dict):
+        return {}
+    properties = schema.get('properties') if isinstance(schema, dict) else None
+    properties = properties if isinstance(properties, dict) else {}
+    redacted = {}
+    for key, value in params.items():
+        if is_secret_field(key, properties.get(key)):
+            redacted[key] = '***'
+        elif isinstance(value, dict):
+            redacted[key] = redact_secrets(value)
+        else:
+            redacted[key] = value
+    return redacted
 
 
 def _find_forbidden_key(obj, path=''):

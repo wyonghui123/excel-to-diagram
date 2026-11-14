@@ -22,13 +22,14 @@
         </template>
 
         <input
-          v-else-if="field.type === 'text'"
+          v-else-if="field.type === 'text' || field.type === 'password'"
           v-model="formData[field.key]"
-          type="text"
+          :type="field.type === 'password' ? 'password' : 'text'"
           class="mf-input"
           :class="{ 'mf-input--error': errors[field.key] }"
           :placeholder="field.placeholder || `请输入${field.label}`"
           :disabled="field.disabled"
+          :autocomplete="field.type === 'password' ? 'new-password' : undefined"
           :aria-required="field.required ? 'true' : undefined"
           :aria-invalid="errors[field.key] ? 'true' : undefined"
           :aria-describedby="errors[field.key] ? `mf-error-${field.key}` : undefined"
@@ -370,7 +371,9 @@ function validateField(key) {
     if (isConditionallyRequired) {
       if (val == null || String(val).trim() === '') {
         const rules = props.fieldPolicy.requiredMap?.value?.[key]
-        const msg = rules?.[0]?.message || `${field.label}不能为空`
+        // 兜底提示：不能为空
+        const emptyHint = '\u4e0d\u80fd\u4e3a\u7a7a'
+        const msg = rules?.[0]?.message || `${field.label}${emptyHint}`
         errors[key] = msg
         return false
       }

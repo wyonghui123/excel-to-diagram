@@ -232,3 +232,41 @@ def test_start_stop_lifecycle(conn):
     assert dispatcher.start() is True
     dispatcher.stop(timeout=1.0)
     assert dispatcher._thread is None
+
+
+# ── once 触发器（M5.1-b）─────────────────────────────────────────────
+
+def test_once_trigger_dispatches_then_soft_completes(conn):
+    _enable(conn, 'db_checkpoint', trigger_type='once', next_run_at=T0)
+    store = _store(conn)
+    dispatcher = _dispatcher(store, dry_run=True)
+
+    summary = dispatcher.tick(T0)
+    assert summary['recorded'] == 1
+    assert summary['advanced'] == 1
+    assert [r['status'] for r in _runs(conn)] == ['skipped']
+
+    trigger = _trigger(conn, 'db_checkpoint')
+    assert int(trigger['enabled']) == 0
+    assert trigger['next_run_at'] is None
+
+    # 完成后再 tick 不会重复投递
+    summary = dispatcher.tick(T0 + 60)
+    assert summary['due'] == 0
+    assert summary['recorded'] == 0
+    assert len(_runs(conn)) == 1
+
+
+def test_status_snapshot_reports_backlog(conn):
+    _enable(conn, 'db_checkpoint', trigger_type='interval',
+            interval_seconds=600, next_run_at=T0)
+    store = _store(conn)
+    store.create_run('db_checkpoint', run_key='manual:snapshot', now=T0)
+
+    dispatcher = _dispatcher(store, enabled=False)
+    snapshot = dispatcher.status_snapshot(now=T0)
+    assert snapshot['enabled'] is False
+    assert snapshot['dry_run'] is True
+    assert snapshot['running'] is False
+    assert snapshot['backlog']['pending'] == 1
+    assert snapshot['backlog']['due_triggers'] == 1

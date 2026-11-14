@@ -317,3 +317,102 @@ def test_v246_migrate_and_verify_on_file_db(tmp_path):
 
 def test_v246_migrate_skips_missing_db(tmp_path):
     assert v246.migrate(str(tmp_path / 'missing.db')) is False
+
+
+# ── 作业定义 / 触发器管理（M5.1）──────────────────────────────────────
+
+def test_update_job_applies_whitelist_with_readback(conn):
+    store = _store(conn)
+    assert store.update_job('db_analyze', {
+        'name': '数据库分析（改）', 'max_attempts': 5,
+    }) is True
+    job = store.job_by_code('db_analyze')
+    assert job['name'] == '数据库分析（改）'
+    assert int(job['max_attempts']) == 5
+    # 非白名单字段（handler）拒绝写入
+    assert store.update_job('db_analyze', {'handler': 'evil'}) is False
+    assert store.job_by_code('db_analyze')['handler'] == 'db_analyze'
+    assert store.update_job('no_such_job', {'name': 'x'}) is False
+
+
+def test_trigger_crud_roundtrip(conn):
+    store = _store(conn)
+    job = store.job_by_code('db_analyze')
+    trigger_id = store.create_trigger(
+        job['id'], 'interval', interval_seconds=600,
+        next_run_at=T0, now=T0)
+    assert trigger_id
+
+    trigger = store.trigger_by_id(trigger_id)
+    assert trigger['trigger_type'] == 'interval'
+    assert int(trigger['interval_seconds']) == 600
+    assert int(trigger['enabled']) == 1
+
+    assert store.update_trigger(trigger_id, {
+        'enabled': 0, 'interval_seconds': 900,
+    }) is True
+    trigger = store.trigger_by_id(trigger_id)
+    assert int(trigger['enabled']) == 0
+    assert int(trigger['interval_seconds']) == 900
+
+    assert store.delete_trigger(trigger_id) is True
+    assert store.trigger_by_id(trigger_id) is None
+
+
+def test_complete_once_trigger_matches_next_run_at(conn):
+    store = _store(conn)
+    job = store.job_by_code('db_analyze')
+    trigger_id = store.create_trigger(
+        job['id'], 'once', next_run_at=T0, now=T0)
+
+    # 乐观匹配失败：不推进
+    assert store.complete_once_trigger(trigger_id, T0 + 1, now=T0) is False
+    assert int(store.trigger_by_id(trigger_id)['enabled']) == 1
+
+    # 匹配成功：软删除（enabled=0 + next_run_at=NULL，行保留）
+    assert store.complete_once_trigger(trigger_id, T0, now=T0) is True
+    trigger = store.trigger_by_id(trigger_id)
+    assert int(trigger['enabled']) == 0
+    assert trigger['next_run_at'] is None
+    assert trigger['last_run_at'] == T0
+
+
+def test_list_runs_filters_by_source_and_trigger_type(conn):
+    store = _store(conn)
+    job = store.job_by_code('db_analyze')
+    trigger_id = store.create_trigger(
+        job['id'], 'cron', cron_expr='0 3 * * *', next_run_at=T0, now=T0)
+
+    store.create_run('db_analyze', run_key='manual:abc', now=T0)
+    store.create_run('db_analyze', run_key='import:abc', now=T0)
+    store.create_run('db_analyze', run_key='%s:%s' % (trigger_id, int(T0)),
+                     trigger_id=trigger_id, now=T0)
+
+    assert len(store.list_runs(source='manual')) == 1
+    assert len(store.list_runs(source='import')) == 1
+    assert len(store.list_runs(source='cron')) == 1
+    assert len(store.list_runs(trigger_type='cron')) == 1
+    assert store.count_runs_filtered(source='manual') == 1
+    assert store.count_runs_filtered() == 3
+
+    # 触发器被删后，历史 run 派生为 scheduled，不再命中 cron 过滤
+    store.delete_trigger(trigger_id)
+    assert len(store.list_runs(source='cron')) == 0
+    assert len(store.list_runs(source='scheduled')) == 1
+
+    with pytest.raises(ValueError):
+        store.list_runs(source='bogus')
+
+
+def test_overview_by_job_aggregates_trigger_and_run(conn):
+    store = _store(conn)
+    job = store.job_by_code('db_analyze')
+    store.create_trigger(job['id'], 'interval', interval_seconds=60,
+                         next_run_at=T0 + 60, now=T0)
+    store.create_run('db_analyze', run_key='manual:overview', now=T0)
+
+    entry = store.overview_by_job()[int(job['id'])]
+    # 播种 1 条 + 新增 1 条
+    assert entry['trigger_count'] == 2
+    assert entry['next_run']['next_run_at'] == T0 + 60
+    assert entry['last_run']['status'] == 'pending'

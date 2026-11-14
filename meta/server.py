@@ -174,7 +174,12 @@ from meta.api.task_api import task_api_bp, set_scheduler as set_task_scheduler
 from meta.api.scheduler_api import (
     scheduler_bp, set_inprocess_schedulers,
 )
-from meta.api.job_admin_api import job_admin_bp, set_job_store
+from meta.api.job_admin_api import (
+    job_admin_bp,
+    set_job_dispatcher,
+    set_job_registry,
+    set_job_store,
+)
 from meta.api.workflow_api import workflow_bp, set_workflow_scheduler
 from meta.api.task_inbox_api import task_inbox_bp
 from meta.api.task_decision_api import task_decision_bp   # [B3 2026-10-03] 审批决策提交入口
@@ -953,16 +958,30 @@ def create_app(db_path=None):
     #   顺序固定：先 build registry 再打开开关；JOB_DISPATCH_ENABLED 默认 0，
     #   handler 白名单与参数校验在 dispatcher 内生效（§7.2）。
     from meta.core.job_run_store import JobRunStore
-    from meta.handlers.job_handlers import build_default_job_registry
+    from meta.core.job_dispatcher import JobDispatcher
+    from meta.handlers.job_handlers import (
+        build_default_job_registry,
+        make_import_cascade_executor,
+    )
     job_store = JobRunStore(data_source)
     set_job_store(job_store)
-    if os.environ.get('JOB_DISPATCH_ENABLED', '0').strip().lower() in (
-            '1', 'true', 'yes'):
-        from meta.core.job_dispatcher import JobDispatcher
-        _job_dispatcher = JobDispatcher(
-            job_store,
-            registry=build_default_job_registry(data_source),
-            enabled=True)
+    # [M5.1-e 2026-11-14] registry 无条件构建：`available` / `can_run` 派生需要
+    #   白名单，未启用 dispatcher 时也要如实反映执行器是否注册（spec IF-002）。
+    _job_registry = build_default_job_registry(data_source)
+    # [FR-006 2026-11-14] 批量导入执行体：与 /import/async 共用同一 service。
+    _job_registry.register(
+        'import_cascade', make_import_cascade_executor(),
+        supports_cancel=True)
+    set_job_registry(_job_registry)
+    _job_enabled = os.environ.get(
+        'JOB_DISPATCH_ENABLED', '0').strip().lower() in ('1', 'true', 'yes')
+    # dispatcher 始终构建（只读状态可查），只有 enabled=1 才启动常驻循环。
+    _job_dispatcher = JobDispatcher(
+        job_store,
+        registry=_job_registry,
+        enabled=_job_enabled)
+    set_job_dispatcher(_job_dispatcher)
+    if _job_enabled:
         _job_dispatcher.start()
         atexit.register(_job_dispatcher.stop)
         logging.getLogger(__name__).info(

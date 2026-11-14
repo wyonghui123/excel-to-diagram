@@ -2,9 +2,9 @@
 import_export_types.py - 导入导出服务的数据类型 + 工具函数（Phase 3.2 MVU 完成）
 
 状态: v3.9 (完成)
-   - ✅ 3 个 dataclass: ExportResult / ImportPreview / ImportResult
-   - ✅ 3 个工具函数: _sanitize_xml_string / _safe_cell_value / _has_cud_actions
-   - ✅ 1 个 helper: get_type_order (转发到 cascade_service)
+   - [OK] 3 个 dataclass: ExportResult / ImportPreview / ImportResult
+   - [OK] 3 个工具函数: _sanitize_xml_string / _safe_cell_value / _has_cud_actions
+   - [OK] 1 个 helper: get_type_order (转发到 cascade_service)
    - ⏸️ ImportExportService 类 (4955 行) 永久搁置 (ROI 极低)
 
 v3 spec 决策: 同 useMetaList 拆分策略 (MVU 最小可行单元)
@@ -143,3 +143,5 @@ class ImportResult:
     errors: List[Dict[str, Any]] = field(default_factory=list)
     error_report_path: str = ""
     trace_id: Optional[str] = None
+    #: errors 是否因全局硬上限被截断（spec FR-006）。
+    errors_truncated: bool = False

@@ -37,6 +37,26 @@ class JobContext:
     attempt: int
     deadline_monotonic: float
     cancel_event: threading.Event
+    #: 账本写入层（`JobRunStore`）；缺失时 `report_progress` 为 no-op。
+    store: object = None
+    #: 本次尝试的持有者标识（与 lease 归属一致）。
+    worker_id: str = None
+
+    @property
+    def should_cancel(self) -> bool:
+        """协作式取消标志（spec FR-005 / §13 Q3）。"""
+        return self.cancel_event.is_set()
+
+    def report_progress(self, payload: dict) -> bool:
+        """写入结构化进度；交由 store 做 ≥1s 节流（FR-004）。"""
+        if self.store is None:
+            return False
+        try:
+            return self.store.update_progress(self.run_id, payload)
+        except Exception as exc:  # noqa: BLE001 - 进度失败不阻断执行
+            logger.warning('[job-exec] run=%s 进度写入失败: %s',
+                           self.run_id, exc)
+            return False
 
 
 @dataclass
