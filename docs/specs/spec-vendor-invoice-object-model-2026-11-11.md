@@ -1,6 +1,6 @@
 # 采购发票对象模型 Spec（Vendor Invoice Object Model）
 
-> 版本：v1.4 草案（2026-11-13 追加 22.6.2 费用变更与单一事实源约束 / R-1~R-4 / 变更矩阵 A~D；v1.3 同日追加 22.6.1 费用分摊方案 / D-CH-01~12；v1.2 于 2026-11-12 §22 细化，金额计算改为复用统一内核 `SalesOrderAmountService`，D-VI-27）｜ 日期：2026-11-11 ｜ 状态：待评审
+> 版本：v1.6 草案（2026-11-14 追加 §24 三单匹配补强；v1.5 于 2026-11-14 落实施 §23.9 方案 A；v1.4 于 2026-11-13 追加 22.6.2 费用变更与单一事实源约束 / R-1~R-4 / 变更矩阵 A~D；v1.3 同日追加 22.6.1 费用分摊方案 / D-CH-01~12；v1.2 于 2026-11-12 §22 细化，金额计算改为复用统一内核 `SalesOrderAmountService`，D-VI-27）｜ 日期：2026-11-11 ｜ 状态：待评审（§23 已实施，2026-11-14）
 > 上游契约：[spec-receipt-object-model-2026-11-01.md](./spec-receipt-object-model-2026-11-01.md) §10 / §11
 > 样板：[sales-invoice-pricing-spec-2026-11-10.md](./sales-invoice-pricing-spec-2026-11-10.md)（FR/NFR/IF/TR 编号体系）
 > 平台基线：`document_category / document_role / direction`（v243）、`doc_flow_rule`（v215）、`control_parameter_def`（容差）
@@ -1495,6 +1495,7 @@ SAP 的分摊基数是「**迄今已开票金额 + 本凭证金额**」，比本
 | R-VI-31 | 调整行金额必须由计算层按 22.2 重算，`unit_price` 与 `net_amount` 同步 | 调整单创建 |
 | R-VI-32 | `qty ≥ 0`；负向只由红字复制 / `adjustment_direction` 表达 | schema + 服务 |
 | R-VI-33 | 金额算术**单一实现**：VI 只允许继承 `SalesOrderAmountService` 并覆写钩子，禁止复制公式 / 新建平行金额服务 | 代码评审 + lint（禁止 `vendor_invoice` 内出现 `round(` / `× 税率` 硬编码） |
+| R-VI-38 ~ R-VI-47 | 三单匹配补强（源单状态 / 费用对账 / UOM / 多异常 / 枚举闭合 / PO 税额 / 容差方向）；明细见 §24.4，本节不重复 | §24 |
 
 > 编号衔接：R-VI-19 仍留空（保留给 SES / ERS 结算模式），R-VI-20~23 属调整单（§21.1），本节从 24 起。
 
@@ -1611,3 +1612,407 @@ SAP 的分摊基数是「**迄今已开票金额 + 本凭证金额**」，比本
 | W7（调整单） | 22.5 T1 / T2 / T3 重算 |
 | W8-P1（费用分摊） | 22.6.1：`allocated_charge_amount` 列 / 2 个 `vi_charge_allocation_*` 参数 / 分摊接线 / 7 条硬约束；22.6.2：A（同票内调整）与 D（整票红冲）两种变更形态 / R-1~R-4 / S-1~S-4 |
 | W8-P2（可选） | 22.6.1.2：跨单据来源、显式行子集、参考成本视图；22.6.2.2：B（贷项）与 C（借项）独立重摊；22.6.2.3：累计开票口径 + `allocation_basis_window` 快照列 |
+
+---
+
+## 23. 应付付款计划（AP Payment Plan）— 与 AR 对称契约（2026-11-14 追加）
+
+> 状态：**已实施（2026-11-14，方案 A；迁移 `v271__vendor_invoice_schedule`；带出链同日对齐 AR）**
+> 实现落点：`meta/schemas/vendor_invoice_schedule.yaml`、`vendor_invoice.yaml#payment_term_id`、`vendor_account.yaml#default_payment_term_id`、`meta/services/vendor_invoice_match_service.py#_generate_schedules`、`meta/services/vendor_payment_term_service.py`（带出链）、`meta/api/bo_api.py#_apply_vendor_invoice_defaults`、`meta/migrations/v271__vendor_invoice_schedule.py`
+> 验证：`meta/tests/test_vendor_invoice_schedule.py`（11 例，含 4 例带出链）、`meta/tests/migrations/test_vendor_invoice_migrations.py::test_v271_schedule_table_and_columns`
+> 方案：**A —— 先追平 AR 结构**；折扣 / 预付 / 付款事实层另立波次（见 §23.9）
+> 参照：`meta/schemas/customer_invoice_schedule.yaml`（结构母本）、`spec-sales-order-billing-object-model-2026-11-07.md` §23 / §30.5（设计稿与 AR 实现口径）
+> 契约来源：`meta/services/customer_invoice_service.py` `_generate_schedules`（L1627-L1682）、`payment_term_schedule_service`（日期单一真源）
+
+### 23.0 一句话结论
+
+采购侧**模板层已完整、实例层为零**：`payment_term` / `payment_term_line` / 日期推算服务都在，但 `vendor_invoice` 没有付款条件字段、没有期次对象、也没有生成点。本节按「默认对称」原则，把 AR 的发票级期次逐字段搬到 AP，**不引入采购侧独有形状**；三单匹配、付款执行等采购专属能力全部落在期次形状之外（§23.8）。
+
+### 23.1 现状审计（采购侧付款计划）
+
+| 层 | 现状 | 证据 | 缺口 |
+|---|---|---|---|
+| 模板层 | 完整 | `payment_term.yaml`（code / name / basis_date_rule / cutoff_day / status）、`payment_term_line.yaml`（seq / percentage / offset_months / fixed_day_of_month / offset_days / discount_percent / discount_days） | 无 |
+| 日期推算 | 单一真源 | `payment_term_schedule_service.py`（只看日期，不管金额/凭证/催收） | 无 |
+| 合同层 | PO 有付款条件字段 | `purchase_order.yaml` `payment_term_id`，注释「空 = 供应商档案默认」 | 原为死引用（`vendor_account` 无对应字段），已由 §23.5 (2) + 带出链补齐 |
+| 实例层 | **无** | `vendor_invoice.yaml` 无 `payment_term_id` / `due_date` / 期次对象；`generated_schema.sql` 无任何 AP 期次表 | 本节补齐 |
+| 付款事实层 | **无** | 无 `vendor_payment` / `payment_allocation`（`generated_schema.sql` 仅有 `vendor_invoices`） | 延后（§23.9） |
+
+### 23.2 对称裁决表（六个设计点）
+
+原则：**默认对称**；只有具备真实采购专属业务逻辑才允许不对称，且不对称不得改期次形状。
+
+| # | 设计点 | AR 现状 | AP 处置 | 理由 |
+|---|---|---|---|---|
+| 1 | 期次挂载层级 | 发票级（`customer_invoice_schedule`），不挂订单 | **对称**：发票级（`vendor_invoice_schedule`），不挂 PO | PO 侧已有 `purchase_order_schedule`（`schedule_kind` 仅 `delivery`/`service`），承载到货/服务计划；付款期次的基准是发票，不是 PO |
+| 2 | 发票头付款条件 | `customer_invoice.payment_term_id`（空 = 即期） | **对称**：新增 `vendor_invoice.payment_term_id` | 无付款条件字段则期次无输入源 |
+| 3 | 往来方默认条件 | `customer_account.default_payment_term_id`（解析链：档案 → 单据类型参数 → 留空） | **对称**：新增 `vendor_account.default_payment_term_id`，同一条解析链 | 同时消除 PO 注释的死引用 |
+| 4 | 现金折扣 | 模板有 `discount_percent` / `discount_days`，但 AR 期次**未快照**折扣日/折扣额 | **两侧都不做**（本波） | 折扣是「双侧共同升级」事项，不接受单侧先行（单侧会让 AP 比 AR 多一层语义） |
+| 5 | 预付 | 设计稿 §23 有 `is_prepayment` / `deposit_amount`，**未落地**；仓库无 `prepayment` 对象 | **两侧都不引入**；不建 Fusion 式「预付发票」 | 预付在 Fusion 是独立发票类型（create → pay → apply），属付款域；凭单侧凭空引入会造出第二套发票语义 |
+| 6 | 到期日位置 | 行级 `due_date`；头无 `due_date` | **对称**：行级 | 一期一日；头级 `due_date` 在多期场景无意义 |
+
+### 23.3 字段级对称契约（逐字段一一对应）
+
+父字段命名沿用 `invoice_id`（`vendor_invoice_line` 的父字段也是 `invoice_id`），**不改成 `vendor_invoice_id`**；累计列沿用 `amount_applied`，**不改名为 `amount_paid`**——两侧同名才能让服务层、页面、报表走同一套口径。
+
+| # | AR（`customer_invoice_schedule`） | AP（`vendor_invoice_schedule`） | 类型 / 约束 | 语义 |
+|---|---|---|---|---|
+| 1 | `invoice_id` | `invoice_id` | integer，必填 | 父字段（所属发票） |
+| 2 | `schedule_no` | `schedule_no` | integer，必填 | 期次序号，从 1 递增；唯一键 `invoice_id + schedule_no` |
+| 3 | `payment_term_line_id` | `payment_term_line_id` | integer，可空 | 来源付款条件行；即期为 NULL |
+| 4 | `ratio_percent` | `ratio_percent` | number(4 位小数)，必填 | 期次比例快照 |
+| 5 | `due_date` | `due_date` | date，必填 | 到期日（≥ 发票日期） |
+| 6 | `amount` | `amount` | number(币种精度)，必填 | 期次金额；Σ = 头 `gross_amount` |
+| 7 | `amount_applied` | `amount_applied` | number，必填，默认 0 | 已核销金额；付款域落地前恒 0、只读 |
+| 8 | `status` | `status` | string，必填，默认 `open` | `open`/`partial`/`closed`/`cancelled`（状态机两侧同构） |
+| 9 | `created_at` / `updated_at` | 同 | datetime | 审计字段（audit_aspect 管理） |
+
+> 差异项：**0 个字段差异**。AP 侧唯一新增的是标签文案（「未收款 → 未付款」「已收清 → 已付清」），不改字段名、不改枚举值。
+
+### 23.4 `vendor_invoice_schedule` 对象定义（新表 `vendor_invoice_schedules`）
+
+对齐 `customer_invoice_schedule.yaml` 的元数据声明：
+
+| 元数据项 | 取值 |
+|---|---|
+| `name` / `table_name` | 应付期次 / `vendor_invoice_schedules` |
+| `parent_object` / `hierarchy.parent_field` | `vendor_invoice` / `invoice_id` |
+| `semantics.category` | `business_document_line` |
+| `aliases` | 应付期次 / 付款计划 / Vendor Invoice Schedule |
+| `deletion_policy.mode` | `restrict`（期次随头只读，不单独删除） |
+| `org_scope` | `mode: chain` / `via: invoice_id` / `host: vendor_invoice` / `function: accounting` / `write_check: true` |
+| `audit` | 全开，update 用 `changed_only` |
+| `ui_view_config.skip_auto_menu` | `true`（由发票详情子表呈现，不建独立菜单） |
+
+**索引**（与 AR 同名同形，便于跨侧比对）：
+
+| 索引名 | 字段 | 唯一 |
+|---|---|---|
+| `uq_vendor_invoice_schedule_no` | `(invoice_id, schedule_no)` | 是 |
+| `idx_vendor_invoice_schedule_invoice` | `(invoice_id)` | 否 |
+| `idx_vendor_invoice_schedule_status_due` | `(status, due_date)` | 否 |
+
+**关系**（两条，与 AR 一一对应）：
+
+| id | source → target | 基数 | 说明 |
+|---|---|---|---|
+| `vendor_invoice_schedule_to_invoice` | `invoice_id` → `vendor_invoice.id` | N:1 | 所属发票 |
+| `vendor_invoice_schedule_to_term_line` | `payment_term_line_id` → `payment_term_line.id` | N:1（可空） | 来源付款条件行 |
+
+### 23.5 新增的两个头字段
+
+**（1）`vendor_invoice.payment_term_id`**
+
+| 属性 | 取值 | 说明 |
+|---|---|---|
+| 类型 / 可空 | integer / 可空 | 与 `customer_invoice.payment_term_id` 同构 |
+| description | 付款条件快照；空 = 即期（过账时生成 1 期 100%） | 与 AR 文案一致 |
+| 带出链 | 由 PO 匹配生成时取 PO `payment_term_id` → 手工录入时取 `vendor_account.default_payment_term_id` → 留空（即期） | 对齐 Fusion「PO → 供应商地点 → 录入覆盖」；**过账前可改，过账后随头只读**。**已实施（2026-11-14）**：创建钩子 `bo_api#_apply_vendor_invoice_defaults` 取供应商默认；过账时 `_generate_schedules` 若头仍空，按行锚点（`schedule_id` → `order_line_id` → `receipt_line_id`）回溯 PO 条件并回写头快照，再退供应商默认 |
+| value_help | `payment_term`，候选 `status: active` | 存量已停用条件回显不受限（不读 value_filter） |
+
+**（2）`vendor_account.default_payment_term_id`**
+
+| 属性 | 取值 |
+|---|---|
+| 类型 / 可空 | integer / 可空 |
+| 解析链 | 档案本字段 → 单据类型控制参数 `default_payment_term` → 留空（不阻断保存） |
+| description | 供应商级默认付款条件；新建采购单据时带出，可改 |
+| 落点 | `vendor_account.yaml` 字段序列中插入 `tax_classification_id` 之后（对齐 `customer_account` 的字段序） |
+
+**（3）连带修正**：`purchase_order.yaml` `payment_term_id` 的注释「空 = 供应商档案默认」在本字段落地后成为真引用，保持原文案；本波只做校验说明，不改语义。
+
+### 23.6 新增不变量（R-VI-34 ~ R-VI-37）
+
+| 编号 | 不变量 | 对应 AR |
+|---|---|---|
+| **R-VI-34** | Σ `amount` = 头 `gross_amount`；尾差归最后一期；不一致拒绝过账 | R-INV-21 |
+| **R-VI-35** | `posted` 后任何期次不可改（严格只读，不做重排期 / 不重算） | R-INV-22 |
+| **R-VI-36** | 红字单 / 取消单不生成期次 | R-INV-24（并使 §6.3 R-VI-15 从占位约束升级为可执行约束） |
+| **R-VI-37** | 头不设已付金额列；`amount_applied` 默认 0，付款域落地前不写 | R-INV-25 |
+
+### 23.7 生成流程（过账时，与 AR 同序）
+
+```
+post(vendor_invoice)
+  ├─ 红字/取消单 → 跳过（R-VI-36）
+  └─ 正向单 → _generate_schedules(header, lines)
+       0. 头 payment_term_id 为空 ⇒ 带出链解析（行锚点回溯 PO → 供应商默认）并回写头快照
+       1. payment_term_id 为空 或 条件无行
+            ⇒ 1 期：ratio=100、payment_term_line_id=NULL、due_date = invoice_date
+       2. 否则 resolve_base_date(term, invoice_date) + compute_due_date(...) 逐行推算
+       3. 校验：任一期 due_date < invoice_date ⇒ 拒绝
+       4. 金额按币种精度分配（尾差归最后一期），Σ = gross 校验
+       5. 逐行写入：schedule_no 递增、amount_applied=0、status=open
+       6. 未过账 / 已红冲 时任何写入均被守卫拒绝
+```
+
+- 日期推算**复用** `payment_term_schedule_service`（`resolve_base_date` + `compute_due_date`），AP 不新增推算逻辑。
+- 错误码按 AR 口径新增两条：`VENDOR_INVOICE_TERM_INVALID`（到期日早于发票日期 / 条件非法）、`VENDOR_INVOICE_AMOUNT_MISMATCH`（期次合计 ≠ 价税合计）。
+- 基准日取 `invoice_date`（与 AR 一致，不取 `posting_date`）。
+
+### 23.8 允许的采购专属差异（都在期次形状之外）
+
+| 差异 | 为什么 AP 必须有 | 落在哪 |
+|---|---|---|
+| 三单匹配锚点 | AP 发票行要指回 PO 行 / 收货行才能校验（`vendor_invoice_line.schedule_id` 指 `purchase_order_schedule`） | **行级**，与付款期次是两个概念；本节不动 |
+| 付款执行 | 付款批 / payment run / pay alone / 付款冻结（hold） | **付款域**（`vendor_payment` + 付款批对象），延后 |
+| 预扣税 / 费用 | 预扣税改变实付金额，但不改变「应付到期金额」 | 付款域；期次 `amount` 仍是应计应付额 |
+
+> 结论：**AP 相对 AR 的差异全部在「期次之外」**，期次本身 8 个字段零差异。
+
+### 23.9 本波范围 / 延后项 / 迁移
+
+**本波做（方案 A）**
+
+1. `vendor_invoice_schedule.yaml`（新对象，§23.4）
+2. `vendor_invoice.payment_term_id`（新列，§23.5-1）
+3. `vendor_account.default_payment_term_id`（新列，§23.5-2）
+4. `vendor_invoice_match_service.post()` 过账钩子 `_generate_schedules` + 守卫（R-VI-34~37）
+5. 发票详情「应付期次」只读子表（无独立菜单）
+6. 付款条件带出链（对齐 AR）：`vendor_payment_term_service` + `bo_api#_apply_vendor_invoice_defaults`（创建取供应商默认）+ 过账兜底（行锚点回溯 PO → 供应商默认 → 回写头快照）
+
+**本波不做（延后，需双侧同步立项）**
+
+| 延后项 | 原因 |
+|---|---|
+| 折扣日 / 折扣额快照 | AR 未做；单侧推进会造出不对称 |
+| 预付（`is_prepayment` / `deposit_amount` / 预付发票） | 两侧均未落地；属付款域 |
+| `vendor_payment` / `payment_allocation` / 付款批 / 账龄 | 付款事实层，独立波次 |
+| PO 级付款计划（`purchase_order_schedule` 扩展 `schedule_kind='payment'`） | 判定为不需要：期次基准是发票（与 Fusion / AR 一致） |
+
+**迁移**：新增期次表 + 2 个可空列，均不下推历史数据（存量已过账发票不补生成期次，按「空 = 无期次」处理；如需补，另开一次性脚本并留审计）。
+
+**出口判据**：同一发票在 AR / AP 两侧期次数、`schedule_no`、`ratio_percent`、`due_date`、`amount`、`status` 逐项可比；Σ = 头价税合计；红字 0 期次；`posted` 后改期次被拒。
+
+### 23.10 对既有条款的修订索引
+
+| 既有条款 | 修订 |
+|---|---|
+| §6.3 R-VI-15（L428，「红字发票不生成付款计划，付款域未建」） | 由占位约束升级为可执行约束（R-VI-36），付款域未建的部分仅剩「付款事实层」 |
+| §15 TBD-3（付款/预付对象延后） | 维持延后；但「应付分期无处落地」的空白由本节补齐 |
+| §3.3 头字段表 | 追加 `payment_term_id` |
+| §22.11 数据模型变更清单 | 追加 `vendor_invoice_schedules` 与 `vendor_account.default_payment_term_id` |
+
+---
+
+## 24. 三单匹配能力补强（W10，2026-11-14 细化）
+
+> 依据：对 `meta/services/vendor_invoice_match_service.py` 的逐函数审计（C）+ SAP `OMR6` / Fusion `AP_INVOICE_MATCH` 对标（S/F）。
+> 口径：**不新增表、不新增物理列、不新增迁移**；只做「判定口径闭合」+「源单前置约束」+「YAML 枚举收敛」。
+> 本节为对 §22 的**增量修订**，冲突时以本节为准（见 §24.9 修订索引）。
+
+### 24.0 结论先行
+
+| # | 结论 | 证据 |
+|---|---|---|
+| M-1 | 三单匹配**骨架完整**：双模式、四维容差、余量推导、行级例外、过账重算均已具备 | C（§24.1） |
+| M-2 | 缺的不是能力，而是**口径闭合**：费用对账只有单 PO 路径、异常原因只留首个、UOM 无一致性校验 | C（§24.2 A 类） |
+| M-3 | **源单前置约束缺失**：`_open_qty` 不校验 PO / 收货单头状态，草稿收货与已关闭 PO 仍可对碰 | C（§24.2 A-3） |
+| M-4 | 有 2 个枚举值 + 2 个参数**已播种但无消费点**（`currency_mismatch` / `supplier_mismatch`；`vi_po_tax_compare` / `tolerance_direction`） | C（§24.2 B 类） |
+| M-5 | 标准 3-way 的「PO 行级 + 多收货累计」未实现，`no_receipt` 例外放行无路径 | 裁决延后至 W10-2（§24.8） |
+
+### 24.1 能力审计矩阵
+
+| 能力 | 现状 | 判定 | 证据 |
+|---|---|---|---|
+| 2-way / 3-way 模式 | `po_based` / `gr_based` 分层解析，头级快照 | 已覆盖 | `_resolve_match_mode` |
+| 可开票余量 | po：`promised − returned − billing`；gr：`qty_invoiceable − ap_match` | 已覆盖 | `_open_qty` L362-381 |
+| 质检折抵 | 仅 `return_to_supplier` / `scrap` 扣减 | 已覆盖（D-VI-16） | `qty_invoiceable` L265-276 |
+| 价格校验 | 单价差 vs PO 快照，仅上界 | 部分（见 B-3） | `_allowed_upper` L481-487 |
+| 数量校验 | 按模式取 `vi_qty_tolerance_order` / `_receipt` | 已覆盖 | `_match_line` |
+| 税额校验 | 行税额自身容差 `vi_tax_tolerance_abs` | 部分（见 B-2） | `_validate_line_tax` L956+ |
+| 费用对账 | 单 PO、仅 surcharge、无锚点放行 | **缺陷** | `_validate_charge_reconciliation` L975-1014 |
+| 锚点快照 | item / uom / po_unit_price 由源单覆盖 | 部分（见 A-2） | `_normalize_line_anchors` L1175-1211 |
+| 例外放行 | 行级 `override_*`，post 按行绕过 | 已覆盖 | R-VI-16 |
+| 匹配结论落地 | 头/行 `match_status` + 单值 reason | **缺陷** | `_aggregate` L1427 / L1444 |
+| 重复发票 | 供应商 + 规范化号硬拦 | 已覆盖 | R-VI-14 |
+| 过账重算 | `BEGIN IMMEDIATE` 内重跑 match | 已覆盖 | R-VI-18 |
+
+### 24.2 缺陷清单
+
+#### A 类（会算错 / 会放过，W10-1 必修）
+
+| ID | 缺陷 | 根因 | 影响 |
+|---|---|---|---|
+| A-1 | 费用对账只覆盖**单 PO** 且**只对 surcharge** | 反查 PO 后 `break` 于首个带 schedule 的行；`target = surcharge`，仅当其为 0 才回退 `discount` | 多 PO 合并发票只对第一张；`surcharge` 与 `discount` **同时非 0** 时漏掉折扣侧（差额 = 折扣额，误报 `VI_FREIGHT_OVER_TOLERANCE`）。**注**：PO 头 `header_discount_amount` 为负值存储，故「仅折扣」场景当前回退是偶然正确的 |
+| A-2 | 费用行不写 doc_flow 边且**无替代余量约束** | R-VI-29 明确「费用行不写边」 | 同一笔 PO 附加费可被多张发票重复报销，无上限保护 |
+| A-3 | **源单状态不校验** | `_open_qty` 只读数量与消耗 | PO `draft` / `closed` / `cancelled` 仍可开票；收货单 `draft` / `cancelled` / `reversed` 仍可被 3-way 匹配 |
+| A-4 | UOM **无一致性校验** | 源单 uom 直接覆盖行入参，不比对 | 发票按「箱」、PO 按「件」时，数量按错误单位静默通过 |
+| A-5 | 异常原因**只存首个** | `_aggregate` / `_persist_line_result` 取 `reasons[0]` | 同行多异常不可见，用户改完一条再报下一条 |
+| A-6 | 纯费用发票**完全绕过对账** | `_validate_charge_reconciliation` 无 `order_id` 直接 `return ''` | 无 PO 锚点的运费/附加费发票零校验过账 |
+
+#### B 类（已声明未接通）
+
+| ID | 项 | 现状 | 处置 |
+|---|---|---|---|
+| B-1 | `match_status` 枚举 `currency_mismatch` / `supplier_mismatch` | YAML 已播种，服务层从不产出（币种/供应商实为硬 `raise`） | **删除枚举值**（§24.5） |
+| B-2 | `match_status` 枚举 `no_receipt` | 无产出路径 | **接线**：`gr_based` 行缺收货锚点 → 置该状态 + 可 override（R-VI-45） |
+| B-3 | `vi_po_tax_compare` | v264 播种标「预留」，无消费 | 按 §24.3.6 消费（R-VI-46） |
+| B-4 | `tolerance_direction` | `_param_def` 已查询，全库无消费点 | 按 §24.3.7 消费（R-VI-47）；默认行为不变（仅上界） |
+
+#### C 类（标准 3-way 能力，W10-2 / W10-3）
+
+| ID | 缺口 | 处置 |
+|---|---|---|
+| C-1 | `gr_based` 粒度为**收货行**，不支持「PO 行 + 多收货单累计」 | W10-2 契约见 §24.8 |
+| C-2 | 无匹配工作台 / 差异池 / 批量提交 | W10-3；维持 §1.2 的波次边界 |
+| C-3 | 费用行无法归属到具体 PO（多 PO 场景） | W10-1 以「拒绝 + 可执行提示」替代（R-VI-39），不做自动拆分 |
+
+### 24.3 判定口径细化
+
+#### 24.3.1 源单状态白名单（R-VI-38）
+
+| 源单 | 可匹配状态 | 其他状态 |
+|---|---|---|
+| `purchase_orders.status` | `confirmed` | `draft` / `closed` / `cancelled` → `VI_SOURCE_STATUS_INVALID` |
+| `receipts.status` | `posted` | `draft` / `cancelled` / `reversed` → `VI_SOURCE_STATUS_INVALID` |
+
+- 校验时机：`_open_qty` 取数前（`match()` 与 `post()` 重算共用同一入口）。
+- **不可 override**：源单状态是事实约束，不提供行级放行（避免「草稿收货直接入账」）。
+- 已 `closed` 的 PO 若确有未开票余量，走 PO 侧「重新打开」流程，不在发票侧留后门。
+
+#### 24.3.2 费用对账算法（R-VI-39 ~ R-VI-42）
+
+```
+charges = [l for l in lines if is_charge_line(l)]        # 运费 / 附加费 / 折扣
+goods   = [l for l in lines if not is_charge_line(l)]
+po_ids  = distinct(order_id 反查(goods 行, 经 schedule / order_line / receipt_line))
+total   = Σ charge.net_amount                            # 折扣行为负值
+tol     = vi_freight_tolerance_abs
+
+if po_ids 为空:
+    → abs(total) ≤ tol ? '' : 'VI_CHARGE_UNANCHORED'    # R-VI-42
+if |po_ids| > 1:
+    → 所有 PO 头 (surcharge + discount) 均为 0 且 abs(total) ≤ tol ? ''
+      : 'VI_CHARGE_MULTI_PO_UNSUPPORTED'                # R-VI-39
+po = 唯一 PO
+target = po.header_surcharge_amount + po.header_discount_amount   # R-VI-40，discount 为负
+if abs(total - target) > tol: → REASON_FREIGHT
+```
+
+- **R-VI-40**：禁止 `if not target` 式回退；`surcharge` 与 `discount` 必须**同时累加**。
+- **R-VI-41（费用余量）**：过账时校验同一 PO 下**已过账发票**的费用行合计（含负向折扣）≤ `surcharge + discount` + `vi_freight_tolerance_abs`，超出 → `VI_CHARGE_EXHAUSTED`（exception，可 override）。
+  - 统计口径：`vendor_invoices.status IN ('posted','reversed')` 按 `document_category='invoice'` 计入；红字贷项按 `direction` 负向冲减后参与合计（与 `v_doc_flow_consumed_qty` 同构，但费用行无边，故就地聚合）。
+  - 边界：费用行不写边（R-VI-29 不变），本约束是**唯一**的费用上限保护。
+- **R-VI-42**：纯费用发票（无任何 PO 锚点）费用合计非 0 → `VI_CHARGE_UNANCHORED`（例外可放行，需 override 留痕，适用于无 PO 的零星运费）。
+- 对账基准：**分摊前**行金额（`_allocate_charges` 不改合计，二者等价）；`document_category` 仅 `invoice` 参与，贷项/借项/调整单跳过（维持现状）。
+
+#### 24.3.3 UOM 一致性（R-VI-43）
+
+- 规则：发票行 `uom_id` 非空且 ≠ 源单（PO 行 / 收货行）`uom_id` → `VI_UOM_MISMATCH`，**拒绝**，不做静默覆盖、不做自动换算。
+- `_normalize_line_anchors` 保留「源单覆盖」语义，但**先比对后覆盖**：比对失败即抛错，不写库。
+- 源单 `uom_id` 为空时以发票行值为准（历史数据兜底）。
+
+#### 24.3.4 异常原因多值（R-VI-44）
+
+- 落库格式：
+  - 单值 → 纯文本（`price_over_tolerance`），**保持现有前端与测试兼容**；
+  - 多值 → JSON 数组字符串（`["price_over_tolerance","qty_over_receipt_tolerance"]`），顺序按 `REASON_*` 常量声明序。
+- 解析约定：读取方先尝试 `json.loads`，失败按纯文本处理（前端必须容错）。
+- `_aggregate`（头级）取**全部**行 reason 去重并集；`_persist_line_result`（行级）写该行全部 reason。
+
+#### 24.3.5 匹配枚举闭合（R-VI-45）
+
+| 枚举值 | 处置 |
+|---|---|
+| `unmatched` / `matched` / `exception` / `overridden` | 保持 |
+| `no_receipt` | **接线**：`gr_based` 且行无 `receipt_line_id` → `match_status='no_receipt'`，reason `VI_NO_RECEIPT`；按 R-VI-16 可 override（对齐 D-VI-3「兼容先开票后收货」） |
+| `currency_mismatch` / `supplier_mismatch` | **从 YAML 删除**（硬 `VI_CURRENCY_MISMATCH` / `VI_SUPPLIER_MISMATCH` 已是事实出口，保留即幽灵枚举） |
+
+#### 24.3.6 PO 税额比对（R-VI-46）
+
+- 条件：参数 `vi_po_tax_compare = true`（默认 false，保持向后兼容）。
+- 计算：`expected_tax = round_amount(发票行不含税金额 × PO 行 tax_rate_percent / 100)`；PO 行为含税价口径时先按税率反算不含税金额。
+- 比对：`abs(行 tax_amount − expected_tax) > vi_tax_tolerance_abs` → reason `VI_PO_TAX_MISMATCH`（与既有 `VI_TAX_MISMATCH` 区分：前者对 PO 税率，后者对行内税基/税率自洽）。
+- 源单缺 `tax_rate_percent` 时跳过（不阻断历史单据）。
+
+#### 24.3.7 容差方向（R-VI-47）
+
+- 取值来源：`control_parameter_def` 既有列 `tolerance_direction`，作用于 `vi_price_tolerance`。
+- 语义：`null` / `upper` → 仅上界（**默认，行为不变**，对齐 A8 / SAP `DQ`）；`both` → 上下界；`lower` → 仅下界。
+- 下界失败 reason：`price_under_tolerance`（新增）；上界仍为 `price_over_tolerance`。
+- 数量容差**不**支持 `both`（对齐 A8，防止「少开票」被误判为异常）。
+
+### 24.4 新增不变量总表（§6.3 追加）
+
+| 编号 | 不变量 | 落点 |
+|---|---|---|
+| R-VI-38 | 源单（PO / 收货单）状态必须 ∈ 白名单 | `_open_qty` 前置 |
+| R-VI-39 | 含费用行的发票，非费用行锚定 PO 必须唯一（或各 PO 头费用全 0） | `_validate_charge_reconciliation` |
+| R-VI-40 | 费用对账目标 = `surcharge + discount`（折扣负值，禁止回退） | 同上 |
+| R-VI-41 | 同一 PO 已过账费用合计 ≤ 头费用合计 + 容差 | `post()` 事务内 |
+| R-VI-42 | 无 PO 锚点的费用发票，费用合计非 0 即 exception | `_validate_charge_reconciliation` |
+| R-VI-43 | 行 uom 必须等于源单 uom（禁止静默覆盖） | `_normalize_line_anchors` |
+| R-VI-44 | 多异常不得丢弃（单值纯文本 / 多值 JSON 数组） | `_aggregate` / `_persist_line_result` |
+| R-VI-45 | `match_status` 枚举每个值必须有产出路径 | `_match_line` / YAML |
+| R-VI-46 | `vi_po_tax_compare=true` 时按 PO 行税率重算比对 | `_validate_line_tax` |
+| R-VI-47 | 价格容差方向由 `tolerance_direction` 决定，默认仅上界 | `_allowed_upper`（改名 `_allowed_bounds`） |
+
+### 24.5 错误码与 reason 字典（增量）
+
+| 类型 | 常量 | 触发 | 可否 override |
+|---|---|---|---|
+| 硬错 | `VI_SOURCE_STATUS_INVALID` | R-VI-38 | 否 |
+| 硬错 | `VI_UOM_MISMATCH` | R-VI-43 | 否 |
+| 硬错 | `VI_CHARGE_MULTI_PO_UNSUPPORTED` | R-VI-39 多 PO 费用 | 否（需拆票） |
+| 行异常 | `VI_CHARGE_EXHAUSTED` | R-VI-41 | 是 |
+| 行异常 | `VI_CHARGE_UNANCHORED` | R-VI-42 | 是 |
+| 行异常 | `VI_NO_RECEIPT` | R-VI-45 | 是 |
+| 行异常 | `VI_PO_TAX_MISMATCH` | R-VI-46 | 是 |
+| 行异常 | `price_under_tolerance` | R-VI-47 下界 | 是 |
+
+### 24.6 数据模型与参数变更
+
+| 项 | 变更 | 迁移 |
+|---|---|---|
+| 表 / 列 | **无**（`match_exception_reason` 已是 text，可存 JSON） | 无 |
+| `vendor_invoice.yaml` `match_status` 枚举 | 删除 `currency_mismatch` / `supplier_mismatch` | YAML 变更 + `sync_schema --generate` |
+| `control_parameter_value` | 可选：`vi_price_tolerance.tolerance_direction='both'`（不播种，默认不进配置） | 无 |
+| `vi_po_tax_compare` | 保持默认 false | 无 |
+
+### 24.7 测试矩阵（W10-1）
+
+| # | 用例 | 期望 |
+|---|---|---|
+| 1 | 单 PO，surcharge=50 且 discount=-20，费用行合计 30 | matched |
+| 2 | 单 PO，surcharge=50 且 discount=-20，费用行合计 50 | `VI_FREIGHT_OVER_TOLERANCE` |
+| 3 | 双 PO 合并发票含费用行（任一 PO 头费用非 0） | `VI_CHARGE_MULTI_PO_UNSUPPORTED` |
+| 4 | 双 PO 合并发票含费用行（两 PO 头费用全 0，费用合计 0） | matched |
+| 5 | 纯费用发票，费用合计 100，无 PO 锚点 | `VI_CHARGE_UNANCHORED` |
+| 6 | 同一 PO 第二张发票重复报销同额附加费 | `VI_CHARGE_EXHAUSTED` |
+| 7 | PO `closed` 仍有余量 | `VI_SOURCE_STATUS_INVALID` |
+| 8 | 收货单 `draft` 作为 3-way 锚点 | `VI_SOURCE_STATUS_INVALID` |
+| 9 | 发票行 uom ≠ PO 行 uom | `VI_UOM_MISMATCH` |
+| 10 | 一行同时超价 + 超量 | reason 为 2 元 JSON 数组 |
+| 11 | `gr_based` 行无 `receipt_line_id` | `no_receipt` + override 后可过账 |
+| 12 | `vi_po_tax_compare=true`，行税额偏离 PO 税率重算值 | `VI_PO_TAX_MISMATCH` |
+| 13 | `tolerance_direction='both'`，单价低于 PO 价超容差 | `price_under_tolerance` |
+| 14 | 默认参数回归（既有 25 例 match 测试） | 全绿，行为不变 |
+
+### 24.8 波次划分
+
+| 波次 | 范围 | 迁移 | 备注 |
+|---|---|---|---|
+| **W10-1（本波建议执行）** | R-VI-38 ~ R-VI-47 + YAML 枚举收敛 | 无 | 低风险；除 R-VI-44 需前端容错外无外部影响 |
+| W10-2 | C-1：`gr_based` 增加「PO 行聚合锚点」——`order_line_id` 为锚，余量 = `Σ qty_invoiceable(该行全部收货行) − Σ ap_match 已耗（按收货行集合聚合）`；`no_receipt` 例外路径复用 R-VI-45 | 无（复用 `order_line_id` 列） | 需先补视图按 `source_id IN (...)` 聚合的查询契约 |
+| W10-3 | C-2：匹配工作台 / 差异池 / 批量提交 | 无 | 维持 §1.2「本波不做」的边界，独立波次评估 |
+
+### 24.9 对既有条款的修订索引
+
+| 既有条款 | 修订 |
+|---|---|
+| §22.6 费用规则第 5 条（「PO 头附加费/折扣非 0 时比对」） | 补全算法与符号口径 → §24.3.2（R-VI-39 ~ 42），明确「多 PO 拒绝 + 折扣负值累加 + 费用余量 + 无锚点不放行」 |
+| §22.9 / R-VI-29（费用行不写边） | 维持；但补 R-VI-41 作为唯一费用上限保护 |
+| §5.2 / A8（数量容差单向） | 维持；价格容差方向由 R-VI-47 显式化 |
+| §22.8 匹配口径 | 追加 R-VI-38（源单状态）、R-VI-43（UOM）、R-VI-45（枚举闭合） |
+| §22.10 行类型与税额 | 追加 R-VI-46（PO 税额比对） |
+| §3.3 / `vendor_invoice.yaml` `match_status` 枚举 | 删除 `currency_mismatch` / `supplier_mismatch`，接线 `no_receipt` |
+| §1.2 边界（匹配工作台不做） | 维持，W10-3 再评估 |
+| §6.3 不变量表 | 追加 R-VI-38 ~ R-VI-47 |
+
+### 24.10 明确不做
+
+- 不做费用行**自动拆分到多 PO**（按金额比例拆分会制造不可解释的分摊事实）。
+- 不做 UOM **自动换算**（需要换算率主数据，属基础资料波次）。
+- 不做匹配**审批流** / 付款挂起（D-VI-12 / D-VI-17 已裁决）。
+- 不做行级多币种（D-VI-18 永久关闭）。

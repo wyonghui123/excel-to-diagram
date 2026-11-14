@@ -553,6 +553,10 @@ fields:
         label: 例外放行
         color: warning
         category: active
+      - value: no_receipt
+        label: 无收货锚点
+        color: warning
+        category: active
     semantics:
       meaning: 行匹配状态
       filterable: true

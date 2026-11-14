@@ -245,6 +245,53 @@ fields:
       multiple: false
       clearable: true
 
+  # [2026-11-14] 供应商级默认付款条件（与 customer_account.default_payment_term_id 对称）
+  #   解析链：本字段 → 单据类型控制参数 default_payment_term → 留空（不阻断保存）
+  - id: default_payment_term_id
+    name: 默认付款条件
+    type: integer
+    db_column: default_payment_term_id
+    nullable: true
+    description: 供应商级默认付款条件；新建采购单据时带出，可改
+    semantics:
+      meaning: 该供应商档案的默认付款条件引用
+      display:
+        type: association
+        target_type: payment_term
+        display_field: name
+        placeholder: "未指定（按单据类型默认）"
+    value_help:
+      source:
+        type: bo
+        target_bo: payment_term
+        value_field: id
+        display_field: name
+        code_field: code
+        apply_target_permissions: true
+        # 候选只取启用行；resolve 不读 value_filter ⇒ 已停用条件的存量回显不受影响
+        value_filter:
+          status: active
+      behavior:
+        multiple: false
+        validation: true
+        binding_strength: strict
+        min_search_length: 0
+      presentation:
+        result_type: dropdown
+        display_format: "{code} - {name}"
+        columns:
+          - field: code
+            label: 条件编码
+            width: 140
+          - field: name
+            label: 条件名称
+            width: 200
+    ui:
+      widget: select
+      relation: payment_term
+      multiple: false
+      clearable: true
+
   - id: created_at
     name: 创建时间
     type: datetime
@@ -366,7 +413,7 @@ ui_view_config:
           - fields: [name]
       - title: 税务
         columns:
-          - fields: [tax_classification_id]
+          - fields: [tax_classification_id, default_payment_term_id]
       - title: 其他
         columns:
           - fields: [description]
@@ -377,4 +424,5 @@ ui_view_config:
         fields:
           - name
           - tax_classification_id
+          - default_payment_term_id
           - description

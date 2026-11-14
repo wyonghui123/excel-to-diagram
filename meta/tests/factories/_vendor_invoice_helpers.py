@@ -24,6 +24,10 @@ from meta.migrations.v252__vendor_invoice_object import (
     HEADER_TABLE,
     LINE_DDL,
 )
+from meta.migrations.v271__vendor_invoice_schedule import (
+    INDEXES as SCHEDULE_INDEXES,
+    SCHEDULE_DDL,
+)
 from meta.tests.shared.db_schema import create_audit_logs
 
 # ---------------------------------------------------------------- 业务常量
@@ -54,6 +58,13 @@ LINE_TYPE_DISCOUNT_ID = 35
 
 SUPPORT_DDL = (
     """
+    CREATE TABLE IF NOT EXISTS vendor_accounts (
+        id INTEGER PRIMARY KEY,
+        name VARCHAR(200),
+        default_payment_term_id INTEGER
+    )
+    """,
+    """
     CREATE TABLE IF NOT EXISTS purchase_orders (
         id INTEGER PRIMARY KEY,
         order_no VARCHAR(30),
@@ -62,8 +73,10 @@ SUPPORT_DDL = (
         currency_id INTEGER,
         org_id INTEGER,
         purchase_org_id INTEGER,
+        payment_term_id INTEGER,
         header_surcharge_amount NUMERIC(18,4),
-        header_discount_amount NUMERIC(18,4)
+        header_discount_amount NUMERIC(18,4),
+        status VARCHAR(20) DEFAULT 'confirmed'
     )
     """,
     """
@@ -75,7 +88,15 @@ SUPPORT_DDL = (
         item_group_id INTEGER,
         line_type_id INTEGER,
         uom_id INTEGER,
-        unit_price NUMERIC(18,6)
+        unit_price NUMERIC(18,6),
+        tax_rate_percent NUMERIC(18,6)
+    )
+    """,
+    """
+    CREATE TABLE IF NOT EXISTS receipts (
+        id INTEGER PRIMARY KEY,
+        receipt_no VARCHAR(30),
+        status VARCHAR(20) DEFAULT 'posted'
     )
     """,
     """
@@ -183,6 +204,29 @@ SUPPORT_DDL = (
         code VARCHAR(3) UNIQUE NOT NULL,
         name VARCHAR(50) NOT NULL,
         decimal_places INTEGER NOT NULL DEFAULT 2
+    )
+    """,
+    # v271：付款条件（AP Payment Plan 期次推算依赖）
+    """
+    CREATE TABLE IF NOT EXISTS payment_terms (
+        id INTEGER PRIMARY KEY,
+        code VARCHAR(32),
+        name VARCHAR(128),
+        basis_date_rule VARCHAR(32) DEFAULT 'invoice_date',
+        cutoff_day INTEGER,
+        status VARCHAR(20) DEFAULT 'active'
+    )
+    """,
+    """
+    CREATE TABLE IF NOT EXISTS payment_term_lines (
+        id INTEGER PRIMARY KEY,
+        payment_term_id INTEGER,
+        seq INTEGER,
+        percentage NUMERIC(9,4),
+        offset_months INTEGER DEFAULT 0,
+        fixed_day_of_month INTEGER,
+        offset_days INTEGER DEFAULT 0,
+        discount_days INTEGER
     )
     """,
     """
@@ -314,6 +358,13 @@ def make_env(tmp_path):
         ds.execute(
             'ALTER TABLE vendor_invoice_lines ADD COLUMN '
             'allocated_charge_amount NUMERIC(18,4) NOT NULL DEFAULT 0')
+    # v271 应付期次（AP Payment Plan）
+    if 'payment_term_id' not in ds.get_table_columns(HEADER_TABLE):
+        ds.execute(
+            'ALTER TABLE vendor_invoices ADD COLUMN payment_term_id INTEGER')
+    ds.execute(SCHEDULE_DDL)
+    for _name, ddl in SCHEDULE_INDEXES:
+        ds.execute(ddl)
     for ddl in SUPPORT_DDL:
         ds.execute(ddl)
     create_audit_logs(ds)
@@ -473,41 +524,54 @@ def seed_tax_rate(ds, *, tax_code_id, rate_percent,
 
 def seed_purchase_order(ds, *, promised_qty=10.0, returned_qty=0.0,
                         unit_price=10.0, line_type_id=LINE_TYPE_ID,
-                        header_surcharge_amount=0.0, header_discount_amount=0.0):
+                        header_surcharge_amount=0.0, header_discount_amount=0.0,
+                        payment_term_id=None, po_id=PO_ID, order_no='PO-0001',
+                        po_line_id=PO_LINE_ID, schedule_id=SCHEDULE_ID,
+                        uom_id=UOM_ID, status='confirmed',
+                        tax_rate_percent=None):
     ds.execute(
         'INSERT OR REPLACE INTO purchase_orders '
         '(id, order_no, supplier_account_id, supplier_party_id, currency_id, '
-        ' org_id, purchase_org_id, header_surcharge_amount, '
-        ' header_discount_amount) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)',
-        [PO_ID, 'PO-0001', SUPPLIER_ACCOUNT_ID, SUPPLIER_PARTY_ID,
-         CURRENCY_ID, ORG_ID, PURCHASE_ORG_ID, header_surcharge_amount,
-         header_discount_amount],
+        ' org_id, purchase_org_id, payment_term_id, header_surcharge_amount, '
+        ' header_discount_amount, status) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)',
+        [po_id, order_no, SUPPLIER_ACCOUNT_ID, SUPPLIER_PARTY_ID,
+         CURRENCY_ID, ORG_ID, PURCHASE_ORG_ID, payment_term_id,
+         header_surcharge_amount, header_discount_amount, status],
     )
     ds.execute(
         'INSERT OR REPLACE INTO purchase_order_lines '
         '(id, order_id, line_no, item_id, item_group_id, line_type_id, uom_id, '
-        ' unit_price) VALUES (?, ?, ?, ?, ?, ?, ?, ?)',
-        [PO_LINE_ID, PO_ID, 1, ITEM_ID, None, line_type_id, UOM_ID, unit_price],
+        ' unit_price, tax_rate_percent) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)',
+        [po_line_id, po_id, 1, ITEM_ID, None, line_type_id, uom_id, unit_price,
+         tax_rate_percent],
     )
     ds.execute(
         'INSERT OR REPLACE INTO purchase_order_schedules '
         '(id, order_id, line_id, schedule_kind, promised_qty, returned_qty, '
         ' status) VALUES (?, ?, ?, ?, ?, ?, ?)',
-        [SCHEDULE_ID, PO_ID, PO_LINE_ID, 'delivery', promised_qty,
+        [schedule_id, po_id, po_line_id, 'delivery', promised_qty,
          returned_qty, 'confirmed'],
     )
     ds.commit()
 
 
 def seed_receipt_line(ds, *, qty_received=10.0, qty_rejected=0.0,
-                      disposition=None):
+                      disposition=None, receipt_id=RECEIPT_ID,
+                      receipt_line_id=RECEIPT_LINE_ID,
+                      receipt_status='posted', schedule_id=SCHEDULE_ID,
+                      order_line_id=PO_LINE_ID, uom_id=UOM_ID):
+    ds.execute(
+        'INSERT OR REPLACE INTO receipts (id, receipt_no, status) '
+        'VALUES (?, ?, ?)',
+        [receipt_id, 'GR-{0}'.format(receipt_id), receipt_status],
+    )
     ds.execute(
         'INSERT OR REPLACE INTO receipt_lines '
         '(id, receipt_id, schedule_id, order_line_id, item_id, uom_id, '
         ' qty_received, qty_rejected, rejection_disposition, status) '
         'VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)',
-        [RECEIPT_LINE_ID, RECEIPT_ID, SCHEDULE_ID, PO_LINE_ID, ITEM_ID,
-         UOM_ID, qty_received, qty_rejected, disposition, 'posted'],
+        [receipt_line_id, receipt_id, schedule_id, order_line_id, ITEM_ID,
+         uom_id, qty_received, qty_rejected, disposition, 'posted'],
     )
     ds.commit()
 
@@ -516,18 +580,20 @@ def insert_invoice(ds, *, invoice_no='VI-0001', category='invoice',
                    direction=1, status='draft', supplier_invoice_no=None,
                    match_mode='gr_based', pricing_mode='po_price',
                    net_amount=100.0, tax_amount=13.0, gross_amount=113.0,
-                   invoice_date='2026-11-01', document_type_id=DOC_TYPE_ID):
+                   invoice_date='2026-11-01', document_type_id=DOC_TYPE_ID,
+                   payment_term_id=None):
     ds.execute(
         'INSERT INTO vendor_invoices '
         '(invoice_no, document_type_id, document_category, direction, '
         ' invoice_date, status, match_mode, supplier_account_id, '
         ' supplier_party_id, currency_id, org_id, supplier_invoice_no, '
-        ' net_amount, tax_amount, gross_amount, match_pricing_mode) '
-        'VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)',
+        ' net_amount, tax_amount, gross_amount, match_pricing_mode, '
+        ' payment_term_id) '
+        'VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)',
         [invoice_no, document_type_id, category, direction, invoice_date,
          status, match_mode, SUPPLIER_ACCOUNT_ID, SUPPLIER_PARTY_ID,
          CURRENCY_ID, ORG_ID, supplier_invoice_no or invoice_no,
-         net_amount, tax_amount, gross_amount, pricing_mode],
+         net_amount, tax_amount, gross_amount, pricing_mode, payment_term_id],
     )
     rows = ds.query('SELECT id FROM vendor_invoices WHERE invoice_no = ?',
                     [invoice_no])
@@ -664,3 +730,54 @@ def seed_currency(ds, *, currency_id=CURRENCY_ID, code='CNY',
         'INSERT OR REPLACE INTO currencies (id, code, name, decimal_places) '
         'VALUES (?, ?, ?, ?)', [currency_id, code, name, decimal_places])
     ds.commit()
+
+
+# ------------------------------------------------------------------ v271 AP 期次
+
+PAYMENT_TERM_ID = 6001
+
+
+def seed_vendor_account(ds, *, account_id=SUPPLIER_ACCOUNT_ID,
+                        default_payment_term_id=None):
+    ds.execute(
+        'INSERT OR REPLACE INTO vendor_accounts '
+        '(id, name, default_payment_term_id) VALUES (?, ?, ?)',
+        [account_id, '供应商{0}'.format(account_id), default_payment_term_id])
+    ds.commit()
+
+
+def seed_payment_term(ds, *, term_id=PAYMENT_TERM_ID, code='NT30',
+                      basis_date_rule='invoice_date', cutoff_day=None,
+                      lines=()):
+    """付款条件头 + 分期行。
+
+    lines 元素: (seq, percentage, offset_months, fixed_day_of_month, offset_days)
+    """
+    ds.execute(
+        'INSERT OR REPLACE INTO payment_terms '
+        '(id, code, name, basis_date_rule, cutoff_day, status) '
+        'VALUES (?, ?, ?, ?, ?, ?)',
+        [term_id, code, code, basis_date_rule, cutoff_day, 'active'])
+    ds.execute('DELETE FROM payment_term_lines WHERE payment_term_id = ?',
+               [term_id])
+    for seq, percentage, offset_months, fixed_day, offset_days in lines:
+        ds.execute(
+            'INSERT INTO payment_term_lines '
+            '(payment_term_id, seq, percentage, offset_months, '
+            ' fixed_day_of_month, offset_days) VALUES (?, ?, ?, ?, ?, ?)',
+            [term_id, seq, percentage, offset_months, fixed_day, offset_days])
+    ds.commit()
+
+
+def set_payment_term(ds, invoice_id, term_id):
+    """改写发票头付款条件（验证显式值不被带出链覆盖）。"""
+    ds.execute(
+        'UPDATE vendor_invoices SET payment_term_id = ? WHERE id = ?',
+        [term_id, invoice_id])
+    ds.commit()
+
+
+def get_schedules(ds, invoice_id):
+    return ds.query(
+        'SELECT * FROM vendor_invoice_schedules WHERE invoice_id = ? '
+        'ORDER BY schedule_no', [invoice_id])

@@ -206,6 +206,7 @@ def handle_computation_not_supported(e: ComputationNotSupportedError):
 SALES_ORDER_OBJECT = 'sales_order'
 PURCHASE_ORDER_OBJECT = 'purchase_order'
 RECEIPT_OBJECT = 'receipt'
+VENDOR_INVOICE_OBJECT = 'vendor_invoice'
 # [P1 2026-11-06] 取号绑定改由元数据 `document.number_field` 解析
 # （见 DocumentNumberService.resolve_document_numbering），不再维护对象白名单。
 #: 抬头变更后需要重算商务默认值的维度（客户 / 销售组织变化）
@@ -303,6 +304,33 @@ def _apply_sales_order_defaults(object_type: str, data: dict) -> dict:
                 converted = False
         if converted and payload.get('order_date'):
             payload['exchange_rate_date'] = payload.get('order_date')
+    return payload
+
+
+def _apply_vendor_invoice_defaults(object_type: str, data: dict) -> dict:
+    """采购发票付款条件带出（spec §23.5，与销售订单对称）。
+
+    解析链：PO 锚点（行上 schedule/order_line/receipt_line 回溯订单）→
+    供应商档案 `vendor_accounts.default_payment_term_id` → 留空（即期）。
+    只在调用方未显式给值时补，已给值一律不覆盖；解析失败不阻断保存。
+    """
+    if object_type != VENDOR_INVOICE_OBJECT:
+        return data
+
+    payload = dict(data)
+    if payload.get('payment_term_id') not in (None, ''):
+        return payload
+    try:
+        from meta.services.vendor_payment_term_service import (
+            VendorPaymentTermService,
+        )
+        value = VendorPaymentTermService(_get_data_source()).resolve(
+            payload.get('supplier_account_id'), payload.get('lines') or [])
+    except Exception as e:
+        logger.warning('[bo_api] 采购发票付款条件带出失败: %s', e)
+        return payload
+    if value not in (None, ''):
+        payload['payment_term_id'] = value
     return payload
 
 
@@ -559,6 +587,7 @@ def create_bo(object_type):
     data = request.get_json(silent=True) or {}
     try:
         data = _apply_sales_order_defaults(object_type, data)
+        data = _apply_vendor_invoice_defaults(object_type, data)
         data = _apply_sales_order_salesperson(object_type, data)
         # value_help 校验放在取号之前：校验失败不消耗订单号
         errors = _validate_value_helps(object_type, data)

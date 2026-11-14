@@ -34,6 +34,7 @@ from meta.migrations import (
     v262__vendor_invoice_line_price_trace as v262,
     v263__vendor_invoice_pricing_mode_seed as v263,
     v264__vendor_invoice_charge_line_seed as v264,
+    v271__vendor_invoice_schedule as v271,
 )
 from meta.tests.factories import _vendor_invoice_migration_helpers as MH
 
@@ -525,5 +526,64 @@ def test_v264_charge_line_types_and_tax_params_seed(db_path):
         assert conn.execute(
             'SELECT COUNT(*) FROM control_parameter_defs WHERE code IN (%s)'
             % placeholders, list(v264.PARAM_CODES)).fetchone()[0] == 0
+    finally:
+        conn.close()
+
+
+def test_v271_schedule_table_and_columns(db_path):
+    """AP 应付期次表 / 2 列 / 3 索引 / 幂等 / 回滚（列保留）。"""
+    conn = _connect(db_path)
+    try:
+        conn.execute(
+            'CREATE TABLE IF NOT EXISTS vendor_accounts ('
+            'id INTEGER PRIMARY KEY, vendor_party_id INTEGER)')
+        conn.commit()
+    finally:
+        conn.close()
+
+    assert v252.migrate(db_path, skip_backup=True) is True
+    assert v271.migrate(db_path, skip_backup=True) is True
+    assert v271.verify(db_path) is True
+
+    # 幂等：二次执行不报错
+    assert v271.migrate(db_path, skip_backup=True) is True
+    assert v271.verify(db_path) is True
+
+    conn = _connect(db_path)
+    try:
+        assert 'payment_term_id' in _columns(conn, v271.HEADER_TABLE)
+        assert 'default_payment_term_id' in _columns(
+            conn, v271.ACCOUNT_TABLE)
+        schedule_cols = _columns(conn, v271.SCHEDULE_TABLE)
+        assert {'invoice_id', 'schedule_no', 'ratio_percent', 'due_date',
+                'amount', 'amount_applied', 'status'} <= schedule_cols
+        for name, _ddl in v271.INDEXES:
+            assert _index_exists(conn, name), '缺少索引 %s' % name
+        # 状态枚举约束（CHECK）
+        conn.execute(
+            'INSERT INTO vendor_invoice_schedules '
+            '(invoice_id, schedule_no, ratio_percent, due_date, amount) '
+            "VALUES (1, 1, 100, '2026-11-01', 100)")
+        conn.commit()
+        with pytest.raises(sqlite3.IntegrityError):
+            conn.execute(
+                "UPDATE vendor_invoice_schedules SET status = 'bogus' "
+                'WHERE invoice_id = 1')
+    finally:
+        conn.rollback()
+        conn.close()
+
+    assert v271.rollback(db_path) is True
+    conn = _connect(db_path)
+    try:
+        assert not conn.execute(
+            "SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = ?",
+            [v271.SCHEDULE_TABLE]).fetchone()
+        for name, _ddl in v271.INDEXES:
+            assert not _index_exists(conn, name)
+        # 两列保留（SQLite 老版本不支持 DROP COLUMN）
+        assert 'payment_term_id' in _columns(conn, v271.HEADER_TABLE)
+        assert 'default_payment_term_id' in _columns(
+            conn, v271.ACCOUNT_TABLE)
     finally:
         conn.close()

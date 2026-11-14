@@ -1,5 +1,5 @@
 -- 自动生成的 Schema
--- 生成时间: 2026-11-13 22:53:02.294549
+-- 生成时间: 2026-11-14 19:10:43.865025
 
 -- 地址: 结构化地址库（支持对象）：国家 / 省 / 市 / 区 / 街道 / 门牌 / 邮编分列 + 格式化全文；只被引用，不承载用途 / 角色
 CREATE TABLE IF NOT EXISTS addresses (
@@ -3674,6 +3674,7 @@ CREATE TABLE IF NOT EXISTS task_runs (
     task_id INTEGER,
     status VARCHAR(200) NOT NULL,
     params TEXT,
+    progress TEXT,
     attempt INTEGER,
     max_attempts INTEGER,
     scheduled_for REAL,
@@ -4075,6 +4076,7 @@ CREATE TABLE IF NOT EXISTS vendor_accounts (
     name VARCHAR(200) NOT NULL,
     description TEXT,
     tax_classification_id INTEGER,
+    default_payment_term_id INTEGER,
     created_at DATETIME,
     FOREIGN KEY (tax_classification_id) REFERENCES tax_classifications(id)
 )
@@ -4100,6 +4102,7 @@ CREATE TABLE IF NOT EXISTS vendor_invoices (
     exchange_rate REAL,
     exchange_rate_type VARCHAR(20),
     exchange_rate_date DATETIME,
+    payment_term_id INTEGER,
     purchase_org_id INTEGER,
     org_id INTEGER NOT NULL,
     supplier_invoice_no VARCHAR(60),
@@ -4109,7 +4112,7 @@ CREATE TABLE IF NOT EXISTS vendor_invoices (
     rounding_diff REAL DEFAULT 0,
     supplier_gross_amount REAL,
     match_pricing_mode VARCHAR(20) NOT NULL DEFAULT 'po_price' CHECK (match_pricing_mode IN ('po_price', 'receipt_price', 'manual')),
-    match_exception_reason VARCHAR(200) CHECK (match_exception_reason IN ('price_over_tolerance', 'qty_over_receipt_tolerance', 'qty_over_order_tolerance', 'no_receipt', 'currency_mismatch', 'supplier_mismatch', 'manual_pricing_required', 'receipt_price_mode', 'price_source_inconsistent')),
+    match_exception_reason VARCHAR(200) CHECK (match_exception_reason IN ('price_over_tolerance', 'price_under_tolerance', 'qty_over_receipt_tolerance', 'qty_over_order_tolerance', 'no_receipt', 'VI_NO_RECEIPT', 'manual_pricing_required', 'receipt_price_mode', 'price_source_inconsistent', 'VI_TAX_MISMATCH', 'VI_PO_TAX_MISMATCH', 'VI_FREIGHT_OVER_TOLERANCE', 'VI_CHARGE_EXHAUSTED', 'VI_CHARGE_UNANCHORED')),
     match_matched_at DATETIME,
     match_matched_by VARCHAR(200),
     settlement_mode VARCHAR(20) NOT NULL DEFAULT 'supplier_invoice' CHECK (settlement_mode IN ('supplier_invoice', 'ers')),
@@ -4162,7 +4165,7 @@ CREATE TABLE IF NOT EXISTS vendor_invoice_lines (
     price_diff_amount REAL,
     price_diff_percent REAL,
     qty_over_receipt REAL,
-    match_status VARCHAR(20) NOT NULL DEFAULT 'unmatched' CHECK (match_status IN ('unmatched', 'matched', 'exception', 'overridden')),
+    match_status VARCHAR(20) NOT NULL DEFAULT 'unmatched' CHECK (match_status IN ('unmatched', 'matched', 'exception', 'overridden', 'no_receipt')),
     match_exception_reason VARCHAR(200),
     override_reason VARCHAR(200),
     overridden_by VARCHAR(200),
@@ -4177,6 +4180,23 @@ CREATE TABLE IF NOT EXISTS vendor_invoice_lines (
     FOREIGN KEY (schedule_id) REFERENCES purchase_order_schedules(id),
     FOREIGN KEY (receipt_line_id) REFERENCES receipt_lines(id),
     FOREIGN KEY (invoice_line_id) REFERENCES vendor_invoice_lines(id)
+)
+
+-- 应付期次: 采购发票应付期次（过账时按付款条件生成，只读）
+CREATE TABLE IF NOT EXISTS vendor_invoice_schedules (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    invoice_id INTEGER NOT NULL,
+    schedule_no INTEGER NOT NULL,
+    payment_term_line_id INTEGER,
+    ratio_percent REAL NOT NULL,
+    due_date DATETIME NOT NULL,
+    amount REAL NOT NULL,
+    amount_applied REAL NOT NULL DEFAULT 0,
+    status VARCHAR(200) NOT NULL DEFAULT 'open' CHECK (status IN ('open', 'partial', 'closed', 'cancelled')),
+    created_at DATETIME,
+    updated_at DATETIME,
+    FOREIGN KEY (invoice_id) REFERENCES vendor_invoices(id),
+    FOREIGN KEY (payment_term_line_id) REFERENCES payment_term_lines(id)
 )
 
 -- 工作流定义: 编排定义层（版本化；定义层无状态——节点/边只描述主干与分支块）
@@ -5613,6 +5633,12 @@ CREATE INDEX IF NOT EXISTS idx_vendor_invoice_line_receipt ON vendor_invoice_lin
 CREATE INDEX IF NOT EXISTS idx_vendor_invoice_line_invoice_line ON vendor_invoice_lines(invoice_line_id)
 CREATE INDEX IF NOT EXISTS idx_vendor_invoice_line_return ON vendor_invoice_lines(return_line_id)
 CREATE INDEX IF NOT EXISTS idx_vendor_invoice_line_item ON vendor_invoice_lines(item_id)
+
+-- Indexes for 应付期次
+CREATE INDEX IF NOT EXISTS idx_vendor_invoice_schedules_payment_term_line_id ON vendor_invoice_schedules(payment_term_line_id)
+CREATE UNIQUE INDEX IF NOT EXISTS uq_vendor_invoice_schedule_no ON vendor_invoice_schedules(invoice_id, schedule_no)
+CREATE INDEX IF NOT EXISTS idx_vendor_invoice_schedule_invoice ON vendor_invoice_schedules(invoice_id)
+CREATE INDEX IF NOT EXISTS idx_vendor_invoice_schedule_status_due ON vendor_invoice_schedules(status, due_date)
 
 -- Indexes for 工作流定义
 CREATE UNIQUE INDEX IF NOT EXISTS uq_workflow_key_version ON workflows(workflow_key, version)

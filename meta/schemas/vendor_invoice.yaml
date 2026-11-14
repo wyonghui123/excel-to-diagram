@@ -484,6 +484,40 @@ fields:
     ui:
       widget: date
 
+  - id: payment_term_id
+    name: 付款条件
+    type: integer
+    db_column: payment_term_id
+    nullable: true
+    description: 付款条件快照；空 = 即期（过账时生成 1 期 100%）。由 PO 匹配生成时取 PO 付款条件，手工录入时带出供应商档案默认值，过账前可改
+    semantics:
+      meaning: 付款条件
+      display:
+        type: association
+        target_type: payment_term
+        display_field: name
+    value_help:
+      source:
+        type: bo
+        target_bo: payment_term
+        value_field: id
+        display_field: name
+        code_field: code
+        apply_target_permissions: true
+      behavior:
+        multiple: false
+        validation: true
+        binding_strength: strict
+        min_search_length: 0
+      presentation:
+        result_type: dropdown
+        display_format: "{code} {name}"
+    ui:
+      widget: select
+      relation: payment_term
+      multiple: false
+      clearable: true
+
   - id: purchase_org_id
     name: 采购组织
     type: integer
@@ -660,6 +694,10 @@ fields:
         label: 价格超容差
         color: danger
         category: active
+      - value: price_under_tolerance
+        label: 价格低于容差下界
+        color: danger
+        category: active
       - value: qty_over_receipt_tolerance
         label: 超收量（容差）
         color: danger
@@ -672,12 +710,8 @@ fields:
         label: 无收货
         color: danger
         category: active
-      - value: currency_mismatch
-        label: 币种不一致
-        color: danger
-        category: active
-      - value: supplier_mismatch
-        label: 供应商不一致
+      - value: VI_NO_RECEIPT
+        label: 无收货锚点
         color: danger
         category: active
       - value: manual_pricing_required
@@ -690,6 +724,26 @@ fields:
         category: active
       - value: price_source_inconsistent
         label: 价格来源混用
+        color: danger
+        category: active
+      - value: VI_TAX_MISMATCH
+        label: 税额超容差
+        color: danger
+        category: active
+      - value: VI_PO_TAX_MISMATCH
+        label: 发票税额与订单税率不符
+        color: danger
+        category: active
+      - value: VI_FREIGHT_OVER_TOLERANCE
+        label: 费用合计超容差
+        color: danger
+        category: active
+      - value: VI_CHARGE_EXHAUSTED
+        label: 费用已超额
+        color: danger
+        category: active
+      - value: VI_CHARGE_UNANCHORED
+        label: 费用无订单锚点
         color: danger
         category: active
     semantics:
@@ -1173,6 +1227,7 @@ ui_view_config:
         columns:
           - fields: [currency_id, exchange_rate]
           - fields: [exchange_rate_type, exchange_rate_date]
+          - fields: [payment_term_id]
           - fields: [net_amount, tax_amount]
           - fields: [gross_amount, rounding_diff]
       - title: 组织与匹配
@@ -1286,6 +1341,7 @@ ui_view_config:
           - exchange_rate
           - exchange_rate_type
           - exchange_rate_date
+          - payment_term_id
           - net_amount
           - tax_amount
           - gross_amount
@@ -1322,3 +1378,11 @@ ui_view_config:
       useMetaList: true
       enableDetail: true
       enableAutoCrud: true
+    # [2026-11-14] 应付期次：过账时按付款条件生成，严格只读
+    - child_object: vendor_invoice_schedule
+      title: 应付期次
+      display: tab
+      pageSize: 10
+      useMetaList: true
+      enableDetail: true
+      enableAutoCrud: false
