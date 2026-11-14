@@ -1,7 +1,6 @@
 ---
 alwaysApply: false
-description: "E2E 测试规则：Playwright 端到端测试规范"
-globs: "tests/e2e/**/*,meta/tests/e2e/**/*"
+description: "[已废弃 2026-07-04] E2E 测试规则 v1，勿使用；现行版本见 core/e2e-testing.md"
 ---
 
 # [DEPRECATED 2026-07-04] E2E 测试规则（v1）

@@ -1,6 +1,6 @@
 ---
-alwaysApply: true
-description: "工程规范总纲：代码质量、架构约束、开发流程"
+alwaysApply: false
+description: "方案评估规范：不确定词必须给验证步骤、假设必验证、配置变更必确认生效"
 ---
 
 # 工程规范规则

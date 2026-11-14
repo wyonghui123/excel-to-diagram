@@ -1,6 +1,6 @@
 ---
-alwaysApply: true
-description: "PowerShell 安全铁律：禁止使用 curl 别名，必须用 curl.exe"
+alwaysApply: false
+description: "PowerShell 安全铁律：禁止使用 curl 别名，必须用 curl.exe（正文 = 铁律 L2 展开版）"
 ---
 
 # PowerShell curl 问题规则

@@ -18,9 +18,9 @@
 |------|------|----------------|
 | 1 | 读 SESSION_REMINDER 速查 4 铁律 | `.trae/rules/SESSION_REMINDER.md` |
 | 2 | 读项目内 AGENT_GUIDELINES (6 件事 + 10 DO NOT) | `AGENT_GUIDELINES.md` (项目根) |
-| 3 | 读 PARALLEL_DEV_SOP 完整流程 (8 阶段) | `PARALLEL_DEV_SOP.md` (项目根) |
-| 4 | 读最近的 HANDOVER (V043/V044 实际案例) | `DEPLOY_HANDOVER_BUG_V0*.md` (项目根) |
-| 5 | 写 spec.md (cp spec_template.md) | `spec_template.md` (项目根或 d:\filework\) |
+| 3 | 读多 Agent 编排规范 (worktree / 端口 / 集成) | `.trae/rules/scenarios/7-ai-collaboration/multi-agent-coordination.md` + `docs/AGENT_INFRA.md` |
+| 4 | 读最近的 HANDOVER (V043/V044 实际案例) | `docs/DEPLOY_HANDOVER_V007_43.md`, `docs/DEPLOY_HANDOVER_V007_44.md` |
+| 5 | 写 spec.md (cp spec_template.md) | `d:\filework\spec_template.md` |
 
 **禁止事项**: 不要读 `.deprecated/`、`RULES_INDEX.md` (按文档分类已弃用)。
 
@@ -32,8 +32,8 @@
 
 | 任务 | 必读文档 |
 |------|----------|
-| **理解 dev-agent 完整工作流** | `d:\filework\.trae\rules\development-workflow.md` |
-| **跑并行 + 集成 (8 阶段 SOP)** | `PARALLEL_DEV_SOP.md` (项目根) |
+| **理解 dev-agent 完整工作流** | `.trae/rules/scenarios/5-development/development-workflow.md` |
+| **跑并行 + 集成** | `.trae/rules/scenarios/7-ai-collaboration/multi-agent-coordination.md` |
 | **写 HANDOVER 文档** | `.trae/templates/DEPLOY_HANDOVER.template.md` |
 | **了解 spec.md 白名单** | `.trae/rules/scenarios/7-ai-collaboration/multi-agent-coordination.md` § L4 |
 | **学习编码规范** | `.trae/rules/core/coding-standards.md` |
@@ -46,12 +46,12 @@
 
 | 任务 | 必读文档 |
 |------|----------|
-| **SOP 阶段 4-6 (integration + 主服务)** | `PARALLEL_DEV_SOP.md` § 4-6 (项目根) |
+| **集成阶段 (integration + 主服务)** | `docs/AGENT_INFRA.md` |
 | **服务管理命令** | `.trae/rules/service-management-rules.md` |
 | **核心 server 管理规范** | `.trae/rules/scenarios/1-remote-server-ops/server-management.md` |
-| **了解 release 工作流** | `d:\filework\.trae\rules\release-sync-workflow.md` |
+| **了解 release 工作流** | `.trae/rules/scenarios/2-deploy/release-sync-workflow.md` |
 | **写 HANDOVER (开发智能体)** | `.trae/templates/DEPLOY_HANDOVER.template.md` |
-| **看 HANDOVER 历史案例 (PM)** | `DEPLOY_HANDOVER_BUG_V043.md`, `DEPLOY_HANDOVER_BUG_V044.md` (项目根) |
+| **看 HANDOVER 历史案例 (PM)** | `docs/DEPLOY_HANDOVER_V007_43.md`, `docs/DEPLOY_HANDOVER_V007_44.md` |
 | **🆕 远端 DB 同步 (拉/推 staging + production)** | `.trae/rules/remote-db-sync.md` + [`tools/REMOTE_DB_OPS.md`](../../tools/REMOTE_DB_OPS.md) |
 
 **关键脚本**:
@@ -184,7 +184,7 @@
 | 找不到 `RULES_INDEX.md` 引用的文件 | RULES_INDEX.md 已弃用, 用本 AGENT_INDEX.md |
 | 找不到 `AGENT_GUIDELINES.md` | 在项目根目录 `AGENT_GUIDELINES.md` |
 | `agent_bootstrap.ps1` 不存在 | 手动 `git worktree add -b <branch> ../<wt>` |
-| pre-commit 缺 spec.md | `cp spec_template.md ./spec.md` |
+| pre-commit 缺 spec.md | `cp d:\filework\spec_template.md ./spec.md` |
 | pre-commit 缺 L1/L2/L3 | commit message 头部加 `L1-Worktree: yes` 等 |
 | 浏览器测试想用 MCP | **[X] 禁止** - 改用 `PlaywrightCLI` |
 
@@ -199,9 +199,9 @@ SESSION_REMINDER (4 铁律)         ← .trae/rules/SESSION_REMINDER.md
   ↓
 AGENT_GUIDELINES (6 件事)         ← AGENT_GUIDELINES.md (项目根)
   ↓
-PARALLEL_DEV_SOP (8 阶段)          ← PARALLEL_DEV_SOP.md (项目根)
+多 Agent 编排 (worktree/端口)          ← multi-agent-coordination.md
   ↓
-最近 HANDOVER (V043/V044)          ← DEPLOY_HANDOVER_BUG_V0*.md (项目根)
+最近 HANDOVER (V043/V044)          ← docs/DEPLOY_HANDOVER_V007_*.md
   ↓
 开始任务
 ```
