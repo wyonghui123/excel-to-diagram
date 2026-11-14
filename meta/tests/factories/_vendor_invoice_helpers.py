@@ -314,12 +314,25 @@ PARAMS = (
 )
 
 
+#: v252 基线的行表 DDL 只允许 4 个 match_status；W10-1 新增 no_receipt。
+#: 生产由 `sync_schema --execute` 按 YAML 枚举重建 CHECK，这里同步模拟。
+LINE_STATUS_CHECK_OLD = (
+    "CHECK (match_status IN "
+    "('unmatched', 'matched', 'exception', 'overridden'))")
+LINE_STATUS_CHECK_NEW = (
+    "CHECK (match_status IN "
+    "('unmatched', 'matched', 'exception', 'overridden', 'no_receipt'))")
+LINE_DDL_CURRENT = LINE_DDL.replace(LINE_STATUS_CHECK_OLD, LINE_STATUS_CHECK_NEW)
+
+
 def make_env(tmp_path):
     """建一个带全部依赖表的临时库，返回已连接的 SQLiteAdapter。"""
     ds = SQLiteAdapter()
     ds.connect(path=str(tmp_path / 'vendor_invoice_match.db'))
     ds.execute(HEADER_DDL)
-    ds.execute(LINE_DDL)
+    if LINE_DDL_CURRENT == LINE_DDL:
+        raise RuntimeError('v252 LINE_DDL 的 match_status CHECK 已变更，需同步本夹具')
+    ds.execute(LINE_DDL_CURRENT)
     # v258 补列（HEADER_DDL 是 v252 基线，生产库由迁移追加）
     if 'reversal_reason' not in ds.get_table_columns(HEADER_TABLE):
         ds.execute(
@@ -471,6 +484,14 @@ def set_param(ds, code, value):
     ds.execute(
         'UPDATE control_parameter_defs SET default_value = ? WHERE code = ?',
         [str(value), code])
+    ds.commit()
+
+
+def set_param_direction(ds, code, direction):
+    """调整控制参数容差方向（R-VI-47：upper / lower / both）。"""
+    ds.execute(
+        'UPDATE control_parameter_defs SET tolerance_direction = ? WHERE code = ?',
+        [direction, code])
     ds.commit()
 
 

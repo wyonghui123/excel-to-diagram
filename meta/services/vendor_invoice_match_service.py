@@ -934,7 +934,8 @@ class VendorInvoiceMatchService:
         for line in lines:
             if target_ids is not None and _int(line.get('id')) not in target_ids:
                 continue
-            if target_ids is None and line.get('match_status') not in (MATCH_EXCEPTION, MATCH_UNMATCHED):
+            if target_ids is None and line.get('match_status') not in (
+                    MATCH_EXCEPTION, MATCH_UNMATCHED, MATCH_NO_RECEIPT):
                 continue
             self.ds.execute(
                 'UPDATE {0} SET match_status = ?, override_reason = ?, overridden_by = ?, '

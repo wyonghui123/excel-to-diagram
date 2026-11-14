@@ -1,6 +1,6 @@
 # 采购发票对象模型 Spec（Vendor Invoice Object Model）
 
-> 版本：v1.6 草案（2026-11-14 追加 §24 三单匹配补强；v1.5 于 2026-11-14 落实施 §23.9 方案 A；v1.4 于 2026-11-13 追加 22.6.2 费用变更与单一事实源约束 / R-1~R-4 / 变更矩阵 A~D；v1.3 同日追加 22.6.1 费用分摊方案 / D-CH-01~12；v1.2 于 2026-11-12 §22 细化，金额计算改为复用统一内核 `SalesOrderAmountService`，D-VI-27）｜ 日期：2026-11-11 ｜ 状态：待评审（§23 已实施，2026-11-14）
+> 版本：v1.7 草案（2026-11-14 W10-1 已实施：R-VI-38 ~ R-VI-47 + 枚举收敛；v1.6 于 2026-11-14 追加 §24 三单匹配补强；v1.5 于 2026-11-14 落实施 §23.9 方案 A；v1.4 于 2026-11-13 追加 22.6.2 费用变更与单一事实源约束 / R-1~R-4 / 变更矩阵 A~D；v1.3 同日追加 22.6.1 费用分摊方案 / D-CH-01~12；v1.2 于 2026-11-12 §22 细化，金额计算改为复用统一内核 `SalesOrderAmountService`，D-VI-27）｜ 日期：2026-11-11 ｜ 状态：待评审（§23 已实施，2026-11-14；§24 W10-1 已实施，2026-11-14）
 > 上游契约：[spec-receipt-object-model-2026-11-01.md](./spec-receipt-object-model-2026-11-01.md) §10 / §11
 > 样板：[sales-invoice-pricing-spec-2026-11-10.md](./sales-invoice-pricing-spec-2026-11-10.md)（FR/NFR/IF/TR 编号体系）
 > 平台基线：`document_category / document_role / direction`（v243）、`doc_flow_rule`（v215）、`control_parameter_def`（容差）
@@ -1800,6 +1800,7 @@ post(vendor_invoice)
 > 依据：对 `meta/services/vendor_invoice_match_service.py` 的逐函数审计（C）+ SAP `OMR6` / Fusion `AP_INVOICE_MATCH` 对标（S/F）。
 > 口径：**不新增表、不新增物理列、不新增迁移**；只做「判定口径闭合」+「源单前置约束」+「YAML 枚举收敛」。
 > 本节为对 §22 的**增量修订**，冲突时以本节为准（见 §24.9 修订索引）。
+> 状态：**W10-1 已实施（2026-11-14）** — R-VI-38 ~ R-VI-47 全部落码，§24.7 的 #1~#13 由 `meta/tests/test_vendor_invoice_match_gaps.py` 覆盖，#14 由既有 25 例 match 测试回归；YAML 枚举已收敛，`generated_schema.sql` 已重新生成。
 
 ### 24.0 结论先行
 
@@ -1993,7 +1994,7 @@ if abs(total - target) > tol: → REASON_FREIGHT
 
 | 波次 | 范围 | 迁移 | 备注 |
 |---|---|---|---|
-| **W10-1（本波建议执行）** | R-VI-38 ~ R-VI-47 + YAML 枚举收敛 | 无 | 低风险；除 R-VI-44 需前端容错外无外部影响 |
+| **W10-1（已实施 2026-11-14）** | R-VI-38 ~ R-VI-47 + YAML 枚举收敛 | 无 | 低风险；除 R-VI-44 需前端容错外无外部影响 |
 | W10-2 | C-1：`gr_based` 增加「PO 行聚合锚点」——`order_line_id` 为锚，余量 = `Σ qty_invoiceable(该行全部收货行) − Σ ap_match 已耗（按收货行集合聚合）`；`no_receipt` 例外路径复用 R-VI-45 | 无（复用 `order_line_id` 列） | 需先补视图按 `source_id IN (...)` 聚合的查询契约 |
 | W10-3 | C-2：匹配工作台 / 差异池 / 批量提交 | 无 | 维持 §1.2「本波不做」的边界，独立波次评估 |
 

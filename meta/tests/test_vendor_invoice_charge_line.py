@@ -116,7 +116,9 @@ def test_line_direct_tax_over_tolerance_flags_mismatch(ds):
 # ------------------------------------------------------------------ 匹配层
 
 def test_line_direct_tax_over_tolerance_is_line_exception(ds, service):
-    invoice_id, _, freight_line = _charge_invoice(ds, freight_tax=10.0)
+    # R-VI-40 收紧后费用对账不再「target=0 静默通过」，故给出等额附加费目标
+    invoice_id, _, freight_line = _charge_invoice(
+        ds, surcharge_amount=50.0, freight_tax=10.0)
 
     result = service.match(invoice_id)
 
