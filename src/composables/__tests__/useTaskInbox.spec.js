@@ -4,15 +4,30 @@ vi.mock('@/services/taskService', () => ({
   fetchInbox: vi.fn(),
   fetchInboxCounts: vi.fn(),
   claimTask: vi.fn(),
+  submitDecision: vi.fn(),
   normalizeInboxResponse: (res) => res && res.success
     ? { entries: res.data.entries || [], counts: res.data.counts || {}, total: res.data.total || 0 }
     : { entries: [], counts: {}, total: 0 },
   formatTaskRow: (e) => ({ ...e, pause: null }),
+  sortApprovalFirst: (rows) => {
+    if (!Array.isArray(rows)) return []
+    const rank = (row) => (row?.primary_bucket === 'approval' ? 0 : 1)
+    return [...rows].sort((a, b) => rank(a) - rank(b))
+  },
+  summarizeBatchResults: (results = []) => {
+    const succeeded = []
+    const failed = []
+    results.forEach((item) => {
+      if (item.success) succeeded.push(item.task_id)
+      else failed.push({ task_id: item.task_id, message: item.message || '', httpStatus: item.httpStatus })
+    })
+    return { succeeded, failed, retryableIds: failed.filter((f) => f.httpStatus === 502).map((f) => f.task_id) }
+  },
   BUCKET_ORDER: ['alert', 'approval', 'todo', 'agent_handoff', 'claimable'],
   BUCKET_LABELS: { alert: '逾期告警', approval: '待我审核', todo: '我的待办', agent_handoff: 'Agent 移交', claimable: '可认领' }
 }))
 
-import { fetchInbox, fetchInboxCounts, claimTask } from '@/services/taskService'
+import { fetchInbox, fetchInboxCounts, claimTask, submitDecision } from '@/services/taskService'
 import { useTaskInbox } from '../useTaskInbox'
 
 describe('useTaskInbox', () => {
@@ -76,5 +91,49 @@ describe('useTaskInbox', () => {
     const box = useTaskInbox()
     const res = await box.claim('T-1')
     expect(res.success).toBe(false)
+  })
+
+  it('load 后 approval 行置顶（稳定排序）', async () => {
+    fetchInbox.mockResolvedValue({
+      success: true,
+      data: {
+        entries: [
+          { task_id: 'T-1', primary_bucket: 'todo' },
+          { task_id: 'T-2', primary_bucket: 'approval' },
+          { task_id: 'T-3', primary_bucket: 'alert' }
+        ],
+        counts: {}, total: 3
+      }
+    })
+    const box = useTaskInbox()
+    await box.load()
+    expect(box.rows.value.map(r => r.task_id)).toEqual(['T-2', 'T-1', 'T-3'])
+  })
+
+  it('submitBatch 逐条提交，失败不中断并汇总成功/失败', async () => {
+    fetchInbox.mockResolvedValue({ success: true, data: { entries: [], counts: {}, total: 0 } })
+    submitDecision
+      .mockResolvedValueOnce({ success: true })
+      .mockResolvedValueOnce({ success: false, message: '单据未生效', httpStatus: 502 })
+      .mockResolvedValueOnce({ success: true })
+    const box = useTaskInbox()
+    const summary = await box.submitBatch(['T-1', 'T-2', 'T-3'], { decision: 'approve', comment: 'ok' })
+    expect(submitDecision).toHaveBeenNthCalledWith(1, 'T-1', { decision: 'approve', comment: 'ok', allowRework: false })
+    expect(submitDecision).toHaveBeenNthCalledWith(2, 'T-2', { decision: 'approve', comment: 'ok', allowRework: false })
+    expect(submitDecision).toHaveBeenNthCalledWith(3, 'T-3', { decision: 'approve', comment: 'ok', allowRework: false })
+    expect(summary.succeeded).toEqual(['T-1', 'T-3'])
+    expect(summary.failed).toHaveLength(1)
+    expect(summary.retryableIds).toEqual(['T-2'])
+  })
+
+  it('submitBatch 单条抛错不中断后续', async () => {
+    fetchInbox.mockResolvedValue({ success: true, data: { entries: [], counts: {}, total: 0 } })
+    submitDecision
+      .mockRejectedValueOnce(new Error('network'))
+      .mockResolvedValueOnce({ success: true })
+    const box = useTaskInbox()
+    const summary = await box.submitBatch(['T-1', 'T-2'], { decision: 'reject', comment: 'no' })
+    expect(summary.succeeded).toEqual(['T-2'])
+    expect(summary.failed[0].message).toBe('network')
   })
 })

@@ -9,7 +9,8 @@ import { apiV1, apiV2 } from '@/utils/httpClient'
 import {
   BUCKET_ORDER, BUCKET_LABELS, derivePause, formatTaskRow,
   normalizeInboxResponse, fetchInbox, fetchInboxCounts, fetchTaskDetail,
-  fetchTaskEvents, claimTask, submitDecision, fetchTasks, fetchWorkflowSchedules
+  fetchTaskEvents, claimTask, submitDecision, fetchTasks, fetchWorkflowSchedules,
+  sortApprovalFirst, summarizeBatchResults
 } from '../taskService'
 
 describe('BUCKET 常量', () => {
@@ -81,6 +82,38 @@ describe('formatTaskRow', () => {
     })
     expect(row.isOverdue).toBe(true)
     expect(row.overdueLabel).toContain('90')
+  })
+})
+
+describe('sortApprovalFirst（approval 分区置顶）', () => {
+  it('approval 行在前，其余保持原顺序', () => {
+    const rows = [
+      { id: 1, primary_bucket: 'todo' },
+      { id: 2, primary_bucket: 'approval' },
+      { id: 3, primary_bucket: 'alert' },
+      { id: 4, primary_bucket: 'approval' }
+    ]
+    expect(sortApprovalFirst(rows).map(r => r.id)).toEqual([2, 4, 1, 3])
+  })
+  it('非数组 → 空数组', () => {
+    expect(sortApprovalFirst(null)).toEqual([])
+  })
+})
+
+describe('summarizeBatchResults（成功 N / 失败 M + 502 可重试）', () => {
+  it('汇总成功与失败，标注可重试项', () => {
+    const out = summarizeBatchResults([
+      { task_id: 'T-1', success: true },
+      { task_id: 'T-2', success: false, message: '单据未生效', httpStatus: 502 },
+      { task_id: 'T-3', success: false, message: '无权限', httpStatus: 403 }
+    ])
+    expect(out.succeeded).toEqual(['T-1'])
+    expect(out.failed).toHaveLength(2)
+    expect(out.failed[0]).toEqual({ task_id: 'T-2', message: '单据未生效', httpStatus: 502 })
+    expect(out.retryableIds).toEqual(['T-2'])
+  })
+  it('空输入 → 空汇总', () => {
+    expect(summarizeBatchResults([])).toEqual({ succeeded: [], failed: [], retryableIds: [] })
   })
 })
 

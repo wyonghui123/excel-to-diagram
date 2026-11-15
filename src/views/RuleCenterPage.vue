@@ -271,6 +271,14 @@
           />
         </div>
 
+        <div v-else-if="tab.kind === 'approval_policy'" class="approval-policy-pane">
+          <ApprovalPolicyPanel
+            :meta="config.approval_policy || {}"
+            :object-type-options="objectTypeOptions"
+            :can-write="canWriteConfig"
+          />
+        </div>
+
         <div v-else-if="tab.kind" class="placeholder">
           <el-empty :description="`${tab.label} · ${messages.not_ready}`" />
         </div>
@@ -523,6 +531,7 @@ import { ElMessageBox } from 'element-plus'
 import { useMessage } from '@/composables/useMessage'
 import { useAuthStore } from '@/stores/authStore'
 import RuleTracePanel from '@/components/common/RuleTrace/RuleTracePanel.vue'
+import ApprovalPolicyPanel from '@/views/RuleCenter/ApprovalPolicyPanel.vue'
 import { apiV1 } from '@/utils/httpClient'
 import { getRule, getRuleCenterViewConfig, getRuleConfigHistory, listRuleHolds, listRules, publishRuleConfig, releaseRuleHold, rollbackRuleConfig, simulateRule } from '@/services/ruleCenterService'
 import { createRuleDraft, listRuleHealth } from '@/services/ruleCenterService'

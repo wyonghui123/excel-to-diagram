@@ -149,10 +149,14 @@ tabs:
 
   - id: approval
     label: 审批策略
+    # [审批 M3 2026-11-15] 页签从「BO 接入点声明（只读）」升级为策略 CRUD + 命中试算；
+    #   数据源 = /api/v1/approval-policies（真源 approval_policies 三表）。
+    kind: approval_policy
+    require: rule_center:read
     sources: [approval]
     columns: [rule_key, name, scope_bo, condition_summary, step_count, status]
     filters: [scope_bo, status, keyword]
-    actions: [detail]
+    actions: [detail, edit, simulate]
 
   - id: validation
     label: 校验与默认值
@@ -454,3 +458,111 @@ simulate:
     baseline: baseline 结果
     draft: draft 结果
     diff: 差异
+
+# [审批 M3 2026-11-15] 审批策略页签（kind: approval_policy）
+#   数据契约：/api/v1/approval-policies（真源 approval_policies 三表）
+#   文案 / 字典一律走本段，前端组件不得写死中文。
+approval_policy:
+  title: 审批策略
+  columns:
+    code: 编码
+    name: 名称
+    scope_bo: 单据对象
+    trigger_action: 触发动作
+    priority: 优先级
+    condition_summary: 命中条件
+    step_count: 审批步骤
+    status: 状态
+    version: 版本
+    effective_from: 生效开始
+    effective_to: 生效结束
+    updated_at: 更新时间
+  fields:
+    code: 编码
+    name: 名称
+    scope_bo: 单据对象
+    trigger_action: 触发动作
+    priority: 优先级
+    status: 状态
+    description: 说明
+    effective_from: 生效开始
+    effective_to: 生效结束
+    conditions_json: 条件（JSON 数组）
+    steps: 审批步骤
+    approver_type: 审批人类型
+    approver_ref: 审批人
+    approve_mode: 会签口径
+    sla_hours: SLA 小时
+    min_amount: 金额下限
+    max_amount: 金额上限
+    object_type: 单据对象
+    record_id: 记录 ID
+    operator: 运算符
+    expected: 期望值
+    actual: 实际值
+    explain_result: 判定
+  dictionaries:
+    status:
+      active: 启用
+      inactive: 停用
+      draft: 草稿
+    approver_type:
+      role: 角色
+      user: 用户
+      position: 岗位
+      org: 组织
+    approve_mode:
+      any: 任一人
+      all: 全部（本期不执行）
+    operator:
+      eq: 等于
+      ne: 不等于
+      gt: 大于
+      ge: 大于等于
+      lt: 小于
+      le: 小于等于
+      in: 属于
+      not_in: 不属于
+      between: 区间
+      is_null: 为空
+      is_not_null: 不为空
+      like: 包含
+    reason:
+      matched: 命中策略
+      no_policy: 无命中（免审批）
+      disabled: 审批开关关闭
+      record_not_found: 单据不存在
+      invalid_object: 对象未声明审批接入点
+  messages:
+    create: 新建策略
+    edit: 编辑
+    simulate: 试算
+    save: 保存
+    cancel: 取消
+    close: 关闭
+    query: 查询
+    refresh: 刷新
+    action: 操作
+    empty: 暂无审批策略
+    load_failed: 查询审批策略失败
+    options_failed: 加载审批策略选项失败
+    detail_failed: 读取审批策略失败
+    save_success: 审批策略已保存（版本 {version}）
+    save_failed: 保存审批策略失败
+    conditions_invalid: 条件 JSON 不是合法数组
+    preview_title: 命中试算
+    preview_run: 开始试算
+    preview_inputs_required: 请先选择单据对象并填写记录 ID
+    preview_hit: 命中
+    preview_miss: 未命中
+    preview_failed: 审批策略试算失败
+    preview_empty: 尚未试算
+    explain_passed: 通过
+    explain_failed: 未通过
+    step_add: 新增步骤
+    step_remove: 删除
+    steps_empty: 无审批步骤
+    policy_code_hint: 全局唯一，如 po_amount_approval
+    version_label: 版本
+    explain_title: 条件校验明细
+    snapshot_title: 命中快照

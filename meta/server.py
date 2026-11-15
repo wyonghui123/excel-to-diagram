@@ -1263,10 +1263,13 @@ def create_app(db_path=None):
     # [规则收敛 v1.6 2026-11-07] 规则中心目录 + 单据规则推导（只读）。
     #   app_builder 已登记，生产入口（waitress → create_app）必须同址补齐。
     from meta.api.rule_center_api import rule_center_bp, rule_trace_bp
+    from meta.api.approval_policy_api import approval_policy_bp
     from meta.api.amount_trace_api import amount_trace_bp
     from meta.api.rule_hold_api import rule_hold_bp
     app.register_blueprint(rule_center_bp)
     app.register_blueprint(rule_trace_bp)
+    # [审批 M3 2026-11-15] 审批策略配置（CRUD + 命中试算，规则中心页签数据源）。
+    app.register_blueprint(approval_policy_bp)
     app.register_blueprint(amount_trace_bp)
     app.register_blueprint(rule_hold_bp)
     app.register_blueprint(key_template_bp)

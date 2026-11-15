@@ -48,7 +48,7 @@ NOT_INSTRUMENTED = NOT_INSTRUMENTED_SOURCES
 ACTIONS = ('detail', 'edit', 'view_source', 'simulate', 'copy_key', 'publish', 'rollback', 'rerun')
 WIDGETS = ('code', 'factor_matrix', 'source_snippet', 'audit_log')
 # [规则模型 M7-3 2026-11-12] holds：挂起列表页签（数据来自 /api/holds，不进 list_rules）
-TAB_KINDS = ('table', 'simulate', 'health', 'rule_trace', 'holds')
+TAB_KINDS = ('table', 'simulate', 'health', 'rule_trace', 'holds', 'approval_policy')
 FILTER_KEYS = (
     'keyword', 'domain', 'rule_type', 'source', 'configurable', 'status',
     'document_type', 'line_type', 'item_group', 'source_bo', 'target_bo',

@@ -98,6 +98,46 @@ export function normalizeInboxResponse(res) {
   }
 }
 
+// ============================================================================
+// 3.5 纯函数 — 收件箱批量审批 / approval 置顶（D-AP-12）
+// ============================================================================
+
+/**
+ * approval 分区置顶（稳定排序：approval 行在前，其余保持原顺序）。
+ * @param {Array} rows
+ * @returns {Array}
+ */
+export function sortApprovalFirst(rows) {
+  if (!Array.isArray(rows)) return []
+  return rows
+    .map((row, index) => ({ row, index }))
+    .sort((a, b) => {
+      const rank = item => (item.row?.primary_bucket === 'approval' ? 0 : 1)
+      return rank(a) - rank(b) || a.index - b.index
+    })
+    .map(item => item.row)
+}
+
+/**
+ * 汇总逐条决策结果：成功 N / 失败 M；httpStatus=502（单据未生效）可重试。
+ * @param {Array<{task_id:string,success:boolean,message?:string,httpStatus?:number}>} results
+ * @returns {{succeeded:string[], failed:Array<{task_id:string,message:string,httpStatus?:number}>, retryableIds:string[]}}
+ */
+export function summarizeBatchResults(results) {
+  const succeeded = []
+  const failed = []
+  ;(results || []).forEach(item => {
+    if (!item) return
+    if (item.success) succeeded.push(item.task_id)
+    else failed.push({ task_id: item.task_id, message: item.message || '', httpStatus: item.httpStatus })
+  })
+  return {
+    succeeded,
+    failed,
+    retryableIds: failed.filter(item => item.httpStatus === 502).map(item => item.task_id)
+  }
+}
+
 function _qs(params) {
   const sp = new URLSearchParams()
   Object.entries(params || {}).forEach(([k, v]) => {
@@ -167,6 +207,7 @@ export async function fetchWorkflowSchedules() {
 
 export default {
   BUCKET_ORDER, BUCKET_LABELS, derivePause, formatTaskRow, normalizeInboxResponse,
+  sortApprovalFirst, summarizeBatchResults,
   fetchInbox, fetchInboxCounts, fetchTaskDetail, fetchTaskEvents, claimTask, submitDecision,
   fetchTasks, fetchWorkflowSchedules
 }

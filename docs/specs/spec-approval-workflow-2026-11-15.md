@@ -311,7 +311,7 @@ src/constants/taskStatus.js      ← 单一派生源（11 态 label + tag type�
 |---|---|---|
 | **M1 后端收敛**（✅ 已完成） | YAML 扩键 + 删 `APPROVAL_TASK_SPECS` / `DECISION_ACTIONS` + 迁移 v276 + `_reviewer_permission` + 门禁 R7 + `approval_status` 门禁测试 | 见下方「M1 验收记录」 |
 | **M2 P0 UI**（✅ 已完成） | `submitDecision` + 抽屉动作 / 审批链 / 依据 / 单据跳转 + `taskStatus.js` + 状态文案替换 | 见下方「M2 验收记录」 |
-| **M3 策略与批量** | 策略 CRUD + `preview` + 收件箱批量 | `preview` 与生产 `resolve()` 返回一致（同 record 对比断言）；批量部分失败仍出汇总 |
+| **M3 策略与批量**（✅ 已完成） | 策略 CRUD + `preview` + 收件箱批量 | 见下方「M3 验收记录」 |
 | **M4（P2，不在本期）** | 加签 / 转签 / 委托 / 会签 / SLA | — |
 
 **M1 验收记录（2026-11-15）**：
@@ -339,6 +339,22 @@ src/constants/taskStatus.js      ← 单一派生源（11 态 label + tag type�
 | 契约补充（实现必需） | 详情端点此前不含快照字段，M2 在 `task_inbox.py` 增加 `_DETAIL_EXTRA_COLUMNS`（`inputs` / `executor_config` / `doc_ref_type` / `doc_ref_id`），仅详情返回、不进收件箱 entry，避免列表 payload 膨胀 |
 | 偏离说明 | 状态文案实际收敛 **3 处任务状态展示**（`TaskCenter` 监控表、`TaskInboxPanel` 行、抽屉状态 chip）。Spec §2.1 #7 另两处（`AssociationSection` 的 `approval_status`、`EngineeringChangeDetailPage` 的变更单状态）属于**不同枚举域**（BO 投影 / 变更单状态），并入 `taskStatus.js` 会造成错误合并，保持原样 |
 | 未做 | live 3010 冒烟未执行（需要种子审批任务 + 真实用户权限）；权限门控与决策错误映射已由组件测试覆盖 |
+
+**M3 验收记录（2026-11-15）**：
+
+| 项 | 结果 |
+|---|---|
+| 后端服务 | `meta/services/approval_policy_admin_service.py`：列表/详情/保存（version 新建=1、更新=+1，子表整体替换在单事务内）/`preview`（薄适配，直接委托 `DocumentApprovalResolver.resolve`）/`options` |
+| 后端 API | `meta/api/approval_policy_api.py`：`GET /api/v1/approval-policies`（分页+3 筛选）、`/options`、`/preview`、`/<id>`、`POST`、`PUT`；`app_builder.py` + `server.py` 双处注册 |
+| 后端测试 | `test_approval_policy_admin.py` 20 passed（version 递增 / 子表替换 / 编码唯一 / 运算符与 AND 逻辑 / 步骤必填 / `preview` 与 `resolve` 同 record 断言一致 / 无策略 `reason=no_policy` / 6 条路由未登录 401）；回归 `test_rule_center_api.py` 26、`test_document_approval.py` 25、`test_task_inbox.py` 14 全绿 |
+| 前端（规则中心） | `TAB_KINDS` 新增 `approval_policy`；`approval` 页签 `kind` 升级；新增顶层 `approval_policy` 元数据段（列/字段/字典/文案）；`src/services/approvalPolicyService.js` + `src/views/RuleCenter/ApprovalPolicyPanel.vue`（列表 / 编辑抽屉 / 条件 JSON / 步骤行编辑 / 试算） |
+| 前端（收件箱） | `taskService.sortApprovalFirst` + `summarizeBatchResults`（纯函数）；`useTaskInbox.submitBatch` 逐条 `submitDecision`、失败不中断、成功后才重载；`TaskInboxPanel` 批量栏（全选 / 意见 / 批量通过 / 批量驳回 / 502 重试）+ approval 行置顶与左侧标记 |
+| 前端测试/构建 | `taskService` + `useTaskInbox` + `TaskInboxPanel` 共 44 passed（新增置顶稳定排序、批量成功/失败汇总、502 可重试、驳回必填意见）；`npm run build` 通过 |
+| 偏离 1：权限码 | 仓内不存在 `approval_policy:{read,write}`，策略 API 复用既有 `rule_center:read` / `rule_center:write`，避免新增第二权限真源（如需独立码需同步权限种子 + 门禁 R7） |
+| 偏离 2：页签 id | 复用既有 `approval` 页签 id（仅升级 `kind`），避免打破 `test_view_config_has_expected_tabs` 对 tab id 的精确断言 |
+| 偏离 3：批量 UI | 未引入 `MetaTable selectable`，保持 `TaskInboxPanel` 既有 `ul` 列表结构 + `el-checkbox` 选中，最小改动且复用现有行点击（`@click.stop` 隔离勾选） |
+| 偏离 4：批量接口 | 不新增批量端点，按 D-AP-12 前端逐条调用 `POST /tasks/{id}/decision`；单条失败继续、结果汇总「成功 N / 失败 M」，`httpStatus=502` 的失败项可一键重试 |
+| 偏离 5：文案 | 规则中心新增文案全部走 `rule_center_view.yaml`；收件箱新增文案沿用该组件 M2 既有内联风格（组件未接元数据文件），未扩散为新的文案真源 |
 
 ---
 

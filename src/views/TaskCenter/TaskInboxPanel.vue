@@ -21,6 +21,59 @@
       </button>
     </div>
 
+    <div v-if="approvalRows.length" data-test="batch-bar" class="tip-batch">
+      <el-checkbox
+        :model-value="allSelected"
+        :indeterminate="selectedIds.length > 0 && !allSelected"
+        data-test="batch-select-all"
+        @change="toggleSelectAll"
+      >
+        待审批 {{ approvalRows.length }} 项
+      </el-checkbox>
+      <el-input
+        v-model="batchComment"
+        class="tip-batch-comment"
+        size="small"
+        clearable
+        placeholder="审批意见（驳回必填）"
+      />
+      <AppButton
+        data-test="batch-approve"
+        size="sm"
+        :disabled="!selectedIds.length || !!batchRunning"
+        :loading="batchRunning === 'approve'"
+        @click="runBatch('approve')"
+      >
+        批量通过
+      </AppButton>
+      <AppButton
+        data-test="batch-reject"
+        variant="danger"
+        size="sm"
+        :disabled="!selectedIds.length || !!batchRunning"
+        :loading="batchRunning === 'reject'"
+        @click="runBatch('reject')"
+      >
+        批量驳回
+      </AppButton>
+    </div>
+    <div
+      v-if="batchMessage"
+      data-test="batch-result"
+      class="tip-batch-result"
+      :class="{ 'tip-error': batchFailed }"
+    >
+      <span>{{ batchMessage }}</span>
+      <AppButton
+        v-if="batchRetryableIds.length"
+        data-test="batch-retry"
+        size="xs"
+        @click="retryBatch"
+      >
+        重试失败项
+      </AppButton>
+    </div>
+
     <div v-if="loading" data-test="loading" class="tip-state">加载中…</div>
     <div v-else-if="error" data-test="error" class="tip-state tip-error">{{ error }}</div>
     <ul v-else-if="rows.length" class="tip-list">
@@ -29,9 +82,18 @@
         :key="row.task_id"
         data-test="inbox-row"
         class="tip-row"
+        :class="{ 'tip-row--approval': row.type === 'approval' }"
         @click="$emit('open-detail', row.task_id)"
       >
         <div class="tip-row-main">
+          <el-checkbox
+            v-if="row.type === 'approval'"
+            :data-test="`row-check-${row.task_id}`"
+            :model-value="selectedIds.includes(row.task_id)"
+            class="tip-row-check"
+            @click.stop
+            @change="toggleRow(row.task_id)"
+          />
           <span class="tip-row-title">{{ row.title || row.task_id }}</span>
           <span v-if="row.pause" class="tip-chip" :class="`tip-chip--${row.pause.tone}`">
             {{ row.pause.label }}
@@ -50,7 +112,8 @@
 </template>
 
 <script setup>
-import { onMounted } from 'vue'
+import { computed, onMounted, ref } from 'vue'
+import { ElMessageBox } from 'element-plus'
 import { AppCard, AppButton } from '@/components/common'
 import { useTaskInbox } from '@/composables/useTaskInbox'
 import { statusLabel } from '@/constants/taskStatus'
@@ -64,8 +127,22 @@ const props = defineProps({
 })
 
 const {
-  rows, activeBucket, loading, error, buckets, setBucket, load
+  rows, activeBucket, loading, error, buckets, setBucket, load, submitBatch
 } = useTaskInbox({ appId: props.appId, limit: props.limit })
+
+// ---- 批量审批（D-AP-12：逐条 submitDecision，失败不中断）----
+const selectedIds = ref([])
+const batchComment = ref('')
+const batchRunning = ref('')
+const batchMessage = ref('')
+const batchFailed = ref(false)
+const batchRetryableIds = ref([])
+const lastDecision = ref('approve')
+
+const approvalRows = computed(() => rows.value.filter(row => row.type === 'approval'))
+const allSelected = computed(() =>
+  approvalRows.value.length > 0 && approvalRows.value.every(row => selectedIds.value.includes(row.task_id))
+)
 
 function selectBucket(key) {
   setBucket(activeBucket.value === key ? '' : key)
@@ -73,6 +150,71 @@ function selectBucket(key) {
 
 function reload() {
   load()
+}
+
+function toggleSelectAll(checked) {
+  selectedIds.value = checked ? approvalRows.value.map(row => row.task_id) : []
+}
+
+function toggleRow(taskId) {
+  selectedIds.value = selectedIds.value.includes(taskId)
+    ? selectedIds.value.filter(id => id !== taskId)
+    : [...selectedIds.value, taskId]
+}
+
+async function decideBatch(taskIds, decision) {
+  if (!taskIds.length) return
+  if (decision === 'reject' && !batchComment.value.trim()) {
+    batchFailed.value = true
+    batchMessage.value = '驳回需填写审批意见'
+    return
+  }
+  batchRunning.value = decision
+  batchFailed.value = false
+  batchMessage.value = ''
+  batchRetryableIds.value = []
+  lastDecision.value = decision
+  try {
+    const summary = await submitBatch(taskIds, { decision, comment: batchComment.value.trim() })
+    batchRetryableIds.value = summary.retryableIds
+    batchFailed.value = summary.failed.length > 0
+    let text = ''
+    text += `成功 ${summary.succeeded.length} / 失败 ${summary.failed.length}`
+    if (summary.failed.length) {
+      text += `：${summary.failed.map(item => item.message || item.task_id).join('；')}`
+    }
+    batchMessage.value = text
+    selectedIds.value = selectedIds.value.filter(id => !summary.succeeded.includes(id))
+    if (summary.succeeded.length && !summary.failed.length) batchComment.value = ''
+  } catch (e) {
+    batchFailed.value = true
+    batchMessage.value = e?.message || String(e)
+  } finally {
+    batchRunning.value = ''
+  }
+}
+
+const batchActionLabels = {
+  approve: '通过',
+  reject: '驳回'
+}
+
+async function runBatch(decision) {
+  const ids = selectedIds.value.slice()
+  if (!ids.length) return
+  const action = batchActionLabels[decision]
+  try {
+    await ElMessageBox.confirm(`确认${action}选中的 ${ids.length} 项审批任务？`, '批量审批', { type: 'warning' })
+  } catch (_) {
+    return
+  }
+  await decideBatch(ids, decision)
+}
+
+function retryBatch() {
+  const ids = batchRetryableIds.value.slice()
+  if (!ids.length) return
+  decideBatch(ids, lastDecision.value)
 }
 
 onMounted(load)
@@ -91,8 +233,20 @@ onMounted(load)
   display: inline-block; margin-left: 6px; min-width: 18px; text-align: center;
   background: var(--color-bg-layout); border-radius: 9px; font-size: 12px; padding: 0 4px;
 }
+.tip-batch {
+  display: flex; flex-wrap: wrap; align-items: center; gap: 8px;
+  padding: 8px 10px; margin-bottom: 12px;
+  background: var(--color-bg-layout); border-radius: 6px; font-size: 13px;
+}
+.tip-batch-comment { width: 220px; }
+.tip-batch-result {
+  display: flex; align-items: center; gap: 8px; flex-wrap: wrap;
+  margin-bottom: 12px; font-size: 13px; color: var(--color-text-secondary);
+}
 .tip-list { list-style: none; margin: 0; padding: 0; }
 .tip-row { padding: 10px 8px; border-bottom: 1px solid var(--color-border); cursor: pointer; }
+.tip-row--approval { border-left: 2px solid var(--color-primary); }
+.tip-row-check { margin-right: 4px; }
 .tip-row:hover { background: var(--color-bg-layout); }
 .tip-row-main { display: flex; align-items: center; gap: 8px; }
 .tip-row-title { font-weight: 500; }

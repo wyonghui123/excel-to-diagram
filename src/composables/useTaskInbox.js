@@ -9,8 +9,9 @@
 
 import { ref, computed } from 'vue'
 import {
-  fetchInbox, fetchInboxCounts, claimTask,
+  fetchInbox, fetchInboxCounts, claimTask, submitDecision,
   normalizeInboxResponse, formatTaskRow,
+  sortApprovalFirst, summarizeBatchResults,
   BUCKET_ORDER, BUCKET_LABELS
 } from '@/services/taskService'
 
@@ -40,7 +41,7 @@ export function useTaskInbox({ appId = null, limit = 50 } = {}) {
         limit
       })
       const norm = normalizeInboxResponse(res)
-      rows.value = norm.entries.map(formatTaskRow)
+      rows.value = sortApprovalFirst(norm.entries.map(formatTaskRow))
       counts.value = norm.counts
       total.value = norm.total
     } catch (e) {
@@ -77,9 +78,37 @@ export function useTaskInbox({ appId = null, limit = 50 } = {}) {
     }
   }
 
+  /**
+   * 批量审批（D-AP-12：逐条调用现有端点，不新增批量 API）。
+   * 单条失败不中断；返回成功/失败汇总与 502 可重试项。
+   * @param {string[]} taskIds
+   * @param {{decision:'approve'|'reject', comment?:string, allowRework?:boolean}} payload
+   */
+  async function submitBatch(taskIds, { decision, comment = '', allowRework = false } = {}) {
+    const ids = (Array.isArray(taskIds) ? taskIds : []).filter(Boolean)
+    const results = []
+    for (const taskId of ids) {
+      try {
+        const res = await submitDecision(taskId, { decision, comment, allowRework })
+        results.push({
+          task_id: taskId,
+          success: res?.success === true,
+          message: res?.message || '',
+          httpStatus: res?.httpStatus
+        })
+      } catch (e) {
+        results.push({ task_id: taskId, success: false, message: e?.message || String(e) })
+      }
+    }
+    const summary = summarizeBatchResults(results)
+    if (summary.succeeded.length) await load()
+    else await refreshCounts()
+    return summary
+  }
+
   return {
     rows, counts, total, activeBucket, loading, error, buckets,
-    badge, load, refreshCounts, setBucket, claim
+    badge, load, refreshCounts, setBucket, claim, submitBatch
   }
 }
 

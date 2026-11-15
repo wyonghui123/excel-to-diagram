@@ -539,6 +539,7 @@ class ApplicationBuilder:
         from meta.api.engineering_change_api import engineering_change_bp
         from meta.api.inventory_aging_api import inventory_aging_bp
         from meta.api.rule_center_api import rule_center_bp, rule_trace_bp
+        from meta.api.approval_policy_api import approval_policy_bp
         from meta.api.amount_trace_api import amount_trace_bp
         from meta.api.rule_hold_api import rule_hold_bp
         from meta.api.schema_api import schema_dashboard_bp
@@ -639,6 +640,8 @@ class ApplicationBuilder:
         # [规则收敛 v1.6 2026-11-07] 规则中心目录 + 单据规则推导（只读）。
         app.register_blueprint(rule_center_bp)
         app.register_blueprint(rule_trace_bp)
+        # [审批 M3 2026-11-15] 审批策略配置（CRUD + 命中试算，规则中心页签数据源）。
+        app.register_blueprint(approval_policy_bp)
         # [金额回溯 2026-11-13] 四类单据统一只读金额回溯。
         app.register_blueprint(amount_trace_bp)
         app.register_blueprint(rule_hold_bp)
