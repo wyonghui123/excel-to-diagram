@@ -27,6 +27,13 @@ document:
   numbering:
     scope_bo: transfer_shipment
     fallback_sequence_code: TRS
+doc_effect:
+  # 本对象自身不承载红冲编排：发货事实由父单 transfer_order 的 doc_effect.reversal 统一冲销
+  # （transfer_order_service 以 schema_id='transfer_order' 调用编排器）
+  reversal: false
+  reversal_waiver:
+    reason: 调拨发货单红冲由父单 transfer_order 统一编排，本对象不单独声明
+    delegated_to: transfer_order
 table_name: transfer_shipments
 description: 调拨发货单头（行见 transfer_shipment_line）
 display_name_field: shipment_no

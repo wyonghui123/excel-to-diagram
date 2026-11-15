@@ -188,6 +188,50 @@ def test_unknown_document_field_is_flagged(monkeypatch, tmp_path):
 
 
 # ---------------------------------------------------------------------------
+# 闸 2-1：能力三态（posted 可达 ⇒ 显式 true / false+reason / waived）
+# ---------------------------------------------------------------------------
+
+def _posted_schema(doc_effect_text=''):
+    return (
+        'id: demo\n'
+        'fields:\n'
+        '  - id: status\n'
+        '    enum_values:\n'
+        '      - value: draft\n'
+        '      - value: posted\n'
+        'document:\n'
+        '  state_field: status\n'
+    ) + doc_effect_text
+
+
+def test_posted_without_reversal_declaration_is_flagged(monkeypatch, tmp_path):
+    _isolate(monkeypatch, tmp_path, _posted_schema())
+    violations, _scanned, _facts, _declared = lint.lint_doc_flow()
+    assert any(field == 'doc_effect.reversal' and 'posted 可达' in reason
+               for _label, field, reason in violations)
+
+
+def test_posted_reversal_false_requires_waiver_reason(monkeypatch, tmp_path):
+    _isolate(monkeypatch, tmp_path, _posted_schema(
+        'doc_effect:\n'
+        '  reversal: false\n'))
+    violations, _scanned, _facts, _declared = lint.lint_doc_flow()
+    assert any(field == 'doc_effect.reversal_waiver'
+               for _label, field, _reason in violations)
+
+
+def test_posted_reversal_false_with_waiver_passes(monkeypatch, tmp_path):
+    _isolate(monkeypatch, tmp_path, _posted_schema(
+        'doc_effect:\n'
+        '  reversal: false\n'
+        '  reversal_waiver:\n'
+        '    reason: 红冲由父单编排\n'
+        '    delegated_to: parent_doc\n'))
+    violations, _scanned, _facts, _declared = lint.lint_doc_flow()
+    assert [v for v in violations if v[0] == 'demo.yaml'] == []
+
+
+# ---------------------------------------------------------------------------
 # doc_effect.reversal 声明合法性
 # ---------------------------------------------------------------------------
 

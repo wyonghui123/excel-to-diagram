@@ -478,7 +478,7 @@ def _orchestrator_string_literals():
     return literals
 
 
-def _lint_reversal_block(label, reversal, doc_creators):
+def _lint_reversal_block(label, reversal, doc_creators, reachable_codes=None):
     """`doc_effect.reversal` 声明合法性；返回 violation 列表。"""
     field = "doc_effect.reversal"
     if not isinstance(reversal, dict):
@@ -489,6 +489,13 @@ def _lint_reversal_block(label, reversal, doc_creators):
     if (not isinstance(from_states, list) or not from_states
             or not all(str(s).strip() for s in from_states)):
         violations.append((label, field + ".from_states", "必须是非空状态名列表"))
+    elif reachable_codes:
+        unknown = sorted(str(s) for s in from_states
+                         if str(s) not in reachable_codes)
+        if unknown:
+            violations.append((label, field + ".from_states",
+                               "状态 %s 不在本对象状态枚举内（声明了不可达状态）"
+                               % "/".join(unknown)))
 
     if not str(reversal.get("to_state") or "").strip():
         violations.append((label, field + ".to_state", "必须声明目标状态"))
@@ -553,6 +560,29 @@ def _aspect_field_index():
     return index
 
 
+def _state_codes(raw, state_field):
+    """对象可达状态集合：`states:` 块 ∪ 状态字段 `enum_values`。
+
+    多数 YAML 用字段 enum_values 声明状态（仅 3 个文件用 `states:`），
+    逆向可达性判定必须以真实声明为准，不能只看 `states:`。
+    """
+    codes = set()
+    for item in raw.get("states") or ():
+        if isinstance(item, dict) and item.get("code"):
+            codes.add(str(item["code"]))
+    if not state_field:
+        return codes
+    for item in raw.get("fields") or ():
+        if not isinstance(item, dict):
+            continue
+        if state_field not in (item.get("id"), item.get("db_column")):
+            continue
+        for option in item.get("enum_values") or ():
+            if isinstance(option, dict) and option.get("value"):
+                codes.add(str(option["value"]))
+    return codes
+
+
 def lint_doc_flow():
     """R-MM-05 正/逆/调整同构 lint；返回 (违规列表, 扫描的事实单据数)。"""
     profiles, valid_modes, valid_commitments, doc_creators = _reversal_constants()
@@ -564,6 +594,10 @@ def lint_doc_flow():
     documents = []             # (label, schema_id, document, own_fields, state_codes)
     object_fields = {}         # schema id -> 字段名集合（fields + 切面 fields）
     schema_ids = set()
+    line_object_ids = set()    # 被父对象声明为 line_object 的行对象 id
+    schema_reversal = {}       # schema id -> true / false / waived / absent
+    schema_waiver = {}         # schema id -> reversal_waiver 映射
+    posted_objects = []        # (label, schema_id) 状态枚举含 posted 的对象
 
     for path in sorted(SCHEMAS_DIR.glob("*.yaml")):
         try:
@@ -596,18 +630,44 @@ def lint_doc_flow():
 
         doc_effect = raw.get("doc_effect")
         document = raw.get("document")
+        state_field = (str(document.get("state_field") or "").strip()
+                       if isinstance(document, dict) else "")
+        reachable_codes = _state_codes(raw, state_field)
 
         # 1) 覆盖度：统计事实单据（document 段）覆盖数
         if isinstance(document, dict):
             scanned += 1
             fact_schemas[schema_id] = label
             documents.append((label, schema_id, document, field_names, state_codes))
+            line_object = str(document.get("line_object") or "").strip()
+            if line_object:
+                line_object_ids.add(line_object)
 
-        # 2) doc_effect.reversal 声明合法（未声明不算违规：不强制新增声明位）
+        reversal_value = (doc_effect.get("reversal")
+                          if isinstance(doc_effect, dict) else None)
+        waiver = (doc_effect.get("reversal_waiver")
+                  if isinstance(doc_effect, dict) else None)
+        if isinstance(waiver, dict):
+            schema_waiver[schema_id] = waiver
+        if isinstance(reversal_value, dict) and reversal_value:
+            schema_reversal[schema_id] = "true"
+        elif isinstance(waiver, dict) and str(waiver.get("reason") or "").strip():
+            schema_reversal[schema_id] = "waived"
+        elif reversal_value is False:
+            schema_reversal[schema_id] = "false"
+        else:
+            schema_reversal[schema_id] = "absent"
+
+        # 2) doc_effect.reversal 声明合法（缺省合法性由下方闸 2-1 按可达性判定）
         if isinstance(doc_effect, dict) and "reversal" in doc_effect:
-            declared_reversal.append(label)
-            violations.extend(_lint_reversal_block(
-                label, doc_effect.get("reversal"), doc_creators))
+            if schema_reversal[schema_id] == "true":
+                declared_reversal.append(label)
+            if isinstance(reversal_value, dict):
+                violations.extend(_lint_reversal_block(
+                    label, reversal_value, doc_creators, reachable_codes))
+
+        if "posted" in reachable_codes:
+            posted_objects.append((label, schema_id))
 
     # 3) document 声明：必填键 + 字段引用 / 状态值可解析（可选键不强制补齐）
     for label, _schema_id, document, own_fields, state_codes in documents:
@@ -645,6 +705,43 @@ def lint_doc_flow():
                     violations.append(
                         (label, "document.line_sequence_field",
                          "%r 不在 %s 的 fields 内" % (seq, line_object)))
+
+    # 3.1) 闸 2-1 能力三态：posted 可达对象必须显式声明逆向能力
+    #      true / false+reason / waived（reason 必填）三选一，禁止「缺省即策略」
+    for label, schema_id in posted_objects:
+        capability = schema_reversal.get(schema_id, "absent")
+        if capability in ("true", "waived"):
+            continue
+        if schema_id in line_object_ids:
+            continue  # 行对象生命周期由父对象拥有，随头红冲
+        if capability == "false":
+            violations.append((
+                label, "doc_effect.reversal_waiver",
+                "reversal: false 必须同时声明 reversal_waiver.reason"))
+            continue
+        violations.append((
+            label, "doc_effect.reversal",
+            "posted 可达但未声明逆向能力（缺省即策略）：须显式 reversal: true，"
+            "或 reversal: false + reversal_waiver.reason"))
+
+    # 3.2) 闸 2-2 引用闭包：REVERSAL_PROFILES 的 key 必须是已声明逆向能力的对象
+    #      单向断言（profile -> schema）；orchestrator-only 对象不需要 profile
+    for doc_type in sorted(profiles):
+        field = "REVERSAL_PROFILES[%s]" % doc_type
+        capability = schema_reversal.get(doc_type)
+        if capability is None:
+            continue  # 对象不存在由 4) 段报错，避免重复
+        waiver = schema_waiver.get(doc_type) or {}
+        delegated = str(waiver.get("delegated_to") or "").strip()
+        if capability == "true":
+            continue
+        if (str(waiver.get("reason") or "").strip() and delegated
+                and schema_reversal.get(delegated) == "true"):
+            continue  # 显式委派：红冲由另一个已声明能力的对象统一编排
+        violations.append((
+            field, "document_type",
+            "档位指向的对象未声明逆向能力（当前 %s），"
+            "须删除档位或在其 YAML 声明 reversal / reversal_waiver" % capability))
 
     # 4) 档位表：mode / commitment / edges 声明完整性
     for doc_type, profile in sorted(profiles.items()):

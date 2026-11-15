@@ -25,6 +25,14 @@ document:
   line_object: inventory_count_line
   line_parent_field: count_id
   line_sequence_field: line_no
+doc_effect:
+  # 已知债务（REV-04 / W14）：posted 盘点单当前不可逆且无更正链，取消仅对 draft/counting
+  # 生效。实现「反向调整单 + 再红冲」后改为 reversal: true；在补齐前显式登记豁免。
+  reversal: false
+  reversal_waiver:
+    reason: posted 盘点单缺更正链（REV-04），由 W14 补反向调整单后转 true
+    ticket: REV-04
+    expires: W14
 table_name: inventory_counts
 description: 库存盘点单头（账面快照 / 实盘录入 / 差异过账）
 display_name_field: count_no

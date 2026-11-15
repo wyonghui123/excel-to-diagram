@@ -1,6 +1,6 @@
 # 采购发票对象模型 Spec（Vendor Invoice Object Model）
 
-> 版本：v1.11 草案（2026-11-15 方案 C 已实施：服务采购复用收货单双语义验收，服务行跳过库存过账 + `service_acceptance_required` 派生 2-way/3-way；v1.10 于 2026-11-14 W11-2 已实施：R-VI-51 / R-VI-52 / R-VI-53 + v273 `v_vendor_return_open_amount`；v1.9 追加 §25.11 规则模型落位与 SSOT 收敛；2026-11-14 追加 §25 端到端 / 逆向 / 异常一致性补强：R-VI-48 ~ R-VI-59，并修订 R-VI-36；v1.7 于 2026-11-14 W10-1 已实施：R-VI-38 ~ R-VI-47 + 枚举收敛；v1.6 于 2026-11-14 追加 §24 三单匹配补强；v1.5 于 2026-11-14 落实施 §23.9 方案 A；v1.4 于 2026-11-13 追加 22.6.2 费用变更与单一事实源约束 / R-1~R-4 / 变更矩阵 A~D；v1.3 同日追加 22.6.1 费用分摊方案 / D-CH-01~12；v1.2 于 2026-11-12 §22 细化，金额计算改为复用统一内核 `SalesOrderAmountService`，D-VI-27）｜ 日期：2026-11-11 ｜ 状态：待评审（§23 已实施，2026-11-14；§24 W10-1 已实施，2026-11-14；§25 W11-1 已实施，2026-11-14；§25 W11-2 已实施，2026-11-14；§25.11 SSOT 收敛已实施，2026-11-14；§10.1 方案 C 已实施，2026-11-15；其余待评审）
+> 版本：v1.14 草案（2026-11-15 追加 §25.13.7「W15 第 3 项 dry-run 与闸 2 实施证据」：三态断言 + 引用闭包落地，`inventory_count` / `transfer_shipment` 显式豁免登记；v1.13 于 2026-11-15 追加 §25.13「元数据驱动的单一事实源强化机制」：五类泄漏点 + 三道闸 + 缺口覆盖矩阵；v1.12 于 2026-11-15 追加 §25.12 跨 BO 二次审计与 Fusion 对标：4 条口径修正 + 5 条跨 BO 缺口、新增 R-VI-60 ~ R-VI-62；v1.11 于 2026-11-15 方案 C 已实施：服务采购复用收货单双语义验收，服务行跳过库存过账 + `service_acceptance_required` 派生 2-way/3-way；v1.10 于 2026-11-14 W11-2 已实施：R-VI-51 / R-VI-52 / R-VI-53 + v273 `v_vendor_return_open_amount`；v1.9 追加 §25.11 规则模型落位与 SSOT 收敛；2026-11-14 追加 §25 端到端 / 逆向 / 异常一致性补强：R-VI-48 ~ R-VI-59，并修订 R-VI-36；v1.7 于 2026-11-14 W10-1 已实施：R-VI-38 ~ R-VI-47 + 枚举收敛；v1.6 于 2026-11-14 追加 §24 三单匹配补强；v1.5 于 2026-11-14 落实施 §23.9 方案 A；v1.4 于 2026-11-13 追加 22.6.2 费用变更与单一事实源约束 / R-1~R-4 / 变更矩阵 A~D；v1.3 同日追加 22.6.1 费用分摊方案 / D-CH-01~12；v1.2 于 2026-11-12 §22 细化，金额计算改为复用统一内核 `SalesOrderAmountService`，D-VI-27）｜ 日期：2026-11-11 ｜ 状态：待评审（§23 已实施，2026-11-14；§24 W10-1 已实施，2026-11-14；§25 W11-1 已实施，2026-11-14；§25 W11-2 已实施，2026-11-14；§25.11 SSOT 收敛已实施，2026-11-14；§10.1 方案 C 已实施，2026-11-15；§25.12 跨 BO 二次审计已补充，2026-11-15；§25.13 SSOT 强化机制已补充，2026-11-15；§25.13.7 W15 闸 2-1 / 2-2 已实施，2026-11-15；其余待评审）
 > 上游契约：[spec-receipt-object-model-2026-11-01.md](./spec-receipt-object-model-2026-11-01.md) §10 / §11
 > 样板：[sales-invoice-pricing-spec-2026-11-10.md](./sales-invoice-pricing-spec-2026-11-10.md)（FR/NFR/IF/TR 编号体系）
 > 平台基线：`document_category / document_role / direction`（v243）、`doc_flow_rule`（v215）、`control_parameter_def`（容差）
@@ -2043,15 +2043,20 @@ if abs(total - target) > tol: → REASON_FREIGHT
 | E2E-03 | PO 侧无 billing 消耗守卫：`purchase_order_guard_service` 无任何 `invoiced / billing / consumed` 判定 ⇒ 已开票的 PO 仍可关闭 / 改量 / 删行，在途发票变悬挂 | 真遗漏 | 同目录 grep No matches | R-VI-54 |
 | REV-01 | 收货红冲不校验发票消耗（**P0 最高**）：`receipt_service.reverse()` 仅校验 posted / red / 重复红冲；`receipt.yaml` 的 `doc_flow` 补偿 `rule_ids` 不含 `receipt_line_to_vendor_invoice_line`（`ap_match`）⇒ 已 3-way 匹配的收货单可红冲，`ap_match` 边悬挂；再叠加 `_open_qty` 的 `max(..., 0.0)` ⇒ 负余量被静默吞掉 | 真遗漏（最高） | `receipt_service.py` `reverse()` + `receipt.yaml` `doc_flow` | R-VI-48 |
 | REV-02 | 逆向不联动应付期次：红字单 / 调整单 / 取消单一律不生成期次（`_generate_schedules` 直接 `return []`），原票期次又只读（R-VI-35）⇒ 红冲后应付台账仍显示全额待付（**负债虚增**） | 真遗漏 | `_generate_schedules` docstring / 分支 | R-VI-49（修订 R-VI-36） |
-| REV-03 | 贷项 / 借项不可再更正：`_assert_reversible` 要求 `document_role='invoice'` + `direction=1`；`create_adjustment` 原单仅接受 `invoice / adjustment` ⇒ 贷项开错（多贷）无红冲、无调整路径，只能取消重开且取消不适用 posted | 真遗漏 | `_assert_reversible` / `create_adjustment` | R-VI-52 |
+| REV-03 | 贷项 / 借项不可再更正：`_assert_reversible` 要求 `document_role='invoice'` + `direction=1`；`create_adjustment` 原单仅接受 `invoice / adjustment` ⇒ 贷项开错（多贷）无红冲、无调整路径，只能取消重开且取消不适用 posted | 约束过窄（✅ W11-2 已修） | `_assert_reversible` / `create_adjustment` | R-VI-52 |
 | EXC-01 | 外币汇率零校验：`_validate_amounts` 只校行 / 头算术恒等式，全仓 `exchange_rate` 在匹配服务无命中 ⇒ `exchange_rate = 0 / NULL` 的外币发票可过账，本位币金额无意义 | 真遗漏 | `_validate_amounts` | R-VI-53 |
 | EXC-02 | 空供应商发票号可过账：查重键含 `supplier_invoice_no`，空号归一为 `''`，对空号不构成硬拦 ⇒ 多张空号发票并存、无法与供应商对账 | 真遗漏 | `normalize_supplier_invoice_no` + 查重路径 | R-VI-55 |
 | EXC-03 | 期间 / 过账日期无约束：`posting_date` 缺省取 `invoice_date`，可回填任意历史月；无「期间已关闭」概念 | 真遗漏 | 过账 / 红冲日期取值 | R-VI-56 |
 | EXC-04 | 供应商主数据有效性未校验：停用 / 冻结供应商仍可建票过账（只校 `supplier_account_id` 存在且与 PO 一致） | 真遗漏 | `_validate_supplier` | R-VI-57 |
 | EXC-05 | `cancellation` 类型是死枚举：`document_category='cancellation'` 已 seed（`VENDOR_INVOICE_CANCEL`）、`line_source_policy` 已声明，但动作面只有 `cancel`（draft/submitted → cancelled）与 `reverse`（生成 `credit_memo`），**无 `create_cancellation`** | 真遗漏（口径不一致） | `vendor_invoice_actions.py` | R-VI-58 |
 | EXC-06 | `no_receipt` 放行后无重匹配入口：置 `no_receipt` 可强制过账，但收货到货后无幂等 `rematch` 动作回填 `ap_match` 边 | 真遗漏（可用性） | 动作面 grep | R-VI-59 |
+| E2E-04 | 服务请求 → 工单 → 收货无规则 / 无边：`meta/migrations` 无 `service_request_to*` / `work_order_line*` 规则，工单完工也不产生 `receipt`；Fusion 中「工单完工入库」与「采购收货」是两套独立事务 | 设计差异（TBD，非缺陷） | 迁移目录 grep 无命中；Fusion WO completion ≠ PO receipt | TBD-VI-X1（子表 + 外键，不补 doc_flow 边） |
+| REV-04 | 盘点过账不可逆且差异不回写：`inventory_count_service` 在 posted 后 `cancel` 硬拦，`inventory_count` 无 `doc_effect.reversal`；差异调整单虽已声明逆向，但「由盘点发起」的更正链未闭合 ⇒ 盘错只能再盘一次，无法定向更正 | 真遗漏（P0） | `inventory_count_service.py` posted 校验 + `inventory_count.yaml` 无 reversal | R-VI-60 |
+| REV-05 | 逆向档位配置孤儿：`reversal_profiles.REVERSAL_PROFILES` 含 `transfer_shipment`，但该 BO YAML 无 `doc_effect.reversal`、全仓无生产调用 ⇒ 配置与声明不一致，易被误判「已支持红冲」 | 配置卫生 | `reversal_profiles.py` + `transfer_shipment.yaml` | R-VI-61（✅ 闸 2-2 已拦，2026-11-15） |
+| EXC-07 | 死规则与口径冲突：v254 播种 `vendor_invoice_line_to_credit_memo_line`，全仓无 attach 代码（仅测试夹具引用）；本 Spec 明确「不建该规则、改对原边写 `red_ink_edge`」⇒ 规则表与实现两套口径 | 配置卫生 | v254 + 全仓 grep | R-VI-62 |
 
 **已裁决、不重复立项**（复核确认属既有边界）：付款事实层 / 付款批 / 账龄（§23.9 独立波次）、预付与现金折扣（同）、GL / GR-IR（§1.2 无 GL 域）、W10-2（`gr_based` PO 行聚合锚点）、W10-3（匹配工作台）、匹配方案对象（D-VI-20）、行级多币种（D-VI-18）。
+**跨 BO 二次复核追加**（2026-11-15，见 §25.12）：收付款 BO 缺失（Fusion `iby_payments_all` 为独立对象）属付款波次结构性缺口，不是本域漏项；工单完工不产生采购收货属设计差异（TBD-VI-X1）；贷项不可红冲经 Fusion 复核定性为「约束过窄」且已由 R-VI-52 修复。
 
 ### 25.1 正向端到端对账矩阵
 
@@ -2166,16 +2171,18 @@ if abs(total - target) > tol: → REASON_FREIGHT
 | 动作面 | 新增 `vendor_invoice.rematch` | YAML `actions` + handler |
 | 表结构 | 其余 **无新增列**（汇率、供应商状态均读上游，不落副本） | — |
 
-### 25.7 波次划分（W11 / W12 / W13）
+### 25.7 波次划分（W11 / W12 / W13 / W14 / W15）
 
 | 波次 | 范围 | 迁移 | 风险 |
 |---|---|---|---|
 | **W11-1（P0，建议先做）** ✅ 已实施（2026-11-14） | R-VI-48（收货红冲守卫）+ R-VI-49（期次净额化，修订 R-VI-36）+ R-VI-50（`v_vendor_payable_open`）+ `v_vendor_invoice_negative_open` | v272 | 触及收货域与期次写入分支；需回归 §23 既有 9 例期次测试 |
 | **W11-2（P1）** ✅ 已实施（2026-11-14） | R-VI-51（退货贷项余量 + `v_vendor_return_open_amount`）+ R-VI-52（贷项逆向）+ R-VI-53（汇率） | v273 | 类型白名单放宽，已补「贷项红冲 → 借项」用例 |
-| **W12（P2）** | R-VI-54（PO 守卫）+ R-VI-55（发票号必填）+ R-VI-56（期间）+ R-VI-57（供应商状态） | v272 | PO 守卫可能影响既有 PO 关闭测试；参数默认值须保守 |
+| **W12（P2）** | R-VI-54（PO 守卫：关闭 / 降量 / 删行 / 改计划量四路 + 服务行按 schedule 消耗判定）+ R-VI-55（发票号必填）+ R-VI-56（期间）+ R-VI-57（供应商状态） | v272 | PO 守卫可能影响既有 PO 关闭测试；参数默认值须保守 |
 | **W13（P3）** | R-VI-58（cancellation 收敛）+ R-VI-59（`rematch`） | v272 / 无 | 低风险；`rematch` 需前端按钮与权限码 |
+| **W14（P0，建议前置）** | R-VI-60（盘点更正走反向调整单 + 差异回写链）+ R-VI-61 / R-VI-62（逆向声明与规则一致性清理） | 无新增表；R-VI-60 复用 `inventory_adjustment` 既有 reversal 声明 | 触及盘点域；须回归 `test_inventory_count*` / `test_inventory_adjustment*`；清理项需迁移 rollback |
+| **W15（P1，机制）** | §25.13 三道闸：seed 生成收敛（闸 1）+ 迁移 verify 四项断言（闸 2）+ `doc_effect.reversal` tri-state | 无业务迁移；新增校验脚本 / 生成器改造 | 会拦停存量配置；须先 dry-run 出「未声明能力」清单再批量补声明，否则开发体验倒退 |
 
-> 顺序理由：W11-1 修的是「账不实」（红冲后负债虚增、收货红冲留悬挂边），必须先于任何付款域工作；W11-2 修「退货与错单的处理路径」；W12 / W13 是防护性校验与可用性补强。
+> 顺序理由：W11-1 修的是「账不实」（红冲后负债虚增、收货红冲留悬挂边），必须先于任何付款域工作；W11-2 修「退货与错单的处理路径」；W12 / W13 是防护性校验与可用性补强。**W14 与 W11 同属「账不实」类（盘点差异无法定向更正、逆向能力声明与实际实现不一致）**，建议与 W12 并行前置，不受发票域波次阻塞。**W15 是「防复发」的机制波次**：它不修任何单条业务缺口，而是让同类缺口在未来无法静默存在（§25.13）。
 
 ### 25.8 对既有条款的修订索引
 
@@ -2199,6 +2206,8 @@ if abs(total - target) > tol: → REASON_FREIGHT
 - 不做 PO 自动改量重匹配（R-VI-54 只拒绝，不自动调整）。
 - **TBD-VI-C1**：供应商取消单（`cancellation` 单据化）——仅当出现合规硬要求时再评估（25.2.4 方案 B）。
 - **TBD-VI-C2**：退货贷项自动生成（维持 D-VI-11 软配对，只做上限校验不强制配对）。
+- **TBD-VI-X1**：服务请求 → 工单 → 收货的建模方式——Fusion 用子表 + 外键（工单引用 SR、完工入库是独立事务），**不以 doc_flow 边表达**；本平台若做，建议同样走子表外键，不补 `service_request_to_work_order` 边规则（§25.12.3）。
+- **TBD-VI-X2**：盘点更正采用「反向调整单」还是「盘点单自身可逆」——Fusion 走调整单（inv adjustment）反向，建议对齐；需与盘点域确认是否同时开放 `inventory_count` 的 `doc_effect.reversal`（§25.12.3）。
 
 ### 25.10 测试矩阵（建议）
 
@@ -2218,11 +2227,19 @@ if abs(total - target) > tol: → REASON_FREIGHT
 | 12 | `posting_date` 早于 3 个月前（参数=2） | `VI_PERIOD_CLOSED` |
 | 13 | `posting_date` 为明天（forward=0） | `VI_POSTING_DATE_INVALID` |
 | 14 | 停用供应商建票 + 过账 | 草稿可建；过账 `VI_SUPPLIER_INACTIVE` |
-| 15 | PO 有 active `billing` 边，关闭 PO | `PO_CONSUMED_BY_VENDOR_INVOICE` |
+| 15 | PO 有 active `billing` 边，关闭 PO / 降计划量 / 删行 / 改计划量 | 四路均 `PO_CONSUMED_BY_VENDOR_INVOICE`（R-VI-54） |
 | 16 | `no_receipt` 已过账 → 收货到货 → `rematch` | 写 `ap_match` 边、置 `matched`，金额不变 |
 | 17 | 同一行重复 `rematch` | `noop`，不重复写边 |
 | 18 ✅ | 退货行 `amount_credited` 已满，再开贷项 | `VI_RETURN_EXCEEDED`（`test_vendor_invoice_match.py`） |
 | 19 | 回归：§23 既有 9 例期次 + §24 的 14 例 | 全绿（默认参数行为不变） |
+| 20 ✅ | 服务计划行 `service_acceptance_required=0` + `gr_based` | 直接 `matched`，无需收货（`test_vendor_invoice_match.py`） |
+| 21 ✅ | 服务计划行 `service_acceptance_required=1` | 头级 `unmatched` + 行级 `no_receipt`，直至验收（同上） |
+| 22 ✅ | 服务计划行收货单过账 | 不写库存：`_transactions == []`、`_balance is None`（`test_inventory_receipt_bridge.py`） |
+| 23 | 盘点 posted 后发起更正 | 生成**反向调整单**并回写盘点行，盘点单保持 posted（R-VI-60） |
+| 24 | 盘点差异调整单再红冲 | 余额回到盘点前，原盘点单与调整单均可追溯（R-VI-60） |
+| 25 ✅ | 启动 / 迁移期一致性断言 | `REVERSAL_PROFILES` 键集合 ⊆ 已声明逆向能力的 BO（单向闭包，含 `delegated_to` 豁免），无孤儿（R-VI-61；`test_doc_flow_reversal_metamodel.py`） |
+| 26 | `doc_flow_rule` 死规则扫描 | 每条规则均有 attach 调用点或显式白名单豁免（R-VI-62） |
+| 27 ✅ | posted 可达对象的逆向能力三态 | 未声明即拦；`false` 缺 `reversal_waiver.reason` 即拦；`false`+waiver / 行对象放行（§25.13.7，`test_doc_flow_reversal_metamodel.py` 3 例） |
 
 > 实施前置：迁移 v272 / v273 与视图需 `sync_schema --generate` 后跑 `python d:\filework\test.py --file meta/tests/services/test_vendor_invoice_match.py` + `--file meta/tests/migrations/test_vendor_invoice_migrations.py` + 收货域回归。
 
@@ -2254,6 +2271,9 @@ if abs(total - target) > tol: → REASON_FREIGHT
 | R-VI-57 供应商启用 | L1 优先 / L3 兜底 | 取决于 metric 能否查供应状态；不得写成常量集合 |
 | R-VI-58 取消单不可建 | L2 | `type_definitions` 停用 + 入口配置，不在代码里 `if category == cancellation` |
 | R-VI-59 重复匹配幂等 | L3 + 平台约束 | `uq_doc_flow_idem` 兜底，已实施 |
+| R-VI-60 盘点更正回写 | L3（算法）+ L2（复用 `inventory_adjustment` 的 reversal 声明） | **不给 `inventory_count` 加 reversal**（保持 posted 不可逆）；更正 = 反向调整单 + 回写盘点行；正负方向由原调整单 `direction` 派生，不在代码里硬判 |
+| R-VI-61 逆向声明一致性 | L2（配置对齐） | `REVERSAL_PROFILES` 键集合与 BO YAML `doc_effect.reversal` 双向校验；孤儿键要么删除，要么补声明 + 生产调用，禁止「配置先行」 |
+| R-VI-62 死规则治理 | L2（迁移清理） | `doc_flow_rule` 纳入迁移 verify：无 attach 调用点且不在白名单 ⇒ 迁移期告警；删除须配 rollback 脚本 |
 
 #### 25.11.2 SSOT 硬约束（已收敛）
 
@@ -2272,6 +2292,9 @@ if abs(total - target) > tol: → REASON_FREIGHT
 - 新增跨对象守卫必须复用 `v_doc_flow_consumed_qty` + core 池常量，禁止另写一份消耗量 SQL。
 - 禁止任何物理缓存量列（沿用 N3 / D-VI-4）。
 - 读模型（视图）只增不改语义；分档阈值变更需同步本 Spec 与本条。
+- **能力禁止依赖缺省**：`doc_effect.reversal` 采用 tri-state（显式 `true` / 显式 `false` / 未声明 ⇒ 构建失败），白名单豁免须带 reason 并进决策日志（现状见 §25.13.2-E）。
+- **配置→代码引用必须闭包**：YAML 中 `doc_flow.compensate.rule_ids` / `reversal.faces.*` / `actions.handler` 等名字，必须在代码或 attach 点存在；反之代码不得消费未声明名字。由迁移 verify 断言（§25.13.3 闸 2）。
+- **派生量必须声明 `derivation`**（`source` / `owner` / `refresh`），否则 schema 校验拒绝落表；纯派生只能是视图，物化必须有刷新契约，物理缓存量列继续禁止（§25.13.2-D）。
 
 #### 25.11.4 回归证据
 
@@ -2284,3 +2307,200 @@ if abs(total - target) > tol: → REASON_FREIGHT
 `test_vendor_invoice_migrations` 14 例（含 v273 migrate / verify / rollback）、
 `test_vendor_invoice_reversal_platform` 新增「贷项红冲 → 借项 + 撤销红字边」1 例、
 `test_vendor_invoice_adjustment` 原「贷项源被拒」用例替换为「贷项 decrease 允许 / increase 被拒」—— 全绿。
+
+2026-11-15 方案 C（服务采购复用收货单）落地后：5 文件 111 例全绿，含新增「服务收货不写库存」1 例、
+「服务行 2-way 直接 matched / 3-way 保持 `no_receipt`」2 例。
+
+---
+
+### 25.12 跨 BO 二次审计与 Fusion 对标（2026-11-15）
+
+> 触发：§25.11 收敛后，对 §25.0 台账做**跨 BO 复核**（`receipt` / `purchase_order` / `inventory_count` /
+> `inventory_adjustment` / `transfer_order` / `work_order` / `service_request`），并用 Oracle Fusion 的
+> **实际对象与事务**二次对标，确认哪些是缺口、哪些是我们把口径定错了。本节只补文档与待办，**不改已实施行为**。
+>
+> 证据强度约定（避免把推断当结论）：
+> - **F-强** = Oracle 官方文档（R12 Work Confirmation、2-way/3-way 匹配规则、26C 取消工作确认回冲、AR 反向事务）已核；
+> - **F-弱** = 官方页面未直接命中，依据社区文档 / 产品知识推断；
+> - **C** = 本仓代码逐文件核实。
+
+#### 25.12.1 Fusion 确认（同构，不需改）
+
+| # | 我们的实现 | Fusion 对应机制 | 结论 | 证据 |
+|---|---|---|---|---|
+| F1 | §10.1 方案 C：服务采购复用 `receipt` 作验收凭证，`schedule_kind='service'` + `service_acceptance_required` 派生 2-way/3-way | **Work Confirmation**（服务确认单）：服务类 PO 的「收货」等价物，确认后才可匹配 | 同构，无需引入 SES 独立对象 | F-强 / C |
+| F2 | 3-way：行级 `qty_billed ≤ qty_received`；2-way：`qty_billed ≤ qty_ordered` | Fusion 两条匹配规则原文即此口径（2-way 比 ordered，3-way 再比 received） | 口径一致 | F-强 |
+| F3 | 服务行过账 `InventoryGuardService` 跳过库存过账（`_transactions == []`） | 服务确认不产生库存事务 | 一致 | C / F-弱 |
+| F4 | 收货行不带价，价格比 PO 快照（D-RC-9 / A4） | Fusion 收货 / 工作确认均不含价 | 维持不补价 | F-强 |
+| F5 | 匹配锚点 = `purchase_order_schedule` 聚合，`receipt_line` 仅 trace（D-VI-3） | Fusion `PO_LINE_LOCATIONS_ALL.quantity_billed` 为计划行聚合 | 一致 | F-强 |
+| F6 | 取消 / 红冲收货单回冲 `ap_match`（W11-1 R-VI-48） | 26C「取消工作确认」自动回冲已匹配发票的持有 / 匹配状态 | 我们已具备，且更早拦截（红冲前守卫） | F-强 / C |
+| F7 | 容差复用 `control_parameter_def` + `tolerance_direction / tolerance_basis`（A7） | Fusion 发票容差为可配置分布（价格 / 数量 / 金额） | 结构对位 | F-强 |
+| F8 | 无收付款 BO；发票只提供应付依据（§1.2 / §23.9） | 付款为独立对象 `iby_payments_all`（发票 / 付款 / 核销三张事实表） | 我们的边界正确，缺的是付款波次而非发票字段 | F-强 |
+
+#### 25.12.2 口径修正（原审计定性过头或偏差）
+
+| # | 原定性 | 修正后 | 依据 | 处置 |
+|---|---|---|---|---|
+| C1 | REV-03「贷项 / 借项不可红冲」= 真遗漏 | **约束过窄**：Fusion AR 反向事务同时覆盖贷项与借项，说明正确模型是「反向事务对任意 AR 事务成立」，我们只是白名单写窄了 | F-强 + C | 已由 R-VI-52 修复（W11-2），§25.0 档位改「约束过窄（已修）」 |
+| C2 | 「工单 → 收货 断链」= P1 缺口 | **设计差异**：Fusion 工单完工走完工入库（WIP completion / WO delivery）事务，与采购收货是两条链，不应有 `work_order → receipt` 边 | F-弱（官方文档未直命中，产品知识推断） | 降级为 TBD-VI-X1（E2E-04），不列为修复项 |
+| C3 | R-VI-54 缺口范围 = 「PO 仍可关闭」 | 收敛为**四路守卫**：关闭 / 降计划量 / 删行 / 改计划量；并需覆盖服务行（2-way 下由 `schedule` 消耗判定，而非仅收货量） | C + F-强（Fusion `Closed for Invoicing` / `Final Match` 在 PO 行做状态收敛） | 扩写 R-VI-54（W12），不改结论 |
+| C4 | 「无收付款 BO」= 本域遗漏 | **跨域结构性缺口**，归属付款波次；本域只需保证应付敞口可派生（`v_vendor_payable_open`） | F-强（`iby_payments_all` 独立） | §25.0 已裁决段落 + §25.12.1 F8 |
+
+#### 25.12.3 新增跨 BO 缺口与落点
+
+| # | 缺口 | 影响 | 落点 | 优先 |
+|---|---|---|---|---|
+| REV-04 | 盘点过账后不可逆、差异不回写（`inventory_count_service` cancel 硬拦 + 无 `doc_effect.reversal`） | 盘错只能整单重盘，账实差异无法定向更正；调整单虽可红冲，却与盘点单断链 | **R-VI-60**：更正 = 反向调整单 + 回写盘点行；`inventory_count` 保持不可逆（TBD-VI-X2） | P0 |
+| REV-05 | `REVERSAL_PROFILES` 含 `transfer_shipment`，但 YAML 未声明 `doc_effect.reversal`、无生产调用 | 配置与能力不一致，前端 / API 可能误判「支持红冲」 | **R-VI-61**：双向一致性校验（启动或迁移期断言） | P1（配置卫生） |
+| EXC-07 | v254 死规则 `vendor_invoice_line_to_credit_memo_line` 与「改对原边写 `red_ink_edge`」口径冲突 | 规则表与实现两套口径，后续维护易误接 | **R-VI-62**：迁移 verify 加死规则扫描 + rollback | P2（清理） |
+| — | 服务请求 → 工单 → 收货 | 无规则 / 无边；Fusion 亦非 doc_flow 边 | **TBD-VI-X1**：若做则子表 + 外键，**不补边规则** | 待决 |
+| — | 收付款 BO | 应付核销 / 付款批 / 账龄无事实层 | 付款波次（§23.9）；本域不预埋字段（D-VI-17） | 跨波次 |
+
+#### 25.12.4 明确不做（本次复核新增）
+
+- **不**给 `inventory_count` 加 `doc_effect.reversal`：盘点单一经 posted 即历史快照，更正的语义是「再调整」而不是「撤销盘点」（对齐 Fusion 调整单反向；F-弱）。
+- **不**为工单 → 收货补 `doc_flow` 边：违反平台「边 = 单据间事实流转」语义；如需联动走子表外键（TBD-VI-X1）。
+- **不**把付款预埋进 `vendor_invoices`：沿用 D-VI-17 / N5，付款波次独立建模。
+- **不**在本域修 PO 侧守卫的四路细节之外扩展（不自动改量、不自动重匹配，§25.9 维持）。
+
+---
+
+### 25.13 元数据驱动的单一事实源强化机制（2026-11-15）
+
+> §25.11 回答「规则该落在哪一层」，本节回答「**怎么保证同一事实不会第二次分叉**」。
+> §25.12 的 17 条台账中，10 条本可被机制提前拦住（6 条结构上不可能发生、4 条迁移期 fail-fast），
+> 6 条属 SSOT 覆盖不到的范围（业务需求缺失 / 跨域所有权 / 设计决策）。
+> **本节只立机制，不新增业务行为；实施归 W15。**
+
+#### 25.13.1 五层真源模型与三类违规形态
+
+| 层 | 唯一真源 | 内容 | 禁止 |
+|---|---|---|---|
+| **L0 事实层** | 业务事件表（`receipt_lines` / `doc_flow_edges` / `vendor_invoices` …） | 不可推导的原子事实 | 由派生量反向写回；同一条事实存两张表 |
+| **L1 声明层** | BO YAML（`doc_effect` / `rules` / `line_source_policy` / `actions`）+ `type_definitions` + `control_parameter_def` | 能力、口径、枚举、优先级 | 代码里复制一份枚举 / 白名单 / 阈值 |
+| **L2 派生层** | 视图（`v_doc_flow_consumed_qty` / `v_vendor_payable_open` / `v_vendor_return_open_amount` …） | 由 L0 + L1 投影 | 视图内引入代码常量；同名派生两处 |
+| **L3 算法层** | 唯一函数（金额内核 `SalesOrderAmountService` / 期次展开 / 消耗量计算） | 计算过程 | 同一计算在正 / 逆两个分支各写一遍 |
+| **L4 编排层** | `reversal_orchestrator.execute` / `attach_edge` / guard | 事务与顺序 | service 直连边表或状态列 |
+
+三类违规形态（本次 17 条缺口的全部成因）：
+
+| 形态 | 定义 | 本 Spec 实例 |
+|---|---|---|
+| **V1 同层双份** | 同一事实在同一层有两份输入 | 类型 seed 既在 YAML 又在手写迁移；逆向能力既在 `REVERSAL_PROFILES` 又在 YAML |
+| **V2 跨层反引** | 下层绕过声明直接硬编码 | `_assert_reversible` 白名单、`get_profile` 档位表取代 `doc_effect` 声明 |
+| **V3 缺省即策略** | 未声明被当作一种合法策略 | `doc_effect.reversal` 未声明即「不可逆且不报错」 |
+
+#### 25.13.2 五类泄漏点（元数据驱动特有）
+
+| # | 泄漏点 | 现象（证据） | 后果 | 判据（怎么算违规） |
+|---|---|---|---|---|
+| **A** | **声明 ↔ 生成双轨** | DDL 走 `sync_schema --generate`（`meta/schemas/generated_schema.sql` + `.schema_version.json`），但 `type_definitions` / `control_parameter_def` / `doc_flow_rule` 的 seed 仍是手写迁移（v254 / v272 / v273） | EXC-05（类型 seed 了、动作面没有）、EXC-07（规则 seed 了、无 attach 点） | 同一行配置能由 YAML 推出，却出现在手写 SQL 里 ⇒ 违规 |
+| **B** | **名字引用悬空** | `doc_flow.compensate.rule_ids` / `reversal.faces` / `actions.handler` 全是名字引用，平台无「配置→代码」闭包校验 | REV-05（孤儿 profile）、EXC-07（死规则）、REV-01（补偿边手列，漏 `ap_match` 静默） | YAML 里的名字在代码 / attach 点找不到，或代码消费的名字未声明 ⇒ 违规 |
+| **C** | **缺省即策略** | `doc_effect_validator.validate_object` 显式规定「未声明 `doc_effect.reversal` 不算非法」（模块头注释 + `if not reversal: return`） | REV-04（盘点漏声明，系统静默放行）；任何新 BO 默认不可逆 | 对 `posted` 可达的 BO，`reversal` 缺失而非显式 `false` ⇒ 违规。**静态侧已由闸 2-1 收口**（§25.13.7），运行期 validator 仍宽松 |
+| **D** | **派生量与事实同形** | 期次表 / `qty_*` 视图 / `amount_credited` 未在元数据区分「纯派生 / 物化派生 / 原子事实」，期次被当事实表写入却无读方 | E2E-01（只写不读）、REV-02（正逆两套期次口径） | 表有写点但无视图读出口，或同一量既有列又有视图 ⇒ 违规 |
+| **E** | **多级解析顺序隐式** | `vi_match_mode` 的 org → document_type → line_type → material 优先级本身就是事实；`specificity_rank` 机制已在 `control_parameter_def.yaml` / `app_builder` / `rule_config_publish_service` 落地 | 若服务层另写优先级 `if` 链，则与参数解析同级双源（**待核**：本 Spec 未逐行核匹配服务的解析路径） | 同一优先级顺序在代码与参数表各出现一次 ⇒ 违规 |
+
+#### 25.13.3 三道闸
+
+| 闸 | 检查内容 | 时机 | 失败后果 | 覆盖 |
+|---|---|---|---|---|
+| **闸 1 生成期** | YAML → DDL **与 seed** 单管道产出；`schema_version.json` 漂移检测 | `sync_schema --generate` / CI | 生成物 diff 非空即失败，禁止提交手改 SQL | A（V1） |
+| **闸 2 迁移期** | ① 引用闭包（rule_id / face / handler 双向存在）② 能力 tri-state（posted 可达 BO 必须显式声明）③ 类型可用性（active 类型须有创建动作或显式 inactive）④ 派生量 `derivation`（source / owner / refresh） | 迁移 verify + 启动自检 | 迁移失败，禁止上线 | B / C / D / A |
+| **闸 3 运行期** | 所有写入口过同一 guard：`ConsumptionGuard`（承诺量扣减）/ `ReversalOrchestrator`（逆向）/ `attach_edge`（边） | 每次写 | 抛业务异常，禁止 service 直连表 | E2E-03 / REV-01 |
+
+> 三道闸的分工原则：**能用静态解决的绝不放到运行期**。V3（缺省即策略）只有在闸 2 拦才算真正解决；放到运行期就变成「运行时才知道自己不可逆」，用户已点过账。
+
+#### 25.13.4 缺口覆盖矩阵（17 条 → 机制）
+
+| 缺口 | 违规形态 | 拦截机制 | 结论 |
+|---|---|---|---|
+| E2E-01 期次只写不读 | D | 闸 2-④ + L3 唯一展开函数 | 结构消除 |
+| E2E-02 退货可贷无真源 | D | 闸 2-④（先有视图再写校验） | fail-fast |
+| E2E-03 PO 无 billing 守卫 | V2 | 闸 3 统一 `ConsumptionGuard` | 结构消除 |
+| E2E-04 工单 → 收货 | — | 无（设计差异） | 不覆盖（SSOT 只防「误补」） |
+| REV-01 收货红冲漏 `ap_match` | B | 闸 2-① + 影响面闭包推导（替代手列 `rule_ids`） | fail-fast（近似结构消除） |
+| REV-02 逆向不联动期次 | D | L3 方向派生（`direction × amount`），禁止分支重写 | 结构消除 |
+| REV-03 贷项不可红冲 | V2 | 可逆性读 `type_definitions` / `doc_effect`，禁止白名单 | 结构消除 |
+| REV-04 盘点不可逆不回写 | C | 闸 2-② tri-state | fail-fast（暴露，不决策） |
+| REV-05 孤儿 profile | A / B | 能力单一真源 + 闸 2-① | 结构消除 |
+| EXC-01 汇率零校验 | — | 闸 2「已登记校验必须唯一落点」 | 部分（发现依赖人） |
+| EXC-02 空发票号 | — | 同上 | 部分 |
+| EXC-03 期间无约束 | — | 同上 | 部分 |
+| EXC-04 供应商状态未校验 | — | 同上 | 部分 |
+| EXC-05 cancellation 死枚举 | A | 闸 2-③ 类型可用性 | fail-fast |
+| EXC-06 无 `rematch` | — | 无 | 不覆盖（纯功能缺失） |
+| EXC-07 死规则 | A / B | 闸 1 + 闸 2-① | 结构消除 |
+| 收付款 BO 缺失 | — | 无 | 不覆盖（跨域所有权） |
+
+统计：**结构消除 6 / fail-fast 4 / 部分 4 / 不覆盖 3**。
+
+#### 25.13.5 代价、逃生口与实施排序
+
+**代价（必须承认）**：SSOT 强化 = 给开发加「声明税」。新 BO 必须写 `reversal` 与 `derivation`，否则构建失败。没有逃生口的强校验一定被绕过，而绕过的方式通常是「在 service 里再写一份」——那比原缺口更糟。
+
+**逃生口（唯一合法形式）**：`exempt: { reason, ticket, expires }` 白名单 + `decision_log.py` 留痕；无 reason 的豁免不予合并。
+
+**实施排序（关键）**：
+
+1. **先治「配置源数量」，再治「代码分支数量」**。REV-03 的根因不是「代码里有白名单」，而是「声明层已有 `type_definitions` 却没接线」。若先删代码分支而不先统一配置源，分支会以另一种形式回来。
+2. **闸 1 / 闸 2 必须先于闸 3**。运行期 guard 只能拦住「已经能跑」的路径；静态与迁移期才能拦住「根本没写」。
+3. **tri-state 上线前必须 dry-run**：先出「posted 可达但未声明 reversal」的清单，一次性补声明后再开硬拦，否则开发会被大面积误伤。**已执行**（2026-11-15，结果见 §25.13.7）：真实清单仅 2 个对象，非全库扫描。
+
+**反模式清单**：
+
+- 为了让校验通过而在 service 内复制一份枚举 / 阈值 ⇒ V2 复发。
+- 新增派生量先落表、后补视图 ⇒ D 复发（期次表就是这样诞生的）。
+- 用 `status='inactive'` 隐藏「声明了但没实现」的配置 ⇒ 把 EXC-05 从显性变成隐性。
+
+#### 25.13.6 落地清单（W15）
+
+| # | 动作 | 落点 | 现状（C） | 优先级 |
+|---|---|---|---|---|
+| 1 | seed 由 YAML 生成（闸 1） | `sync_schema --generate` 扩展至 `type_definitions` / `control_parameter_def` / `doc_flow_rule` | DDL 已生成，seed 仍手写（v254 / v272 / v273） | P1 |
+| 2 | 迁移 verify 四项断言（闸 2） | 迁移 verify 脚本 + 启动自检 | **部分实施**（闸 2-1 能力三态 + 闸 2-2 引用闭包已进 `lint_metamodel --doc-flow`，2026-11-15；类型可用性 / `derivation` 断言待补） | P1 |
+| 3 | `doc_effect.reversal` tri-state | `doc_effect_validator.validate_object` + `lint_metamodel --doc-flow` | **静态侧已实施**（2026-11-15）：posted 可达 ⇒ 显式 `true` / `false`+`reversal_waiver.reason` / waived；运行期 validator 仍为宽松（缺省不报错），随 W14 收紧 | P1 |
+| 4 | `derivation` 段 schema 校验 | schema 校验器 + `app_builder` | 无 | P2 |
+| 5 | `specificity_rank` 单向消费核对 | `control_parameter_def.yaml` / 匹配服务 | 机制已在（`app_builder` / `rule_config_publish_service`），待核匹配服务是否另写 `if` 链 | P2 |
+
+#### 25.13.7 W15 第 3 项 dry-run 与闸 2 实施证据（2026-11-15）
+
+**25.13.7.1 dry-run 口径与结果（C）**
+
+判据：对象自身状态枚举（`states:` 块 ∪ `state_field` 字段 `enum_values`）含 `posted`，即为「逆向可达」。不按「有没有服务代码调用红冲」判定——否则会漏掉 `inventory_count` 这类根本没有入口的对象。
+
+| 对象 | 逆向能力 | 判定 |
+|---|---|---|
+| `customer_invoice` / `vendor_invoice` / `receipt` / `inventory_adjustment` | 已声明 `reversal`（`from_states: [posted]`） | true |
+| `inventory_count` | 无 `doc_effect` 段 | **真缺口（REV-04）**，登记豁免 |
+| `transfer_shipment` | 无 `doc_effect` 段 | 显式 `reversal: false` + 委派 `transfer_order` |
+| `receipt_line` | 无声明 | 行对象豁免（生命周期由头拥有，随头红冲） |
+
+结论：声明税不是「全库 180 个 schema」，实际只需处置 2 个对象——tri-state 的迁移成本远低于 §25.13.5 的悲观预期。
+
+**25.13.7.2 闸 2 三条断言（已实施）**
+
+| # | 断言 | 判据 | 落点 |
+|---|---|---|---|
+| 闸 2-1 | 能力三态完整性 | posted 可达 ⇒ 必须 `reversal: true` / `reversal: false` + `reversal_waiver.reason` / waiver（reason 必填）；`line_object` 行对象豁免 | `lint_metamodel.lint_doc_flow` |
+| 闸 2-2 | 引用闭包（单向） | `REVERSAL_PROFILES` 的 key ⇒ 必须是存在的 schema **且** 已声明逆向能力，或 waiver 显式 `delegated_to` 一个已声明能力的对象 | 同上 |
+| 闸 2-3 | 声明状态可达性 | `reversal.from_states` ⊆ 对象状态枚举（拦「声明了不可达状态」） | `_lint_reversal_block` |
+
+**单向断言的理由（重要）**：`transfer_order` / `inventory_adjustment` 声明了 `reversal` 但无 profile 键，二者只走 `ReversalOrchestrator`——若反向断言「声明必须有 profile」，会制造 2 条假违规。故闭包只从 profile 指向声明，不反向。
+
+**25.13.7.3 豁免登记（唯一合法形式）**
+
+| 对象 | 声明 | 语义 |
+|---|---|---|
+| `transfer_shipment` | `reversal: false` + `reversal_waiver: {reason, delegated_to: transfer_order}` | 能力存在但归属父单，非「不支持」 |
+| `inventory_count` | `reversal: false` + `reversal_waiver: {reason, ticket: REV-04, expires: W14}` | 已知债务，W14 补反向调整单后转 `true` |
+
+约束：`delegated_to` 必须指向一个 `reversal: true` 的 schema（闭包校验）；`ticket` + `expires` 让债务可被检索，避免「永久豁免」变成第二个缺省。
+
+**25.13.7.4 证据（C）**
+
+- `python meta/tools/lint_metamodel.py --doc-flow` → `14 document schema(s) scanned, 6 reversal declaration(s), 0 violation(s)`；`--all` 全绿。
+- `meta/tests/test_doc_flow_reversal_metamodel.py` 24 passed（新增 3 例：未声明即拦 / `false` 缺 reason 即拦 / `false`+waiver 放行）。
+
+**25.13.7.5 口径澄清**
+
+覆盖度仍以 `reversal: true` 计（6 个），2 条豁免不计入「已支持红冲」——否则闸 2-1 会用「填豁免」把缺口伪装成能力。
