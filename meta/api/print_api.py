@@ -14,6 +14,9 @@ REPRINT 只记 `print_runs`、不物理叠印，响应头 `X-Print-Watermark-App
 """
 
 import json
+import threading
+import time
+import uuid
 from urllib.parse import quote
 
 from flask import Blueprint, Response, request
@@ -555,7 +558,7 @@ def run():
         return error_response('bo_code 与 doc_id 必填',
                               error_code='data_invalid', status=400)
     trigger = str(payload.get('trigger') or 'print')
-    if trigger not in print_service.ARCHIVE_TRIGGERS:
+    if trigger not in ('print', 'download'):
         return error_response('trigger 仅支持 print/download',
                               error_code='invalid_trigger', status=400)
     guard = _require_bo_read(bo_code)
@@ -616,3 +619,112 @@ def run_list():
     items = [_run_view(row) for row in rows]
     return ok_list(items, total=offset + len(items),
                    page=offset // limit + 1, page_size=limit)
+
+
+# ------------------------------------------------------------------ 批量 (M5)
+
+PRINT_JOB_CODE = 'print_document'
+
+
+def _get_job_store():
+    """复用 server.py 注入的账本；未注入时按需构造（与 /export/async 同策略）。"""
+    try:
+        from meta.api.job_admin_api import get_job_store
+        store = get_job_store()
+    except Exception:
+        store = None
+    if store is not None:
+        return store
+    try:
+        from meta.core.datasource import get_platform_data_source
+        from meta.core.job_run_store import JobRunStore
+        return JobRunStore(get_platform_data_source())
+    except Exception:
+        return None
+
+
+def _dispatcher_owns_execution() -> bool:
+    try:
+        from meta.api.job_admin_api import get_job_dispatcher
+        dispatcher = get_job_dispatcher()
+    except Exception:
+        return False
+    return bool(dispatcher is not None and getattr(dispatcher, 'enabled', False))
+
+
+def _execute_inline(store, run_id: int, params: dict) -> None:
+    """无 dispatcher 时内联执行（JOB_DISPATCH_ENABLED 默认 0，保证开箱可用）。"""
+    from meta.core.job_executor_registry import JobContext
+    from meta.handlers.job_handlers import make_print_document_executor
+
+    worker_id = 'print-inline-%s' % uuid.uuid4().hex[:8]
+    try:
+        if not store.claim(run_id, worker_id):
+            return
+        store.start(run_id, worker_id)
+        ctx = JobContext(
+            run_id=run_id, job_code=PRINT_JOB_CODE, params=params, attempt=1,
+            deadline_monotonic=time.monotonic() + 3600,
+            cancel_event=threading.Event(), store=store, worker_id=worker_id)
+        result = make_print_document_executor()(ctx)
+        store.finish(run_id, worker_id, bool(result.success),
+                     result=result.data, error=result.error)
+    except Exception as exc:
+        try:
+            store.finish(run_id, worker_id, False, error=str(exc))
+        except Exception:
+            pass
+
+
+def _start_batch(store, run_id: int, params: dict) -> None:
+    if _dispatcher_owns_execution():
+        return
+    threading.Thread(target=_execute_inline, args=(store, run_id, params),
+                     daemon=True, name='print-batch-%s' % run_id).start()
+
+
+@print_bp.route('/batch', methods=['POST'])
+@login_required
+def batch():
+    payload = _payload()
+    bo_code = str(payload.get('bo_code') or '')
+    doc_ids = payload.get('doc_ids')
+    if not bo_code:
+        return error_response('bo_code 必填', error_code='data_invalid', status=400)
+    if not isinstance(doc_ids, list) or not doc_ids:
+        return error_response('doc_ids 必须是非空数组',
+                              error_code='invalid_doc_ids', status=400)
+    guard = _require_bo_read(bo_code)
+    if guard:
+        return guard
+
+    limit = print_service.batch_limit()
+    if len(doc_ids) > limit:
+        return error_response('单批最多 %d 份，当前 %d 份' % (limit, len(doc_ids)),
+                              error_code='batch_too_large', status=400)
+
+    store = _get_job_store()
+    if store is None:
+        return error_response('作业账本不可用', error_code='job_ledger_unavailable',
+                              status=503)
+
+    params = {
+        'bo_code': bo_code,
+        'type_code': str(payload.get('type_code') or ''),
+        'doc_ids': [str(item) for item in doc_ids],
+        'template_id': payload.get('template_id'),
+        'operator': get_current_user(),
+    }
+    try:
+        run_id = store.create_run(PRINT_JOB_CODE, params=params,
+                                  run_key='print:%s' % uuid.uuid4().hex,
+                                  max_attempts=1)
+    except Exception:
+        return error_response('创建打印作业失败', error_code='job_create_failed',
+                              status=503)
+    if run_id is None:
+        return error_response('打印作业未注册: %s' % PRINT_JOB_CODE,
+                              error_code='job_not_registered', status=503)
+
+    _start_batch(store, run_id, params)
+    return ok({'task_run_id': run_id, 'run_id': run_id})

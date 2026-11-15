@@ -265,3 +265,92 @@ def test_runs_requires_bo_code(client):
     response = client.get('/api/print/runs')
     assert response.status_code == 400
     assert response.get_json()['error_code'] == 'data_invalid'
+
+
+def test_run_rejects_batch_trigger(client, monkeypatch):
+    monkeypatch.setattr(print_api, 'evaluate', lambda user, bo, action: (
+        type('D', (), {'allowed': True})()))
+    response = client.post('/api/print/run', json={
+        'bo_code': 'sales_order', 'doc_id': 'SO-1', 'trigger': 'batch'})
+    assert response.status_code == 400
+    assert response.get_json()['error_code'] == 'invalid_trigger'
+
+
+# ------------------------------------------------------------------ 批量 (M5)
+
+class _FakeStore:
+    def __init__(self, run_id=42):
+        self.run_id = run_id
+        self.created = []
+
+    def create_run(self, job_code, **kwargs):
+        self.created.append((job_code, kwargs))
+        return self.run_id
+
+
+def test_batch_requires_bo_read(client, monkeypatch):
+    monkeypatch.setattr(print_api, 'evaluate', lambda user, bo, action: (
+        type('D', (), {'allowed': False})()))
+    response = client.post('/api/print/batch', json={
+        'bo_code': 'secret_doc', 'doc_ids': ['1']})
+    assert response.status_code == 403
+
+
+def test_batch_rejects_empty_doc_ids(client, monkeypatch):
+    monkeypatch.setattr(print_api, 'evaluate', lambda user, bo, action: (
+        type('D', (), {'allowed': True})()))
+    response = client.post('/api/print/batch', json={
+        'bo_code': 'sales_order', 'doc_ids': []})
+    assert response.status_code == 400
+    assert response.get_json()['error_code'] == 'invalid_doc_ids'
+
+
+def test_batch_rejects_too_many_docs(client, monkeypatch):
+    monkeypatch.setattr(print_api, 'evaluate', lambda user, bo, action: (
+        type('D', (), {'allowed': True})()))
+    monkeypatch.setattr(print_service, 'batch_limit', lambda: 2)
+    response = client.post('/api/print/batch', json={
+        'bo_code': 'sales_order', 'doc_ids': ['1', '2', '3']})
+    assert response.status_code == 400
+    assert response.get_json()['error_code'] == 'batch_too_large'
+
+
+def test_batch_enqueues_job_and_starts_execution(client, monkeypatch):
+    monkeypatch.setattr(print_api, 'evaluate', lambda user, bo, action: (
+        type('D', (), {'allowed': True})()))
+    monkeypatch.setattr(print_service, 'batch_limit', lambda: 200)
+    store = _FakeStore()
+    started = {}
+    monkeypatch.setattr(print_api, '_get_job_store', lambda: store)
+    monkeypatch.setattr(print_api, '_start_batch', lambda s, run_id, params: (
+        started.update({'store': s, 'run_id': run_id, 'params': params})))
+
+    response = client.post('/api/print/batch', json={
+        'bo_code': 'sales_order', 'type_code': 'header',
+        'doc_ids': ['SO-1', 'SO-2'], 'template_id': 11})
+    assert response.status_code == 200
+    data = response.get_json()['data']
+    assert data['task_run_id'] == 42
+    assert data['run_id'] == 42
+
+    job_code, kwargs = store.created[-1]
+    assert job_code == 'print_document'
+    assert kwargs['params']['doc_ids'] == ['SO-1', 'SO-2']
+    assert kwargs['params']['template_id'] == 11
+    assert kwargs['params']['operator']['username'] == 'printer'
+    assert kwargs['run_key'].startswith('print:')
+    assert kwargs['max_attempts'] == 1
+    assert started['run_id'] == 42
+    assert started['params']['type_code'] == 'header'
+
+
+def test_batch_reports_missing_job_definition(client, monkeypatch):
+    monkeypatch.setattr(print_api, 'evaluate', lambda user, bo, action: (
+        type('D', (), {'allowed': True})()))
+    monkeypatch.setattr(print_api, '_get_job_store', lambda: _FakeStore(run_id=None))
+    monkeypatch.setattr(print_api, '_start_batch', lambda *args: None)
+
+    response = client.post('/api/print/batch', json={
+        'bo_code': 'sales_order', 'doc_ids': ['SO-1']})
+    assert response.status_code == 503
+    assert response.get_json()['error_code'] == 'job_not_registered'

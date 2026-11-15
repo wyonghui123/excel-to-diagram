@@ -236,6 +236,42 @@ def make_export_cascade_executor():
     return _run
 
 
+def make_print_document_executor():
+    """[M5 2026-11-15] 批量打印执行体：每份独立 print_run，失败进清单不中断整批。"""
+
+    def _run(ctx) -> JobResult:
+        params = ctx.params or {}
+        bo_code = str(params.get('bo_code') or '')
+        type_code = str(params.get('type_code') or '')
+        doc_ids = params.get('doc_ids')
+        if not bo_code or not isinstance(doc_ids, list) or not doc_ids:
+            return JobResult(False, error='缺少 bo_code / doc_ids')
+        if ctx.should_cancel:
+            return JobResult(False, error='cancelled')
+
+        from meta.services import print_service as print_service_module
+
+        def _progress(info):
+            ctx.report_progress(info)
+
+        try:
+            result = print_service_module.batch_print_documents(
+                bo_code, type_code, doc_ids,
+                template_id=params.get('template_id'),
+                operator=params.get('operator') or params.get('user'),
+                job_run_id=str(ctx.run_id),
+                progress_callback=_progress,
+                should_cancel=lambda: ctx.should_cancel)
+        except Exception as exc:
+            return JobResult(False, error=str(getattr(exc, 'message', exc)))
+
+        if result.get('cancelled'):
+            return JobResult(False, error='cancelled')
+        return JobResult(True, data=result)
+
+    return _run
+
+
 def _make_ops_executor(code, handler, data_source):
     def _run(ctx) -> JobResult:
         if ctx.cancel_event.is_set():

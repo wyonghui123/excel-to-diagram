@@ -963,6 +963,7 @@ def create_app(db_path=None):
         build_default_job_registry,
         make_import_cascade_executor,
         make_export_cascade_executor,
+        make_print_document_executor,
     )
     job_store = JobRunStore(data_source)
     set_job_store(job_store)
@@ -976,6 +977,10 @@ def create_app(db_path=None):
     # [FR-001 2026-11-14] 异步导出执行体：与 /export/async 共用同一 service。
     _job_registry.register(
         'export_cascade', make_export_cascade_executor(),
+        supports_cancel=True)
+    # [M5 2026-11-15] 批量打印执行体：与 /api/print/batch 共用 print_service。
+    _job_registry.register(
+        'print_document', make_print_document_executor(),
         supports_cancel=True)
     set_job_registry(_job_registry)
     _job_enabled = os.environ.get(

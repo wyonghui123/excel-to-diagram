@@ -17,7 +17,7 @@ pytestmark = pytest.mark.unit
 from meta.core.job_executor_registry import JobResult
 from meta.handlers.job_handlers import (
     DEFAULT_OPS_HANDLERS, _make_ops_executor, build_default_job_registry,
-    make_bo_action_executor,
+    make_bo_action_executor, make_print_document_executor,
 )
 
 
@@ -108,3 +108,67 @@ def test_ops_executor_short_circuits_on_cancel():
     result = _make_ops_executor('db_analyze', handler, object())(
         _Ctx({}, cancel_event=event))
     assert result.success is False and result.error == 'cancelled'
+
+
+# ---------------------------------------------------------- 批量打印执行器 (M5)
+
+class _PrintCtx:
+    def __init__(self, params, cancel=False):
+        self.run_id = 88
+        self.job_code = 'print_document'
+        self.params = params
+        self.attempt = 1
+        self.cancel_event = threading.Event()
+        if cancel:
+            self.cancel_event.set()
+        self.progress = []
+
+    @property
+    def should_cancel(self):
+        return self.cancel_event.is_set()
+
+    def report_progress(self, payload):
+        self.progress.append(payload)
+        return True
+
+
+def test_print_document_executor_delegates_batch(monkeypatch):
+    from meta.services import print_service
+    captured = {}
+
+    def fake_batch(bo_code, type_code, doc_ids, **kwargs):
+        captured.update({'bo_code': bo_code, 'type_code': type_code,
+                         'doc_ids': doc_ids, **kwargs})
+        kwargs['progress_callback']({'total': 2, 'completed': 1, 'failed': 0})
+        return {'total': 2, 'completed': 2, 'failed': 0, 'cancelled': False,
+                'failures': [], 'runs': []}
+
+    monkeypatch.setattr(print_service, 'batch_print_documents', fake_batch)
+    ctx = _PrintCtx({'bo_code': 'demo', 'type_code': 'header',
+                     'doc_ids': ['D1', 'D2'], 'template_id': 3,
+                     'operator': {'id': 'u1'}})
+    result = make_print_document_executor()(ctx)
+    assert result.success is True
+    assert result.data['completed'] == 2
+    assert captured['job_run_id'] == '88'
+    assert captured['operator'] == {'id': 'u1'}
+    assert captured['template_id'] == 3
+    assert ctx.progress == [{'total': 2, 'completed': 1, 'failed': 0}]
+
+
+def test_print_document_executor_requires_doc_ids():
+    result = make_print_document_executor()(_PrintCtx({'bo_code': 'demo'}))
+    assert result.success is False
+    assert 'doc_ids' in result.error
+
+
+def test_print_document_executor_reports_cancelled(monkeypatch):
+    from meta.services import print_service
+    monkeypatch.setattr(print_service, 'batch_print_documents',
+                        lambda *a, **kw: {'total': 2, 'completed': 1,
+                                          'failed': 0, 'cancelled': True,
+                                          'failures': [], 'runs': []})
+    result = make_print_document_executor()(
+        _PrintCtx({'bo_code': 'demo', 'doc_ids': ['D1', 'D2']}))
+    assert result.success is False
+    assert result.error == 'cancelled'

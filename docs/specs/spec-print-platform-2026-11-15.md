@@ -310,10 +310,11 @@ CREATE INDEX idx_print_runs_job ON print_runs (job_run_id);
 
 ## 9. 批量打印（统一作业账本）
 
-- 注册执行器 `print_document`：`make_print_document_executor()`，在 `build_default_job_registry()` 内 `registry.register('print_document', ...)`（同 `export_cascade` 形态）。
+- 注册执行器 `print_document`：`make_print_document_executor()`，与 `export_cascade` 同处接线（`meta/server.py` 的 `_job_registry.register(...)`）；作业定义由 `meta/migrations/v275__print_document_job.py` 播种（`handler='print_document'`、`max_attempts=1`）。
 - 入参：`{bo_code, type_code, doc_ids[], template_id?, operator}`；作业进度按「每份」推进（`total/completed/failed`）。
 - 每份独立渲染、独立归档、独立 `print_runs`（`job_run_id` 关联）；单份失败不阻塞整批，结束后产出失败清单。
-- 限流：默认并发 2、单批上限 200 份（配置项）；超限直接拒单而不是排队膨胀。
+- 限流：默认并发 2、单批上限 200 份（`PRINT_BATCH_CONCURRENCY` / `PRINT_MAX_BATCH`）；超限直接拒单而不是排队膨胀。
+- 执行归属：`JOB_DISPATCH_ENABLED=1` 时由 dispatcher 领取；未启用时由端点内联线程 claim/start/finish（与 `/export/async` 同策略，保证默认配置开箱可用）。
 - 结果消费：`TaskRuns.vue` 已有页面直接复用，无需新 UI。
 
 ---
@@ -369,10 +370,10 @@ CREATE INDEX idx_print_runs_job ON print_runs (job_run_id);
 | 阶段 | 内容 | 主要落点 |
 |---|---|---|
 | M1 | 迁移 + 数据访问层 + 可打印清单派生（已完成 2026-11-15） | `meta/schemas/print_template.yaml`/`print_binding.yaml`/`print_run.yaml` + `meta/migrations/v274__print_platform.py`、`meta/services/print_repository.py`、`meta/services/print_capability.py`（派生清单） |
-| M2 | 模板校验/发布 + 变量白名单派生 | `meta/services/print_template_service.py` |
-| M3 | 默认版式合成 + 渲染 + 归档 + 打印记录 | `meta/services/print_renderer.py`（含 `default_layout(bo_meta)`）、`meta/services/print_service.py` |
-| M4 | API + 权限接入 | `meta/api/print_api.py` |
-| M5 | 批量执行器 + 作业接线 | `meta/handlers/job_handlers.py`、`meta/core/job_executor_registry.py` |
+| M2 | 模板校验/发布 + 变量白名单派生（已完成 2026-11-15） | `meta/services/print_template_service.py`（含 `default_template_source` / `fork_default`） |
+| M3 | 默认版式合成 + 渲染 + 归档 + 打印记录（已完成 2026-11-15） | `meta/services/print_renderer.py`（含 `default_layout(bo_meta)`）、`meta/services/print_service.py`（含 `reprint_document`） |
+| M4 | API + 权限接入（已完成 2026-11-15） | `meta/api/print_api.py`、`meta/server.py` / `meta/core/app_builder.py` 蓝图登记 |
+| M5 | 批量执行器 + 作业接线（已完成 2026-11-15） | `meta/handlers/job_handlers.py`、`meta/migrations/v275__print_document_job.py`、`meta/server.py` 执行器注册、`POST /api/print/batch` |
 | M6 | 前端：单据动作 + 打印记录抽屉 + 模板/绑定管理页 | 前端路由与组件 |
 
 取证（2026-11-15，`print_capability` 实跑）：可打印接入点 **17 个 header 类型 / 8 个单据 BO**（customer_invoice 4、vendor_invoice 4、receipt 2、sales_order 2、shipment 2、purchase_order 1、transfer_order 1、transfer_shipment 1）→ P0 手写模板上限 8 套，其余类型走 `default_layout` 合成。

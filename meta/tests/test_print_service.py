@@ -363,3 +363,57 @@ def test_archive_pdf_uploads_with_system_identity(monkeypatch):
     assert captured['filename'] == 'DEMO-001_demo_std_v2_seq3.pdf'
     assert captured['user']['id'] == 'system'
     assert captured['user']['is_admin'] is True
+
+
+# ------------------------------------------------------------------ 批量 (M5)
+
+def test_batch_print_documents_collects_per_doc_failures(monkeypatch):
+    calls = []
+
+    def fake_print(bo_code, type_code, doc_id, **kwargs):
+        calls.append((doc_id, kwargs))
+        if doc_id == 'D2':
+            raise print_service.PrintError('render_failed', '渲染失败', 500)
+        return {'run': {'id': 1, 'print_seq': 1}, 'attachment_id': 9}
+
+    monkeypatch.setattr(print_service, 'print_document', fake_print)
+    progress = []
+    result = print_service.batch_print_documents(
+        'demo', '', ['D1', 'D2', 'D3'], operator={'id': 'u1'},
+        job_run_id='42', progress_callback=progress.append)
+
+    assert result['total'] == 3
+    assert result['completed'] == 2
+    assert result['failed'] == 1
+    assert result['processed'] == 3
+    assert result['cancelled'] is False
+    assert sorted(run['doc_id'] for run in result['runs']) == ['D1', 'D3']
+    assert result['failures'][0] == {'doc_id': 'D2', 'code': 'render_failed',
+                                     'message': '渲染失败'}
+    assert {call[1]['trigger'] for call in calls} == {'batch'}
+    assert {call[1]['job_run_id'] for call in calls} == {'42'}
+    assert progress[-1]['total'] == 3
+    assert progress[-1]['completed'] == 2
+    assert progress[-1]['failed'] == 1
+
+
+def test_batch_print_documents_rejects_empty_and_oversize(monkeypatch):
+    with pytest.raises(print_service.PrintError) as empty:
+        print_service.batch_print_documents('demo', '', [])
+    assert empty.value.code == 'empty_batch'
+
+    monkeypatch.setattr(print_service, 'batch_limit', lambda: 2)
+    with pytest.raises(print_service.PrintError) as large:
+        print_service.batch_print_documents('demo', '', ['1', '2', '3'])
+    assert large.value.code == 'batch_too_large'
+    assert large.value.status == 400
+
+
+def test_batch_print_documents_honours_cancel(monkeypatch):
+    monkeypatch.setattr(print_service, 'print_document',
+                        lambda *args, **kwargs: {'run': {'id': 1},
+                                                 'attachment_id': 1})
+    result = print_service.batch_print_documents(
+        'demo', '', ['D1', 'D2'], should_cancel=lambda: True)
+    assert result['cancelled'] is True
+    assert result['processed'] == 0

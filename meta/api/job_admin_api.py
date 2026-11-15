@@ -84,6 +84,11 @@ def get_job_store():
     return _store
 
 
+def get_job_dispatcher():
+    """供其他蓝图判断 dispatcher 是否接管执行（enabled 时由 tick 领取）。"""
+    return _dispatcher
+
+
 def _store_or_error():
     if _store is None:
         return None, (jsonify({

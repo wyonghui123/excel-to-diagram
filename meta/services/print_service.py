@@ -20,6 +20,8 @@ import hashlib
 import json
 import os
 import re
+import threading
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from datetime import datetime
 from io import BytesIO
 from typing import Any, Callable, Dict, List, Optional
@@ -533,3 +535,97 @@ def reprint_document(print_run_id: int, operator: Any = None, *,
     return {'run': repo.get_run(run_id), 'pdf': pdf,
             'source_run_id': int(source['id']), 'attachment_id': attachment_id,
             'watermark': 'REPRINT', 'watermark_applied': REPRINT_WATERMARK_APPLIED}
+
+
+# ------------------------------------------------------------------ 批量 (M5)
+
+#: 单批上限 / 并发（spec §9；超限直接拒单，不排队膨胀）
+MAX_BATCH_SIZE = 200
+DEFAULT_BATCH_CONCURRENCY = 2
+
+
+def _positive_int_env(name: str, default: int) -> int:
+    try:
+        value = int(os.environ.get(name, default))
+    except (TypeError, ValueError):
+        return default
+    return value if value > 0 else default
+
+
+def batch_limit() -> int:
+    """单批上限：`PRINT_MAX_BATCH`（默认 200）。"""
+    return _positive_int_env('PRINT_MAX_BATCH', MAX_BATCH_SIZE)
+
+
+def batch_print_documents(bo_code: str, type_code: str, doc_ids: List[Any], *,
+                          template_id: Optional[int] = None,
+                          operator: Any = None,
+                          job_run_id: Any = None,
+                          progress_callback: Optional[Callable[[Dict[str, Any]], None]] = None,
+                          should_cancel: Optional[Callable[[], bool]] = None) -> Dict[str, Any]:
+    """批量打印：每份独立渲染 / 归档 / 记账，单份失败不阻塞整批（spec §9）。
+
+    进度按「每份」推进（total/completed/failed）；失败只进清单，
+    整批不因单份异常抛出，便于执行器把进度与失败明细一起落 `task_runs.result`。
+    """
+    ids = [str(item) for item in (doc_ids or []) if str(item)]
+    total = len(ids)
+    if not total:
+        raise PrintError('empty_batch', '批量打印缺少 doc_ids', 400)
+    limit = batch_limit()
+    if total > limit:
+        raise PrintError('batch_too_large',
+                         '单批最多 %d 份，当前 %d 份' % (limit, total), 400)
+
+    workers = min(_positive_int_env('PRINT_BATCH_CONCURRENCY',
+                                    DEFAULT_BATCH_CONCURRENCY), total)
+    lock = threading.Lock()
+    runs: List[Dict[str, Any]] = []
+    failures: List[Dict[str, Any]] = []
+    cancelled = False
+
+    def _one(doc_id: str):
+        try:
+            result = print_document(bo_code, type_code, doc_id,
+                                    template_id=template_id, trigger='batch',
+                                    operator=operator, job_run_id=job_run_id)
+        except Exception as exc:  # 单份失败只进清单
+            return doc_id, None, {
+                'doc_id': doc_id,
+                'code': getattr(exc, 'code', None) or 'print_failed',
+                'message': str(getattr(exc, 'message', exc))[:500],
+            }
+        run = result.get('run') or {}
+        return doc_id, {'doc_id': doc_id, 'run_id': run.get('id'),
+                        'attachment_id': result.get('attachment_id'),
+                        'print_seq': run.get('print_seq')}, None
+
+    with ThreadPoolExecutor(max_workers=workers) as pool:
+        futures = []
+        for doc_id in ids:
+            if should_cancel is not None and should_cancel():
+                cancelled = True
+                break
+            futures.append(pool.submit(_one, doc_id))
+        for future in as_completed(futures):
+            doc_id, run_info, failure = future.result()
+            with lock:
+                if failure is not None:
+                    failures.append(failure)
+                else:
+                    runs.append(run_info)
+                snapshot = {'total': total, 'completed': len(runs),
+                            'failed': len(failures), 'stage': doc_id}
+            if progress_callback is not None:
+                try:
+                    progress_callback(snapshot)
+                except Exception:
+                    pass
+
+    return {'total': total,
+            'completed': len(runs),
+            'failed': len(failures),
+            'processed': len(runs) + len(failures),
+            'cancelled': cancelled,
+            'failures': failures,
+            'runs': runs}
