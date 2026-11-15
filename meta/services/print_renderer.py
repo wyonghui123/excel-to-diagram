@@ -431,8 +431,10 @@ def render_pdf(html: str, engine: Optional[str] = None,
                 page = browser.new_page()
                 page.route('**/*', _block_network)
                 page.set_content(html, wait_until='load', timeout=timeout)
+                # 本机 Playwright 版本的 Page.pdf() 不接受 timeout 参数，
+                # 超时由 set_content 的 timeout 与浏览器默认值承担。
                 return page.pdf(print_background=True,
-                                prefer_css_page_size=True, timeout=timeout)
+                                prefer_css_page_size=True)
             finally:
                 browser.close()
     except PrintRenderError:
