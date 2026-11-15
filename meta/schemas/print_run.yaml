@@ -1,0 +1,145 @@
+# 打印运行（追加写账本）
+# 依据：docs/specs/spec-print-platform-2026-11-15.md §4.3 / D-PR-04 / D-PR-09 / D-PR-14
+# 纪律：只新增不更新（凭证字节可追溯）；归档 PDF 存附件平台，本表只记指针。
+#       打印次数 / 最近打印时间全部从本表派生，业务表零新增计数列。
+id: print_run
+name: 打印记录
+table_name: print_runs
+description: 一次打印 = 一条记录 + 一个归档附件；重打 = 新记录指向同一附件
+module: print
+generic_api_mode: read_only
+
+semantics:
+  meaning: 打印运行记录（追加写）
+  category: auxiliary
+
+fields:
+  - id: id
+    name: ID
+    type: integer
+    db_column: id
+    required: true
+    unique: true
+    description: 技术主键
+    semantics:
+      meaning: 自增主键
+      primary_key: true
+  - id: bo_code
+    name: 业务对象
+    type: string
+    db_column: bo_code
+    required: true
+  - id: type_code
+    name: 单据类型
+    type: string
+    db_column: type_code
+    required: true
+    default: ''
+  - id: doc_id
+    name: 单据ID
+    type: string
+    db_column: doc_id
+    required: true
+  - id: doc_no
+    name: 单据号快照
+    type: string
+    db_column: doc_no
+  - id: doc_rev
+    name: 单据版本快照
+    type: string
+    db_column: doc_rev
+  - id: template_id
+    name: 模板
+    type: integer
+    db_column: template_id
+    required: true
+  - id: template_version
+    name: 模板版本
+    type: integer
+    db_column: template_version
+    required: true
+  - id: trigger
+    name: 触发方式
+    type: string
+    db_column: trigger
+    required: true
+    description: preview / print / download / batch / reprint
+  - id: is_formal
+    name: 正式凭证
+    type: integer
+    db_column: is_formal
+    required: true
+    default: 0
+  - id: is_reprint
+    name: 是否重打
+    type: integer
+    db_column: is_reprint
+    required: true
+    default: 0
+  - id: print_seq
+    name: 正式打印序号
+    type: integer
+    db_column: print_seq
+    required: true
+    default: 0
+    description: 同一单据正式打印序号，从 1 起
+  - id: watermark
+    name: 水印
+    type: string
+    db_column: watermark
+    required: true
+    default: NONE
+    description: NONE / PREVIEW / DRAFT / REPRINT（存码，不存文案）
+  - id: attachment_id
+    name: 归档附件
+    type: integer
+    db_column: attachment_id
+    description: 预览为 NULL；正式件指向 attachments
+  - id: payload_hash
+    name: 入参摘要
+    type: string
+    db_column: payload_hash
+    description: 渲染入参 sha256（防篡改追溯）
+  - id: job_run_id
+    name: 作业ID
+    type: string
+    db_column: job_run_id
+    description: 批量时关联 task_runs
+  - id: status
+    name: 状态
+    type: string
+    db_column: status
+    required: true
+    description: running / succeeded / failed
+  - id: error_code
+    name: 错误码
+    type: string
+    db_column: error_code
+  - id: error_message
+    name: 错误信息
+    type: text
+    db_column: error_message
+  - id: operator_id
+    name: 操作人
+    type: string
+    db_column: operator_id
+    required: true
+  - id: operator_name
+    name: 操作人姓名
+    type: string
+    db_column: operator_name
+    required: true
+  - id: created_at
+    name: 打印时间
+    type: datetime
+    db_column: created_at
+    required: true
+
+indexes:
+  - fields: [bo_code, doc_id, created_at]
+    name: idx_print_runs_doc
+  - fields: [job_run_id]
+    name: idx_print_runs_job
+
+ui_view_config:
+  skip_auto_menu: true

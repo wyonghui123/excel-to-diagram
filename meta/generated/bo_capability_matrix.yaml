@@ -1,11 +1,11 @@
 # 由 meta/tools/gen_capability_matrix.py 生成，请勿手工编辑（Spec §12.4 R27）。
 # 只读生成物，不是运行期判定源；重新生成请执行 --check 之外的默认模式。
-version: 9718137e9dc5
-generated_at: '2026-11-12T05:51:10Z'
+version: fd89bc55f2a8
+generated_at: '2026-11-14T23:52:57Z'
 scan:
   schemas_dir: meta/schemas
-  yaml_scanned: 211
-  classified: 211
+  yaml_scanned: 217
+  classified: 217
   unclassified: 0
   errors: 0
   basis: 装载后对象属性；不读 category_config 模板（避免隐式能力扩散）
@@ -20,96 +20,126 @@ archetypes:
   auxiliary:
     bo_category: master_data
     bo_category_breakdown:
-      master_data: 9
+      master_data: 14
     objects:
     - annotation
+    - attachment
+    - attachment_link
     - demand_trace_graph
     - document_hu_link_view
     - hierarchies
     - party_archive
     - party_internal
+    - print_binding
+    - print_run
+    - print_template
     - task_event
     - task_run
     - task_worklog
     capabilities:
       audit:
-        enabled: 9
-        declared: 1
-        total: 9
-        coverage: 9/9
+        enabled: 14
+        declared: 3
+        total: 14
+        coverage: 14/14
       numbering:
         enabled: 0
         declared: 0
-        total: 9
-        coverage: 0/9
+        total: 14
+        coverage: 0/14
       state_machine:
         enabled: 0
         declared: 0
-        total: 9
-        coverage: 0/9
+        total: 14
+        coverage: 0/14
       posting:
         enabled: 0
         declared: 0
-        total: 9
-        coverage: 0/9
+        total: 14
+        coverage: 0/14
       soft_delete:
         enabled: 0
         declared: 0
-        total: 9
-        coverage: 0/9
+        total: 14
+        coverage: 0/14
       revision:
         enabled: 0
         declared: 0
-        total: 9
-        coverage: 0/9
+        total: 14
+        coverage: 0/14
     gaps:
       numbering:
       - annotation
+      - attachment
+      - attachment_link
       - demand_trace_graph
       - document_hu_link_view
       - hierarchies
       - party_archive
       - party_internal
+      - print_binding
+      - print_run
+      - print_template
       - task_event
       - task_run
       - task_worklog
       state_machine:
       - annotation
+      - attachment
+      - attachment_link
       - demand_trace_graph
       - document_hu_link_view
       - hierarchies
       - party_archive
       - party_internal
+      - print_binding
+      - print_run
+      - print_template
       - task_event
       - task_run
       - task_worklog
       posting:
       - annotation
+      - attachment
+      - attachment_link
       - demand_trace_graph
       - document_hu_link_view
       - hierarchies
       - party_archive
       - party_internal
+      - print_binding
+      - print_run
+      - print_template
       - task_event
       - task_run
       - task_worklog
       soft_delete:
       - annotation
+      - attachment
+      - attachment_link
       - demand_trace_graph
       - document_hu_link_view
       - hierarchies
       - party_archive
       - party_internal
+      - print_binding
+      - print_run
+      - print_template
       - task_event
       - task_run
       - task_worklog
       revision:
       - annotation
+      - attachment
+      - attachment_link
       - demand_trace_graph
       - document_hu_link_view
       - hierarchies
       - party_archive
       - party_internal
+      - print_binding
+      - print_run
+      - print_template
       - task_event
       - task_run
       - task_worklog
@@ -404,7 +434,7 @@ archetypes:
   business_document_line:
     bo_category: transactional
     bo_category_breakdown:
-      transactional: 34
+      transactional: 35
     objects:
     - change_request_line
     - customer_invoice_line
@@ -435,6 +465,7 @@ archetypes:
     - transfer_order_line
     - transfer_shipment_line
     - vendor_invoice_line
+    - vendor_invoice_schedule
     - work_definition_operation
     - work_definition_operation_output
     - work_definition_sequence
@@ -442,35 +473,35 @@ archetypes:
     - work_order_operation
     capabilities:
       audit:
-        enabled: 34
-        declared: 26
-        total: 34
-        coverage: 34/34
+        enabled: 35
+        declared: 27
+        total: 35
+        coverage: 35/35
       numbering:
         enabled: 0
         declared: 0
-        total: 34
-        coverage: 0/34
+        total: 35
+        coverage: 0/35
       state_machine:
         enabled: 2
         declared: 2
-        total: 34
-        coverage: 2/34
+        total: 35
+        coverage: 2/35
       posting:
         enabled: 0
         declared: 0
-        total: 34
-        coverage: 0/34
+        total: 35
+        coverage: 0/35
       soft_delete:
         enabled: 0
-        declared: 27
-        total: 34
-        coverage: 0/34
+        declared: 28
+        total: 35
+        coverage: 0/35
       revision:
         enabled: 0
         declared: 0
-        total: 34
-        coverage: 0/34
+        total: 35
+        coverage: 0/35
     gaps:
       numbering:
       - change_request_line
@@ -502,6 +533,7 @@ archetypes:
       - transfer_order_line
       - transfer_shipment_line
       - vendor_invoice_line
+      - vendor_invoice_schedule
       - work_definition_operation
       - work_definition_operation_output
       - work_definition_sequence
@@ -535,6 +567,7 @@ archetypes:
       - transfer_order_line
       - transfer_shipment_line
       - vendor_invoice_line
+      - vendor_invoice_schedule
       - work_definition_operation
       - work_definition_operation_output
       - work_definition_sequence
@@ -568,6 +601,7 @@ archetypes:
       - transfer_order_line
       - transfer_shipment_line
       - vendor_invoice_line
+      - vendor_invoice_schedule
       - work_definition_operation
       - work_definition_operation_output
       - work_definition_sequence
@@ -603,6 +637,7 @@ archetypes:
       - transfer_order_line
       - transfer_shipment_line
       - vendor_invoice_line
+      - vendor_invoice_schedule
       - work_definition_operation
       - work_definition_operation_output
       - work_definition_sequence
@@ -638,6 +673,7 @@ archetypes:
       - transfer_order_line
       - transfer_shipment_line
       - vendor_invoice_line
+      - vendor_invoice_schedule
       - work_definition_operation
       - work_definition_operation_output
       - work_definition_sequence

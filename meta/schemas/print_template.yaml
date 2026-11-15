@@ -1,0 +1,159 @@
+# 打印模板（版本化资源）
+# 依据：docs/specs/spec-print-platform-2026-11-15.md §4.1 / D-PR-01 / D-PR-15 / D-PR-16
+# 纪律：模板的 HTML/CSS 与变量白名单由 print_template_service 专属端点写入（发布后不可编辑，
+#       只能新建版本）；通用 CRUD 关闭，避免绕过发布校验直改 active 版本。
+id: print_template
+name: 打印模板
+table_name: print_templates
+description: 单据打印模板版本（HTML+CSS 资源；变量白名单发布时冻结；发布后只读）
+module: print
+generic_api_mode: disabled
+
+semantics:
+  meaning: 单据打印模板（版本化资源）
+  category: auxiliary
+  aliases: [打印模板, Print Template]
+
+fields:
+  - id: id
+    name: ID
+    type: integer
+    db_column: id
+    required: true
+    unique: true
+    description: 技术主键
+    semantics:
+      meaning: 自增主键
+      primary_key: true
+  - id: bo_code
+    name: 业务对象
+    type: string
+    db_column: bo_code
+    required: true
+    description: BO 元数据 id（接入点 = bo_code + header 类型）
+  - id: type_code
+    name: 单据类型
+    type: string
+    db_column: type_code
+    required: true
+    default: ''
+    description: type_definitions.code(level=header)；空串 = 该 BO 全类型共用
+  - id: code
+    name: 模板编码
+    type: string
+    db_column: code
+    required: true
+    description: 模板族编码，跨版本稳定
+  - id: name
+    name: 模板名称
+    type: string
+    db_column: name
+    required: true
+  - id: version
+    name: 版本
+    type: integer
+    db_column: version
+    required: true
+    description: 从 1 递增；发布后只能新建版本
+  - id: status
+    name: 状态
+    type: string
+    db_column: status
+    required: true
+    description: draft / active / archived / stale
+  - id: html
+    name: 模板内容
+    type: text
+    db_column: html
+    required: true
+    description: HTML 模板（{{path}} 变量，控制流仅 #if / #each）
+  - id: css
+    name: 样式
+    type: text
+    db_column: css
+    default: ''
+  - id: variables_json
+    name: 变量白名单
+    type: json
+    db_column: variables_json
+    required: true
+    description: 发布时由 BO 元数据派生的变量白名单（派生只读品，无编辑接口）
+  - id: paper_size
+    name: 纸张
+    type: string
+    db_column: paper_size
+    default: A4
+    description: 纸张规格；渲染期注入，模板内 @page 一律剥离（单一事实源）
+  - id: orientation
+    name: 方向
+    type: string
+    db_column: orientation
+    default: portrait
+    description: portrait / landscape
+  - id: margin_top
+    name: 上边距(mm)
+    type: float
+    db_column: margin_top
+    default: 10
+  - id: margin_right
+    name: 右边距(mm)
+    type: float
+    db_column: margin_right
+    default: 10
+  - id: margin_bottom
+    name: 下边距(mm)
+    type: float
+    db_column: margin_bottom
+    default: 10
+  - id: margin_left
+    name: 左边距(mm)
+    type: float
+    db_column: margin_left
+    default: 10
+  - id: scope_type
+    name: 作用域类型
+    type: string
+    db_column: scope_type
+    default: system
+    description: system / tenant / org
+  - id: scope_id
+    name: 作用域
+    type: string
+    db_column: scope_id
+  - id: effective_from
+    name: 生效起
+    type: string
+    db_column: effective_from
+  - id: effective_to
+    name: 生效止
+    type: string
+    db_column: effective_to
+  - id: created_by
+    name: 创建人
+    type: string
+    db_column: created_by
+    required: true
+  - id: created_at
+    name: 创建时间
+    type: datetime
+    db_column: created_at
+    required: true
+  - id: published_at
+    name: 发布时间
+    type: datetime
+    db_column: published_at
+  - id: archived_at
+    name: 归档时间
+    type: datetime
+    db_column: archived_at
+
+indexes:
+  - fields: [bo_code, type_code, code, version]
+    unique: true
+    name: uq_print_template_version
+  - fields: [bo_code, status]
+    name: idx_print_templates_bo_status
+
+ui_view_config:
+  # 模板管理由 M6 前端独占入口（/api/print/templates），不走 auto menu
+  skip_auto_menu: true

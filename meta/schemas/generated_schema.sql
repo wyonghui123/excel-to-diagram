@@ -1,5 +1,5 @@
 -- 自动生成的 Schema
--- 生成时间: 2026-11-14 19:10:43.865025
+-- 生成时间: 2026-11-15 07:47:26.364600
 
 -- 地址: 结构化地址库（支持对象）：国家 / 省 / 市 / 区 / 街道 / 门牌 / 邮编分列 + 格式化全文；只被引用，不承载用途 / 角色
 CREATE TABLE IF NOT EXISTS addresses (
@@ -2325,6 +2325,76 @@ CREATE TABLE IF NOT EXISTS pricing_periods (
     description TEXT,
     created_at DATETIME,
     updated_at DATETIME
+)
+
+-- 打印绑定: 单据类型 × 作用域 × 条件 → 模板（默认 + 优先级；不引入规则引擎）
+CREATE TABLE IF NOT EXISTS print_bindings (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    bo_code VARCHAR(200) NOT NULL,
+    type_code VARCHAR(200) NOT NULL DEFAULT '',
+    scope_type VARCHAR(200) DEFAULT 'system',
+    scope_id VARCHAR(200),
+    condition_json TEXT NOT NULL DEFAULT '{}',
+    priority INTEGER NOT NULL DEFAULT 100,
+    template_id INTEGER NOT NULL,
+    is_default INTEGER NOT NULL DEFAULT 0,
+    is_active INTEGER NOT NULL DEFAULT 1,
+    created_at DATETIME NOT NULL,
+    updated_at DATETIME NOT NULL
+)
+
+-- 打印记录: 一次打印 = 一条记录 + 一个归档附件；重打 = 新记录指向同一附件
+CREATE TABLE IF NOT EXISTS print_runs (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    bo_code VARCHAR(200) NOT NULL,
+    type_code VARCHAR(200) NOT NULL DEFAULT '',
+    doc_id VARCHAR(200) NOT NULL,
+    doc_no VARCHAR(200),
+    doc_rev VARCHAR(200),
+    template_id INTEGER NOT NULL,
+    template_version INTEGER NOT NULL,
+    trigger VARCHAR(200) NOT NULL,
+    is_formal INTEGER NOT NULL DEFAULT 0,
+    is_reprint INTEGER NOT NULL DEFAULT 0,
+    print_seq INTEGER NOT NULL DEFAULT 0,
+    watermark VARCHAR(200) NOT NULL DEFAULT 'NONE',
+    attachment_id INTEGER,
+    payload_hash VARCHAR(200),
+    job_run_id VARCHAR(200),
+    status VARCHAR(200) NOT NULL,
+    error_code VARCHAR(200),
+    error_message TEXT,
+    operator_id VARCHAR(200) NOT NULL,
+    operator_name VARCHAR(200) NOT NULL,
+    created_at DATETIME NOT NULL
+)
+
+-- 打印模板: 单据打印模板版本（HTML+CSS 资源；变量白名单发布时冻结；发布后只读）
+CREATE TABLE IF NOT EXISTS print_templates (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    bo_code VARCHAR(200) NOT NULL,
+    type_code VARCHAR(200) NOT NULL DEFAULT '',
+    code VARCHAR(200) NOT NULL,
+    name VARCHAR(200) NOT NULL,
+    version INTEGER NOT NULL,
+    status VARCHAR(200) NOT NULL,
+    html TEXT NOT NULL,
+    css TEXT DEFAULT '',
+    variables_json TEXT NOT NULL,
+    paper_size VARCHAR(200) DEFAULT 'A4',
+    orientation VARCHAR(200) DEFAULT 'portrait',
+    margin_top REAL DEFAULT 10,
+    margin_right REAL DEFAULT 10,
+    margin_bottom REAL DEFAULT 10,
+    margin_left REAL DEFAULT 10,
+    scope_type VARCHAR(200) DEFAULT 'system',
+    scope_id VARCHAR(200),
+    effective_from VARCHAR(200),
+    effective_to VARCHAR(200),
+    created_by VARCHAR(200) NOT NULL,
+    created_at DATETIME NOT NULL,
+    published_at DATETIME,
+    archived_at DATETIME
 )
 
 -- 过程指令: 工序的过程指令（文本指令 / 结构化操作参数，单表双形态）
@@ -5117,6 +5187,17 @@ CREATE INDEX IF NOT EXISTS idx_pricing_determinations_name ON pricing_determinat
 -- Indexes for 计价期
 CREATE UNIQUE INDEX IF NOT EXISTS idx_pricing_period_code ON pricing_periods(code)
 CREATE INDEX IF NOT EXISTS idx_pricing_periods_name ON pricing_periods(name)
+
+-- Indexes for 打印绑定
+CREATE INDEX IF NOT EXISTS idx_print_bindings_lookup ON print_bindings(bo_code, type_code, is_active, priority)
+
+-- Indexes for 打印记录
+CREATE INDEX IF NOT EXISTS idx_print_runs_doc ON print_runs(bo_code, doc_id, created_at)
+CREATE INDEX IF NOT EXISTS idx_print_runs_job ON print_runs(job_run_id)
+
+-- Indexes for 打印模板
+CREATE UNIQUE INDEX IF NOT EXISTS uq_print_template_version ON print_templates(bo_code, type_code, code, version)
+CREATE INDEX IF NOT EXISTS idx_print_templates_bo_status ON print_templates(bo_code, status)
 
 -- Indexes for 过程指令
 CREATE INDEX IF NOT EXISTS idx_process_instructions_uom_id ON process_instructions(uom_id)

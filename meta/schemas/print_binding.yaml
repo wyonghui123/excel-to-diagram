@@ -1,0 +1,94 @@
+# 打印绑定（默认 + 条件 + 优先级）
+# 依据：docs/specs/spec-print-platform-2026-11-15.md §4.2 / D-PR-11
+# 纪律：绑定写入走 print_template_service 专属端点；通用 CRUD 关闭。
+id: print_binding
+name: 打印绑定
+table_name: print_bindings
+description: 单据类型 × 作用域 × 条件 → 模板（默认 + 优先级；不引入规则引擎）
+module: print
+generic_api_mode: disabled
+
+semantics:
+  meaning: 打印模板绑定
+  category: auxiliary
+
+fields:
+  - id: id
+    name: ID
+    type: integer
+    db_column: id
+    required: true
+    unique: true
+    description: 技术主键
+    semantics:
+      meaning: 自增主键
+      primary_key: true
+  - id: bo_code
+    name: 业务对象
+    type: string
+    db_column: bo_code
+    required: true
+  - id: type_code
+    name: 单据类型
+    type: string
+    db_column: type_code
+    required: true
+    default: ''
+    description: 空串 = BO 级默认绑定
+  - id: scope_type
+    name: 作用域类型
+    type: string
+    db_column: scope_type
+    default: system
+  - id: scope_id
+    name: 作用域
+    type: string
+    db_column: scope_id
+  - id: condition_json
+    name: 匹配条件
+    type: json
+    db_column: condition_json
+    required: true
+    default: '{}'
+    description: 如 {"supplier_country":"CN"}；空对象 = 无条件
+  - id: priority
+    name: 优先级
+    type: integer
+    db_column: priority
+    required: true
+    default: 100
+    description: 小者优先
+  - id: template_id
+    name: 模板
+    type: integer
+    db_column: template_id
+    required: true
+  - id: is_default
+    name: 是否默认
+    type: integer
+    db_column: is_default
+    required: true
+    default: 0
+  - id: is_active
+    name: 是否启用
+    type: integer
+    db_column: is_active
+    required: true
+    default: 1
+  - id: created_at
+    name: 创建时间
+    type: datetime
+    db_column: created_at
+    required: true
+  - id: updated_at
+    name: 更新时间
+    type: datetime
+    db_column: updated_at
+    required: true
+
+indexes:
+  - fields: [bo_code, type_code, is_active, priority]
+    name: idx_print_bindings_lookup
+
+ui_view_config:
+  skip_auto_menu: true
