@@ -403,6 +403,36 @@ describe('TaskDetailDrawer', () => {
     expect(w.find('[data-test="notify-hint"]').text()).toContain('只读')
   })
 
+  it('notify 阶段 → 管理员也不渲染改派/加签面板', async () => {
+    const task = {
+      ...APPROVAL_TASK,
+      executor_candidates: ['u-a'],
+      executor_config: { ...APPROVAL_TASK.executor_config, action_type: 'notify' }
+    }
+    fetchTaskDetail.mockResolvedValue({ success: true, data: task })
+    fetchTaskEvents.mockResolvedValue({ success: true, data: [] })
+    const w = mountDrawer({
+      visible: true, taskId: 'T-2', currentActor: 'u-a'
+    })
+    await flushPromises()
+    expect(w.find('[data-test="reassign-panel"]').exists()).toBe(false)
+    expect(w.find('[data-test="participate-panel"]').exists()).toBe(false)
+  })
+
+  it('无策略快照 → 仍显示阶段动作徽标', async () => {
+    const task = {
+      ...APPROVAL_TASK,
+      inputs: {},
+      executor_config: { ...APPROVAL_TASK.executor_config, action_type: 'auto' }
+    }
+    fetchTaskDetail.mockResolvedValue({ success: true, data: task })
+    fetchTaskEvents.mockResolvedValue({ success: true, data: [] })
+    const w = mountDrawer({ visible: true, taskId: 'T-2' })
+    await flushPromises()
+    expect(w.find('[data-test="policy-snapshot"]').exists()).toBe(false)
+    expect(w.find('[data-test="action-type"]').text()).toContain('自动通过')
+  })
+
   it('仅知会名单用户 → 隐藏审批按钮（非候选池成员）', async () => {
     const task = {
       ...APPROVAL_TASK,

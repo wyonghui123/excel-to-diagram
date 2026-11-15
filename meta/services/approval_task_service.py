@@ -37,7 +37,8 @@ class ApprovalTaskService:
 
     def create_task(self, object_type: str, record_id: Any, *,
                     policy_snapshot: Optional[Dict[str, Any]] = None,
-                    actor: str = '') -> Optional[str]:
+                    actor: str = '',
+                    approver_selection: Optional[Any] = None) -> Optional[str]:
         """返回任务 id；不适用（未知对象 / 缺 id / 已有在途任务）返回 None。"""
         meta = get_approval_meta(object_type)
         actions = meta.get('decision_actions') or {}
@@ -61,6 +62,9 @@ class ApprovalTaskService:
         inputs = {'id': record_id, id_key: record_id}
         if policy_snapshot:
             inputs['policy_snapshot'] = policy_snapshot
+        # [P2] initiator_choice 输入通道：发起人自选名单随任务冻结（spec §9.5）
+        if approver_selection:
+            inputs['approver_selection'] = approver_selection
 
         # [M5-2/M5-4 2026-11-15] 候选池 = 取人器按当前阶段聚合解析（spec §9.5 / §9.4）：
         # 同阶段多步骤合并；auto 步骤自动通过、notify 步骤只读知会、approve 计入会签。
@@ -69,7 +73,8 @@ class ApprovalTaskService:
             policy_snapshot or {}, stage_no,
             {'data_source': self._ds, 'task_type': _task_type_of(policy_snapshot),
              'object_type': object_type, 'record_id': record_id,
-             'initiator': actor or 'system', 'policy_snapshot': policy_snapshot})
+             'initiator': actor or 'system', 'policy_snapshot': policy_snapshot,
+             'approver_selection': approver_selection})
         candidates = stage['candidates']
         notify = stage['notify']
         assignee = candidates[0] if len(candidates) == 1 else None
@@ -83,6 +88,7 @@ class ApprovalTaskService:
         # [M4-4 2026-11-15] 步骤 sla_hours 非空才开 SLA 单（默认关闭，spec §8.5）
         created_dt = datetime.now()
         sla_cfg, due_at = _resolve_sla(policy_snapshot, created_dt)
+        quorum_required = _resolve_quorum(policy_snapshot)
         sla_row = {}
         if sla_cfg:
             sla_row = {'sla': json.dumps(sla_cfg, ensure_ascii=False),
@@ -107,6 +113,8 @@ class ApprovalTaskService:
                  'completion_mode': _resolve_completion_mode(policy_snapshot),
                  # [M5-4] auto 自动通过 / notify 只读知会 / approve 人工决策
                  'action_type': stage['action'],
+                 **({'quorum_required': quorum_required}
+                    if quorum_required else {}),
                  **({'notify_candidates': notify} if notify else {}),
                  # [M5-2] 取人解释：为什么是这批人 / 为什么空池
                  'assign_source': stage['source'],
@@ -194,33 +202,59 @@ def _resolve_candidates(policy_snapshot: Optional[Dict[str, Any]]) -> list:
     return resolver.resolve(step, {}).candidates
 
 
-def _resolve_completion_mode(policy_snapshot: Optional[Dict[str, Any]]) -> str:
-    """首个步骤 approve_mode → `completion_mode`（spec §8.1；缺省 any）。"""
+def _first_stage_steps(policy_snapshot: Optional[Dict[str, Any]]) -> list:
+    """首个阶段的全部步骤（同阶段多步骤需聚合，spec §9.4）。"""
     step = _first_step(policy_snapshot)
     if not step:
-        return 'any'
-    mode = str(step.get('approve_mode') or 'any').strip().lower()
-    return mode if mode in ('any', 'all') else 'any'
+        return []
+    stage = max(_int_of(step.get('stage_no'), 1), 1)
+    return [s for s in (policy_snapshot or {}).get('steps') or []
+            if max(_int_of(s.get('stage_no'), 1), 1) == stage]
+
+
+def _resolve_completion_mode(policy_snapshot: Optional[Dict[str, Any]]) -> str:
+    """首阶段会签口径：任一步 `all` 即 `all`，否则 `any`（spec §8.1/§9.4）。"""
+    modes = [str(s.get('approve_mode') or 'any').strip().lower()
+             for s in _first_stage_steps(policy_snapshot)]
+    return 'all' if 'all' in modes else 'any'
+
+
+def _resolve_quorum(policy_snapshot: Optional[Dict[str, Any]]) -> Optional[int]:
+    """首阶段通过票数下限：`routing_json.quorum.required` 取最大值（spec §9.4）。"""
+    required = []
+    for step in _first_stage_steps(policy_snapshot):
+        routing = step.get('routing_json')
+        if isinstance(routing, str):
+            try:
+                routing = json.loads(routing)
+            except (TypeError, ValueError):
+                continue
+        quorum = routing.get('quorum') if isinstance(routing, dict) else None
+        value = _int_of(quorum.get('required'), 0) if isinstance(quorum, dict) else 0
+        if value > 0:
+            required.append(value)
+    return max(required) if required else None
 
 
 def _resolve_sla(policy_snapshot: Optional[Dict[str, Any]],
                  created_at: datetime) -> tuple:
-    """首个步骤 `sla_hours` → (任务 sla 快照, due_at)；未声明返回 (None, None)。
+    """首阶段各步骤 `sla_hours` 最小值 → (任务 sla 快照, due_at)；未声明 (None, None)。
 
     [M4-4 2026-11-15] 阈值属业务域、随任务冻结（spec §8.5）；`on_breach=None`
     即「只记录不动作」——超时改派由 `executor_config.sla_on_breach` 另行开关。
+    同阶段多步骤时取最小值，保证先到期的步骤先触发。
     """
-    steps = (policy_snapshot or {}).get('steps') or []
-    if not steps:
+    hours_list = []
+    for step in _first_stage_steps(policy_snapshot):
+        try:
+            hours = float(step.get('sla_hours'))
+        except (TypeError, ValueError):
+            continue
+        if hours > 0:
+            hours_list.append(hours)
+    if not hours_list:
         return None, None
-    step = _first_step(policy_snapshot) or {}
-    try:
-        hours = float(step.get('sla_hours'))
-    except (TypeError, ValueError):
-        return None, None
-    if hours <= 0:
-        return None, None
-    seconds = int(hours * 3600)
+    seconds = int(min(hours_list) * 3600)
     return ({'target_seconds': seconds, 'warn_at_pct': 80, 'alert_at_pct': 95,
              'grace_seconds': 0, 'on_breach': None},
             (created_at + timedelta(seconds=seconds)).isoformat(timespec='seconds'))

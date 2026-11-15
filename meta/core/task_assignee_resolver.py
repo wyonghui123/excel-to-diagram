@@ -31,8 +31,8 @@ REASON_LEVEL_EXHAUSTED = 'level_exhausted'
 REASON_UNSUPPORTED = 'unsupported_approver_type'
 REASON_NO_DATA_SOURCE = 'no_data_source'
 
-#: 汇报线默认上溯跳数（1 = 只下一级；0 = 到顶）
-DEFAULT_LEVELS = 1
+#: 汇报线默认上溯跳数（0 = 到顶；spec §9.3：`levels` 缺省/`null` 即到顶）
+DEFAULT_LEVELS = 0
 
 
 @dataclass
@@ -292,7 +292,7 @@ def _resolve_manager_chain(participant, ctx, ds) -> Resolution:
     """多级上溯：`levels` 跳 + `min_job_level` 跳级 + `top_worker_id` 哨兵。"""
     routing = _routing(participant)
     return _walk_chain(
-        ctx, ds,
+        ctx, ds, routing=routing,
         levels=_levels(routing),
         min_job_level=_int(routing.get('min_job_level')),
         top_worker_id=routing.get('top_worker_id'),
@@ -307,7 +307,7 @@ def _resolve_position_hierarchy(participant, ctx, ds) -> Resolution:
     routing = _routing(participant)
     positions = _split_ref(participant.get('approver_ref'))
     return _walk_chain(
-        ctx, ds,
+        ctx, ds, routing=routing,
         levels=_levels(routing),
         min_job_level=_int(routing.get('min_job_level')),
         top_worker_id=routing.get('top_worker_id'),
@@ -316,22 +316,55 @@ def _resolve_position_hierarchy(participant, ctx, ds) -> Resolution:
         source='position_hierarchy')
 
 
-def _walk_chain(ctx, ds, *, levels: int, min_job_level: Optional[int],
-                top_worker_id: Any, positions: Optional[List[str]],
-                include: List[str], source: str) -> Resolution:
-    """汇报线遍历：一次批量拉 employee + user，内存上溯（R14 无 N+1）。"""
+def _walk_chain(ctx, ds, *, routing: Mapping[str, Any], levels: int,
+                min_job_level: Optional[int], top_worker_id: Any,
+                positions: Optional[List[str]], include: List[str],
+                source: str) -> Resolution:
+    """汇报线遍历：一次批量拉 employee + user，内存上溯（R14 无 N+1）。
+
+    起点由 `approval_chain_of`（起始主体 employee / position / org）与
+    `start_with`（manager / self / position / 指定 user）决定，缺省沿用
+    「发起人的直属主管，一跳」。
+    """
     employees = _employee_snapshot(ds)
-    start = _initiator_employee_id(ctx, ds, employees)
     explain: List[Dict[str, Any]] = []
-    if not start:
-        return Resolution(
-            explain=[_evidence('employee', 'exists', ctx.get('initiator'),
-                               None, False)],
-            source=source, reason=REASON_MISSING_MANAGER)
+    roots, include_roots, root_reason = _chain_roots(
+        ctx, ds, employees, routing, positions, explain)
+    if not roots:
+        if not explain:
+            explain.append(_evidence('employee', 'exists',
+                                     ctx.get('initiator'), None, False))
+        return Resolution(explain=explain, source=source,
+                          reason=root_reason or REASON_MISSING_MANAGER)
 
     members: List[Mapping[str, Any]] = []
-    hops = 0
+    if include_roots:
+        members.extend(employees[str(root)] for root in roots
+                       if str(root) in employees)
     top_hit = False
+    end_reason: Optional[str] = None
+    for root in roots:
+        walked, hit, reason = _walk_up(
+            employees, root, levels=levels, min_job_level=min_job_level,
+            top_worker_id=top_worker_id, positions=positions, explain=explain)
+        members.extend(walked)
+        top_hit = top_hit or hit
+        end_reason = reason or end_reason
+
+    user_ids = [_user_id_of(employees, m.get('id')) for m in members]
+    candidates = _usernames_of(ds, user_ids)
+    candidates = _with_initiator(candidates, include, ctx)
+    reason = None if (candidates or top_hit) else (end_reason or REASON_LEVEL_EXHAUSTED)
+    return Resolution(candidates, explain, source, reason)
+
+
+def _walk_up(employees: Dict[str, Any], start: Any, *, levels: int,
+             min_job_level: Optional[int], top_worker_id: Any,
+             positions: Optional[List[str]],
+             explain: List[Dict[str, Any]]) -> tuple:
+    """自 `start` 沿 `manager_employee_id` 上溯，返回 (成员, 是否命中哨兵, 终止原因)。"""
+    members: List[Mapping[str, Any]] = []
+    hops = 0
     current = start
     end_reason: Optional[str] = None
     while True:
@@ -362,18 +395,92 @@ def _walk_chain(ctx, ds, *, levels: int, min_job_level: Optional[int],
         if keep:
             members.append(manager)
         if top_worker_id not in (None, '') and str(manager_id) == str(top_worker_id):
-            top_hit = True
-            break
+            return members, True, end_reason
         if levels > 0 and hops >= levels:
             end_reason = REASON_LEVEL_EXHAUSTED
             break
         current = manager_id
+    return members, False, end_reason
 
-    user_ids = [_user_id_of(employees, m.get('id')) for m in members]
-    candidates = _usernames_of(ds, user_ids)
-    candidates = _with_initiator(candidates, include, ctx)
-    reason = None if (candidates or top_hit) else (end_reason or REASON_LEVEL_EXHAUSTED)
-    return Resolution(candidates, explain, source, reason)
+
+#: `start_with` 关键字（其余值按「指定 user」处理，spec §9.3）
+_START_WITH_KEYWORDS = ('', 'manager', 'self', 'position')
+
+
+def _chain_roots(ctx: Mapping[str, Any], ds, employees: Dict[str, Any],
+                 routing: Mapping[str, Any], positions: Optional[List[str]],
+                 explain: List[Dict[str, Any]]) -> tuple:
+    """解析链起点：返回 (roots, 是否含起点本人, 空池原因)。"""
+    start = _initiator_employee_id(ctx, ds, employees)
+    if not start:
+        return [], False, REASON_MISSING_MANAGER
+    chain_of = str(routing.get('approval_chain_of') or 'employee').strip().lower()
+    start_with = str(routing.get('start_with') or 'manager').strip().lower()
+    roots: List[Any] = [start]
+    include_roots = False
+    reason: Optional[str] = None
+
+    if chain_of == 'org':
+        managers = _org_manager_employee_ids(ds, employees, start)
+        explain.append(_evidence('approval_chain_of', 'eq', 'org', managers,
+                                 bool(managers)))
+        if managers:
+            roots, include_roots = managers, True
+    elif chain_of == 'position':
+        # 岗位节点由该岗位持有人代表（employees.position 为自由文本，无岗位主数据）
+        explain.append(_evidence('approval_chain_of', 'eq', 'position',
+                                 (employees.get(str(start)) or {}).get('position'),
+                                 True))
+        include_roots = True
+    elif chain_of not in ('', 'employee'):
+        explain.append(_evidence('approval_chain_of', 'in',
+                                 ['employee', 'position', 'org'], chain_of, False))
+
+    if start_with == 'position' and positions:
+        roots = [eid for eid, row in employees.items()
+                 if str(row.get('position') or '') in positions]
+        include_roots = True
+        reason = None if roots else REASON_NO_MEMBER
+    elif start_with not in _START_WITH_KEYWORDS:
+        employee_id = _employee_id_of_user(ds, employees, start_with)
+        explain.append(_evidence('start_with', 'eq', start_with, employee_id,
+                                 employee_id is not None))
+        if employee_id is not None:
+            roots, include_roots = [employee_id], True
+        else:
+            roots, reason = [], REASON_MISSING_MANAGER
+    elif start_with in ('self', 'position'):
+        include_roots = True
+    return roots, include_roots, reason
+
+
+def _org_manager_employee_ids(ds, employees: Dict[str, Any],
+                              employee_id: Any) -> List[str]:
+    """`approval_chain_of='org'` 起点：发起人所在组织的负责人（`org_members.is_manager`）。"""
+    org_id = (employees.get(str(employee_id)) or {}).get('org_id')
+    if org_id in (None, ''):
+        return []
+    rows = _query(ds, 'SELECT user_id FROM org_members '
+                      'WHERE org_id = ? AND COALESCE(is_manager, 0) = 1',
+                  [org_id])
+    user_ids = {str(r.get('user_id')) for r in rows if r.get('user_id') is not None}
+    if not user_ids:
+        return []
+    return [eid for eid, row in employees.items()
+            if str(row.get('user_id')) in user_ids]
+
+
+def _employee_id_of_user(ds, employees: Dict[str, Any], username: str) -> Any:
+    """`start_with='<username>'` 起点：该用户的 employee 节点。"""
+    rows = _query(ds, 'SELECT id FROM users WHERE username = ? LIMIT 1',
+                  [username])
+    if not rows:
+        return None
+    user_id = str(rows[0].get('id'))
+    for eid, row in employees.items():
+        if str(row.get('user_id')) == user_id:
+            return eid
+    return None
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -458,11 +565,14 @@ def _routing(participant: Mapping[str, Any]) -> Dict[str, Any]:
 
 
 def _include(routing: Mapping[str, Any]) -> List[str]:
+    """`include` 节点：`requester`/`self` 计为候选人；`skip_empty` 是遍历语义
+    （过滤不阻塞上溯，已由 `_walk_up` 天然满足），此处只透传。"""
     raw = routing.get('include')
     return [str(x).strip().lower() for x in _split_ref(raw)]
 
 
 def _levels(routing: Mapping[str, Any]) -> int:
+    """`levels`：`N` 上溯 N 跳；`0`/`null`/缺省 = 到顶（spec §9.3）。"""
     value = routing.get('levels')
     if value in (None, ''):
         return DEFAULT_LEVELS

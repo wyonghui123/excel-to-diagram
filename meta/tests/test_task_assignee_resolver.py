@@ -31,7 +31,8 @@ CREATE TABLE user_permission_sets (
 CREATE TABLE orgs (
     id INTEGER PRIMARY KEY, code TEXT, parent_id INTEGER, status TEXT DEFAULT 'active'
 );
-CREATE TABLE org_members (id INTEGER PRIMARY KEY, org_id INTEGER, user_id INTEGER);
+CREATE TABLE org_members (id INTEGER PRIMARY KEY, org_id INTEGER, user_id INTEGER,
+    is_manager INTEGER DEFAULT 0);
 CREATE TABLE employees (
     id INTEGER PRIMARY KEY, user_id INTEGER, manager_employee_id INTEGER,
     job_grade TEXT, position TEXT, org_id INTEGER, status TEXT DEFAULT 'active'
@@ -89,8 +90,9 @@ def _seed(connection):
         'INSERT INTO orgs (id, code, parent_id) VALUES (?, ?, ?)',
         [(1, 'HQ', None), (2, 'SALES', 1), (3, 'SALES_EAST', 2), (4, 'HR', 1)])
     connection.executemany(
-        'INSERT INTO org_members (id, org_id, user_id) VALUES (?, ?, ?)',
-        [(1, 1, 1), (2, 2, 2), (3, 3, 3), (4, 4, 4)])
+        'INSERT INTO org_members (id, org_id, user_id, is_manager) '
+        'VALUES (?, ?, ?, ?)',
+        [(1, 1, 1, 1), (2, 2, 2, 0), (3, 3, 3, 0), (4, 4, 4, 0)])
     connection.executemany(
         'INSERT INTO permission_sets (id, code) VALUES (?, ?)',
         [(10, 'APPROVER'), (11, 'MANAGER')])
@@ -238,6 +240,46 @@ def test_position_hierarchy_keeps_matched_position(ds):
     assert result.candidates == ['bob']
 
 
+# ───────────────────────── 链起点（start_with / approval_chain_of） ─────────────────────────
+
+def test_manager_chain_start_with_self(ds):
+    result = resolver.resolve(
+        _step('manager_chain', None, {'levels': 0, 'start_with': 'self'}),
+        _ctx(ds))
+    assert result.candidates == ['alice', 'bob', 'carol', 'dave']
+
+
+def test_manager_chain_start_with_named_user(ds):
+    result = resolver.resolve(
+        _step('manager_chain', None, {'levels': 0, 'start_with': 'carol'}),
+        _ctx(ds))
+    assert result.candidates == ['carol', 'dave']
+
+
+def test_manager_chain_start_with_unknown_user_reports_missing(ds):
+    result = resolver.resolve(
+        _step('manager_chain', None, {'levels': 0, 'start_with': 'nobody'}),
+        _ctx(ds))
+    assert result.candidates == []
+    assert result.reason == resolver.REASON_MISSING_MANAGER
+
+
+def test_manager_chain_approval_chain_of_org(ds):
+    """从发起人所在组织的负责人（org_members.is_manager=1）起链。"""
+    result = resolver.resolve(
+        _step('manager_chain', None, {'levels': 0, 'approval_chain_of': 'org'}),
+        _ctx(ds))
+    assert result.candidates == ['alice', 'bob', 'carol', 'dave']
+
+
+def test_position_hierarchy_start_with_position(ds):
+    """起点换成该岗位的全部持有人（含本人），再上溯。"""
+    result = resolver.resolve(
+        _step('position_hierarchy', 'Buyer', {'levels': 0, 'start_with': 'position'}),
+        _ctx(ds))
+    assert result.candidates == ['bob', 'erin']
+
+
 # ───────────────────────── 表达式 / 自选 ─────────────────────────
 
 def test_expression_uses_rule_predicate(ds):
@@ -319,4 +361,27 @@ def test_create_task_empty_pool_records_reason():
         [task_id]).fetchone()
     assert json.loads(row[0]) == []
     assert json.loads(row[1])['assign_reason'] == resolver.REASON_NO_SUCH_ROLE
+    connection.close()
+
+
+def test_create_task_writes_stage_quorum_and_completion_mode():
+    """首阶段会签聚合 + quorum 落 executor_config（spec §9.4）。"""
+    connection = _build_task_db()
+    service = ApprovalTaskService(_DS(connection))
+    snapshot = {
+        'policy_code': 'PO_QUORUM', 'task_type': 'approval',
+        'steps': [{'step_no': 1, 'stage_no': 1, 'approver_type': 'role',
+                   'approver_ref': 'APPROVER', 'approve_mode': 'all',
+                   'action_type': 'approve',
+                   'routing_json': json.dumps({'quorum': {'required': 2}}),
+                   'sla_hours': None, 'min_amount': None, 'max_amount': None}],
+    }
+    task_id = service.create_task('purchase_order', 1,
+                                  policy_snapshot=snapshot, actor='alice')
+    assert task_id
+    row = connection.execute(
+        'SELECT executor_config FROM tasks WHERE id = ?', [task_id]).fetchone()
+    config = json.loads(row[0])
+    assert config['completion_mode'] == 'all'
+    assert config['quorum_required'] == 2
     connection.close()

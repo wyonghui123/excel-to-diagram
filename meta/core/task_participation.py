@@ -65,7 +65,7 @@ def _build_participation_meta() -> MetaObject:
         _f("participant", FieldType.STRING, required=True,
            description="参与人（用户 id）"),
         _f("role", FieldType.STRING, required=True, default="required",
-           description="required / added / transferred_in"),
+           description="required / added / transferred_in / notify（只读知会）"),
         _f("outcome", FieldType.STRING, required=True, default="pending",
            description="pending / accepted / rejected / skipped / transferred"),
         _f("comment", FieldType.TEXT, description="决策意见"),

@@ -26,6 +26,7 @@ from meta.core.decision_effect import (
 from meta.core.task_delegation import active_delegators_for, delegation_tables_exist
 from meta.core.task_event_schema import record_worklog
 from meta.core.task_participation import (
+    NOTIFY_ROLE,
     PARTICIPATION_TABLE,
     ParticipationError,
     VOTING_ROLES,
@@ -101,6 +102,26 @@ def completion_mode(task: Dict[str, Any]) -> str:
     mode = str(_read_config(task).get("completion_mode") or DEFAULT_COMPLETION_MODE)
     mode = mode.strip().lower()
     return mode if mode in COMPLETION_MODES else DEFAULT_COMPLETION_MODE
+
+
+def quorum_required(task: Dict[str, Any]) -> Optional[int]:
+    """通过票数下限（`executor_config.quorum_required`，spec §9.4）；无声明返回 None。"""
+    raw = _read_config(task).get("quorum_required")
+    try:
+        required = int(str(raw).strip())
+    except (TypeError, ValueError):
+        return None
+    return required if required > 0 else None
+
+
+def _accepted_votes(rows: List[Dict[str, Any]], candidates: List[str]) -> int:
+    """当前候选池内的「通过」票数（每人取最新一行，旧阶段行不计）。"""
+    latest: Dict[str, Dict[str, Any]] = {}
+    for row in rows:
+        latest[row["participant"]] = row
+    pool = set(candidates)
+    return sum(1 for name, row in latest.items()
+               if name in pool and row["outcome"] == "accepted")
 
 
 def _read_candidates(task: Dict[str, Any]) -> List[str]:
@@ -250,9 +271,13 @@ def participate(data_source, task_id: str, *, actor: str,
         raise ParticipationPermissionError("participant 不能为空")
 
     rows = list_participations(data_source, task_id)
-    admitted = admin or any(row["participant"] == actor for row in rows)
+    # [P0] notify 只读：知会行不计准入，不能加签
+    voting_rows = [row for row in rows if row["role"] in VOTING_ROLES]
+    admitted = admin or any(row["participant"] == actor for row in voting_rows)
     if not admitted:
         admitted = bool(_delegators(data_source, actor, task, now=now))
+    if not admitted and any(row["participant"] == actor for row in rows):
+        raise ParticipationPermissionError("知会人只读，不能加签")
     if not admitted:
         raise ParticipationPermissionError("无该任务准入，不能加签")
 
@@ -318,6 +343,10 @@ def decide_with_participation(data_source, task_id: str, *, decision: str,
         # 管理员不进归并：沿用协议短路（admin 逃生口，与 D-AP-06 一致）
         return decide_and_apply(data_source, str(task_id), **legacy)
     else:
+        # [P0] notify 只读：知会人不是投票参与人
+        if any(row["participant"] == actor and row["role"] == NOTIFY_ROLE
+               for row in rows):
+            raise ParticipationConflictError("知会人只读，不能投票")
         for delegator in _delegators(data_source, actor, task, now=now):
             if _last_pending(rows, delegator) is not None:
                 targets.append((delegator, delegator))
@@ -332,6 +361,7 @@ def decide_with_participation(data_source, task_id: str, *, decision: str,
 
     ts = now or _now_iso()
     mode = completion_mode(task)
+    required = quorum_required(task)
     with data_source.transaction():
         for participant, on_behalf in targets:
             try:
@@ -347,17 +377,29 @@ def decide_with_participation(data_source, task_id: str, *, decision: str,
             skip_other_pending(data_source, task_id, now=ts)
 
         remaining = pending_participants(data_source, task_id)
+        # [P1] quorum：有下限时按票数判定；否则按 approve_mode 结算（spec §9.4）
+        if required:
+            met = _accepted_votes(
+                list_participations(data_source, task_id),
+                _read_candidates(task)) >= required
+        else:
+            met = not (mode == "all" and remaining)
         advanced: Optional[Dict[str, Any]] = None
-        if decision == "approve" and not (mode == "all" and remaining):
+        if decision == "approve" and met and remaining and (mode == "all" or required):
+            # 阶段已通过但仍有未投票者：一并作废，避免残留待办
+            skip_other_pending(data_source, task_id, roles=VOTING_ROLES, now=ts)
+        if decision == "approve" and met:
             # [M5-3] 本阶段已通过：有下一阶段则原地推进（不落终态、不调 BO）
             advanced = advance_stage(data_source, task, actor=actor, now=ts)
-        if decision == "approve" and mode == "all" and remaining:
+        if decision == "approve" and not met:
             outcome: Dict[str, Any] = {
                 "status": "partially_approved",
                 "task_status": task["status"],
                 "decision": decision,
                 "remaining": remaining,
             }
+            if required:
+                outcome["quorum_required"] = required
         elif advanced is not None:
             outcome = advanced
         elif is_effect_task:

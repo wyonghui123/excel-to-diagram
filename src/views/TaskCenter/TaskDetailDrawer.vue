@@ -145,6 +145,13 @@
       <div v-if="isApproval" data-test="decision-panel" class="tdd-decision">
         <h4 class="tdd-section">审批</h4>
 
+        <!-- [M5-5] 阶段动作三态：approve 人工决策、auto 自动通过、notify 只读知会（无快照也显示） -->
+        <div class="tdd-policy-head">
+          <span data-test="action-type" class="tdd-chip" :class="`tdd-chip--${actionTypeTone}`">
+            {{ actionTypeLabel }}
+          </span>
+        </div>
+
         <div v-if="policySnapshot" class="tdd-policy" data-test="policy-snapshot">
           <div class="tdd-policy-head">
             <span class="tdd-chip tdd-chip--info">
@@ -154,10 +161,6 @@
               v{{ policySnapshot.policy_version }}
             </span>
             <span v-if="policySnapshot.hit_policy === false" class="tdd-chip tdd-chip--warning">未命中策略</span>
-            <!-- [M5-5] 阶段动作三态：approve 人工决策、auto 自动通过、notify 只读知会 -->
-            <span data-test="action-type" class="tdd-chip" :class="`tdd-chip--${actionTypeTone}`">
-              {{ actionTypeLabel }}
-            </span>
           </div>
 
           <!-- [M5-5] 取人依据与空池原因（executor_config 由取人器写入） -->
@@ -310,12 +313,14 @@ const completionModeLabel = computed(() => (
 ))
 
 const TERMINAL_STATUSES = ['done', 'failed', 'cancelled', 'skipped', 'dead']
-const canReassign = computed(() => (
-  canReassignTask(task.value, props.currentActor, { isAdmin: authStore.isAdmin })
-))
+const canReassign = computed(() => {
+  if (isNotifyOnly.value) return false
+  return canReassignTask(task.value, props.currentActor, { isAdmin: authStore.isAdmin })
+})
 const canParticipate = computed(() => {
   const t = task.value
   if (!t || !props.currentActor || TERMINAL_STATUSES.includes(t.status)) return false
+  if (isNotifyOnly.value) return false
   return authStore.isAdmin || t.executor_assignee === props.currentActor ||
     candidates.value.includes(props.currentActor)
 })

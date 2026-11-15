@@ -78,11 +78,40 @@ def _stage_steps(snapshot: Dict[str, Any], stage: int) -> List[Dict[str, Any]]:
     return [s for s in (snapshot.get('steps') or []) if _stage_of(s) == stage]
 
 
-def _first_step(snapshot: Dict[str, Any], stage: int) -> Optional[Dict[str, Any]]:
-    steps = _stage_steps(snapshot, stage)
-    if not steps:
+def _stage_completion_mode(snapshot: Dict[str, Any], stage: int) -> str:
+    """阶段会签口径：任一步 `all` 即 `all`，否则 `any`（spec §9.4）。"""
+    modes = [str(s.get('approve_mode') or 'any').strip().lower()
+             for s in _stage_steps(snapshot, stage)]
+    return 'all' if 'all' in modes else 'any'
+
+
+def _stage_sla_hours(snapshot: Dict[str, Any], stage: int) -> Optional[int]:
+    """阶段 SLA：取该阶段各步骤 `sla_hours` 的最小值（先到先算）。"""
+    hours = [_int(s.get('sla_hours'), 0) for s in _stage_steps(snapshot, stage)]
+    hours = [value for value in hours if value > 0]
+    return min(hours) if hours else None
+
+
+def _stage_quorum(snapshot: Dict[str, Any], stage: int) -> Optional[int]:
+    """阶段通过票数下限：`routing_json.quorum.required` 取最大值（spec §9.4）。"""
+    required = []
+    for step in _stage_steps(snapshot, stage):
+        routing = _load_json(step.get('routing_json'), {})
+        if not isinstance(routing, dict):
+            continue
+        quorum = routing.get('quorum')
+        value = _int(quorum.get('required')) if isinstance(quorum, dict) else None
+        if value and value > 0:
+            required.append(value)
+    return max(required) if required else None
+
+
+def _sla_snapshot(hours: Optional[int]) -> Optional[Dict[str, Any]]:
+    """任务 `sla` 快照（与审批建任务同构，spec §8.5）。"""
+    if not hours or hours <= 0:
         return None
-    return sorted(steps, key=lambda s: _int(s.get('step_no'), 0))[0]
+    return {'target_seconds': int(hours * 3600), 'warn_at_pct': 80,
+            'alert_at_pct': 95, 'grace_seconds': 0, 'on_breach': None}
 
 
 #: [M5-4] 步骤动作三态（定义层 approval_policy_steps.action_type）
@@ -241,24 +270,28 @@ def _advance_once(data_source, task: Dict[str, Any], *,
     if target is None:
         return None
 
-    step = _first_step(snapshot, target)
     resolution = resolve_stage(snapshot, target,
                                _stage_context(data_source, task, snapshot, actor))
 
     ts = now or datetime.now().isoformat()
     start = datetime.fromisoformat(ts) if isinstance(ts, str) else ts
-    hours = _int((step or {}).get('sla_hours'), 0) or None
+    hours = _stage_sla_hours(snapshot, target)
     due = _due_at(start, hours)
 
     config = _load_json(task.get('executor_config'), {})
     if not isinstance(config, dict):
         config = {}
     config.update({
-        'completion_mode': _completion_mode(step),
+        'completion_mode': _stage_completion_mode(snapshot, target),
         'action_type': resolution['action'],
         'assign_source': resolution['source'],
         'assign_explain': resolution['explain'],
     })
+    quorum = _stage_quorum(snapshot, target)
+    if quorum:
+        config['quorum_required'] = quorum
+    else:
+        config.pop('quorum_required', None)
     if resolution['notify']:
         config['notify_candidates'] = resolution['notify']
     else:
@@ -279,13 +312,23 @@ def _advance_once(data_source, task: Dict[str, Any], *,
         columns['stage_no'] = target
     if _has_column(data_source, 'tasks', 'executor_assignee'):
         columns['executor_assignee'] = candidates[0] if len(candidates) == 1 else None
-    if due and _has_column(data_source, 'tasks', 'due_at'):
+    if _has_column(data_source, 'tasks', 'due_at'):
         columns['due_at'] = due
+    if _has_column(data_source, 'tasks', 'sla'):
+        columns['sla'] = (json.dumps(_sla_snapshot(hours), ensure_ascii=False)
+                          if hours else None)
 
     assignments = ', '.join('%s = ?' % k for k in columns)
-    data_source.execute(
-        'UPDATE tasks SET %s WHERE id = ?' % assignments,
-        list(columns.values()) + [task_id])
+    sql = 'UPDATE tasks SET %s WHERE id = ?' % assignments
+    params: List[Any] = list(columns.values()) + [task_id]
+    # [P0] CAS：只推进仍停留在 current 阶段的任务，避免并发双签把阶段连跳
+    if 'stage_no' in columns:
+        sql += ' AND COALESCE(stage_no, 1) = ?'
+        params.append(current)
+    cursor = data_source.execute(sql, params)
+    if getattr(cursor, 'rowcount', None) == 0:
+        logger.info('[TaskStage] 阶段已被并发推进，跳过：%s', task_id)
+        return None
 
     # 参与流水：旧阶段投票待办作废（知会行保留只读）→ 新阶段重新种人
     try:
@@ -397,6 +440,3 @@ def advance_stage(data_source, task: Dict[str, Any], *,
     return _settle_from(data_source, reloaded, actor=actor, now=now) or result
 
 
-def _completion_mode(step: Optional[Dict[str, Any]]) -> str:
-    mode = str((step or {}).get('approve_mode') or 'any').strip().lower()
-    return mode if mode in ('any', 'all') else 'any'

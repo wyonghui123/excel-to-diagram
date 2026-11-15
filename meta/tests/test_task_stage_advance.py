@@ -141,3 +141,73 @@ def test_empty_next_stage_pool_keeps_stage_with_reason(ds):
     assert result['status'] == 'stage_advanced'
     assert result['candidates'] == []
     assert result['assign_reason'] == 'no_member'
+
+
+def _multi_snapshot(steps):
+    """steps = [(step_no, stage_no, ref, hours, approve_mode)]"""
+    return {'policy_code': 'PO_MULTI_STAGE', 'task_type': 'approval',
+            'steps': [{'step_no': step_no, 'stage_no': stage_no,
+                       'approver_type': 'user', 'approver_ref': ref,
+                       'approve_mode': mode, 'action_type': 'approve',
+                       'routing_json': None, 'sla_hours': hours,
+                       'min_amount': None, 'max_amount': None}
+                      for step_no, stage_no, ref, hours, mode in steps]}
+
+
+def test_stage_sla_uses_min_hours_across_steps(ds):
+    """阶段 SLA = 同阶段各步 sla_hours 最小值（spec §9.4 阶段聚合）。"""
+    snapshot = _multi_snapshot([
+        (1, 1, 'alice', None, 'any'),
+        (2, 2, 'bob', 48, 'any'),
+        (3, 2, 'carol', 12, 'any'),
+    ])
+    _seed_task(ds, snapshot)
+
+    result = advance_stage(ds, ds.query('SELECT * FROM tasks WHERE id = ?',
+                                        ['T-1'])[0], actor='alice', now=T0)
+
+    assert result['status'] == 'stage_advanced'
+    sla = ds.query("SELECT target_seconds, due_at FROM task_slas "
+                   "WHERE task_id = ? AND sla_key = 'stage-2'", ['T-1'])[0]
+    assert sla['target_seconds'] == 12 * 3600
+    assert sla['due_at'] == '2026-11-15T21:00:00'
+
+
+def test_stage_completion_mode_all_if_any_step_all(ds):
+    """阶段会签口径：任一步 all ⇒ 整阶段 all。"""
+    snapshot = _multi_snapshot([
+        (1, 1, 'alice', None, 'any'),
+        (2, 2, 'bob', None, 'any'),
+        (3, 2, 'carol', None, 'all'),
+    ])
+    _seed_task(ds, snapshot)
+
+    advance_stage(ds, ds.query('SELECT * FROM tasks WHERE id = ?', ['T-1'])[0],
+                  actor='alice', now=T0)
+
+    row = ds.query('SELECT executor_config FROM tasks WHERE id = ?',
+                   ['T-1'])[0]
+    assert json.loads(row['executor_config'])['completion_mode'] == 'all'
+
+
+def test_advance_cas_skips_when_stage_moved(ds, monkeypatch):
+    """CAS：取人期间阶段已被并发推进 ⇒ 放弃本次 UPDATE（返回 None）。"""
+    snapshot = _multi_snapshot([
+        (1, 1, 'alice', None, 'any'),
+        (2, 2, 'bob', None, 'any'),
+        (3, 3, 'carol', None, 'any'),
+    ])
+    _seed_task(ds, snapshot)
+    loaded = ds.query('SELECT * FROM tasks WHERE id = ?', ['T-1'])[0]
+
+    def _resolve_after_concurrent_move(snapshot_arg, stage_arg, ctx):
+        ds.execute('UPDATE tasks SET stage_no = 2 WHERE id = ?', ['T-1'])
+        return {'action': 'approve', 'candidates': ['bob'], 'notify': [],
+                'explain': [], 'reason': None, 'source': '', 'ctx': ctx}
+
+    monkeypatch.setattr('meta.services.task_stage.resolve_stage',
+                        _resolve_after_concurrent_move)
+
+    assert advance_stage(ds, loaded, actor='alice', now=T0) is None
+    row = ds.query('SELECT stage_no FROM tasks WHERE id = ?', ['T-1'])[0]
+    assert row['stage_no'] == 2     # 未被二次推进到 3

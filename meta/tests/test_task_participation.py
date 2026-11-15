@@ -84,8 +84,10 @@ def _ok_handler(new_status="approved", calls=None):
 
 def _task(ds, *, task_id="T-1", type_="approval", status="waiting_approval",
           mode="any", participants=None, assignee=None, created_by="u-sub",
-          with_actions=True, app_id="wms"):
+          with_actions=True, app_id="wms", extra_config=None):
     config = {"completion_mode": mode}
+    if extra_config:
+        config.update(extra_config)
     if with_actions:
         config["decision_actions"] = {
             "approve": "demo.approve", "reject": "demo.reject"}
@@ -342,3 +344,56 @@ class TestDelegatedVote:
             decide_with_participation(
                 ds, "T-2", decision="approve", actor="u9",
                 reviewer_permission=True, now="2026-11-15T10:00:00")
+
+
+class TestQuorum:
+    """TC-PART-014 quorum：N 中 M 通过（spec §9.4）"""
+
+    def test_TC_PART_014_quorum达标即结算(self, ds, registry):
+        calls = []
+        _register(registry, "demo.approve", _ok_handler(calls=calls))
+        _register(registry, "demo.reject", _ok_handler("rejected"))
+        _task(ds, task_id="T-1", mode="all", participants=["u1", "u2", "u3"],
+              extra_config={"quorum_required": 2})
+
+        first = decide_with_participation(
+            ds, "T-1", decision="approve", actor="u1",
+            reviewer_permission=True, now=NOW)
+        assert first["status"] == "partially_approved"
+        assert first["remaining"] == ["u2", "u3"]
+        assert first["quorum_required"] == 2
+        assert calls == []                                   # 未达下限不调 BO
+
+        second = decide_with_participation(
+            ds, "T-1", decision="approve", actor="u2",
+            reviewer_permission=True, now=NOW)
+        assert second["status"] == "completed"
+        assert len(calls) == 1
+        parts = _parts(ds)
+        assert parts["u1"]["outcome"] == "accepted"
+        assert parts["u2"]["outcome"] == "accepted"
+        assert parts["u3"]["outcome"] == "skipped"           # 达标后未投票者作废
+
+
+class TestNotifyReadOnly:
+    """TC-PART-015~016 知会人只读（spec §9.4 / M5-4）"""
+
+    def _seed_notify(self, ds):
+        from meta.core.task_participation import seed_participants
+        _task(ds, task_id="T-1", participants=["u1"])
+        with ds.transaction():
+            seed_participants(ds, "T-1", ["u2"], role="notify", created_by="u-sub")
+
+    def test_TC_PART_015_知会人不能加签(self, ds):
+        self._seed_notify(ds)
+        with pytest.raises(ParticipationPermissionError, match="只读"):
+            participate(ds, "T-1", actor="u2")
+
+    def test_TC_PART_016_知会人不能投票(self, ds, registry):
+        _register(registry, "demo.approve", _ok_handler())
+        _register(registry, "demo.reject", _ok_handler("rejected"))
+        self._seed_notify(ds)
+        with pytest.raises(ParticipationConflictError, match="只读"):
+            decide_with_participation(
+                ds, "T-1", decision="approve", actor="u2",
+                reviewer_permission=True, now=NOW)

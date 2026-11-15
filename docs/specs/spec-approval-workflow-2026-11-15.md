@@ -681,7 +681,9 @@ POST /tasks/<id>/decision
 **枚举扩展（零 ALTER，列本身无 CHECK 约束）**：
 - `approver_type`：`user` / `role` / `org` / `position`（现有）＋ `group` / `manager` / `manager_chain` / `position_hierarchy` / `job_level` / `expression` / `initiator_choice`（发起人自选）。
 - `approve_mode`：`any`（= first responder wins）/ `all`（= consensus）＋ `serial`（串行会签，按 `step_no` 逐个签）。**不新增 `voting` 列**——避免 `approve_mode` 与 `voting` 双真源。
-- `routing_json.quorum`（可选，P：Camunda `completionCondition`）：N 中 M 通过，如 `{"required": 2}`；缺省时 `any`=1、`all`=全部，与现状等价。
+  - **阶段聚合口径**：同一 `stage_no` 内任一步 `approve_mode='all'` ⇒ 整个阶段按 `all` 结算，否则 `any`（`task_stage` / `approval_task_service` 同一规则）。
+  - **`serial` 本轮未实现**：`completion_mode` 仅消费 `any` / `all`；按 `step_no` 逐个签需要引擎级调度（一次只暴露一个待办），留待后续迭代，当前传入 `serial` 按 `any` 处理。
+- `routing_json.quorum`（可选，P：Camunda `completionCondition`）：N 中 M 通过，如 `{"required": 2}`；缺省时 `any`=1、`all`=全部，与现状等价。**已实现**：建任务 / 阶段推进时把同阶段各步最大值写入 `executor_config.quorum_required`；`decide_with_participation` 以「当前候选池内通过票数 ≥ required」判定是否 settle（未达 ⇒ `partially_approved` 并回传 `quorum_required`）。
 
 **索引变更**：`uidx_approval_policy_step` 由 `(policy_id, step_no)` 改为 `(policy_id, stage_no, step_no)`（[v178 L108-110](file:///d:/filework/excel-to-diagram/meta/migrations/v178__approval_rule_model.py#L108-L110)）。现有数据 `stage_no=1`，新旧唯一约束等价，无数据冲突。
 
@@ -711,7 +713,9 @@ ctx = {task_type, object_type, record: Mapping, initiator, org_id, employee_id}
 
 **约束**：
 1. **输出 `explain` 与 `rule_predicate` 同构**（`field/op/expected/actual/passed`）→ 前端可直接展示「为什么是这个人 / 为什么一个人都没有」。
-2. **空池不再静默返回 `[]`**，必须带原因（`no_member` / `level_exhausted` / `missing_manager` / `no_such_role`），写入 `executor_config.assign_explain`。
+2. **空池不再静默返回 `[]`**，必须带原因，写入 `executor_config` **双键**（两者互补，不互相替代）：
+   - `assign_explain`：判定链数组（`field / op / expected / actual / passed / step_no`，与 §9.5 约束 1 同构），回答「哪一步、筛掉了谁」；
+   - `assign_reason`：枚举单值（`no_member` / `level_exhausted` / `missing_manager` / `no_such_role` / `unsupported_approver_type` / `no_data_source`），回答「为什么一个都没有」，供前端一句话说明。
 3. `approval_task_service._derive_candidates` 由「只认 user」改为调用 resolver；调用点唯一。
 4. **权限不替代、也不被替代**（D-AP-06 不变）：resolver 回答「可能是谁」，`{bo}:approve` / `task:handle` 回答「能不能做」。
 5. **批量查询**：一次拉 `employee`（按 org/职级）后内存上溯，禁止逐人递归查询（R14）。
@@ -745,10 +749,11 @@ ctx = {task_type, object_type, record: Mapping, initiator, org_id, employee_id}
 | 阶段 | 内容 | 验收 |
 |---|---|---|
 | ✅ M5-1 | v278 迁移：定义层 4 列（`approval_policies.task_type`；`approval_policy_steps.stage_no / action_type / routing_json`）+ `tasks.stage_no`（`task.yaml`）+ 唯一索引重建 + 快照同步 + 枚举校验 | `test_g7_task_domain_meta_migration.py` 绿；25 例 `document_approval*` 全绿 |
-| ✅ M5-2 | resolver 注册表 + `_derive_candidates` 切换 + 空池 explain | `meta/tests/test_task_assignee_resolver.py` 24 passed（11 算子 + 空池 + 无 N+1） |
-| ✅ M5-3 | 阶段推进：决策后 `stage_no+1`、重派生候选人、重开 SLA | `test_task_stage_advance.py` 5 passed（两阶段：候选人换人 / `stage_no=2` / SLA 新单 `stage-N`） |
+| ✅ M5-2 | resolver 注册表 + `_derive_candidates` 切换 + 空池 explain | `meta/tests/test_task_assignee_resolver.py` 30 passed（11 算子 + 空池 + 无 N+1 + `start_with=self/指定用户` / `approval_chain_of=org` / 岗位起点 / 首阶段 quorum 落配置） |
+| ✅ M5-3 | 阶段推进：决策后 `stage_no+1`、重派生候选人、重开 SLA | `test_task_stage_advance.py` 8 passed（两阶段：候选人换人 / `stage_no=2` / SLA 新单 `stage-N` / 阶段 SLA 取各步最小值 / 会签口径聚合 / CAS 防并发连跳） |
 | ✅ M5-4 | `action_type` = `auto` / `notify` | `test_task_action_type.py` 8 passed（auto 不建人工待办直接推进；notify 只读、投票被拒、不计会签分母） |
-| ✅ M5-5 | 前端：阶段进度（`阶段 2/3`）+ 取人解释 + 空池原因 | `TaskDetailDrawer.spec.js` 24 passed（阶段进度 / assign_explain / 空池中文原因 / auto·notify 徽标 / 知会隐藏按钮）；`npm run build` 通过；详情接口回传 `stage_no` 并有 `test_task_inbox.py` 断言 |
+| ✅ M5-5 | 前端：阶段进度（`阶段 2/3`）+ 取人解释 + 空池原因 | `TaskDetailDrawer.spec.js` 26 passed（阶段进度 / assign_explain / 空池中文原因 / auto·notify 徽标 / 知会隐藏按钮 / notify 隐藏改派加签 / 无快照仍显示动作徽标）；`npm run build` 通过；详情接口回传 `stage_no` 并有 `test_task_inbox.py` 断言 |
+| ✅ M5-fix | 审计补丁：阶段聚合（SLA min / 任一步 `all` 即 `all`）+ CAS 防连跳 + `quorum_required` 结算分母 + notify 前后端全只读 + resolver `levels` 缺省到顶 / `start_with` / `approval_chain_of` + 空池双键 `assign_explain`/`assign_reason` | `test_task_stage_advance.py` 8 / `test_task_participation.py` 16 / `test_task_assignee_resolver.py` 30 / `test_task_action_type.py` + `test_task_inbox.py` + `test_task_decision_api.py` 28 全绿；关联回归 147 passed；`TaskDetailDrawer.spec.js` 26 passed |
 
 **风险**
 
