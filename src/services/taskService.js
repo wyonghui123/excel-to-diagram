@@ -148,6 +148,83 @@ function _qs(params) {
 }
 
 // ============================================================================
+// 3.6 纯函数 — M4 通用能力（参与进度 / 改派准入 / SLA 倒计时 / 委托表单）
+// ============================================================================
+
+const TERMINAL_STATUSES = ['done', 'failed', 'cancelled', 'skipped', 'dead']
+export const DELEGATION_SCOPES = ['any', 'app', 'type', 'doc_ref_type']
+
+/** 参与进度响应归一（失败/空兜底，不抛）。 */
+export function normalizeParticipations(res) {
+  const empty = { participants: [], counts: {}, remaining: [], completionMode: 'any' }
+  if (!res || res.success !== true || !res.data) return empty
+  const d = res.data
+  return {
+    participants: Array.isArray(d.participants) ? d.participants : [],
+    counts: d.counts && typeof d.counts === 'object' ? d.counts : {},
+    remaining: Array.isArray(d.remaining) ? d.remaining : [],
+    completionMode: d.completion_mode || 'any'
+  }
+}
+
+/** 改派动作可见性（服务端仍裁决；前端只做「无权限不渲染」）。 */
+export function canReassignTask(task, actor, { isAdmin = false } = {}) {
+  if (!task || !actor) return false
+  if (TERMINAL_STATUSES.includes(task.status)) return false
+  if (isAdmin) return true
+  if (task.executor_assignee === actor) return true
+  const c = task.executor_candidates
+  const list = Array.isArray(c)
+    ? c
+    : (c && typeof c === 'object' ? [...(c.users || []), ...(c.agents || []), ...(c.groups || [])] : [])
+  return list.includes(actor)
+}
+
+/**
+ * SLA 倒计时（纯函数）：due_at − now。
+ * @returns {{overdue:boolean, ms:number, label:string}|null}
+ */
+export function formatSlaRemaining(dueAt, now = Date.now()) {
+  if (!dueAt) return null
+  const due = new Date(dueAt).getTime()
+  const base = now instanceof Date ? now.getTime() : Number(now)
+  if (!Number.isFinite(due) || !Number.isFinite(base)) return null
+  const diff = due - base
+  const overdue = diff < 0
+  const abs = Math.abs(diff)
+  const totalMinutes = Math.floor(abs / 60000)
+  const days = Math.floor(totalMinutes / 1440)
+  const hours = Math.floor((totalMinutes % 1440) / 60)
+  const minutes = totalMinutes % 60
+  let span
+  if (days > 0) span = `${days}d ${hours}h`
+  else if (hours > 0) span = `${hours}h ${minutes}m`
+  else span = `${minutes}m`
+  return { overdue, ms: diff, label: overdue ? `已超时 ${span}` : `剩余 ${span}` }
+}
+
+/** 委托表单校验（与后端 create_delegation 口径一致，前端先拦）。 */
+export function validateDelegationForm(form = {}) {
+  const delegate = String(form.delegate || '').trim()
+  if (!delegate) return { valid: false, message: '受托人不能为空' }
+  const delegator = String(form.delegator || '').trim()
+  if (delegator && delegator === delegate) return { valid: false, message: '不能委托给自己' }
+  const scopeType = form.scope_type || 'any'
+  if (!DELEGATION_SCOPES.includes(scopeType)) {
+    return { valid: false, message: `不支持的委托范围：${scopeType}` }
+  }
+  if (scopeType !== 'any' && !String(form.scope_value || '').trim()) {
+    return { valid: false, message: '选择范围后必须填写范围值' }
+  }
+  const from = form.effective_from ? new Date(form.effective_from).getTime() : null
+  const to = form.effective_to ? new Date(form.effective_to).getTime() : null
+  if (Number.isFinite(from) && Number.isFinite(to) && to < from) {
+    return { valid: false, message: '结束时间不能早于开始时间' }
+  }
+  return { valid: true, message: '' }
+}
+
+// ============================================================================
 // 4. API — v1 task.v1 端点
 // ============================================================================
 
@@ -193,6 +270,44 @@ export async function submitDecision(taskId, { decision, comment = '', allowRewo
   })
 }
 
+/** 参与人进度（任务可见者；M4-2/M4-5） */
+export async function fetchParticipations(taskId) {
+  return apiV1.get(`/tasks/${encodeURIComponent(taskId)}/participations`)
+}
+
+/** 改派执行人（M4-1；reason 必填留痕，服务端裁决准入与四眼） */
+export async function reassignTask(taskId, { toUser, reason } = {}) {
+  return apiV1.post(`/tasks/${encodeURIComponent(taskId)}/assign`, {
+    to_user: toUser,
+    reason
+  })
+}
+
+/** 加签 / 会签（M4-2；participant 缺省 = 自己） */
+export async function participateTask(taskId, { participant, comment = '', requireAll = false } = {}) {
+  const body = { comment, require_all: !!requireAll }
+  if (participant) body.participant = participant
+  return apiV1.post(`/tasks/${encodeURIComponent(taskId)}/participate`, body)
+}
+
+/** 我的委托配置（M4-3；服务端非 admin 强制 delegator=当前用户） */
+export async function fetchDelegations({ includeInactive = false, delegator } = {}) {
+  return apiV1.get(`/task-delegations${_qs({
+    include_inactive: includeInactive ? 'true' : undefined,
+    delegator
+  })}`)
+}
+
+/** 新建委托（M4-3） */
+export async function createDelegation(payload = {}) {
+  return apiV1.post('/task-delegations', payload)
+}
+
+/** 撤销委托（M4-3；DELETE → status=revoked，保留审计行） */
+export async function revokeDelegation(id) {
+  return apiV1.delete(`/task-delegations/${id}`)
+}
+
 /** 运维监控列表（限管理员） */
 export async function fetchTasks({ status, type, appId, executorType, page, pageSize } = {}) {
   return apiV1.get(`/tasks${_qs({
@@ -206,8 +321,12 @@ export async function fetchWorkflowSchedules() {
 }
 
 export default {
-  BUCKET_ORDER, BUCKET_LABELS, derivePause, formatTaskRow, normalizeInboxResponse,
+  BUCKET_ORDER, BUCKET_LABELS, DELEGATION_SCOPES,
+  derivePause, formatTaskRow, normalizeInboxResponse,
   sortApprovalFirst, summarizeBatchResults,
+  normalizeParticipations, canReassignTask, formatSlaRemaining, validateDelegationForm,
   fetchInbox, fetchInboxCounts, fetchTaskDetail, fetchTaskEvents, claimTask, submitDecision,
+  fetchParticipations, reassignTask, participateTask,
+  fetchDelegations, createDelegation, revokeDelegation,
   fetchTasks, fetchWorkflowSchedules
 }

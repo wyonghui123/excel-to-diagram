@@ -14,10 +14,12 @@
 import json
 import logging
 import uuid
-from datetime import datetime
+from datetime import datetime, timedelta
 from typing import Any, Dict, Optional
 
+from meta.core import task_assignee_resolver as resolver
 from meta.core.approval_meta_loader import get_approval_meta
+from meta.services.task_stage import resolve_stage, settle_auto
 
 logger = logging.getLogger(__name__)
 
@@ -60,6 +62,32 @@ class ApprovalTaskService:
         if policy_snapshot:
             inputs['policy_snapshot'] = policy_snapshot
 
+        # [M5-2/M5-4 2026-11-15] 候选池 = 取人器按当前阶段聚合解析（spec §9.5 / §9.4）：
+        # 同阶段多步骤合并；auto 步骤自动通过、notify 步骤只读知会、approve 计入会签。
+        stage_no = _stage_no(policy_snapshot)
+        stage = resolve_stage(
+            policy_snapshot or {}, stage_no,
+            {'data_source': self._ds, 'task_type': _task_type_of(policy_snapshot),
+             'object_type': object_type, 'record_id': record_id,
+             'initiator': actor or 'system', 'policy_snapshot': policy_snapshot})
+        candidates = stage['candidates']
+        notify = stage['notify']
+        assignee = candidates[0] if len(candidates) == 1 else None
+        if assignee and _has_task_column(self._ds, 'executor_assignee'):
+            row_assignee = {'executor_assignee': assignee}
+        else:
+            row_assignee = {}
+        stage_row = {'stage_no': stage_no} \
+            if _has_task_column(self._ds, 'stage_no') else {}
+
+        # [M4-4 2026-11-15] 步骤 sla_hours 非空才开 SLA 单（默认关闭，spec §8.5）
+        created_dt = datetime.now()
+        sla_cfg, due_at = _resolve_sla(policy_snapshot, created_dt)
+        sla_row = {}
+        if sla_cfg:
+            sla_row = {'sla': json.dumps(sla_cfg, ensure_ascii=False),
+                       'due_at': due_at}
+
         row = {
             'id': task_id,
             'code': None,
@@ -70,15 +98,28 @@ class ApprovalTaskService:
             'app_id': meta['app_id'],
             'executor_type': 'human',
             'assign_policy': 'claim',
-            'executor_candidates': json.dumps([], ensure_ascii=False),
+            'executor_candidates': json.dumps(candidates, ensure_ascii=False),
+            **row_assignee,
+            **stage_row,
+            **sla_row,
             'executor_config': json.dumps(
-                {'decision_actions': actions}, ensure_ascii=False),
+                {'decision_actions': actions,
+                 'completion_mode': _resolve_completion_mode(policy_snapshot),
+                 # [M5-4] auto 自动通过 / notify 只读知会 / approve 人工决策
+                 'action_type': stage['action'],
+                 **({'notify_candidates': notify} if notify else {}),
+                 # [M5-2] 取人解释：为什么是这批人 / 为什么空池
+                 'assign_source': stage['source'],
+                 'assign_explain': stage['explain'],
+                 **({'assign_reason': stage['reason']}
+                    if stage['reason'] else {})},
+                ensure_ascii=False),
             'inputs': json.dumps(inputs, ensure_ascii=False, default=str),
             'doc_ref': str(record_id),
             'doc_ref_type': object_type,
             'doc_ref_id': str(record_id),
             'created_by': actor or 'system',
-            'created_at': datetime.now().isoformat(timespec='seconds'),
+            'created_at': created_dt.isoformat(timespec='seconds'),
             'attempt': 1,
         }
         columns = ', '.join(row.keys())
@@ -87,6 +128,16 @@ class ApprovalTaskService:
             'INSERT INTO tasks ({0}) VALUES ({1})'.format(columns, values),
             list(row.values()),
         )
+        # [M4-1] 参与流水与候选池双写（同一事务由调用方迁移/提交保证；表缺失跳过）
+        _seed_participations(self._ds, task_id, candidates, actor or 'system',
+                             notify=notify)
+        # [M4-4] 按任务快照开 SLA 单（表缺失 / 无 sla_hours 跳过；不阻断建任务）
+        if sla_cfg:
+            _open_sla(self._ds, task_id, created_dt)
+        # [M5-4] auto / 纯知会阶段不产生人工待办：建完即自动跨过（末阶段则走完）
+        if stage['action'] in ('auto', 'notify'):
+            settle_auto(self._ds, task_id, actor='system',
+                        now=created_dt.isoformat(timespec='seconds'))
         logger.info('[ApprovalTask] %s id=%s 建审批任务 %s',
                     object_type, record_id, task_id)
         return task_id
@@ -100,3 +151,116 @@ class ApprovalTaskService:
                 field, meta['table']), [record_id])
         doc_no = rows[0].get('doc_no') if rows else None
         return str(doc_no or record_id)
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# [M4 2026-11-15] 候选池 / 参与流水双写（spec §8.1）
+# ─────────────────────────────────────────────────────────────────────────────
+
+def _first_step(policy_snapshot: Optional[Dict[str, Any]]) -> Optional[Dict[str, Any]]:
+    """当前阶段的首个步骤（排序键 = (stage_no, step_no)，spec §9.4）。"""
+    steps = (policy_snapshot or {}).get('steps') or []
+    if not steps:
+        return None
+    try:
+        return sorted(steps, key=lambda s: (_int_of(s.get('stage_no'), 1),
+                                            _int_of(s.get('step_no'), 0)))[0]
+    except (TypeError, ValueError):
+        return None
+
+
+def _int_of(value: Any, default: int) -> int:
+    try:
+        return int(value)
+    except (TypeError, ValueError):
+        return default
+
+
+def _task_type_of(policy_snapshot: Optional[Dict[str, Any]]) -> str:
+    """策略任务类型（spec D-GT-01：表名不动，通用性用 task_type 表达）。"""
+    return str((policy_snapshot or {}).get('task_type') or 'approval')
+
+
+def _stage_no(policy_snapshot: Optional[Dict[str, Any]]) -> int:
+    step = _first_step(policy_snapshot)
+    return max(_int_of((step or {}).get('stage_no'), 1), 1)
+
+
+def _resolve_candidates(policy_snapshot: Optional[Dict[str, Any]]) -> list:
+    """兼容入口：无 DataSource 时退化为字面名单（仅 `user` 型）。"""
+    step = _first_step(policy_snapshot)
+    if not step:
+        return []
+    return resolver.resolve(step, {}).candidates
+
+
+def _resolve_completion_mode(policy_snapshot: Optional[Dict[str, Any]]) -> str:
+    """首个步骤 approve_mode → `completion_mode`（spec §8.1；缺省 any）。"""
+    step = _first_step(policy_snapshot)
+    if not step:
+        return 'any'
+    mode = str(step.get('approve_mode') or 'any').strip().lower()
+    return mode if mode in ('any', 'all') else 'any'
+
+
+def _resolve_sla(policy_snapshot: Optional[Dict[str, Any]],
+                 created_at: datetime) -> tuple:
+    """首个步骤 `sla_hours` → (任务 sla 快照, due_at)；未声明返回 (None, None)。
+
+    [M4-4 2026-11-15] 阈值属业务域、随任务冻结（spec §8.5）；`on_breach=None`
+    即「只记录不动作」——超时改派由 `executor_config.sla_on_breach` 另行开关。
+    """
+    steps = (policy_snapshot or {}).get('steps') or []
+    if not steps:
+        return None, None
+    step = _first_step(policy_snapshot) or {}
+    try:
+        hours = float(step.get('sla_hours'))
+    except (TypeError, ValueError):
+        return None, None
+    if hours <= 0:
+        return None, None
+    seconds = int(hours * 3600)
+    return ({'target_seconds': seconds, 'warn_at_pct': 80, 'alert_at_pct': 95,
+             'grace_seconds': 0, 'on_breach': None},
+            (created_at + timedelta(seconds=seconds)).isoformat(timespec='seconds'))
+
+
+def _open_sla(data_source, task_id: str, start_at: datetime) -> None:
+    """开 SLA 单（表缺失 / 配置缺失跳过，不阻断建任务）。"""
+    try:
+        from meta.core.task_sla import open_sla_for_task
+        open_sla_for_task(data_source, task_id, start_at=start_at)
+    except Exception:  # noqa: BLE001
+        logger.warning('[M4-4] 审批任务 SLA 开单失败（任务已建）：%s',
+                       task_id, exc_info=True)
+
+
+def _has_task_column(data_source, column: str) -> bool:
+    try:
+        rows = data_source.execute(
+            'PRAGMA table_info(tasks)').fetchall()
+    except Exception:  # noqa: BLE001
+        return False
+    return any(len(r) > 1 and r[1] == column for r in rows)
+
+
+def _seed_participations(data_source, task_id: str, candidates: list,
+                         actor: str, *, notify: Optional[list] = None) -> None:
+    """参与流水与候选池双写；表缺失（迁移未执行）跳过，不阻断建任务。"""
+    if not candidates and not notify:
+        return
+    try:
+        from meta.core.task_participation import (
+            NOTIFY_ROLE, participation_tables_exist, seed_participants,
+        )
+        if not participation_tables_exist(data_source).get('task_participations'):
+            return
+        seed_participants(data_source, task_id, candidates or [],
+                          role='required', created_by=actor)
+        if notify:
+            seed_participants(data_source, task_id, notify,
+                              role=NOTIFY_ROLE, created_by=actor)
+    except Exception:  # noqa: BLE001
+        logger.warning('[ApprovalTask] 参与流水双写失败（任务已建）：%s',
+                       task_id, exc_info=True)

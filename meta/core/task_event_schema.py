@@ -254,6 +254,47 @@ def record_transition(
     return event_id, worklog_id
 
 
+def record_worklog(
+    data_source,
+    *,
+    task_id: str,
+    entry_type: str = "note",
+    summary: str = "",
+    detail: Any = None,
+    actor: str = "",
+    actor_kind: str = "",
+    workflow_run_id: str = "",
+    doc_ref: str = "",
+    trace_id: str = "",
+    occurred_at: Optional[str] = None,
+) -> str:
+    """独立写一条 WORKLOG（无状态迁移；不伪造 TASK_EVENT）。
+
+    [M4 2026-11-15] 改派 / 加签 / SLA 改派等「非迁移」动作的审计入口。事件类型
+    仍只有 5 类（`EVENT_TYPES`），扩枚举会牵动事件表 YAML 与既有断言，故不扩。
+    """
+    if entry_type not in WORKLOG_ENTRY_TYPES:
+        raise ValueError(
+            f"未知工作日志类型: {entry_type!r}（合法值见 WORKLOG_ENTRY_TYPES）")
+
+    worklog_id = uuid.uuid4().hex
+    ts = occurred_at or _now_iso()
+    data_source.execute(
+        """INSERT INTO task_worklogs
+           (id, task_id, workflow_run_id, event_id, entry_type,
+            actor, actor_kind, summary, detail,
+            inputs_hash, outputs_hash, progress_pct, doc_ref, trace_id,
+            occurred_at, created_at)
+           VALUES (?, ?, ?, NULL, ?, ?, ?, ?, ?, NULL, NULL, NULL, ?, ?, ?, ?)""",
+        (
+            worklog_id, task_id, workflow_run_id or None, entry_type,
+            actor or None, actor_kind or None, summary or None, _json_text(detail),
+            doc_ref or None, trace_id or None, ts, _now_iso(),
+        ),
+    )
+    return worklog_id
+
+
 # ─────────────────────────────────────────────────────────────────────────────
 # 读路径（append-only 账的查询；只 SELECT，不 UPDATE / DELETE）
 # ─────────────────────────────────────────────────────────────────────────────

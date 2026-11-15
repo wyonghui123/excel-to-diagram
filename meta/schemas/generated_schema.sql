@@ -1,5 +1,5 @@
 -- 自动生成的 Schema
--- 生成时间: 2026-11-15 12:18:28.818498
+-- 生成时间: 2026-11-15 17:44:17.307621
 
 -- 地址: 结构化地址库（支持对象）：国家 / 省 / 市 / 区 / 街道 / 门牌 / 邮编分列 + 格式化全文；只被引用，不承载用途 / 角色
 CREATE TABLE IF NOT EXISTS addresses (
@@ -3708,6 +3708,7 @@ CREATE TABLE IF NOT EXISTS tasks (
     doc_ref_type VARCHAR(200),
     doc_ref_id VARCHAR(200),
     line_refs TEXT,
+    stage_no INTEGER DEFAULT 1,
     created_by VARCHAR(200),
     created_at DATETIME,
     started_at DATETIME,

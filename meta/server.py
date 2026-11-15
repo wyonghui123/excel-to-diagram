@@ -182,6 +182,9 @@ from meta.api.job_admin_api import (
 )
 from meta.api.workflow_api import workflow_bp, set_workflow_scheduler
 from meta.api.task_inbox_api import task_inbox_bp
+from meta.api.task_assign_api import task_assign_bp   # [M4-1 2026-11-15] 任务改派（任务域通用）
+from meta.api.task_participation_api import task_participation_bp   # [M4-2 2026-11-15] 加签/参与进度
+from meta.api.task_delegation_api import task_delegation_bp   # [M4-3 2026-11-15] 任务委托 CRUD
 from meta.api.task_decision_api import task_decision_bp   # [B3 2026-10-03] 审批决策提交入口
 from meta.core.platform_modules import is_module_enabled   # [roadmap v1.32.0 §6.2.4] 平台模块部署级启停
 from meta.api.key_template_api import key_template_bp, set_engine as set_kt_engine
@@ -1202,6 +1205,12 @@ def create_app(db_path=None):
         app.register_blueprint(task_api_bp)
         # [A8 2026-10-02] 统一收件箱 + 平台心跳
         app.register_blueprint(task_inbox_bp)
+        # [M4-1 2026-11-15] 改派（任务域通用能力；随 tasks 门控）
+        app.register_blueprint(task_assign_bp)
+        # [M4-2 2026-11-15] 加签 / 参与进度（任务域通用能力；随 tasks 门控）
+        app.register_blueprint(task_participation_bp)
+        # [M4-3 2026-11-15] 委托 CRUD（任务域通用能力；随 tasks 门控）
+        app.register_blueprint(task_delegation_bp)
         # [B3 2026-10-03] 审批决策提交（决策-生效协议唯一生产调用方）
         app.register_blueprint(task_decision_bp)
         # [C 组编排完整 2026-10-14] 编排只读聚合（调度 tab 数据源），随 tasks 门控

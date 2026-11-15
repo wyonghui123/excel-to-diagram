@@ -176,7 +176,7 @@ CREATE TABLE purchase_orders (
 );
 CREATE TABLE approval_policies (
     id INTEGER PRIMARY KEY, code TEXT, name TEXT, scope_bo TEXT,
-    trigger_action TEXT, status TEXT, priority INTEGER,
+    trigger_action TEXT, task_type TEXT, status TEXT, priority INTEGER,
     effective_from TEXT, effective_to TEXT
 );
 CREATE TABLE approval_policy_conditions (
@@ -185,8 +185,9 @@ CREATE TABLE approval_policy_conditions (
 );
 CREATE TABLE approval_policy_steps (
     id INTEGER PRIMARY KEY, policy_id INTEGER, step_no INTEGER,
-    approver_type TEXT, approver_ref TEXT, min_amount REAL, max_amount REAL,
-    approve_mode TEXT, sla_hours INTEGER
+    stage_no INTEGER, approver_type TEXT, approver_ref TEXT,
+    min_amount REAL, max_amount REAL,
+    approve_mode TEXT, action_type TEXT, routing_json TEXT, sla_hours INTEGER
 );
 CREATE TABLE control_parameter_defs (
     id INTEGER PRIMARY KEY, code TEXT UNIQUE, name TEXT, domain TEXT,

@@ -29,7 +29,7 @@ import json
 from datetime import datetime
 from typing import Any, Dict, List, Optional
 
-from meta.core.task_event_schema import record_transition
+from meta.core.task_event_schema import record_transition, record_worklog
 from meta.core.task_schema import TASK_TABLE
 from meta.core.task_state_machine import (
     TransitionContext, evaluate_transition, require_transition,
@@ -47,11 +47,21 @@ class AssignmentError(Exception):
     """分配 / 认领前置不满足（策略关闸、候选池未命中、并发被抢占……）。"""
 
 
+class TaskNotFoundError(AssignmentError):
+    """任务不存在（HTTP 404，区别于前置不满足的 409）。"""
+
+
+class AssignmentPermissionError(AssignmentError):
+    """操作人无权改派（HTTP 403，区别于前置不满足的 409）。"""
+
+
 _TASK_COLUMNS = (
     "id", "title", "status", "executor_type", "executor_assignee",
     "executor_candidates", "assign_policy", "claim_timeout_seconds",
     "workflow_run_id", "trace_id", "agent_session_id", "doc_ref", "line_refs",
     "updated_at",
+    # [M4-1] 改派准入所需（追加在尾部，保持上面既有下标不变）
+    "type", "created_by", "doc_ref_type", "app_id",
 )
 
 
@@ -89,7 +99,7 @@ def _load_task(data_source, task_id: str) -> Dict[str, Any]:
         (str(task_id),),
     ).fetchall()
     if not rows:
-        raise AssignmentError(f"任务不存在：{task_id}")
+        raise TaskNotFoundError(f"任务不存在：{task_id}")
     r = rows[0]
     return {
         "id": r[0], "title": r[1], "status": r[2], "executor_type": r[3],
@@ -99,6 +109,9 @@ def _load_task(data_source, task_id: str) -> Dict[str, Any]:
         "claim_timeout_seconds": r[7], "workflow_run_id": r[8] or "",
         "trace_id": r[9] or "", "agent_session_id": r[10] or "",
         "doc_ref": r[11] or "", "line_refs": _load_json(r[12], None),
+        "updated_at": r[13] or "",
+        "type": r[14] or "", "created_by": r[15] or "",
+        "doc_ref_type": r[16] or "", "app_id": r[17] or "",
     }
 
 
@@ -348,3 +361,126 @@ def list_claimable(data_source, actor_id: str) -> List[Dict[str, Any]]:
                 "candidates": _candidates(task),
             })
     return out
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# 改派（M4-1 2026-11-15；任务域通用能力，审批只是第一消费者）
+# ─────────────────────────────────────────────────────────────────────────────
+
+#: 终态：改派 / 加签 / 委托一律拒绝（投影列 executor_assignee 不再有意义）
+TERMINAL_STATUSES = ("done", "failed", "cancelled", "skipped", "dead")
+
+
+def _active_delegators(data_source, actor: str, task: Dict[str, Any]) -> List[str]:
+    """准入身份展开：返回把该任务委托给 actor 的委托人（表缺失 → 无委托）。"""
+    try:
+        from meta.core.task_delegation import active_delegators_for
+    except Exception:  # noqa: BLE001 - 委托模块不可用不影响改派主流程
+        return []
+    return active_delegators_for(data_source, actor, task)
+
+
+def reassign_task(data_source, task_id: str, *, to_user: str, actor: str,
+                  reason: str, admin: bool = False,
+                  target_permitted: Optional[bool] = None,
+                  now: Any = None) -> Dict[str, Any]:
+    """把任务的执行人改派给 `to_user`（单事务：tasks 双列 + 参与流水 + 工作日志）。
+
+    真源口径（spec §8.2）:
+    - `executor_candidates` = 谁能做（重建为 `[to_user]`）；
+      `executor_assignee` = 当前锁定（投影，直接写 `to_user`）。
+    - 旧参与行 pending → `transferred`（不删除）；目标行 → `transferred_in/pending`。
+    - 不动 `assign_policy` / `inputs` / `doc_ref*` / 状态（状态迁移由业务动作负责）。
+
+    准入：actor ∈ assignee / candidates / 有效受托人 / admin，且任务非终态。
+    审批附加（type='approval'）：须为 `waiting_approval`；目标 ≠ 提交人（四眼）；
+    目标具备 `{bo}:approve`（由 API 层查权限后经 `target_permitted` 传入）。
+    """
+    if not str(actor or "").strip():
+        raise AssignmentPermissionError("未登录")
+    to_user = str(to_user or "").strip()
+    if not to_user:
+        raise AssignmentError("改派目标不能为空")
+    reason = str(reason or "").strip()
+    if not reason:
+        raise AssignmentError("改派原因必填")
+
+    task = _load_task(data_source, task_id)
+    if (task["status"] or "") in TERMINAL_STATUSES:
+        raise AssignmentError(f"任务已终态（{task['status']}），不可改派")
+
+    if task["type"] == "approval":
+        if task["status"] != "waiting_approval":
+            raise AssignmentError(
+                f"审批任务仅在 waiting_approval 可改派（当前 {task['status']}）")
+        if to_user == task["created_by"]:
+            raise AssignmentError("改派目标不能是提交人（四眼约束）")
+        if target_permitted is not True:
+            code = f"{task['doc_ref_type'] or '{bo}'}:approve"
+            raise AssignmentPermissionError(
+                f"目标用户缺少审批权限 {code}；请先授权或改派给管理员")
+
+    authorized = (
+        admin
+        or str(actor) == task["executor_assignee"]
+        or is_candidate(task, str(actor))
+        or bool(_active_delegators(data_source, str(actor), task))
+    )
+    if not authorized:
+        raise AssignmentPermissionError(
+            "无权改派：仅当前执行人 / 候选池成员 / 有效受托人 / 管理员可操作")
+
+    old_candidates = _candidates(task)
+    old_assignee = task["executor_assignee"]
+    if to_user == old_assignee:
+        raise AssignmentError(f"{to_user} 已是当前执行人，无需改派")
+
+    ts = _now_iso()
+    with data_source.transaction():
+        cursor = data_source.execute(
+            f"UPDATE {TASK_TABLE} SET executor_candidates = ?, executor_assignee = ?, "
+            f"updated_at = ? WHERE id = ? AND status NOT IN "
+            f"({', '.join('?' * len(TERMINAL_STATUSES))})",
+            [json.dumps([to_user], ensure_ascii=False), to_user, ts, str(task_id)]
+            + list(TERMINAL_STATUSES),
+        )
+        rowcount = getattr(cursor, "rowcount", None)
+        if rowcount is not None and rowcount <= 0:
+            raise AssignmentError("任务状态已变化，改派未生效")
+
+        _write_reassign_participations(
+            data_source, task_id, to_user=to_user, actor=str(actor), reason=reason, now=ts)
+
+        record_worklog(
+            data_source, task_id=str(task_id), entry_type="note", actor=str(actor),
+            actor_kind="human", summary=f"改派：{old_assignee or '未指派'} → {to_user}",
+            detail={"action": "reassign", "from_assignee": old_assignee,
+                    "from_candidates": old_candidates, "to_user": to_user,
+                    "reason": reason},
+            workflow_run_id=task["workflow_run_id"], trace_id=task["trace_id"],
+            doc_ref=task["doc_ref"], occurred_at=now,
+        )
+
+    return {
+        "task_id": task["id"], "status": task["status"],
+        "from_assignee": old_assignee or None, "from_candidates": old_candidates,
+        "to_user": to_user, "policy": task["assign_policy"],
+    }
+
+
+def _write_reassign_participations(data_source, task_id: str, *, to_user: str,
+                                   actor: str, reason: str, now: str) -> None:
+    """参与流水双写（表缺失则跳过：迁移未执行的库仍可改派，不阻断主流程）。"""
+    try:
+        from meta.core.task_participation import (
+            mark_pending_transferred, participation_tables_exist, upsert_transferred_in,
+        )
+        if not participation_tables_exist(data_source).get("task_participations"):
+            return
+        mark_pending_transferred(data_source, task_id, exclude=to_user, now=now)
+        upsert_transferred_in(data_source, task_id, to_user, created_by=actor,
+                              comment=reason, now=now)
+    except Exception:  # noqa: BLE001 - 流水是审计旁路，不能反向阻断归属变更
+        import logging
+        logging.getLogger(__name__).warning(
+            "[M4-1] 改派写参与流水失败（任务归属已生效）：task=%s", task_id, exc_info=True)

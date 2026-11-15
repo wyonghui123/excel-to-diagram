@@ -133,6 +133,18 @@ def init_services(data_source=None):
     except Exception as e:
         logger.warning("Task SLA schema ensure skipped: %s", str(e))
 
+    # [M4 2026-11-15] 参与流水 + 委托两表（任务域通用能力；spec §8.1）
+    try:
+        from meta.core.task_participation import ensure_participation_tables
+        ensure_participation_tables(_data_source)
+    except Exception as e:
+        logger.warning("Task participation schema ensure skipped: %s", str(e))
+    try:
+        from meta.core.task_delegation import ensure_delegation_tables
+        ensure_delegation_tables(_data_source)
+    except Exception as e:
+        logger.warning("Task delegation schema ensure skipped: %s", str(e))
+
     # [F1 2026-10-03] hold 当前态派生视图（task_hold_current），读平台库事件账；
     # hold / release 只写 TASK_EVENT、不改状态列（task-model-design §12 F1 / §12.1 Q3）
     try:

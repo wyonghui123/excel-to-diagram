@@ -9,6 +9,10 @@
         </span>
         <span class="tdd-chip tdd-chip--muted">{{ task.type }}</span>
         <span class="tdd-chip tdd-chip--muted">{{ task.executor_type }}</span>
+        <!-- [M5-5] 阶段进度：stage_no + 快照去重阶段集合 -->
+        <span v-if="stageProgress" data-test="stage-progress" class="tdd-chip tdd-chip--info">
+          阶段 {{ stageProgress.current }}/{{ stageProgress.total }}
+        </span>
         <span v-if="pause" data-test="pause-badge" class="tdd-chip" :class="`tdd-chip--${pause.tone}`">
           {{ pause.label }}
         </span>
@@ -16,7 +20,12 @@
 
       <dl class="tdd-fields">
         <div><dt>认领人</dt><dd>{{ task.executor_assignee || '—' }}</dd></div>
-        <div><dt>到期</dt><dd>{{ task.due_at || '—' }}</dd></div>
+        <div><dt>到期</dt><dd>
+          {{ task.due_at || '—' }}
+          <span v-if="sla" data-test="sla-countdown" class="tdd-countdown" :class="{ 'tdd-countdown--overdue': sla.overdue }">
+            · {{ sla.label }}
+          </span>
+        </dd></div>
         <div><dt>创建人</dt><dd>{{ task.created_by || '—' }}</dd></div>
         <div>
           <dt>业务单据</dt>
@@ -37,6 +46,102 @@
         <span v-if="claimMsg" class="tdd-claim-msg">{{ claimMsg }}</span>
       </div>
 
+      <!-- M4-2、M4-5 参与人进度（通用能力，非审批任务同样展示） -->
+      <div v-if="participation.participants.length" data-test="participants-panel" class="tdd-m4">
+        <h4 class="tdd-section">
+          参与人进度
+          <span class="tdd-chip tdd-chip--muted" data-test="completion-mode">{{ completionModeLabel }}</span>
+        </h4>
+        <div class="tdd-counts" data-test="participation-counts">
+          <span v-for="(n, key) in participation.counts" :key="key">{{ outcomeLabel(key) }} {{ n }}</span>
+        </div>
+        <ul class="tdd-participants">
+          <li v-for="p in participation.participants" :key="p.id" data-test="participant-row" class="tdd-participant">
+            {{ p.participant }} · {{ p.role }} · {{ outcomeLabel(p.outcome) }}
+            <template v-if="p.on_behalf_of"> · 代 {{ p.on_behalf_of }}</template>
+          </li>
+        </ul>
+        <div
+          v-if="participation.completionMode === 'all' && participation.remaining.length"
+          data-test="participation-remaining"
+          class="tdd-decision-hint"
+        >
+          会签未齐，待 {{ participation.remaining.join('、') }} 表态
+        </div>
+      </div>
+
+      <!-- M4-1、M4-5 改派（无权限不渲染） -->
+      <div v-if="canReassign" data-test="reassign-panel" class="tdd-m4">
+        <h4 class="tdd-section">改派</h4>
+        <input v-model="reassignTarget" data-test="reassign-target" class="tdd-input" placeholder="目标执行人" />
+        <input v-model="reassignReason" data-test="reassign-reason" class="tdd-input" placeholder="改派原因（必填）" />
+        <div class="tdd-actions">
+          <AppButton data-test="reassign-btn" :disabled="!!reassigning" @click="onReassign">
+            {{ reassigning ? '提交中…' : '确认改派' }}
+          </AppButton>
+          <span v-if="reassignMsg" data-test="reassign-msg" class="tdd-claim-msg" :class="{ 'tdd-error': reassignFailed }">
+            {{ reassignMsg }}
+          </span>
+        </div>
+      </div>
+
+      <!-- M4-2、M4-5 加签与会签（无权限不渲染） -->
+      <div v-if="canParticipate" data-test="participate-panel" class="tdd-m4">
+        <h4 class="tdd-section">加签</h4>
+        <input v-model="participantInput" data-test="participant-input" class="tdd-input" placeholder="加签人（留空 = 加自己）" />
+        <label class="tdd-check">
+          <input v-model="requireAll" type="checkbox" data-test="require-all" />
+          转会签（全部参与人通过才生效）
+        </label>
+        <div class="tdd-actions">
+          <AppButton data-test="participate-btn" :disabled="!!participating" @click="onParticipate">
+            {{ participating ? '提交中…' : '加签' }}
+          </AppButton>
+          <span v-if="participateMsg" data-test="participate-msg" class="tdd-claim-msg" :class="{ 'tdd-error': participateFailed }">
+            {{ participateMsg }}
+          </span>
+        </div>
+      </div>
+
+      <!-- M4-3、M4-5 我的委托（用户级配置，随抽屉展开） -->
+      <div v-if="currentActor" data-test="delegation-panel" class="tdd-m4">
+        <h4 class="tdd-section">我的委托</h4>
+        <ul v-if="delegations.length" class="tdd-participants">
+          <li v-for="d in delegations" :key="d.id" data-test="delegation-row" class="tdd-participant">
+            {{ d.delegate }} · {{ d.scope_type || 'any' }}<template v-if="d.scope_value">（{{ d.scope_value }}）</template>
+            · {{ d.effective_from || '即时' }} → {{ d.effective_to || '长期' }}
+            <button type="button" class="tdd-link" data-test="delegation-revoke" @click="onRevokeDelegation(d.id)">撤销</button>
+          </li>
+        </ul>
+        <div v-else data-test="no-delegations" class="tdd-sub">暂无委托</div>
+        <div class="tdd-form">
+          <input v-model="delegationForm.delegate" data-test="delegate-input" class="tdd-input" placeholder="受托人" />
+          <select v-model="delegationForm.scope_type" data-test="delegate-scope" class="tdd-input">
+            <option value="any">全部任务</option>
+            <option value="app">按应用</option>
+            <option value="type">按任务类型</option>
+            <option value="doc_ref_type">按单据类型</option>
+          </select>
+          <input
+            v-if="delegationForm.scope_type !== 'any'"
+            v-model="delegationForm.scope_value"
+            data-test="delegate-scope-value"
+            class="tdd-input"
+            placeholder="范围值"
+          />
+          <input v-model="delegationForm.effective_from" data-test="delegate-from" class="tdd-input" type="datetime-local" />
+          <input v-model="delegationForm.effective_to" data-test="delegate-to" class="tdd-input" type="datetime-local" />
+          <div class="tdd-actions">
+            <AppButton data-test="delegate-create-btn" :disabled="!!delegating" @click="onCreateDelegation">
+              {{ delegating ? '提交中…' : '新增委托' }}
+            </AppButton>
+            <span v-if="delegationMsg" data-test="delegation-msg" class="tdd-claim-msg" :class="{ 'tdd-error': delegationFailed }">
+              {{ delegationMsg }}
+            </span>
+          </div>
+        </div>
+      </div>
+
       <div v-if="isApproval" data-test="decision-panel" class="tdd-decision">
         <h4 class="tdd-section">审批</h4>
 
@@ -49,6 +154,33 @@
               v{{ policySnapshot.policy_version }}
             </span>
             <span v-if="policySnapshot.hit_policy === false" class="tdd-chip tdd-chip--warning">未命中策略</span>
+            <!-- [M5-5] 阶段动作三态：approve 人工决策、auto 自动通过、notify 只读知会 -->
+            <span data-test="action-type" class="tdd-chip" :class="`tdd-chip--${actionTypeTone}`">
+              {{ actionTypeLabel }}
+            </span>
+          </div>
+
+          <!-- [M5-5] 取人依据与空池原因（executor_config 由取人器写入） -->
+          <div
+            v-if="assignExplain.length || assignReasonLabel || assignSource"
+            data-test="assign-explain"
+            class="tdd-conditions"
+          >
+            <div class="tdd-sub">
+              取人依据<template v-if="assignSource"> · {{ assignSource }}</template>
+            </div>
+            <div
+              v-for="(a, i) in assignExplain"
+              :key="i"
+              class="tdd-cond"
+              :class="{ 'tdd-cond--fail': a.passed === false }"
+            >
+              {{ a.field }} {{ a.op }} {{ a.expected }}（实际 {{ a.actual }}）
+              <span v-if="a.step_no" class="tdd-chain-meta">· 步骤 {{ a.step_no }}</span>
+            </div>
+            <div v-if="assignReasonLabel" data-test="assign-reason" class="tdd-cond tdd-cond--fail">
+              空池原因：{{ assignReasonLabel }}
+            </div>
           </div>
 
           <ol v-if="approvalSteps.length" data-test="approval-chain" class="tdd-chain">
@@ -97,6 +229,9 @@
             </AppButton>
           </div>
         </div>
+        <div v-else-if="isNotifyOnly" class="tdd-decision-hint" data-test="notify-hint">
+          知会（只读）：本阶段无需决策，不计入会签
+        </div>
         <div v-else-if="decideHint" class="tdd-decision-hint" data-test="decision-hint">{{ decideHint }}</div>
         <div v-if="decideMsg" data-test="decision-msg" class="tdd-claim-msg" :class="{ 'tdd-error': decideFailed }">
           {{ decideMsg }}
@@ -125,7 +260,10 @@
 <script setup>
 import { ref, computed, watch } from 'vue'
 import { AppModal, AppButton } from '@/components/common'
-import { fetchTaskDetail, fetchTaskEvents, claimTask, derivePause, submitDecision } from '@/services/taskService'
+import { fetchTaskDetail, fetchTaskEvents, claimTask, derivePause, submitDecision,
+  fetchParticipations, reassignTask, participateTask,
+  fetchDelegations, createDelegation, revokeDelegation,
+  normalizeParticipations, canReassignTask, formatSlaRemaining, validateDelegationForm } from '@/services/taskService'
 import { statusLabel, statusTone } from '@/constants/taskStatus'
 import { useAuthStore } from '@/stores/authStore'
 import { resolveDetailPath } from '@/router/detailPathResolver'
@@ -158,6 +296,50 @@ const pause = computed(() => derivePause(task.value))
 
 const isApproval = computed(() => task.value?.type === 'approval')
 
+// ── M4 通用能力：参与进度 / 改派 / 加签 / 委托 / SLA 倒计时 ──────────────
+const participation = ref(normalizeParticipations(null))
+const sla = computed(() => formatSlaRemaining(task.value?.due_at))
+
+const OUTCOME_LABELS = {
+  pending: '待处理', accepted: '已接受', rejected: '已拒绝',
+  skipped: '已跳过', transferred: '已转交'
+}
+function outcomeLabel(key) { return OUTCOME_LABELS[key] || key }
+const completionModeLabel = computed(() => (
+  participation.value.completionMode === 'all' ? '会签（全部通过）' : '或签（任一通过）'
+))
+
+const TERMINAL_STATUSES = ['done', 'failed', 'cancelled', 'skipped', 'dead']
+const canReassign = computed(() => (
+  canReassignTask(task.value, props.currentActor, { isAdmin: authStore.isAdmin })
+))
+const canParticipate = computed(() => {
+  const t = task.value
+  if (!t || !props.currentActor || TERMINAL_STATUSES.includes(t.status)) return false
+  return authStore.isAdmin || t.executor_assignee === props.currentActor ||
+    candidates.value.includes(props.currentActor)
+})
+
+const reassignTarget = ref('')
+const reassignReason = ref('')
+const reassigning = ref(false)
+const reassignMsg = ref('')
+const reassignFailed = ref(false)
+
+const participantInput = ref('')
+const requireAll = ref(false)
+const participating = ref(false)
+const participateMsg = ref('')
+const participateFailed = ref(false)
+
+const delegations = ref([])
+const delegating = ref(false)
+const delegationMsg = ref('')
+const delegationFailed = ref(false)
+const delegationForm = ref({
+  delegate: '', scope_type: 'any', scope_value: '', effective_from: '', effective_to: ''
+})
+
 /** 审批快照（D-AP-09：审批链 / 命中依据唯一数据源，已随任务冻结） */
 const policySnapshot = computed(() => {
   const s = task.value?.inputs?.policy_snapshot
@@ -183,6 +365,78 @@ const decisionActions = computed(() => {
 const docRefType = computed(() => task.value?.doc_ref_type || '')
 const docRefId = computed(() => task.value?.doc_ref_id || '')
 
+// ── [M5-5] 阶段进度 / 动作三态 / 取人依据 ─────────────────────────────────
+/** 任务当前阶段（tasks.stage_no；缺失按单阶段处理） */
+const stageNo = computed(() => {
+  const n = Number(task.value?.stage_no)
+  return Number.isFinite(n) && n > 0 ? n : null
+})
+
+/** 快照内出现过的阶段号（升序去重）；无步骤时退化为当前阶段 */
+const stageNumbers = computed(() => {
+  const seen = new Set()
+  for (const s of approvalSteps.value) {
+    const n = Number(s.stage_no)
+    if (Number.isFinite(n) && n > 0) seen.add(n)
+  }
+  if (!seen.size && stageNo.value) seen.add(stageNo.value)
+  return [...seen].sort((a, b) => a - b)
+})
+
+const stageProgress = computed(() => {
+  if (!stageNo.value) return null
+  // 非审批任务仅单阶段且无快照时不占版面
+  if (!policySnapshot.value && stageNo.value <= 1) return null
+  const total = Math.max(stageNumbers.value.length, stageNo.value)
+  return { current: stageNo.value, total }
+})
+
+const ACTION_TYPE_LABELS = {
+  approve: '人工审批', auto: '自动通过', notify: '知会（只读）'
+}
+const ACTION_TYPE_TONES = { approve: 'info', auto: 'success', notify: 'warning' }
+const actionType = computed(() => {
+  const value = task.value?.executor_config?.action_type
+  return typeof value === 'string' && ACTION_TYPE_LABELS[value] ? value : 'approve'
+})
+const actionTypeLabel = computed(() => ACTION_TYPE_LABELS[actionType.value] || actionType.value)
+const actionTypeTone = computed(() => ACTION_TYPE_TONES[actionType.value] || 'muted')
+
+const notifyCandidates = computed(() => {
+  const raw = task.value?.executor_config?.notify_candidates
+  return Array.isArray(raw) ? raw.map(String) : []
+})
+
+/** 只读知会：阶段动作为 notify，或当前用户仅在知会名单（不在候选池） */
+const isNotifyOnly = computed(() => {
+  if (actionType.value === 'notify') return true
+  const actor = props.currentActor
+  if (!actor) return false
+  return notifyCandidates.value.includes(actor) && !candidates.value.includes(actor)
+})
+
+const assignExplain = computed(() => {
+  const raw = task.value?.executor_config?.assign_explain
+  return Array.isArray(raw) ? raw : []
+})
+const assignSource = computed(() => {
+  const raw = task.value?.executor_config?.assign_source
+  return typeof raw === 'string' ? raw : ''
+})
+const ASSIGN_REASON_LABELS = {
+  no_member: '目标范围内没有匹配成员',
+  no_such_role: '权限角色不存在或未绑定成员',
+  missing_manager: '发起人缺少上级（管理链断点）',
+  level_exhausted: '管理链已到顶层，仍无满足条件的人',
+  unsupported_approver_type: '暂不支持的取人类型',
+  no_data_source: '缺少数据源，无法取人'
+}
+const assignReasonLabel = computed(() => {
+  const raw = task.value?.executor_config?.assign_reason
+  if (typeof raw !== 'string' || !raw) return ''
+  return ASSIGN_REASON_LABELS[raw] || raw
+})
+
 /** 审批权限口径与后端一致：admin 短路，否则 {bo}:approve */
 const hasApprovePermission = computed(() => {
   if (!docRefType.value) return false
@@ -192,6 +446,7 @@ const hasApprovePermission = computed(() => {
 const canDecide = computed(() => {
   const t = task.value
   if (!t || !isApproval.value || t.status !== 'waiting_approval') return false
+  if (isNotifyOnly.value) return false
   return !!(decisionActions.value?.approve || decisionActions.value?.reject) && hasApprovePermission.value
 })
 
@@ -200,6 +455,7 @@ const decideHint = computed(() => {
   if (!t || !isApproval.value) return ''
   if (!decisionActions.value) return '任务未冻结审批动作配置，无法在此提交决策'
   if (t.status !== 'waiting_approval') return `当前状态「${statusLabel(t)}」不可审批`
+  if (isNotifyOnly.value) return '本阶段为知会（只读），无需决策'
   if (!docRefType.value) return '单据类型缺失（历史任务），无法判定审批权限'
   if (!hasApprovePermission.value) return `缺少审批权限（${docRefType.value}:approve）`
   return ''
@@ -244,6 +500,7 @@ async function load() {
       error.value = detail?.message || '任务不存在或无权查看'
       task.value = null
       events.value = []
+      participation.value = normalizeParticipations(null)
     } else {
       task.value = detail.data
       events.value = (evts && evts.success && Array.isArray(evts.data)) ? evts.data : []
@@ -253,6 +510,35 @@ async function load() {
     task.value = null
   } finally {
     loading.value = false
+  }
+  await Promise.all([refreshParticipation(), refreshDelegations()])
+}
+
+/** 参与人进度（失败静默：不影响抽屉主信息） */
+async function refreshParticipation() {
+  if (!props.taskId) {
+    participation.value = normalizeParticipations(null)
+    return
+  }
+  try {
+    participation.value = normalizeParticipations(await fetchParticipations(props.taskId))
+  } catch (e) {
+    participation.value = normalizeParticipations(null)
+  }
+}
+
+/** 我的委托（未登录/失败静默） */
+async function refreshDelegations() {
+  if (!props.currentActor) {
+    delegations.value = []
+    return
+  }
+  try {
+    const res = await fetchDelegations({ includeInactive: false })
+    delegations.value = (res && res.success === true && res.data && Array.isArray(res.data.items))
+      ? res.data.items : []
+  } catch (e) {
+    delegations.value = []
   }
 }
 
@@ -321,11 +607,134 @@ async function onDecide(decision) {
   }
 }
 
+async function onReassign() {
+  const toUser = reassignTarget.value.trim()
+  const reason = reassignReason.value.trim()
+  if (!toUser || !reason) {
+    reassignFailed.value = true
+    reassignMsg.value = '目标执行人与改派原因均必填'
+    return
+  }
+  reassigning.value = true
+  reassignMsg.value = ''
+  reassignFailed.value = false
+  try {
+    const res = await reassignTask(props.taskId, { toUser, reason })
+    if (res && res.success === true) {
+      reassignMsg.value = `已改派给 ${toUser}`
+      reassignTarget.value = ''
+      reassignReason.value = ''
+      await load()
+      emit('claimed')
+    } else {
+      reassignFailed.value = true
+      reassignMsg.value = res?.message || '改派失败'
+    }
+  } catch (e) {
+    reassignFailed.value = true
+    reassignMsg.value = e?.message || String(e)
+  } finally {
+    reassigning.value = false
+  }
+}
+
+async function onParticipate() {
+  participating.value = true
+  participateMsg.value = ''
+  participateFailed.value = false
+  try {
+    const res = await participateTask(props.taskId, {
+      participant: participantInput.value.trim() || undefined,
+      requireAll: requireAll.value
+    })
+    if (res && res.success === true) {
+      participateMsg.value = res.data?.status === 'partially_approved'
+        ? '已加签，会签未齐'
+        : '已加签'
+      participantInput.value = ''
+      await refreshParticipation()
+    } else {
+      participateFailed.value = true
+      participateMsg.value = res?.message || '加签失败'
+    }
+  } catch (e) {
+    participateFailed.value = true
+    participateMsg.value = e?.message || String(e)
+  } finally {
+    participating.value = false
+  }
+}
+
+async function onCreateDelegation() {
+  const check = validateDelegationForm(delegationForm.value)
+  if (!check.valid) {
+    delegationFailed.value = true
+    delegationMsg.value = check.message
+    return
+  }
+  delegating.value = true
+  delegationMsg.value = ''
+  delegationFailed.value = false
+  const form = delegationForm.value
+  try {
+    const res = await createDelegation({
+      delegate: form.delegate.trim(),
+      scope_type: form.scope_type,
+      scope_value: form.scope_type === 'any' ? null : String(form.scope_value || '').trim(),
+      effective_from: form.effective_from || null,
+      effective_to: form.effective_to || null
+    })
+    if (res && res.success === true) {
+      delegationMsg.value = '委托已创建'
+      delegationForm.value = {
+        delegate: '', scope_type: 'any', scope_value: '', effective_from: '', effective_to: ''
+      }
+      await refreshDelegations()
+    } else {
+      delegationFailed.value = true
+      delegationMsg.value = res?.message || '委托创建失败'
+    }
+  } catch (e) {
+    delegationFailed.value = true
+    delegationMsg.value = e?.message || String(e)
+  } finally {
+    delegating.value = false
+  }
+}
+
+async function onRevokeDelegation(id) {
+  delegationMsg.value = ''
+  delegationFailed.value = false
+  try {
+    const res = await revokeDelegation(id)
+    if (res && res.success === true) {
+      delegationMsg.value = '已撤销'
+      await refreshDelegations()
+    } else {
+      delegationFailed.value = true
+      delegationMsg.value = res?.message || '撤销失败'
+    }
+  } catch (e) {
+    delegationFailed.value = true
+    delegationMsg.value = e?.message || String(e)
+  }
+}
+
 watch(() => [props.visible, props.taskId], () => {
   decideMsg.value = ''
   decideFailed.value = false
   comment.value = ''
   allowRework.value = false
+  reassignMsg.value = ''
+  reassignFailed.value = false
+  reassignTarget.value = ''
+  reassignReason.value = ''
+  participateMsg.value = ''
+  participateFailed.value = false
+  participantInput.value = ''
+  requireAll.value = false
+  delegationMsg.value = ''
+  delegationFailed.value = false
   load()
 }, { immediate: true })
 </script>
@@ -366,4 +775,12 @@ watch(() => [props.visible, props.taskId], () => {
 .tdd-event-move { color: var(--color-primary); }
 .tdd-state { padding: 24px; text-align: center; color: var(--color-text-secondary); }
 .tdd-error { color: #f56c6c; }
+.tdd-m4 { border-top: 1px solid var(--color-border); padding-top: 8px; margin-bottom: 16px; }
+.tdd-input { width: 100%; box-sizing: border-box; margin-bottom: 8px; padding: 6px 8px; border: 1px solid var(--color-border); border-radius: 4px; font: inherit; }
+.tdd-form { margin-top: 8px; }
+.tdd-counts { display: flex; gap: 12px; flex-wrap: wrap; font-size: 12px; color: var(--color-text-secondary); margin-bottom: 6px; }
+.tdd-participants { list-style: none; margin: 0; padding: 0; }
+.tdd-participant { font-size: 13px; padding: 3px 0; }
+.tdd-countdown { font-size: 12px; color: var(--color-text-secondary); }
+.tdd-countdown--overdue { color: #f56c6c; }
 </style>

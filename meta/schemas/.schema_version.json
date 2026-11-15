@@ -2464,6 +2464,82 @@
       ],
       "table": "pricing_periods"
     },
+    "print_binding": {
+      "hash": "c0074c5bea0a0d41ffa78ca31191f077",
+      "fields": [
+        "id",
+        "bo_code",
+        "type_code",
+        "scope_type",
+        "scope_id",
+        "condition_json",
+        "priority",
+        "template_id",
+        "is_default",
+        "is_active",
+        "created_at",
+        "updated_at"
+      ],
+      "table": "print_bindings"
+    },
+    "print_run": {
+      "hash": "8160178bb279bdfaa62ea2b01e769839",
+      "fields": [
+        "id",
+        "bo_code",
+        "type_code",
+        "doc_id",
+        "doc_no",
+        "doc_rev",
+        "template_id",
+        "template_version",
+        "trigger",
+        "is_formal",
+        "is_reprint",
+        "print_seq",
+        "watermark",
+        "attachment_id",
+        "payload_hash",
+        "job_run_id",
+        "status",
+        "error_code",
+        "error_message",
+        "operator_id",
+        "operator_name",
+        "created_at"
+      ],
+      "table": "print_runs"
+    },
+    "print_template": {
+      "hash": "8c69ecad658d02b1c0c1f55d0e71cadb",
+      "fields": [
+        "id",
+        "bo_code",
+        "type_code",
+        "code",
+        "name",
+        "version",
+        "status",
+        "html",
+        "css",
+        "variables_json",
+        "paper_size",
+        "orientation",
+        "margin_top",
+        "margin_right",
+        "margin_bottom",
+        "margin_left",
+        "scope_type",
+        "scope_id",
+        "effective_from",
+        "effective_to",
+        "created_by",
+        "created_at",
+        "published_at",
+        "archived_at"
+      ],
+      "table": "print_templates"
+    },
     "process_instruction": {
       "hash": "69ba4809dddcf55e7549f8345c6a9fe7",
       "fields": [
@@ -3784,7 +3860,7 @@
       "table": "sub_domains"
     },
     "task": {
-      "hash": "5ef504af3c266b653e395b101907186f",
+      "hash": "1099ee91bb56bbdfd59aeeb3bfa07707",
       "fields": [
         "id",
         "code",
@@ -3818,7 +3894,10 @@
         "trace_id",
         "agent_session_id",
         "doc_ref",
+        "doc_ref_type",
+        "doc_ref_id",
         "line_refs",
+        "stage_no",
         "created_by",
         "created_at",
         "started_at",
@@ -3852,7 +3931,7 @@
       "table": "task_events"
     },
     "task_run": {
-      "hash": "1e8d8b80b5ac8be5712cb21a6ff1ec82",
+      "hash": "be3d623d33fd1a8d95c6e4d260fed8d8",
       "fields": [
         "id",
         "run_key",
@@ -3861,6 +3940,7 @@
         "task_id",
         "status",
         "params",
+        "progress",
         "attempt",
         "max_attempts",
         "scheduled_for",
@@ -4272,7 +4352,7 @@
       "table": "users"
     },
     "vendor_account": {
-      "hash": "4d4b8c6f05f01203d2c2af1e1b08ff8e",
+      "hash": "4bed168ccc080ec5b87bc48fefa68979",
       "fields": [
         "updated_at",
         "created_by",
@@ -4282,12 +4362,13 @@
         "name",
         "description",
         "tax_classification_id",
+        "default_payment_term_id",
         "created_at"
       ],
       "table": "vendor_accounts"
     },
     "vendor_invoice": {
-      "hash": "d055dc8f6aaedc8fc8398a208b50280b",
+      "hash": "ba0ca83aff8b023d3c7a93b3b2179b67",
       "fields": [
         "id",
         "invoice_no",
@@ -4308,6 +4389,7 @@
         "exchange_rate",
         "exchange_rate_type",
         "exchange_rate_date",
+        "payment_term_id",
         "purchase_org_id",
         "org_id",
         "supplier_invoice_no",
@@ -4377,6 +4459,23 @@
         "updated_by"
       ],
       "table": "vendor_invoice_lines"
+    },
+    "vendor_invoice_schedule": {
+      "hash": "38502e80e2db5f1e3ce26e764010356b",
+      "fields": [
+        "id",
+        "invoice_id",
+        "schedule_no",
+        "payment_term_line_id",
+        "ratio_percent",
+        "due_date",
+        "amount",
+        "amount_applied",
+        "status",
+        "created_at",
+        "updated_at"
+      ],
+      "table": "vendor_invoice_schedules"
     },
     "version": {
       "hash": "4219873eb96fd507746aef0b0e418d12",
@@ -4603,5 +4702,5 @@
       "table": "work_order_operations"
     }
   },
-  "last_sync": "2026-11-14T07:36:03.905524"
+  "last_sync": "2026-11-15T17:45:52.033202"
 }

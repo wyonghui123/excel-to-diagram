@@ -201,6 +201,12 @@ fields:
     type: json
     db_column: line_refs
     description: 行级弱引用数组（可选，Phase 3 启用）；不建 FK、不建行级生命周期表
+  - id: stage_no
+    name: 当前阶段
+    type: integer
+    db_column: stage_no
+    default: 1
+    description: 当前阶段序号（多阶段任务推进用；默认 1 = 单阶段，与历史任务一致）
   - id: created_by
     name: 创建人
     type: string

@@ -18,6 +18,7 @@
   · 未识别的 operator 视为该条件不命中（并打日志），不静默放宽整条策略。
 """
 
+import json
 import logging
 from datetime import datetime
 from typing import Any, Dict, List, Optional, Tuple
@@ -43,6 +44,18 @@ def _num(value: Any) -> Optional[float]:
         return None
     try:
         return float(value)
+    except (TypeError, ValueError):
+        return None
+
+
+def _json_obj(value: Any) -> Any:
+    """[M5] routing_json → dict/list；非法或空返回 None（不阻断解析）。"""
+    if _blank(value):
+        return None
+    if isinstance(value, (dict, list)):
+        return value
+    try:
+        return json.loads(str(value))
     except (TypeError, ValueError):
         return None
 
@@ -122,6 +135,8 @@ class DocumentApprovalResolver:
             # D-AP-07：策略版本随快照冻结，变更不回溯在途任务
             'policy_version': policy.get('version'),
             'priority': policy.get('priority'),
+            # [M5-2] 通用任务引擎：任务类型随快照冻结（D-GT-01，缺省 approval）
+            'task_type': policy.get('task_type') or 'approval',
             # FR-006：命中策略显式化（审批策略集默认 first）
             'hit_policy': DEFAULT_HIT_POLICY,
             'amount': amount,
@@ -249,14 +264,19 @@ class DocumentApprovalResolver:
     # ------------------------------------------------------------------
     def _load_steps(self, policy_id: Any, amount: float) -> List[Dict[str, Any]]:
         rows = self._ds.query(
-            'SELECT step_no, approver_type, approver_ref, min_amount, max_amount, '
-            '       approve_mode, sla_hours FROM approval_policy_steps '
-            'WHERE policy_id = ? ORDER BY step_no ASC', [policy_id])
+            'SELECT step_no, stage_no, approver_type, approver_ref, min_amount, '
+            '       max_amount, approve_mode, action_type, routing_json, sla_hours '
+            'FROM approval_policy_steps '
+            'WHERE policy_id = ? ORDER BY stage_no ASC, step_no ASC', [policy_id])
         steps = [{
             'step_no': int(_num(row.get('step_no')) or 0),
+            # [M5] 阶段与动作三态；历史行默认 stage_no=1 / action_type=approve
+            'stage_no': int(_num(row.get('stage_no')) or 1),
             'approver_type': row.get('approver_type'),
             'approver_ref': row.get('approver_ref'),
             'approve_mode': row.get('approve_mode') or 'any',
+            'action_type': row.get('action_type') or 'approve',
+            'routing_json': _json_obj(row.get('routing_json')),
             'sla_hours': row.get('sla_hours'),
             'min_amount': _num(row.get('min_amount')),
             'max_amount': _num(row.get('max_amount')),

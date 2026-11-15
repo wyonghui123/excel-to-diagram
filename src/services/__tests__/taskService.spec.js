@@ -1,7 +1,7 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest'
 
 vi.mock('@/utils/httpClient', () => ({
-  apiV1: { get: vi.fn(), post: vi.fn() },
+  apiV1: { get: vi.fn(), post: vi.fn(), delete: vi.fn() },
   apiV2: { get: vi.fn(), post: vi.fn() }
 }))
 
@@ -10,7 +10,10 @@ import {
   BUCKET_ORDER, BUCKET_LABELS, derivePause, formatTaskRow,
   normalizeInboxResponse, fetchInbox, fetchInboxCounts, fetchTaskDetail,
   fetchTaskEvents, claimTask, submitDecision, fetchTasks, fetchWorkflowSchedules,
-  sortApprovalFirst, summarizeBatchResults
+  sortApprovalFirst, summarizeBatchResults,
+  normalizeParticipations, canReassignTask, formatSlaRemaining, validateDelegationForm,
+  fetchParticipations, reassignTask, participateTask,
+  fetchDelegations, createDelegation, revokeDelegation
 } from '../taskService'
 
 describe('BUCKET 常量', () => {
@@ -172,5 +175,71 @@ describe('API 封装', () => {
     apiV2.get.mockResolvedValue({ success: true, data: { items: [] } })
     await fetchWorkflowSchedules()
     expect(apiV2.get).toHaveBeenCalledWith('/workflows/schedules')
+  })
+
+  it('M4 通用能力端点路径正确', async () => {
+    apiV1.get.mockResolvedValue({ success: true, data: {} })
+    apiV1.post.mockResolvedValue({ success: true, data: {} })
+    apiV1.delete.mockResolvedValue({ success: true })
+    await fetchParticipations('T-1')
+    await reassignTask('T-1', { toUser: 'u-b', reason: '请假' })
+    await participateTask('T-1', { participant: 'u-c', requireAll: true })
+    await fetchDelegations({ includeInactive: true })
+    await createDelegation({ delegate: 'u-b' })
+    await revokeDelegation(7)
+    expect(apiV1.get).toHaveBeenCalledWith('/tasks/T-1/participations')
+    expect(apiV1.post).toHaveBeenCalledWith('/tasks/T-1/assign', { to_user: 'u-b', reason: '请假' })
+    expect(apiV1.post).toHaveBeenCalledWith('/tasks/T-1/participate', { comment: '', require_all: true, participant: 'u-c' })
+    expect(apiV1.get).toHaveBeenCalledWith('/task-delegations?include_inactive=true')
+    expect(apiV1.post).toHaveBeenCalledWith('/task-delegations', { delegate: 'u-b' })
+    expect(apiV1.delete).toHaveBeenCalledWith('/task-delegations/7')
+  })
+})
+
+describe('M4 纯函数（参与进度 / 改派准入 / SLA / 委托校验）', () => {
+  it('normalizeParticipations 对失败/空响应兜底', () => {
+    expect(normalizeParticipations(null)).toEqual({
+      participants: [], counts: {}, remaining: [], completionMode: 'any'
+    })
+    const ok = normalizeParticipations({
+      success: true,
+      data: { participants: [{ id: 1 }], counts: { approved: 1 }, completion_mode: 'all' }
+    })
+    expect(ok.participants).toHaveLength(1)
+    expect(ok.completionMode).toBe('all')
+  })
+
+  it('canReassignTask：终态/陌生人不可，执行人/候选人/admin 可', () => {
+    const base = { status: 'claimed', executor_assignee: 'u-a', executor_candidates: ['u-b'] }
+    expect(canReassignTask(base, 'u-a')).toBe(true)
+    expect(canReassignTask(base, 'u-b')).toBe(true)
+    expect(canReassignTask(base, 'u-x')).toBe(false)
+    expect(canReassignTask(base, 'u-x', { isAdmin: true })).toBe(true)
+    expect(canReassignTask({ ...base, status: 'done' }, 'u-a')).toBe(false)
+    expect(canReassignTask(null, 'u-a')).toBe(false)
+  })
+
+  it('formatSlaRemaining：剩余 / 已超时 / 非法输入', () => {
+    const now = new Date('2026-11-15T10:00:00')
+    expect(formatSlaRemaining('2026-11-15T13:30:00', now).label).toBe('剩余 3h 30m')
+    expect(formatSlaRemaining('2026-11-15T08:00:00', now)).toMatchObject({
+      overdue: true, label: '已超时 2h 0m'
+    })
+    expect(formatSlaRemaining('', now)).toBeNull()
+    expect(formatSlaRemaining('bad-input', now)).toBeNull()
+  })
+
+  it('validateDelegationForm：受托人/范围/区间，与后端同口径', () => {
+    expect(validateDelegationForm({}).message).toBe('受托人不能为空')
+    expect(validateDelegationForm({ delegate: 'u-a', delegator: 'u-a' }).message).toBe('不能委托给自己')
+    expect(validateDelegationForm({ delegate: 'u-b', scope_type: 'type' }).message)
+      .toBe('选择范围后必须填写范围值')
+    expect(validateDelegationForm({
+      delegate: 'u-b', effective_from: '2026-12-05T10:00', effective_to: '2026-12-01T10:00'
+    }).message).toBe('结束时间不能早于开始时间')
+    expect(validateDelegationForm({
+      delegate: 'u-b', scope_type: 'type', scope_value: 'approval',
+      effective_from: '2026-12-01T10:00', effective_to: '2026-12-05T10:00'
+    })).toEqual({ valid: true, message: '' })
   })
 })

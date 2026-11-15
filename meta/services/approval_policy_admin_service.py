@@ -27,7 +27,18 @@ CONDITION_TABLE = 'approval_policy_conditions'
 STEP_TABLE = 'approval_policy_steps'
 
 VALID_STATUSES: Tuple[str, ...] = ('active', 'inactive', 'draft')
-VALID_APPROVE_MODES: Tuple[str, ...] = ('any', 'all')
+VALID_APPROVE_MODES: Tuple[str, ...] = ('any', 'all', 'serial')
+#: [M5 2026-11-15] 取人器枚举（spec §9.5）；除 user 外均为运行期解析
+VALID_APPROVER_TYPES: Tuple[str, ...] = (
+    'user', 'role', 'org', 'position', 'group',
+    'manager', 'manager_chain', 'position_hierarchy', 'job_level',
+    'expression', 'initiator_choice',
+)
+#: [M5 2026-11-15] 动作三态（spec §9.4）：必审 / 自动通过 / 知会
+VALID_ACTION_TYPES: Tuple[str, ...] = ('approve', 'auto', 'notify')
+VALID_TASK_TYPES: Tuple[str, ...] = (
+    'approval', 'work_order', 'review', 'inspection', 'reminder',
+)
 #: 与 rule_predicate.OPERATOR_ALIASES 同源，避免第二份运算符清单
 OPERATORS: Tuple[str, ...] = tuple(sorted(set(OPERATOR_ALIASES.values())))
 
@@ -50,6 +61,14 @@ def _int(value: Any, default: Optional[int] = None, label: str = '') -> Optional
         return int(value)
     except (TypeError, ValueError):
         raise ValueError('%s 必须是整数' % (label or '取值'))
+
+
+def _task_type(value: Any) -> str:
+    """[M5] 任务类型（默认 approval）；审批只是枚举值之一（spec §9.4）。"""
+    text = str(value or 'approval').strip().lower()
+    if text not in VALID_TASK_TYPES:
+        raise ValueError('task_type 必须是 %s' % '/'.join(VALID_TASK_TYPES))
+    return text
 
 
 def _float(value: Any, label: str = '') -> Optional[float]:
@@ -140,7 +159,13 @@ def _step_row(raw: Any, index: int) -> Dict[str, Any]:
     if not isinstance(raw, dict):
         raise ValueError('步骤 #%d 必须是对象' % (index + 1))
     step_no = _int(raw.get('step_no'), index + 1, '步骤 step_no')
+    stage_no = _int(raw.get('stage_no'), 1, '步骤 stage_no')
+    if stage_no < 1:
+        raise ValueError('步骤 #%d stage_no 必须 >= 1' % (index + 1))
     approver_type = str(raw.get('approver_type') or 'role').strip()
+    if approver_type not in VALID_APPROVER_TYPES:
+        raise ValueError('步骤 #%d approver_type 必须是 %s'
+                         % (index + 1, '/'.join(VALID_APPROVER_TYPES)))
     approver_ref = str(raw.get('approver_ref') or '').strip()
     if not approver_ref:
         raise ValueError('步骤 #%d 缺少 approver_ref' % (index + 1))
@@ -148,11 +173,29 @@ def _step_row(raw: Any, index: int) -> Dict[str, Any]:
     if approve_mode not in VALID_APPROVE_MODES:
         raise ValueError('步骤 #%d approve_mode 必须是 %s'
                          % (index + 1, '/'.join(VALID_APPROVE_MODES)))
+    action_type = str(raw.get('action_type') or 'approve').strip().lower()
+    if action_type not in VALID_ACTION_TYPES:
+        raise ValueError('步骤 #%d action_type 必须是 %s'
+                         % (index + 1, '/'.join(VALID_ACTION_TYPES)))
+    routing = raw.get('routing_json')
+    if routing in (None, ''):
+        routing_json = None
+    elif isinstance(routing, dict):
+        routing_json = json.dumps(routing, ensure_ascii=False, sort_keys=True)
+    else:
+        try:
+            json.loads(str(routing))
+        except ValueError:
+            raise ValueError('步骤 #%d routing_json 不是合法 JSON' % (index + 1))
+        routing_json = str(routing)
     return {
         'step_no': step_no,
+        'stage_no': stage_no,
         'approver_type': approver_type,
         'approver_ref': approver_ref,
         'approve_mode': approve_mode,
+        'action_type': action_type,
+        'routing_json': routing_json,
         'sla_hours': _int(raw.get('sla_hours'), None, '步骤 sla_hours'),
         'min_amount': _float(raw.get('min_amount'), '步骤 min_amount'),
         'max_amount': _float(raw.get('max_amount'), '步骤 max_amount'),
@@ -200,7 +243,8 @@ def list_policies(ds, *, scope_bo: Optional[str] = None,
 
     rows = ds.query(
         'SELECT id, code, name, scope_bo, trigger_action, priority, status, '
-        '       version, effective_from, effective_to, description, updated_at '
+        '       task_type, version, effective_from, effective_to, description, '
+        '       updated_at '
         'FROM %s%s ORDER BY priority DESC, id DESC LIMIT ? OFFSET ?'
         % (POLICY_TABLE, clause),
         params + [int(limit), int(offset)])
@@ -271,6 +315,7 @@ def _validate_header(payload: Dict[str, Any], base: Optional[Dict[str, Any]]) ->
         'name': name,
         'scope_bo': scope_bo,
         'trigger_action': str(pick('trigger_action') or 'submit').strip(),
+        'task_type': _task_type(pick('task_type')),
         'priority': _int(pick('priority'), 100, 'priority'),
         'status': status,
         'description': pick('description'),
@@ -295,9 +340,9 @@ def _validate_children(payload: Dict[str, Any],
     if not isinstance(raw_steps, list):
         raise ValueError('steps 必须是数组')
     steps = [_step_row(item, idx) for idx, item in enumerate(raw_steps)]
-    step_nos = [row['step_no'] for row in steps]
-    if len(set(step_nos)) != len(step_nos):
-        raise ValueError('步骤 step_no 不能重复')
+    step_keys = [(row['stage_no'], row['step_no']) for row in steps]
+    if len(set(step_keys)) != len(step_keys):
+        raise ValueError('同一阶段内 step_no 不能重复')
     return conditions, steps
 
 
@@ -324,12 +369,13 @@ def save_policy(ds, payload: Dict[str, Any], *, policy_id: Optional[int] = None,
     try:
         if policy_id is None:
             cursor = ds.execute(
-                'INSERT INTO %s (code, name, scope_bo, trigger_action, priority, '
+                'INSERT INTO %s (code, name, scope_bo, trigger_action, task_type, priority, '
                 'status, description, effective_from, effective_to, version, '
                 'created_by, updated_by, created_at, updated_at) '
-                'VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 1, ?, ?, ?, ?)' % POLICY_TABLE,
+                'VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1, ?, ?, ?, ?)' % POLICY_TABLE,
                 [header['code'], header['name'], header['scope_bo'],
-                 header['trigger_action'], header['priority'], header['status'],
+                 header['trigger_action'], header['task_type'], header['priority'],
+                 header['status'],
                  header['description'], header['effective_from'],
                  header['effective_to'], actor, actor, now, now])
             policy_id = cursor.lastrowid
@@ -337,11 +383,12 @@ def save_policy(ds, payload: Dict[str, Any], *, policy_id: Optional[int] = None,
             version = int((base or {}).get('version') or 1) + 1
             ds.execute(
                 'UPDATE %s SET code = ?, name = ?, scope_bo = ?, trigger_action = ?, '
-                'priority = ?, status = ?, description = ?, effective_from = ?, '
-                'effective_to = ?, version = ?, updated_by = ?, updated_at = ? '
-                'WHERE id = ?' % POLICY_TABLE,
+                'task_type = ?, priority = ?, status = ?, description = ?, '
+                'effective_from = ?, effective_to = ?, version = ?, '
+                'updated_by = ?, updated_at = ? WHERE id = ?' % POLICY_TABLE,
                 [header['code'], header['name'], header['scope_bo'],
-                 header['trigger_action'], header['priority'], header['status'],
+                 header['trigger_action'], header['task_type'], header['priority'],
+                 header['status'],
                  header['description'], header['effective_from'],
                  header['effective_to'], version, actor, now, policy_id])
 
@@ -359,13 +406,14 @@ def save_policy(ds, payload: Dict[str, Any], *, policy_id: Optional[int] = None,
                  row['value_json'], actor, actor, now, now])
         for row in steps:
             ds.execute(
-                'INSERT INTO %s (policy_id, step_no, approver_type, approver_ref, '
-                'min_amount, max_amount, approve_mode, sla_hours, created_by, '
-                'updated_by, created_at, updated_at) '
-                'VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)' % STEP_TABLE,
-                [policy_id, row['step_no'], row['approver_type'],
+                'INSERT INTO %s (policy_id, step_no, stage_no, approver_type, approver_ref, '
+                'min_amount, max_amount, approve_mode, action_type, routing_json, '
+                'sla_hours, created_by, updated_by, created_at, updated_at) '
+                'VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)' % STEP_TABLE,
+                [policy_id, row['step_no'], row['stage_no'], row['approver_type'],
                  row['approver_ref'], row['min_amount'], row['max_amount'],
-                 row['approve_mode'], row['sla_hours'], actor, actor, now, now])
+                 row['approve_mode'], row['action_type'], row['routing_json'],
+                 row['sla_hours'], actor, actor, now, now])
         ds.commit()
     except Exception:
         ds.rollback()
@@ -407,7 +455,13 @@ def options() -> Dict[str, Any]:
     return {
         'objects': objects,
         'operators': list(OPERATORS),
-        'approver_types': ['role', 'user', 'position', 'org'],
+        'approver_types': list(VALID_APPROVER_TYPES),
+        'action_types': list(VALID_ACTION_TYPES),
+        'task_types': list(VALID_TASK_TYPES),
         'statuses': list(VALID_STATUSES),
         'approve_modes': list(VALID_APPROVE_MODES),
+        #: 路由参数键（spec §9.3），前端按其生成「多级审批」表单
+        'routing_keys': ['approval_chain_of', 'start_with', 'levels',
+                         'min_job_level', 'top_worker_id', 'include',
+                         'org_scope', 'quorum'],
     }

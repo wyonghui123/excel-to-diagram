@@ -101,8 +101,8 @@ class TestTick:
         assert esc["action"] == "notify"
         assert result["errors"] == []
         assert result["counts"] == {"dispatched": 1, "reclaimed": 1,
-                                    "escalations": 1, "reconciliations": 0,
-                                    "errors": 0}
+                                    "escalations": 1, "sla_reassigns": 0,
+                                    "reconciliations": 0, "errors": 0}
 
     def test_TC_TICK_002_重复tick幂等(self, ds):
         _task(ds, task_id="T-A", policy="direct", assignee="u1")
@@ -114,11 +114,11 @@ class TestTick:
         second = platform_tick(ds, now=_at(900))
 
         assert first["counts"] == {"dispatched": 1, "reclaimed": 1,
-                                   "escalations": 1, "reconciliations": 0,
-                                   "errors": 0}
+                                   "escalations": 1, "sla_reassigns": 0,
+                                   "reconciliations": 0, "errors": 0}
         assert second["counts"] == {"dispatched": 0, "reclaimed": 0,
-                                    "escalations": 0, "reconciliations": 0,
-                                    "errors": 0}
+                                    "escalations": 0, "sla_reassigns": 0,
+                                    "reconciliations": 0, "errors": 0}
 
     def test_TC_TICK_003_单任务失败隔离(self, ds, monkeypatch):
         _task(ds, task_id="T-OK", policy="direct", assignee="u1")
@@ -149,8 +149,8 @@ class TestTick:
                                reclaim=False, escalate=False)
 
         assert result["counts"] == {"dispatched": 0, "reclaimed": 0,
-                                    "escalations": 0, "reconciliations": 0,
-                                    "errors": 0}
+                                    "escalations": 0, "sla_reassigns": 0,
+                                    "reconciliations": 0, "errors": 0}
         assert _status(ds, "T-A") == "ready"
 
     def test_TC_TICK_005_段级异常不中断(self, ds, monkeypatch):

@@ -53,11 +53,16 @@ _TASK_COLUMNS = (
     "executor_type", "executor_assignee", "executor_candidates",
     "assign_policy", "due_at", "created_by", "updated_at",
     "agent_session_id", "workflow_run_id", "doc_ref",
+    # [M4-3] 委托范围匹配（app / type / doc_ref_type）需要列值
+    "doc_ref_type",
 )
 
 # [M2 2026-11-15] 详情独有字段：审批链/动作配置/单据引用只随详情返回，
 # 不进收件箱 entry（列表不需要快照，避免 payload 膨胀）。
 _DETAIL_EXTRA_COLUMNS = ("inputs", "executor_config", "doc_ref_type", "doc_ref_id")
+
+#: [M5] 详情可选列：旧库未迁移 `stage_no` 时跳过，避免整条详情 500
+_OPTIONAL_DETAIL_COLUMNS = ("stage_no",)
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -95,6 +100,7 @@ def _row_to_task(r) -> Dict[str, Any]:
         "due_at": r[10] or "", "created_by": r[11] or "",
         "updated_at": r[12] or "", "agent_session_id": r[13] or "",
         "workflow_run_id": r[14] or "", "doc_ref": r[15] or "",
+        "doc_ref_type": r[16] or "",
     }
 
 
@@ -108,7 +114,30 @@ def _attach_detail_fields(task: Dict[str, Any], r) -> Dict[str, Any]:
     task["executor_config"] = _load_json(r[base + 1], {})
     task["doc_ref_type"] = r[base + 2] or ""
     task["doc_ref_id"] = r[base + 3] or ""
+    # [M5] 阶段序号（可选列；旧库缺列时回落 1 = 单阶段）
+    stage_idx = base + len(_DETAIL_EXTRA_COLUMNS)
+    raw_stage = r[stage_idx] if len(r) > stage_idx else None
+    try:
+        task["stage_no"] = int(raw_stage) if raw_stage is not None else 1
+    except (TypeError, ValueError):
+        task["stage_no"] = 1
     return task
+
+
+def _has_column(data_source, table: str, column: str) -> bool:
+    try:
+        rows = data_source.execute('PRAGMA table_info({0})'.format(table)).fetchall()
+    except Exception:  # noqa: BLE001
+        return False
+    return any(len(row) > 1 and row[1] == column for row in rows)
+
+
+def _detail_columns(data_source) -> List[str]:
+    """详情 SELECT 列清单：基础列 + 详情列 + 已迁移的可选列。"""
+    columns = list(_TASK_COLUMNS) + list(_DETAIL_EXTRA_COLUMNS)
+    columns.extend(name for name in _OPTIONAL_DETAIL_COLUMNS
+                   if _has_column(data_source, TASK_TABLE, name))
+    return columns
 
 
 def _alerts_by_task(data_source, *, now: datetime) -> Dict[str, Dict[str, Any]]:
@@ -134,8 +163,10 @@ def _alerts_by_task(data_source, *, now: datetime) -> Dict[str, Dict[str, Any]]:
 
 def _visible(task: Dict[str, Any], *, actor: Optional[str],
              role_apps: Optional[Dict[str, Iterable[str]]],
-             actor_roles: Optional[Iterable[str]]) -> bool:
-    """行级可见性（fail-closed）：分配者 / 候选 / 创建者 / 角色→应用授权。"""
+             actor_roles: Optional[Iterable[str]],
+             data_source=None,
+             is_delegate: Optional[bool] = None) -> bool:
+    """行级可见性（fail-closed）：分配者 / 候选 / 创建者 / 有效受托人 / 角色→应用授权。"""
     if not actor:
         return False
     if task["executor_assignee"] == actor:
@@ -143,6 +174,16 @@ def _visible(task: Dict[str, Any], *, actor: Optional[str],
     if task["created_by"] == actor:
         return True
     if is_candidate(task, actor):
+        return True
+    if is_delegate is None and data_source is not None:
+        # [M4-3] 委托只放开「看得到」，不改归属（assignee/candidates 原样）
+        try:
+            from meta.core.task_delegation import is_delegate_for
+            is_delegate = is_delegate_for(data_source, actor, task)
+        except Exception:  # noqa: BLE001 - 委托表缺失不影响原有可见性
+            logger.debug("[M4-3] 委托表不可读，跳过受托人分支", exc_info=True)
+            is_delegate = False
+    if is_delegate:
         return True
     if role_apps and actor_roles:
         for role in actor_roles:
@@ -152,17 +193,21 @@ def _visible(task: Dict[str, Any], *, actor: Optional[str],
 
 
 def _derive_buckets(task: Dict[str, Any], *, actor: Optional[str],
-                    alert: Optional[Dict[str, Any]]) -> List[str]:
+                    alert: Optional[Dict[str, Any]],
+                    is_delegate: bool = False) -> List[str]:
     """派生所属分区（按 BUCKETS 顺序；每任务仍只出一条 entry）。"""
     out: List[str] = []
     status = task["status"]
     is_assignee = bool(actor) and task["executor_assignee"] == actor
+    # [M4-3] 待办 / 待审放宽到候选池与有效受托人：认领前 / 代处理时也应出现在「我的」分区
+    is_actor = (is_assignee or is_delegate
+                or (bool(actor) and is_candidate(task, actor)))
 
     if alert:
         out.append("alert")
-    if is_assignee and task["type"] == "approval" and status in APPROVAL_STATUSES:
+    if is_actor and task["type"] == "approval" and status in APPROVAL_STATUSES:
         out.append("approval")
-    if is_assignee and status in TODO_STATUSES:
+    if is_actor and status in TODO_STATUSES:
         out.append("todo")
     if (is_assignee and task["executor_type"] == "human"
             and task["agent_session_id"] and status in TODO_STATUSES):
@@ -214,11 +259,24 @@ def _collect(data_source, *, actor: Optional[str],
         task = _row_to_task(r)
         if app_id and task["app_id"] != app_id:
             continue
+        # [M4-3] 受托判定只对「非直接参与人」计算一次，供可见性与分区共用
+        is_del = False
+        if (actor and data_source is not None
+                and task["executor_assignee"] != actor
+                and task["created_by"] != actor
+                and not is_candidate(task, actor)):
+            try:
+                from meta.core.task_delegation import is_delegate_for
+                is_del = is_delegate_for(data_source, actor, task)
+            except Exception:  # noqa: BLE001
+                is_del = False
         if not _visible(task, actor=actor, role_apps=role_apps,
-                        actor_roles=actor_roles):
+                        actor_roles=actor_roles, data_source=data_source,
+                        is_delegate=is_del):
             continue
         alert = alerts.get(task["id"])
-        buckets = _derive_buckets(task, actor=actor, alert=alert)
+        buckets = _derive_buckets(task, actor=actor, alert=alert,
+                                  is_delegate=is_del)
         if not buckets:
             continue  # 与我无待办关系（终态 / 未就绪 / 纯粹他人任务）
         entries.append(_entry(task, buckets=buckets, alert=alert))
@@ -289,13 +347,14 @@ def task_detail(data_source, task_id: str, *, actor: Optional[str],
     if not task_id or not actor:
         return None
     rows = data_source.execute(
-        f"SELECT {', '.join(_TASK_COLUMNS + _DETAIL_EXTRA_COLUMNS)} "
+        f"SELECT {', '.join(_detail_columns(data_source))} "
         f"FROM {TASK_TABLE} WHERE id = ?",
         (str(task_id),),
     ).fetchall()
     if not rows:
         return None
     task = _attach_detail_fields(_row_to_task(rows[0]), rows[0])
-    if not _visible(task, actor=actor, role_apps=role_apps, actor_roles=actor_roles):
+    if not _visible(task, actor=actor, role_apps=role_apps,
+                    actor_roles=actor_roles, data_source=data_source):
         return None
     return task

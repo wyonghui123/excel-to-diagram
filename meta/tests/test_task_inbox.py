@@ -113,7 +113,8 @@ class TestVisibility:
         result = inbox_query(ds, actor="u1")
 
         assert _ids(result) == ["T-CLAIM"]
-        assert result["entries"][0]["buckets"] == ["claimable"]
+        # [M4-3] 待办/待审放宽到候选池：认领前也进 todo（claimable 仍保留）
+        assert result["entries"][0]["buckets"] == ["todo", "claimable"]
 
     def test_TC_INBOX_003_角色应用授权与app收窄(self, ds):
         _task(ds, task_id="T-APP", assignee="u2", created_by="u2",
@@ -157,10 +158,10 @@ class TestBuckets:
         assert entries["T-TODO"]["buckets"] == ["todo"]
         assert entries["T-APPR"]["buckets"] == ["approval", "todo"]
         assert entries["T-APPR"]["primary_bucket"] == "approval"
-        assert entries["T-CLAIM"]["buckets"] == ["claimable"]
+        assert entries["T-CLAIM"]["buckets"] == ["todo", "claimable"]
         assert entries["T-HANDOFF"]["buckets"] == ["todo", "agent_handoff"]
         assert entries["T-HANDOFF"]["is_handoff"] is True
-        assert result["counts"] == {"alert": 0, "approval": 1, "todo": 3,
+        assert result["counts"] == {"alert": 0, "approval": 1, "todo": 4,
                                     "agent_handoff": 1, "claimable": 1,
                                     "total": 4}
 
@@ -227,7 +228,8 @@ class TestQuery:
         filtered = inbox_query(ds, actor="u1", bucket="claimable", limit=1)
 
         assert _ids(filtered) == ["T-CLAIM"]
-        assert filtered["counts"]["todo"] == 1     # counts 全量口径
+        # [M4-3] T-CLAIM 也是候选（进 todo），故 todo 计数=2
+        assert filtered["counts"]["todo"] == 2     # counts 全量口径
         assert filtered["counts"]["total"] == 2
 
     def test_TC_INBOX_022_limit截断(self, ds):
@@ -273,10 +275,10 @@ class TestDetailContract:
                     "steps": [{"step_no": 1, "approver_type": "role"}]}
         ds.execute(
             "UPDATE tasks SET inputs = ?, executor_config = ?, doc_ref_type = ?, "
-            "doc_ref_id = ?, doc_ref = ? WHERE id = ?",
+            "doc_ref_id = ?, doc_ref = ?, stage_no = ? WHERE id = ?",
             (json.dumps({"policy_snapshot": snapshot}),
              json.dumps({"decision_actions": {"approve": "purchase_order.approve"}}),
-             "purchase_order", "PO-9", "PO-9", "T-AP"),
+             "purchase_order", "PO-9", "PO-9", 2, "T-AP"),
         )
 
         task = task_detail(ds, "T-AP", actor="u-owner")
@@ -284,3 +286,5 @@ class TestDetailContract:
         assert task["inputs"]["policy_snapshot"]["policy_code"] == "po_high"
         assert task["executor_config"]["decision_actions"]["approve"] == "purchase_order.approve"
         assert (task["doc_ref_type"], task["doc_ref_id"]) == ("purchase_order", "PO-9")
+        # [M5] 阶段序号随详情返回（前端「阶段 N/M」唯一数据源）
+        assert task["stage_no"] == 2

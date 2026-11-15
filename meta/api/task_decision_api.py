@@ -25,10 +25,15 @@ from flask import Blueprint, jsonify, request
 from meta.core.datasource import get_data_source
 from meta.core.db_path import get_meta_db_path
 from meta.core.decision_effect import (
-    DecisionEffectError, EffectNotAppliedError, decide_and_apply,
+    DecisionEffectError, EffectNotAppliedError,
 )
 from meta.core.permission_gate import user_has_permission
 from meta.services.auth_middleware import get_current_user, is_admin, login_required
+from meta.services.task_participation import (   # [M4-2 2026-11-15] 参与归并薄层
+    ParticipationConflictError, ParticipationNotFoundError,
+    ParticipationPermissionError, ParticipationServiceError,
+    decide_with_participation,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -98,16 +103,24 @@ def submit_decision(
     allow_rework = bool(body.get('allow_rework', False))
 
     try:
-        outcome = decide_and_apply(
+        outcome = decide_with_participation(
             data_source, str(task_id),
             decision=decision,
             comment=comment,
             actor=_actor(user),
-            actor_kind='human',
             reviewer_permission=_reviewer_permission(
                 user, _task_object_type(data_source, task_id)),
             allow_rework=allow_rework,
+            admin=is_admin(user),
         )
+    except ParticipationPermissionError as e:
+        return {'success': False, 'message': str(e)}, 403
+    except ParticipationNotFoundError as e:
+        return {'success': False, 'message': str(e)}, 404
+    except ParticipationConflictError as e:
+        return {'success': False, 'message': str(e)}, 409
+    except ParticipationServiceError as e:
+        return {'success': False, 'message': str(e)}, 400
     except DecisionEffectError as e:
         # 入口/守卫不满足（未调 BO，无副作用）→ 409 冲突（含任务不存在 / 类型不符）
         return {'success': False, 'message': str(e)}, 409
