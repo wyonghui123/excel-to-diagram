@@ -31,6 +31,12 @@
             class="odp-group-sep"
             aria-hidden="true"
           ></span>
+          <PrintPanel
+            v-if="objectType && id && id !== 'new'"
+            :object-type="objectType"
+            :doc-id="id"
+            :type-id="loadedRecord?.document_type_id"
+          />
           <div
             v-if="objectType && id && id !== 'new'"
             class="odp-state-transitions"
@@ -125,6 +131,7 @@ import DetailPage from '@/components/common/DetailPage/DetailPage.vue'
 import { AppButton, AppIcon } from '@/components/common'
 import PermissionConfigPanel from '@/views/SystemManagement/components/PermissionConfigPanel.vue'
 import StateTransitionButtons from '@/components/bo/StateTransitionButtons.vue'
+import PrintPanel from '@/components/print/PrintPanel.vue'
 import metaService from '@/services/metaService'
 import { resolveDetailPath } from '@/router/detailPathResolver'
 import { objectTypeService } from '@/services/objectTypeService'
@@ -301,6 +308,9 @@ const pageTitle = computed(() => {
 })
 
 const objectName = ref('')
+// 打印接入点按 `(bo_code, header 类型)` 匹配；类型 id 来自详情数据 document_type_id
+const loadedRecord = ref(null)
+watch(() => id.value, () => { loadedRecord.value = null })
 // [FIX 2026-06-29] mode='add' 时不拼接 objectName，避免从详情页切回新建时显示旧产品名
 const displayTitle = computed(() => {
   if (mode.value === 'add') return pageTitle.value
@@ -323,6 +333,7 @@ function getPrimaryNameField() {
 
 function handleDataLoaded(data) {
   if (!data) return
+  loadedRecord.value = data
   const primary = getPrimaryNameField()
   const nameFields = primary ? [primary] : ['name', 'username', 'title', 'code', 'label']
   for (const field of nameFields) {

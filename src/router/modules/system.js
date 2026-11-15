@@ -70,5 +70,13 @@ export default [
     name: 'job-schedules',
     component: () => import('@/views/SystemManagement/JobSchedules.vue'),
     meta: { title: '作业调度', requiresAuth: true, requiresAdmin: true }
+  },
+  {
+    // 打印模板与绑定（spec-print-platform §11 M6）：模板/绑定管理判
+    // print_template:{create,update,delete}，故不设 requiresAdmin（权限码即门禁）
+    path: '/system/print-platform',
+    name: 'print-platform',
+    component: () => import('@/views/SystemManagement/PrintPlatform.vue'),
+    meta: { title: '打印模板', requiresAuth: true }
   }
 ]

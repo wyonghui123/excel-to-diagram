@@ -83,9 +83,12 @@ def _is_document_bo(cap: Dict[str, Any]) -> bool:
 def list_printable_bo_types() -> List[Dict[str, Any]]:
     """全部可打印接入点，按 BO 再按类型 id 排序。
 
-    返回项: bo_code / bo_name / table_name / type_code / type_name /
+    返回项: bo_code / bo_name / table_name / type_id / type_code / type_name /
             document_category / direction / is_default_type /
             has_numbering / has_doc_effect
+
+    `type_id` 供前端按单据的 `document_type_id` 精确匹配接入点（同一 BO
+    可有多个 header 类型，见 D-PR-15）；派生口径不变。
     """
     caps = _bo_capabilities()
     rows = _rows(_ds().execute(
@@ -104,6 +107,7 @@ def list_printable_bo_types() -> List[Dict[str, Any]]:
             'bo_code': bo_code,
             'bo_name': cap['bo_name'],
             'table_name': cap['table_name'],
+            'type_id': int(row['id']),
             'type_code': row.get('code') or '',
             'type_name': row.get('name') or '',
             'document_category': row.get('document_category'),

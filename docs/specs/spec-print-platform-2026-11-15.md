@@ -374,9 +374,11 @@ CREATE INDEX idx_print_runs_job ON print_runs (job_run_id);
 | M3 | 默认版式合成 + 渲染 + 归档 + 打印记录（已完成 2026-11-15） | `meta/services/print_renderer.py`（含 `default_layout(bo_meta)`）、`meta/services/print_service.py`（含 `reprint_document`） |
 | M4 | API + 权限接入（已完成 2026-11-15） | `meta/api/print_api.py`、`meta/server.py` / `meta/core/app_builder.py` 蓝图登记 |
 | M5 | 批量执行器 + 作业接线（已完成 2026-11-15） | `meta/handlers/job_handlers.py`、`meta/migrations/v275__print_document_job.py`、`meta/server.py` 执行器注册、`POST /api/print/batch` |
-| M6 | 前端：单据动作 + 打印记录抽屉 + 模板/绑定管理页 | 前端路由与组件 |
+| M6 | 前端：单据动作 + 打印记录抽屉 + 模板/绑定管理页（已完成 2026-11-15） | `src/services/printService.js`、`src/components/print/PrintPanel.vue`、`src/components/print/PrintRunsDrawer.vue`、`src/views/SystemManagement/PrintPlatform.vue`、`src/views/ObjectDetailPage.vue`、`src/router/modules/system.js`；`print_capability` 补 `type_id` 用于多类型 BO 精确匹配 |
 
 取证（2026-11-15，`print_capability` 实跑）：可打印接入点 **17 个 header 类型 / 8 个单据 BO**（customer_invoice 4、vendor_invoice 4、receipt 2、sales_order 2、shipment 2、purchase_order 1、transfer_order 1、transfer_shipment 1）→ P0 手写模板上限 8 套，其余类型走 `default_layout` 合成。
+
+运行期冒烟（2026-11-15，BE 3010）：`GET /api/print/printable` 返 17 类型且带 `type_id`；`POST /resolve`（sales_order/139）→ `uses_default_layout=true`、`reason=no_binding`；`POST /render` → 200 `application/pdf` 94.8KB；`POST /run`（download）→ run#1 + 附件#3、`watermark=DRAFT`；`GET /api/v1/attachments/3/content` → 200 PDF；`GET /runs` 返 1 条。顺带修复 `print_renderer`：本机 Playwright `Page.pdf()` 不接受 `timeout` 参数（原实现必 500）。
 
 ---
 
