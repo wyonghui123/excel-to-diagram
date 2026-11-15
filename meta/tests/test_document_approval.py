@@ -59,7 +59,8 @@ CREATE TABLE tasks (
     id TEXT PRIMARY KEY, code TEXT UNIQUE, title TEXT NOT NULL, type TEXT NOT NULL,
     status TEXT NOT NULL, priority TEXT, app_id TEXT, executor_type TEXT NOT NULL,
     assign_policy TEXT, executor_candidates TEXT, executor_config TEXT,
-    inputs TEXT, doc_ref TEXT, created_by TEXT, created_at TEXT, attempt INTEGER
+    inputs TEXT, doc_ref TEXT, doc_ref_type TEXT, doc_ref_id TEXT,
+    created_by TEXT, created_at TEXT, attempt INTEGER
 );
 INSERT INTO control_parameter_defs
     (id, code, name, domain, value_type, target_bo, default_value, status)
@@ -295,6 +296,8 @@ def test_create_task_fields(conn, ds):
     assert row['status'] == 'waiting_approval'
     assert row['app_id'] == 'procurement'
     assert row['doc_ref'] == '1'
+    assert row['doc_ref_type'] == 'purchase_order'
+    assert row['doc_ref_id'] == '1'
     assert row['created_by'] == 'tester'
     executor = json.loads(row['executor_config'])
     assert executor['decision_actions'] == {

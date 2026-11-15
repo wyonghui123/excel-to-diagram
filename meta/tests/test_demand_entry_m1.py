@@ -134,6 +134,8 @@ CREATE TABLE tasks (
     executor_config TEXT,
     inputs TEXT,
     doc_ref TEXT,
+    doc_ref_type TEXT,
+    doc_ref_id TEXT,
     created_by TEXT,
     created_at TEXT,
     attempt INTEGER
@@ -487,7 +489,8 @@ def real_framework(tmp_path):
         ' type TEXT NOT NULL, status TEXT NOT NULL, priority TEXT, app_id TEXT,'
         ' executor_type TEXT NOT NULL, assign_policy TEXT,'
         ' executor_candidates TEXT, executor_config TEXT, inputs TEXT,'
-        ' doc_ref TEXT, created_by TEXT, created_at TEXT, attempt INTEGER);'
+        ' doc_ref TEXT, doc_ref_type TEXT, doc_ref_id TEXT,'
+        ' created_by TEXT, created_at TEXT, attempt INTEGER);'
         # 控制参数两表（M1 审批策略载体；未配置时服务回退固有口径）
         'CREATE TABLE IF NOT EXISTS control_parameter_defs ('
         ' id INTEGER PRIMARY KEY, code TEXT UNIQUE, name TEXT, domain TEXT,'

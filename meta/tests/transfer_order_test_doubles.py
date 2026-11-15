@@ -251,6 +251,8 @@ CREATE TABLE tasks (
     executor_config TEXT,
     inputs TEXT,
     doc_ref TEXT,
+    doc_ref_type TEXT,
+    doc_ref_id TEXT,
     created_by TEXT,
     created_at TEXT,
     attempt INTEGER

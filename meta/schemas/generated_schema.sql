@@ -1,5 +1,5 @@
 -- 自动生成的 Schema
--- 生成时间: 2026-11-15 07:47:26.364600
+-- 生成时间: 2026-11-15 12:18:28.818498
 
 -- 地址: 结构化地址库（支持对象）：国家 / 省 / 市 / 区 / 街道 / 门牌 / 邮编分列 + 格式化全文；只被引用，不承载用途 / 角色
 CREATE TABLE IF NOT EXISTS addresses (
@@ -3705,6 +3705,8 @@ CREATE TABLE IF NOT EXISTS tasks (
     trace_id VARCHAR(200),
     agent_session_id VARCHAR(200),
     doc_ref VARCHAR(200),
+    doc_ref_type VARCHAR(200),
+    doc_ref_id VARCHAR(200),
     line_refs TEXT,
     created_by VARCHAR(200),
     created_at DATETIME,
@@ -5562,6 +5564,7 @@ CREATE INDEX IF NOT EXISTS idx_tasks_assignee ON tasks(executor_type, executor_a
 CREATE INDEX IF NOT EXISTS idx_tasks_run ON tasks(workflow_run_id)
 CREATE INDEX IF NOT EXISTS idx_tasks_parent ON tasks(parent_task_id)
 CREATE INDEX IF NOT EXISTS idx_tasks_doc ON tasks(doc_ref)
+CREATE INDEX IF NOT EXISTS idx_tasks_approval_ref ON tasks(doc_ref_type, doc_ref_id, status)
 
 -- Indexes for 任务事件
 CREATE INDEX IF NOT EXISTS idx_task_events_task ON task_events(task_id, occurred_at)

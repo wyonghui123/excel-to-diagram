@@ -99,6 +99,8 @@ numbering:
 approval:
   table: transfer_orders
   amount_fields: []
+  title_field: transfer_order_no
+  app_id: procurement
 
 fields:
   - id: id

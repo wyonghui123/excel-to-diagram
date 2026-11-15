@@ -119,6 +119,8 @@ class DocumentApprovalResolver:
             'policy_id': policy_id,
             'policy_code': policy.get('code'),
             'policy_name': policy.get('name'),
+            # D-AP-07：策略版本随快照冻结，变更不回溯在途任务
+            'policy_version': policy.get('version'),
             'priority': policy.get('priority'),
             # FR-006：命中策略显式化（审批策略集默认 first）
             'hit_policy': DEFAULT_HIT_POLICY,

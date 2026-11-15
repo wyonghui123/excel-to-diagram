@@ -21,6 +21,7 @@
   R4 入库集 ⊄ 声明集 → WARNING（孤儿码，可保留兼容）
   R5 菜单集 ⊄ (声明集 ∪ 入库集) → ERROR（菜单引用既未声明也未入库，点击即 403）
   R6 菜单 required_permissions 为空 → WARNING（容器菜单可进 MENU_EMPTY_ALLOWLIST）
+  R7 可审批对象缺 ``{bo}:approve`` 权限码 → ERROR（非 admin 审核人必然 fail-closed）
 
 Usage:
     python scripts/check_permission_consistency.py
@@ -204,11 +205,35 @@ def collect_menu(db_path):
     return codes, sorted(empty)
 
 
+def collect_approval_required():
+    """R7：可审批对象（BO YAML ``approval.table`` 非空）所需的审核权限码。
+
+    审核权限唯一口径 = ``{bo}:approve``（task_decision_api._reviewer_permission）；
+    该码既未声明又未入库 ⇒ 非 admin 审核人提交决策必然 409/403，属配置漏项。
+    """
+    from meta.core import yaml_compat as yaml
+
+    required = set()
+    for path in _iter_yaml_files():
+        try:
+            with open(path, 'r', encoding='utf-8') as handle:
+                data = yaml.safe_load(handle) or {}
+        except Exception:  # noqa: BLE001 - 单文件解析失败不计入 R7
+            continue
+        approval = data.get('approval')
+        if not isinstance(approval, dict) or not str(approval.get('table') or ''):
+            continue
+        object_id = str(data.get('id') or path.stem)
+        required.add('%s:approve' % object_id)
+    return required
+
+
 def check(db_path):
     referenced = collect_referenced()
     declared = collect_declared()
     stored, granted = collect_stored(db_path)
     menu_codes, empty_menus = collect_menu(db_path)
+    approval_required = collect_approval_required()
 
     ref_set = set(referenced)
     dec_set = set(declared)
@@ -222,6 +247,7 @@ def check(db_path):
     granted_unknown = sorted(granted - stored - _IGNORED_CODES)
     orphaned = sorted(stored - dec_set - _IGNORED_CODES)
     menu_missing = sorted(menu_codes - dec_set - stored)
+    approval_missing = sorted(approval_required - dec_set - stored)
 
     return {
         'counts': {
@@ -236,6 +262,7 @@ def check(db_path):
             'not_seeded': not_seeded,
             'granted_unknown': granted_unknown,
             'menu_missing': menu_missing,
+            'approval_permission_missing': approval_missing,
         },
         'warnings': {
             'referenced_undeclared': stored_backed,
@@ -243,7 +270,8 @@ def check(db_path):
             'menu_empty': empty_menus,
         },
         'sources': {code: sorted(src) for code, src in referenced.items()},
-        'is_consistent': not (unbacked or not_seeded or granted_unknown or menu_missing),
+        'is_consistent': not (unbacked or not_seeded or granted_unknown
+                              or menu_missing or approval_missing),
     }
 
 
@@ -272,6 +300,7 @@ def main():
             ('not_seeded', 'R2 声明但未入库'),
             ('granted_unknown', 'R3 已授予但入库缺失'),
             ('menu_missing', 'R5 菜单引用但未声明且未入库'),
+            ('approval_permission_missing', 'R7 可审批对象缺 {bo}:approve（非 admin 审核必被拒）'),
             ('referenced_undeclared', 'R1w 引用未声明但已入库（WARNING，靠存量码兜底）'),
             ('orphaned', 'R4 入库但未声明（WARNING）'),
             ('menu_empty', 'R6 菜单 required_permissions 为空（WARNING）'),

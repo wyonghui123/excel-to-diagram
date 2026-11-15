@@ -186,6 +186,16 @@ fields:
     type: string
     db_column: doc_ref
     description: 单据级弱引用（businessKey 等价物，跨环节关联键）；无 FK
+  - id: doc_ref_type
+    name: 单据对象类型
+    type: string
+    db_column: doc_ref_type
+    description: 单据对象类型（审批任务在途判重的唯一依据；历史任务可为空）
+  - id: doc_ref_id
+    name: 单据记录 ID
+    type: string
+    db_column: doc_ref_id
+    description: 单据记录 ID（与 doc_ref_type 组成审批在途判重键）
   - id: line_refs
     name: 行级引用
     type: json
@@ -250,6 +260,9 @@ indexes:
   - name: idx_tasks_doc
     fields: [doc_ref]
     description: 按单据追任务（跨环节关联）
+  - name: idx_tasks_approval_ref
+    fields: [doc_ref_type, doc_ref_id, status]
+    description: 审批在途判重（type=approval + 单据 + 非终态）
 
 ui_view_config:
   skip_auto_menu: true

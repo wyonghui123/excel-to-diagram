@@ -7,8 +7,8 @@
 纪律（§9.7 / §12.1 B3 / Q1）:
 - 本路由是决策-生效协议的**唯一**生产调用方：薄适配层只做「权限映射 + body 消毒」，
   协议本体（先 BO 生效、后任务归位、幂等、四眼）全部复用 meta.core.decision_effect。
-- 审核权限事实来源：v1 取 is_admin（拥有 '*' 通配），非 admin **fail-closed**
-  （对齐 A8「不臆造权限表」纪律；用户/角色系统接入后再细化）。
+- 审核权限事实来源（D-AP-06）：admin 短路；其余按 `{doc_ref_type}:approve` 判定，
+  单据类型未知（历史任务无 `doc_ref_type`）时 **fail-closed**。
 - **禁止**客户端指定 submitter_id / four_eyes / reviewer_permission：四眼基准取自任务
   的 created_by，由服务端裁决，否则可绕过 maker-checker（§9.7 规范 3）。
 
@@ -27,6 +27,7 @@ from meta.core.db_path import get_meta_db_path
 from meta.core.decision_effect import (
     DecisionEffectError, EffectNotAppliedError, decide_and_apply,
 )
+from meta.core.permission_gate import user_has_permission
 from meta.services.auth_middleware import get_current_user, is_admin, login_required
 
 logger = logging.getLogger(__name__)
@@ -43,9 +44,29 @@ def _actor(user) -> str:
     return user.get('user_id') or user.get('username') or ''
 
 
-def _reviewer_permission(user) -> bool:
-    """审核权限事实（v1：拥有 '*' 通配即视为有权；非 admin fail-closed）。"""
-    return bool(is_admin(user))
+def _task_object_type(data_source, task_id: str) -> str:
+    """任务单据对象类型（审批任务在途判重列）；历史任务为空串 ⇒ 权限 fail-closed。"""
+    try:
+        rows = data_source.query(
+            'SELECT doc_ref_type FROM tasks WHERE id = ?', [str(task_id)])
+    except Exception as exc:  # noqa: BLE001 - 判权限不阻断决策协议，缺失即视为未知
+        logger.warning('[B3] 读取任务 %s 单据类型失败: %s', task_id, exc)
+        return ''
+    if not rows:
+        return ''
+    return str(rows[0].get('doc_ref_type') or '')
+
+
+def _reviewer_permission(user, object_type: str) -> bool:
+    """审核权限事实（D-AP-06）：admin 短路，否则校验 `{bo}:approve`。"""
+    if not user:
+        return False
+    if is_admin(user):
+        return True
+    if not object_type:
+        return False
+    return user_has_permission(
+        user.get('permissions') or [], '%s:approve' % object_type)
 
 
 def _platform_ds():
@@ -83,7 +104,8 @@ def submit_decision(
             comment=comment,
             actor=_actor(user),
             actor_kind='human',
-            reviewer_permission=_reviewer_permission(user),
+            reviewer_permission=_reviewer_permission(
+                user, _task_object_type(data_source, task_id)),
             allow_rework=allow_rework,
         )
     except DecisionEffectError as e:
