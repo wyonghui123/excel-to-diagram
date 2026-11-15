@@ -40,7 +40,7 @@
         </div>
         <div class="tip-row-meta">
           <span class="tip-chip tip-chip--muted">{{ row.bucketLabel }}</span>
-          <span class="tip-status">{{ row.status }}</span>
+          <span class="tip-status">{{ statusLabel(row) }}</span>
           <span v-if="row.due_at" class="tip-due">到期 {{ row.due_at }}</span>
         </div>
       </li>
@@ -53,6 +53,7 @@
 import { onMounted } from 'vue'
 import { AppCard, AppButton } from '@/components/common'
 import { useTaskInbox } from '@/composables/useTaskInbox'
+import { statusLabel } from '@/constants/taskStatus'
 
 defineEmits(['open-detail'])
 defineOptions({ name: 'TaskInboxPanel' })

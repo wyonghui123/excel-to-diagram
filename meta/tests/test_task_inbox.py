@@ -260,3 +260,27 @@ class TestQuery:
 
         assert inbox_counts(ds, actor="u1") == inbox_query(ds, actor="u1")["counts"]
         assert BUCKETS == ("alert", "approval", "todo", "agent_handoff", "claimable")
+
+
+class TestDetailContract:
+    def test_TC_INBOX_030_详情返回审批快照与单据引用(self, ds):
+        """[M2] 抽屉审批链/动作/跳转的唯一数据源：详情必须带快照与拆列引用。"""
+        from meta.core.task_inbox import task_detail
+
+        _task(ds, task_id="T-AP", type_="approval", status="waiting_approval",
+              assignee="u-owner", candidates=[])
+        snapshot = {"policy_code": "po_high", "policy_version": 3,
+                    "steps": [{"step_no": 1, "approver_type": "role"}]}
+        ds.execute(
+            "UPDATE tasks SET inputs = ?, executor_config = ?, doc_ref_type = ?, "
+            "doc_ref_id = ?, doc_ref = ? WHERE id = ?",
+            (json.dumps({"policy_snapshot": snapshot}),
+             json.dumps({"decision_actions": {"approve": "purchase_order.approve"}}),
+             "purchase_order", "PO-9", "PO-9", "T-AP"),
+        )
+
+        task = task_detail(ds, "T-AP", actor="u-owner")
+
+        assert task["inputs"]["policy_snapshot"]["policy_code"] == "po_high"
+        assert task["executor_config"]["decision_actions"]["approve"] == "purchase_order.approve"
+        assert (task["doc_ref_type"], task["doc_ref_id"]) == ("purchase_order", "PO-9")

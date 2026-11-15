@@ -9,7 +9,7 @@ import { apiV1, apiV2 } from '@/utils/httpClient'
 import {
   BUCKET_ORDER, BUCKET_LABELS, derivePause, formatTaskRow,
   normalizeInboxResponse, fetchInbox, fetchInboxCounts, fetchTaskDetail,
-  fetchTaskEvents, claimTask, fetchTasks, fetchWorkflowSchedules
+  fetchTaskEvents, claimTask, submitDecision, fetchTasks, fetchWorkflowSchedules
 } from '../taskService'
 
 describe('BUCKET 常量', () => {
@@ -111,6 +111,22 @@ describe('API 封装', () => {
     apiV1.post.mockResolvedValue({ success: true, data: { status: 'claimed' } })
     await claimTask('T-1')
     expect(apiV1.post).toHaveBeenCalledWith('/tasks/T-1/claim', {})
+  })
+
+  it('submitDecision 按决策协议提交 approve', async () => {
+    apiV1.post.mockResolvedValue({ success: true, data: { status: 'completed' } })
+    await submitDecision('T-1', { decision: 'approve', comment: 'ok' })
+    expect(apiV1.post).toHaveBeenCalledWith('/tasks/T-1/decision', {
+      decision: 'approve', comment: 'ok', allow_rework: false
+    })
+  })
+
+  it('submitDecision 驳回透传 allow_rework', async () => {
+    apiV1.post.mockResolvedValue({ success: true })
+    await submitDecision('T-2', { decision: 'reject', comment: '超限', allowRework: true })
+    expect(apiV1.post).toHaveBeenCalledWith('/tasks/T-2/decision', {
+      decision: 'reject', comment: '超限', allow_rework: true
+    })
   })
 
   it('fetchTasks 拼过滤与分页', async () => {

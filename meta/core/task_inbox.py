@@ -55,6 +55,10 @@ _TASK_COLUMNS = (
     "agent_session_id", "workflow_run_id", "doc_ref",
 )
 
+# [M2 2026-11-15] 详情独有字段：审批链/动作配置/单据引用只随详情返回，
+# 不进收件箱 entry（列表不需要快照，避免 payload 膨胀）。
+_DETAIL_EXTRA_COLUMNS = ("inputs", "executor_config", "doc_ref_type", "doc_ref_id")
+
 
 # ─────────────────────────────────────────────────────────────────────────────
 # 辅助
@@ -92,6 +96,19 @@ def _row_to_task(r) -> Dict[str, Any]:
         "updated_at": r[12] or "", "agent_session_id": r[13] or "",
         "workflow_run_id": r[14] or "", "doc_ref": r[15] or "",
     }
+
+
+def _attach_detail_fields(task: Dict[str, Any], r) -> Dict[str, Any]:
+    """[M2] 详情附加字段：审批快照 inputs / 动作配置 executor_config / 单据引用。
+
+    前端审批链、命中依据、单据跳转的唯一数据源（D-AP-09：不新增审批链 API）。
+    """
+    base = len(_TASK_COLUMNS)
+    task["inputs"] = _load_json(r[base], {})
+    task["executor_config"] = _load_json(r[base + 1], {})
+    task["doc_ref_type"] = r[base + 2] or ""
+    task["doc_ref_id"] = r[base + 3] or ""
+    return task
 
 
 def _alerts_by_task(data_source, *, now: datetime) -> Dict[str, Dict[str, Any]]:
@@ -272,12 +289,13 @@ def task_detail(data_source, task_id: str, *, actor: Optional[str],
     if not task_id or not actor:
         return None
     rows = data_source.execute(
-        f"SELECT {', '.join(_TASK_COLUMNS)} FROM {TASK_TABLE} WHERE id = ?",
+        f"SELECT {', '.join(_TASK_COLUMNS + _DETAIL_EXTRA_COLUMNS)} "
+        f"FROM {TASK_TABLE} WHERE id = ?",
         (str(task_id),),
     ).fetchall()
     if not rows:
         return None
-    task = _row_to_task(rows[0])
+    task = _attach_detail_fields(_row_to_task(rows[0]), rows[0])
     if not _visible(task, actor=actor, role_apps=role_apps, actor_roles=actor_roles):
         return None
     return task

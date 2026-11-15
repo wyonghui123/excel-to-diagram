@@ -136,6 +136,23 @@ export async function claimTask(taskId) {
   return apiV1.post(`/tasks/${encodeURIComponent(taskId)}/claim`, {})
 }
 
+/**
+ * 提交审批决策（决策-生效协议入口；四眼/权限由服务端裁决）。
+ * @param {string} taskId
+ * @param {{decision:'approve'|'reject', comment?:string, allowRework?:boolean}} payload
+ *   - decision 必须来自任务快照 executor_config.decision_actions 的动作入参
+ *   - allow_rework=true 时驳回后退回「进行中」（可重新提交）
+ * @returns {Promise<{success:boolean,data?:Object,message?:string,httpStatus?:number}>}
+ *   409 = 入口/守卫不满足（未产生副作用）；502 = 单据未生效，可重试
+ */
+export async function submitDecision(taskId, { decision, comment = '', allowRework = false } = {}) {
+  return apiV1.post(`/tasks/${encodeURIComponent(taskId)}/decision`, {
+    decision,
+    comment,
+    allow_rework: !!allowRework
+  })
+}
+
 /** 运维监控列表（限管理员） */
 export async function fetchTasks({ status, type, appId, executorType, page, pageSize } = {}) {
   return apiV1.get(`/tasks${_qs({
@@ -150,6 +167,6 @@ export async function fetchWorkflowSchedules() {
 
 export default {
   BUCKET_ORDER, BUCKET_LABELS, derivePause, formatTaskRow, normalizeInboxResponse,
-  fetchInbox, fetchInboxCounts, fetchTaskDetail, fetchTaskEvents, claimTask, fetchTasks,
-  fetchWorkflowSchedules
+  fetchInbox, fetchInboxCounts, fetchTaskDetail, fetchTaskEvents, claimTask, submitDecision,
+  fetchTasks, fetchWorkflowSchedules
 }

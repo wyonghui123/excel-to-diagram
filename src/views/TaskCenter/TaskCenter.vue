@@ -15,7 +15,7 @@
         <tbody>
           <tr v-for="t in rows" :key="t.id" data-test="monitor-row" @click="openDetail(t.id)">
             <td>{{ t.title || t.id }}</td>
-            <td>{{ t.status }}</td>
+            <td>{{ statusLabel(t) }}</td>
             <td>{{ t.type }}</td>
             <td>{{ t.executor_type }}</td>
             <td>{{ t.assignee || '—' }}</td>
@@ -55,6 +55,7 @@
       :current-actor="currentActor"
       @close="drawerVisible = false"
       @claimed="reload"
+      @decided="reload"
     />
   </div>
 </template>
@@ -64,6 +65,7 @@ import { ref, onMounted, watch } from 'vue'
 import { SubNavTabs } from '@/components/common'
 import TaskDetailDrawer from './TaskDetailDrawer.vue'
 import { fetchTasks, fetchWorkflowSchedules } from '@/services/taskService'
+import { statusLabel } from '@/constants/taskStatus'
 import { useAuthStore } from '@/stores/authStore'
 
 defineOptions({ name: 'TaskCenter' })

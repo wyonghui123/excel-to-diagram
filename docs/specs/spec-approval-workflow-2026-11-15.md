@@ -310,7 +310,7 @@ src/constants/taskStatus.js      ← 单一派生源（11 态 label + tag type�
 | 阶段 | 内容 | 验收（可执行） |
 |---|---|---|
 | **M1 后端收敛**（✅ 已完成） | YAML 扩键 + 删 `APPROVAL_TASK_SPECS` / `DECISION_ACTIONS` + 迁移 v276 + `_reviewer_permission` + 门禁 R7 + `approval_status` 门禁测试 | 见下方「M1 验收记录」 |
-| **M2 P0 UI** | `submitDecision` + 抽屉动作 / 审批链 / 依据 / 单据跳转 + `taskStatus.js` + 5 处替换 | 前端构建通过；3010 冒烟：非 admin 用户对无 `{bo}:approve` 单据不可见动作；驳回填意见后可成功并刷新 |
+| **M2 P0 UI**（✅ 已完成） | `submitDecision` + 抽屉动作 / 审批链 / 依据 / 单据跳转 + `taskStatus.js` + 状态文案替换 | 见下方「M2 验收记录」 |
 | **M3 策略与批量** | 策略 CRUD + `preview` + 收件箱批量 | `preview` 与生产 `resolve()` 返回一致（同 record 对比断言）；批量部分失败仍出汇总 |
 | **M4（P2，不在本期）** | 加签 / 转签 / 委托 / 会签 / SLA | — |
 
@@ -328,6 +328,17 @@ src/constants/taskStatus.js      ← 单一派生源（11 态 label + tag type�
 1. `MetaObject` **无** `app` 字段（`meta/core/models.py`）⇒ `app_id` 默认空串，需要业务域的 BO 显式声明。
 2. `task.yaml` 是 BO，列/索引改 YAML 后由 `sync_schema --generate` 产出 DDL，drift 门禁保持绿。
 3. `approval_policy` **未注册为 BO**（无 `approval_policy.yaml`）⇒ M3 策略 CRUD 必须走专用 API，不能走通用 BO API。
+
+**M2 验收记录（2026-11-15）**：
+
+| 项 | 结果 |
+|---|---|
+| 前端测试 | `taskService` + `TaskDetailDrawer` + `TaskInboxPanel` + `TaskCenter.schedule` 共 41 passed（新增抽屉 6 例：状态中文化 / 审批链与依据 / admin 短路 / `{bo}:approve` 白名单 / 无权限提示 / 驳回必填 + `allow_rework` 透传） |
+| 后端测试 | `test_task_inbox.py` 14 passed（新增 `TC_INBOX_030` 详情契约）、`test_task_decision_api.py` 6 passed、`test_task_query_read.py` 全绿 |
+| 构建/lint | `npm run build` 通过（chunk-cycles OK）；`eslint` 无新增错误（仅既有 `URLSearchParams` warning） |
+| 契约补充（实现必需） | 详情端点此前不含快照字段，M2 在 `task_inbox.py` 增加 `_DETAIL_EXTRA_COLUMNS`（`inputs` / `executor_config` / `doc_ref_type` / `doc_ref_id`），仅详情返回、不进收件箱 entry，避免列表 payload 膨胀 |
+| 偏离说明 | 状态文案实际收敛 **3 处任务状态展示**（`TaskCenter` 监控表、`TaskInboxPanel` 行、抽屉状态 chip）。Spec §2.1 #7 另两处（`AssociationSection` 的 `approval_status`、`EngineeringChangeDetailPage` 的变更单状态）属于**不同枚举域**（BO 投影 / 变更单状态），并入 `taskStatus.js` 会造成错误合并，保持原样 |
+| 未做 | live 3010 冒烟未执行（需要种子审批任务 + 真实用户权限）；权限门控与决策错误映射已由组件测试覆盖 |
 
 ---
 

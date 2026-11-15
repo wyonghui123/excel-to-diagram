@@ -1,17 +1,27 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest'
 import { mount, flushPromises } from '@vue/test-utils'
 
+const authState = vi.hoisted(() => ({ isAdmin: true, perms: [] }))
+
+vi.mock('@/stores/authStore', () => ({
+  useAuthStore: () => ({
+    get isAdmin() { return authState.isAdmin },
+    hasPermission: (p) => authState.perms.includes(p)
+  })
+}))
+
 vi.mock('@/services/taskService', async (orig) => {
   const actual = await orig()
   return {
     ...actual,
     fetchTaskDetail: vi.fn(),
     fetchTaskEvents: vi.fn(),
-    claimTask: vi.fn()
+    claimTask: vi.fn(),
+    submitDecision: vi.fn()
   }
 })
 
-import { fetchTaskDetail, fetchTaskEvents } from '@/services/taskService'
+import { fetchTaskDetail, fetchTaskEvents, submitDecision } from '@/services/taskService'
 import TaskDetailDrawer from '../TaskDetailDrawer.vue'
 
 const TASK = {
@@ -26,6 +36,23 @@ const EVENTS = [
   { id: 'e2', event_type: 'status_changed', from_status: 'pending', to_status: 'ready', actor: 'system', actor_kind: 'system', occurred_at: '2026-10-04T09:05:00', reason: '派工' }
 ]
 
+const APPROVAL_TASK = {
+  id: 'T-2', title: '采购订单审批', type: 'approval', status: 'waiting_approval',
+  executor_type: 'human', executor_assignee: '', executor_candidates: [],
+  assign_policy: 'claim', created_by: 'u-owner', doc_ref: 'PO-9',
+  doc_ref_type: 'purchase_order', doc_ref_id: 'PO-9',
+  inputs: {
+    policy_snapshot: {
+      policy_code: 'po_high', policy_name: '采购高额审批', policy_version: 3, hit_policy: true,
+      steps: [{ step_no: 1, approver_type: 'role', approver_ref: 'procurement_manager', approve_mode: 'any', sla_hours: 24 }],
+      conditions_explain: [{ field: 'gross_amount', op: '>=', expected: 100000, actual: 128000, passed: true }]
+    }
+  },
+  executor_config: {
+    decision_actions: { approve: 'purchase_order.approve', reject: 'purchase_order.reject' }
+  }
+}
+
 // AppModal 内部 <Teleport to="body">；测试桩掉 Teleport 让内容留在 wrapper 内可断言。
 function mountDrawer(props) {
   return mount(TaskDetailDrawer, {
@@ -35,7 +62,11 @@ function mountDrawer(props) {
 }
 
 describe('TaskDetailDrawer', () => {
-  beforeEach(() => vi.clearAllMocks())
+  beforeEach(() => {
+    vi.clearAllMocks()
+    authState.isAdmin = true
+    authState.perms = []
+  })
 
   it('visible 时加载详情与活动流并渲染', async () => {
     fetchTaskDetail.mockResolvedValue({ success: true, data: TASK })
@@ -86,5 +117,74 @@ describe('TaskDetailDrawer', () => {
     const w = mountDrawer({ visible: true, taskId: 'T-1' })
     await flushPromises()
     expect(w.find('[data-test="error"]').exists()).toBe(true)
+  })
+
+  it('审批任务：状态中文化 + 审批链 + 命中依据 + 单据跳转', async () => {
+    fetchTaskDetail.mockResolvedValue({ success: true, data: APPROVAL_TASK })
+    fetchTaskEvents.mockResolvedValue({ success: true, data: [] })
+    const w = mountDrawer({ visible: true, taskId: 'T-2' })
+    await flushPromises()
+    expect(w.find('[data-test="task-status"]').text()).toBe('待审批')
+    expect(w.find('[data-test="approval-chain"]').text()).toContain('procurement_manager')
+    expect(w.find('[data-test="condition-explain"]').text()).toContain('gross_amount')
+    expect(w.find('[data-test="open-doc"]').exists()).toBe(true)
+  })
+
+  it('admin 短路权限 → 展示通过/驳回按钮', async () => {
+    fetchTaskDetail.mockResolvedValue({ success: true, data: APPROVAL_TASK })
+    fetchTaskEvents.mockResolvedValue({ success: true, data: [] })
+    const w = mountDrawer({ visible: true, taskId: 'T-2' })
+    await flushPromises()
+    expect(w.find('[data-test="approve-btn"]').exists()).toBe(true)
+    expect(w.find('[data-test="reject-btn"]').exists()).toBe(true)
+  })
+
+  it('非 admin 且有 {bo}:approve → 展示按钮', async () => {
+    authState.isAdmin = false
+    authState.perms = ['purchase_order:approve']
+    fetchTaskDetail.mockResolvedValue({ success: true, data: APPROVAL_TASK })
+    fetchTaskEvents.mockResolvedValue({ success: true, data: [] })
+    const w = mountDrawer({ visible: true, taskId: 'T-2' })
+    await flushPromises()
+    expect(w.find('[data-test="approve-btn"]').exists()).toBe(true)
+  })
+
+  it('无审批权限 → 不展示按钮且给出提示', async () => {
+    authState.isAdmin = false
+    fetchTaskDetail.mockResolvedValue({ success: true, data: APPROVAL_TASK })
+    fetchTaskEvents.mockResolvedValue({ success: true, data: [] })
+    const w = mountDrawer({ visible: true, taskId: 'T-2' })
+    await flushPromises()
+    expect(w.find('[data-test="approve-btn"]').exists()).toBe(false)
+    expect(w.find('[data-test="decision-hint"]').text()).toContain('purchase_order:approve')
+  })
+
+  it('驳回未填意见 → 不发请求并提示', async () => {
+    fetchTaskDetail.mockResolvedValue({ success: true, data: APPROVAL_TASK })
+    fetchTaskEvents.mockResolvedValue({ success: true, data: [] })
+    const w = mountDrawer({ visible: true, taskId: 'T-2' })
+    await flushPromises()
+    await w.find('[data-test="reject-btn"]').trigger('click')
+    await flushPromises()
+    expect(submitDecision).not.toHaveBeenCalled()
+    expect(w.find('[data-test="decision-msg"]').text()).toContain('驳回需填写审批意见')
+  })
+
+  it('驳回填意见 + 退回修改 → 提交 allow_rework 并 emit decided', async () => {
+    submitDecision.mockResolvedValue({ success: true, data: { status: 'completed' } })
+    fetchTaskDetail.mockResolvedValue({ success: true, data: APPROVAL_TASK })
+    fetchTaskEvents.mockResolvedValue({ success: true, data: [] })
+    const w = mountDrawer({ visible: true, taskId: 'T-2' })
+    await flushPromises()
+    await w.find('[data-test="decision-comment"]').setValue('金额超限，退回修改')
+    await w.find('[data-test="allow-rework"]').setValue(true)
+    await w.find('[data-test="reject-btn"]').trigger('click')
+    await flushPromises()
+    expect(submitDecision).toHaveBeenCalledWith('T-2', {
+      decision: 'reject',
+      comment: '金额超限，退回修改',
+      allowRework: true
+    })
+    expect(w.emitted('decided')).toBeTruthy()
   })
 })
