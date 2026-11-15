@@ -1126,7 +1126,10 @@ def create_app(db_path=None):
     # [平台附件 v269 2026-11-13] /api/v1/attachments/* + /api/v1/attachment-links/*。
     #   两条启动路径必须同址登记（waitress 走本函数，app_builder 另有一份）。
     from meta.api.attachment_api import attachment_bp
+    # [打印平台 M4 2026-11-15] /api/print/*（两处启动路径同址登记）。
+    from meta.api.print_api import print_bp
     app.register_blueprint(attachment_bp)
+    app.register_blueprint(print_bp)
     app.register_blueprint(special_bp)
     app.register_blueprint(manage_bp)
     app.register_blueprint(meta_bp)

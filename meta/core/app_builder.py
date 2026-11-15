@@ -511,6 +511,8 @@ class ApplicationBuilder:
         from meta.api.annotation_routes_api import annotation_bp
         # [附件平台 v269 2026-11-13] 平台级附件（内容 + 多态链接）。
         from meta.api.attachment_api import attachment_bp
+        # [打印平台 M4 2026-11-15] /api/print/*（与 server.py 同址）。
+        from meta.api.print_api import print_bp
         from meta.api.audit_management_api import audit_mgmt_bp
         from meta.api.meta_utility_routes_api import meta_util_bp
         from meta.api.key_template_api import key_template_bp, set_engine as set_kt_engine
@@ -588,6 +590,8 @@ class ApplicationBuilder:
         app.register_blueprint(annotation_bp)
         # [附件平台 v269 2026-11-13] /api/v1/attachments/* + /api/v1/attachment-links/*
         app.register_blueprint(attachment_bp)
+        # [打印平台 M4 2026-11-15] /api/print/*
+        app.register_blueprint(print_bp)
         app.register_blueprint(audit_mgmt_bp)
         app.register_blueprint(meta_util_bp)
         app.register_blueprint(key_template_bp)

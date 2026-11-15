@@ -273,7 +273,12 @@ CREATE INDEX idx_print_runs_job ON print_runs (job_run_id);
 
 1. 入口：打印记录列表 / 单据页「重打」。
 2. 取原 `print_runs.attachment_id` 的字节，服务端叠加 REPRINT 水印（含重打序号、时间、操作人）。
-3. 新增一条 `print_runs`：`trigger='reprint'`, `is_reprint=1`, `watermark='REPRINT'`, `print_seq=原+1`，`attachment_id` 指原归档件（不新增附件）。
+   **P0 降级（2026-11-15 实现期确认）**：requirements 无 PDF 合成库（仅 playwright），P0 **不物理叠印**；
+   `watermark='REPRINT'` 只落 `print_runs`，响应头 `X-Print-Watermark-Applied: false` 显式声明未叠印。
+   物理叠加推迟到 P1（引入 PDF 叠加库后改 `REPRINT_WATERMARK_APPLIED=True`，接口不变）。
+3. 新增一条 `print_runs`：`trigger='reprint'`, `is_reprint=1`, `watermark='REPRINT'`,
+   `print_seq=原值`（沿用，不消耗新序号，见 D-PR-06）, `is_formal=原值`，
+   `attachment_id` 指原归档件（不新增附件）。
 4. 原归档字节与 `sha256` 不变；`print_count = count(print_runs where trigger in ('print','download','batch','reprint') and status='succeeded')`。
 
 **为什么要叠加而不是重渲染**：Oracle Fusion 的真实缺陷正是「重打取当前版本 → 内容可能和原件不一致」；叠加水印保证「内容零漂移 + 可识别为重打」。
@@ -295,7 +300,7 @@ CREATE INDEX idx_print_runs_job ON print_runs (job_run_id);
 | POST | `/api/print/resolve` | 入参 `{bo_code, type_code, doc_id}` → 命中的模板与理由（排障） |
 | POST | `/api/print/render` | `{bo_code, type_code, doc_id, template_id?, mode: preview}` → `application/pdf` 流；无绑定走合成默认版式 |
 | POST | `/api/print/run` | `{bo_code, type_code, doc_id, template_id?, trigger: print|download}` → `print_run` + `attachment_id` |
-| POST | `/api/print/reprint` | `{print_run_id}` → 新 `print_run`，返回带水印 PDF 流 |
+| POST | `/api/print/reprint` | `{print_run_id}` → 新 `print_run`，返回原归档 PDF 流（P0 水印只记 run，头 `X-Print-Watermark-Applied: false`，见 §7.2） |
 | GET | `/api/print/runs?bo_code=&doc_id=` | 打印记录（分页） |
 | POST | `/api/print/batch` | `{bo_code, type_code, doc_ids[], template_id?}` → `{task_run_id}`（走作业账本） |
 

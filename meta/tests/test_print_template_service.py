@@ -109,3 +109,55 @@ def test_variables_signature_stable_and_discriminating():
     assert first == second
     assert first != svc.variables_signature(svc.derive_variables('sales_order'))
     assert first != svc.variables_signature({})
+
+
+# ------------------------------------------------------------ 默认版式源 (D-PR-16)
+
+def test_default_template_source_is_valid_and_whitelisted():
+    source = svc.default_template_source(BO)
+    html = source['html']
+    assert source['css'] == svc.DEFAULT_TEMPLATE_CSS
+    assert '@page' not in source['css']
+    assert '<div class="print-doc">' in html
+    assert '{{ doc.bill_to_account_id }}' in html
+    assert '{{#each customer_invoice_line}}' in html
+    assert '{{ customer_invoice_line.' in html
+
+    errors, warnings = svc.validate_template(html, svc.derive_variables(BO))
+    assert errors == []
+    assert warnings == []
+
+
+def test_default_template_source_unknown_bo():
+    with pytest.raises(svc.PrintTemplateError) as exc:
+        svc.default_template_source('__not_a_bo__')
+    assert exc.value.code == 'bo_not_found'
+
+
+def test_fork_default_avoids_existing_code_and_passes_context(monkeypatch):
+    monkeypatch.setattr(svc.repo, 'find_template',
+                        lambda bo, type_code, code: {'id': 1} if code == 'default' else None)
+    captured = {}
+
+    def fake_create_draft(bo_code, code, name, html, **kwargs):
+        captured.update({'bo_code': bo_code, 'code': code, 'name': name,
+                         'html': html, **kwargs})
+        return {'template': {'id': 9, 'code': code}, 'errors': [], 'warnings': []}
+
+    monkeypatch.setattr(svc, 'create_draft', fake_create_draft)
+
+    result = svc.fork_default(BO, type_code='standard', created_by='u7')
+    assert result['template']['id'] == 9
+    assert captured['code'] == 'default_2'
+    assert captured['bo_code'] == BO
+    assert captured['type_code'] == 'standard'
+    assert captured['created_by'] == 'u7'
+    assert captured['css'] == svc.DEFAULT_TEMPLATE_CSS
+    assert '{{ doc.bill_to_account_id }}' in captured['html']
+    assert captured['name'].endswith('默认版式')
+
+
+def test_fork_default_unknown_bo():
+    with pytest.raises(svc.PrintTemplateError) as exc:
+        svc.fork_default('__not_a_bo__')
+    assert exc.value.code == 'bo_not_found'

@@ -13,6 +13,7 @@
 import json
 import re
 from datetime import datetime
+from html import escape
 from typing import Any, Dict, List, Optional, Tuple
 
 from meta.services import print_repository as repo
@@ -463,3 +464,102 @@ def mark_stale(bo_code: str) -> List[int]:
             repo.set_template_status(row['id'], 'stale')
             stale.append(int(row['id']))
     return stale
+
+
+# ------------------------------------------------------------ 默认版式源（D-PR-16）
+
+DEFAULT_TEMPLATE_CSS = (
+    '.print-doc { font-family: sans-serif; font-size: 12px; color: #222; }'
+    '.print-doc-header h1 { font-size: 20px; text-align: center; margin: 0 0 4px; }'
+    '.print-doc-no { text-align: center; margin: 0 0 12px; color: #555; }'
+    '.print-doc-fields { width: 100%; border-collapse: collapse; margin-bottom: 12px; }'
+    '.print-doc-fields th { width: 22%; text-align: right; font-weight: normal; '
+    'color: #555; padding: 3px 6px; border-bottom: 1px solid #ddd; }'
+    '.print-doc-fields td { padding: 3px 6px; border-bottom: 1px solid #ddd; }'
+    '.print-collection h2 { font-size: 14px; margin: 12px 0 6px; }'
+    '.print-collection table { width: 100%; border-collapse: collapse; }'
+    '.print-collection th, .print-collection td { border: 1px solid #bbb; '
+    'padding: 3px 5px; font-size: 11px; }'
+    '.print-collection th { background: #f4f4f4; }'
+)
+
+
+def default_template_source(bo_code: str) -> Dict[str, str]:
+    """把合成默认版式写成可编辑模板源（`{{ doc.<字段> }}` / `{{#each}}`）。
+
+    与 `print_renderer.default_layout` 同源：字段顺序取自元数据白名单，
+    区别仅是把取值替换为模板变量，供 fork-default 落成 draft（D-PR-16）。
+    """
+    obj = _meta_object(bo_code)
+    if obj is None:
+        raise PrintTemplateError('bo_not_found', '未知 BO: %s' % bo_code)
+    variables = derive_variables(bo_code)
+    fields = variables.get('fields') or {}
+    number_field = str(getattr(getattr(obj, 'document_profile', None),
+                               'number_field', '') or '')
+
+    parts: List[str] = ['<div class="print-doc">',
+                        '<header class="print-doc-header">',
+                        '<h1>%s</h1>' % escape(str(getattr(obj, 'name', '') or bo_code))]
+    if number_field and number_field in fields:
+        parts.append('<p class="print-doc-no">编号：{{ doc.%s }}</p>' % number_field)
+    parts.append('</header>')
+
+    if fields:
+        parts.append('<table class="print-doc-fields"><tbody>')
+        for code, meta in fields.items():
+            parts.append('<tr><th>%s</th><td>{{ doc.%s }}</td></tr>'
+                         % (escape(str(meta.get('label') or code)), code))
+        parts.append('</tbody></table>')
+
+    for collection_code, collection in (variables.get('collections') or {}).items():
+        inner_alias = str(collection.get('inner_alias') or '')
+        child_fields = collection.get('fields') or {}
+        if not inner_alias or not child_fields:
+            continue
+        parts.append('<section class="print-collection">')
+        parts.append('<h2>%s</h2>' % escape(str(collection.get('label')
+                                                 or collection_code)))
+        parts.append('<table><thead><tr>')
+        for code, meta in child_fields.items():
+            parts.append('<th>%s</th>' % escape(str(meta.get('label') or code)))
+        parts.append('</tr></thead><tbody>')
+        parts.append('{{#each %s}}<tr>' % collection_code)
+        for code in child_fields:
+            parts.append('<td>{{ %s.%s }}</td>' % (inner_alias, code))
+        parts.append('</tr>{{/each}}')
+        parts.append('</tbody></table></section>')
+
+    parts.append('</div>')
+    html = ''.join(parts)
+    errors, _warnings = validate_template(html, variables)
+    if errors:
+        raise PrintTemplateError('default_template_invalid',
+                                 '默认版式生成未通过校验', 500, errors)
+    return {'html': html, 'css': DEFAULT_TEMPLATE_CSS}
+
+
+def _free_code(bo_code: str, type_code: str, base: str) -> str:
+    """默认版式另存时避让已有模板族（同接入点内 code 唯一）。"""
+    if repo.find_template(bo_code, type_code, base) is None:
+        return base
+    for index in range(2, 100):
+        candidate = '%s_%d' % (base, index)
+        if repo.find_template(bo_code, type_code, candidate) is None:
+            return candidate
+    raise PrintTemplateError('template_code_conflict',
+                             '默认版式模板名已占满: %s' % base, 409)
+
+
+def fork_default(bo_code: str, type_code: str = '', code: str = '',
+                 name: str = '', created_by: str = 'system') -> Dict[str, Any]:
+    """把合成默认版式另存为 draft（改动分叉点，D-PR-16）。"""
+    obj = _meta_object(bo_code)
+    if obj is None:
+        raise PrintTemplateError('bo_not_found', '未知 BO: %s' % bo_code)
+    source = default_template_source(bo_code)
+    resolved_code = _free_code(bo_code, type_code, code or 'default')
+    display_name = name or '%s 默认版式' % (getattr(obj, 'name', '') or bo_code)
+    return create_draft(bo_code, resolved_code, display_name,
+                        source['html'], css=source['css'],
+                        type_code=type_code, created_by=created_by)

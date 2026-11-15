@@ -265,3 +265,101 @@ def test_archive_name_sanitizes_unsafe_chars():
         {'doc_no': 'CI/2026#001', 'bo_code': 'customer_invoice'}, None, 3, 12)
     assert '/' not in name and '#' not in name
     assert name.endswith('_default_v0_seq3.pdf')
+
+
+# ------------------------------------------------------------------ 重打 (D-PR-08)
+
+def _source_run(**overrides):
+    row = {
+        'id': 5, 'bo_code': 'demo', 'type_code': 'standard', 'doc_id': 'D1',
+        'doc_no': 'DEMO-001', 'doc_rev': '2026-11-15 10:00:00',
+        'template_id': 7, 'template_version': 2, 'is_formal': 1,
+        'print_seq': 3, 'status': 'succeeded', 'attachment_id': 88,
+        'payload_hash': 'a' * 64,
+    }
+    row.update(overrides)
+    return row
+
+
+def test_reprint_document_reuses_archived_bytes(fake_repo):
+    fake_repo['runs'][5] = _source_run()
+    requested = {}
+
+    def reader(attachment_id):
+        requested['attachment_id'] = attachment_id
+        return b'%PDF-ARCHIVE'
+
+    result = print_service.reprint_document(
+        5, operator={'id': 'u9', 'name': '李四'}, reader=reader)
+
+    assert requested['attachment_id'] == 88
+    assert result['pdf'] == b'%PDF-ARCHIVE'
+    assert result['source_run_id'] == 5
+    assert result['attachment_id'] == 88
+    assert result['watermark_applied'] is False
+
+    run = result['run']
+    assert run['trigger'] == 'reprint'
+    assert run['is_reprint'] == 1
+    assert run['print_seq'] == 3
+    assert run['is_formal'] == 1
+    assert run['watermark'] == 'REPRINT'
+    assert run['status'] == 'succeeded'
+    assert run['attachment_id'] == 88
+    assert run['operator_name'] == '李四'
+
+
+def test_reprint_document_keeps_source_seq_and_hash(fake_repo):
+    fake_repo['runs'][5] = _source_run()
+    print_service.reprint_document(5, reader=lambda attachment_id: b'x')
+
+    _, inserted = fake_repo['inserts'][-1]
+    assert inserted['print_seq'] == 3
+    assert inserted['template_id'] == 7
+    assert inserted['template_version'] == 2
+    assert inserted['doc_no'] == 'DEMO-001'
+
+    _, status, kwargs = fake_repo['finishes'][-1]
+    assert status == 'succeeded'
+    assert kwargs['attachment_id'] == 88
+    assert kwargs['payload_hash'] == 'a' * 64
+
+
+def test_reprint_document_rejects_missing_or_unarchived(fake_repo):
+    with pytest.raises(print_service.PrintError) as missing:
+        print_service.reprint_document(404)
+    assert missing.value.code == 'run_not_found'
+    assert missing.value.status == 404
+
+    fake_repo['runs'][6] = _source_run(id=6, status='failed', attachment_id=None)
+    with pytest.raises(print_service.PrintError) as unarchived:
+        print_service.reprint_document(6)
+    assert unarchived.value.code == 'run_not_archived'
+    assert unarchived.value.status == 409
+
+
+# ------------------------------------------------------- 归档身份（子系统账本）
+
+def test_archive_pdf_uploads_with_system_identity(monkeypatch):
+    from meta.services import attachment_service
+
+    captured = {}
+
+    def fake_upload(file_storage, target_type, target_id, **kwargs):
+        captured.update({'filename': file_storage.filename,
+                         'target_type': target_type, 'target_id': target_id,
+                         **kwargs})
+        return {'attachment': {'id': 123}}
+
+    monkeypatch.setattr(attachment_service, 'upload_and_link', fake_upload)
+
+    attachment_id = print_service._archive_pdf(
+        b'%PDF-1.4', 12, 'DEMO-001_demo_std_v2_seq3.pdf',
+        {'id': 'u1', 'user_id': 'u1', 'user_name': '张三'})
+
+    assert attachment_id == 123
+    assert captured['target_type'] == 'print_run'
+    assert captured['target_id'] == 12
+    assert captured['filename'] == 'DEMO-001_demo_std_v2_seq3.pdf'
+    assert captured['user']['id'] == 'system'
+    assert captured['user']['is_admin'] is True

@@ -380,16 +380,22 @@ def _archive_name(context: Dict[str, Any], template: Optional[Dict[str, Any]],
 
 def _archive_pdf(pdf: bytes, run_id: int, file_name: str,
                  operator: Dict[str, Any]) -> int:
-    """默认归档：走附件平台（唯一字节真源），挂到 `print_run`。"""
+    """默认归档：走附件平台（唯一字节真源），挂到 `print_run`。
+
+    归档件属打印子系统账本：上传走系统身份，避免普通打印人被
+    `print_run:update` 拦截；真实操作人只落在 `print_runs.operator_*`。
+    """
     from werkzeug.datastructures import FileStorage
     from meta.services import attachment_service
 
+    archive_user = {'id': 'system', 'user_id': 'system',
+                    'user_name': 'print-subsystem', 'is_admin': True}
     file_storage = FileStorage(stream=BytesIO(pdf), filename=file_name,
                                content_type='application/pdf')
     result = attachment_service.upload_and_link(
         file_storage, 'print_run', run_id,
         link_role='primary', category='other', is_primary=True,
-        display_name=file_name, user=operator)
+        display_name=file_name, user=archive_user)
     return int((result.get('attachment') or {}).get('id'))
 
 
@@ -461,3 +467,69 @@ def print_document(bo_code: str, type_code: str, doc_id: str, *,
 
     return {'run': repo.get_run(run_id), 'template': template,
             'attachment_id': attachment_id}
+
+
+# ------------------------------------------------------------------ 重打
+
+#: REPRINT 水印是否物理叠加进 PDF。P0 无 PDF 合成库，只记 run 不叠印（见 spec §7.2）。
+REPRINT_WATERMARK_APPLIED = False
+
+
+def _read_archived(attachment_id: int) -> bytes:
+    """读取归档件字节：归档属打印子系统账本，走系统身份（BO read 已在 API 校验）。"""
+    from meta.services import attachment_service
+
+    _row, path = attachment_service.open_content(
+        attachment_id, user={'id': 'system', 'user_id': 'system',
+                             'user_name': 'print-subsystem', 'is_admin': True})
+    with open(path, 'rb') as handle:
+        return handle.read()
+
+
+def reprint_document(print_run_id: int, operator: Any = None, *,
+                     reader: Optional[Callable[[int], bytes]] = None) -> Dict[str, Any]:
+    """重打：复用原归档字节（内容零漂移），只追加一条 `reprint` run。
+
+    D-PR-08：不重渲染、不覆盖归档字节；`print_seq` 沿用原序号（D-PR-06
+    重打不消耗新凭证序号）。无 PDF 叠加库时 REPRINT 水印只落在 run 记录。
+    """
+    source = repo.get_run(int(print_run_id))
+    if source is None:
+        raise PrintError('run_not_found', '打印记录不存在: %s' % print_run_id, 404)
+    if source.get('status') != 'succeeded' or not source.get('attachment_id'):
+        raise PrintError('run_not_archived', '该打印记录没有归档件，无法重打', 409)
+
+    attachment_id = int(source['attachment_id'])
+    pdf = (reader or _read_archived)(attachment_id)
+    user = _normalize_operator(operator)
+
+    run_id = repo.insert_run({
+        'bo_code': source['bo_code'],
+        'type_code': source.get('type_code') or '',
+        'doc_id': source['doc_id'],
+        'doc_no': source.get('doc_no'),
+        'doc_rev': source.get('doc_rev'),
+        'template_id': int(source.get('template_id') or 0),
+        'template_version': int(source.get('template_version') or 0),
+        'trigger': 'reprint',
+        'is_formal': int(source.get('is_formal') or 0),
+        'is_reprint': 1,
+        'print_seq': int(source.get('print_seq') or 0),
+        'watermark': 'REPRINT',
+        'status': 'running',
+        'operator_id': user['id'],
+        'operator_name': user['user_name'],
+        'created_at': _now(),
+    })
+    try:
+        repo.finish_run(run_id, 'succeeded', attachment_id=attachment_id,
+                        payload_hash=source.get('payload_hash'))
+    except Exception as exc:
+        code = getattr(exc, 'code', None) or 'print_failed'
+        repo.finish_run(run_id, 'failed', error_code=code,
+                        error_message=str(getattr(exc, 'message', exc))[:500])
+        raise PrintError(code, '重打失败: %s' % str(getattr(exc, 'message', exc)), 500) from exc
+
+    return {'run': repo.get_run(run_id), 'pdf': pdf,
+            'source_run_id': int(source['id']), 'attachment_id': attachment_id,
+            'watermark': 'REPRINT', 'watermark_applied': REPRINT_WATERMARK_APPLIED}
