@@ -186,17 +186,13 @@
             </div>
           </div>
 
-          <ol v-if="approvalSteps.length" data-test="approval-chain" class="tdd-chain">
-            <li v-for="s in approvalSteps" :key="s.step_no" class="tdd-chain-step">
-              <span class="tdd-chain-no">{{ s.step_no }}</span>
-              <span class="tdd-chain-body">
-                <span>{{ stepApprover(s) }}</span>
-                <span class="tdd-chain-meta">
-                  {{ approveModeLabel(s.approve_mode) }}<template v-if="s.sla_hours"> · {{ s.sla_hours }}h</template>
-                </span>
-              </span>
-            </li>
-          </ol>
+          <!-- [9.13.4.5 2026-11-16] 实例流转三步态：与单据侧只读投影共用 ApprovalFlowSteps -->
+          <ApprovalFlowSteps
+            v-if="flowModel.steps.length"
+            data-test="approval-chain"
+            :steps="flowModel.steps"
+            :miss-reason="flowModel.missReason"
+          />
 
           <div v-if="conditionExplains.length" data-test="condition-explain" class="tdd-conditions">
             <div class="tdd-sub">命中依据</div>
@@ -262,8 +258,9 @@
 
 <script setup>
 import { ref, computed, watch } from 'vue'
-import { AppModal, AppButton } from '@/components/common'
+import { AppModal, AppButton, ApprovalFlowSteps } from '@/components/common'
 import { fetchTaskDetail, fetchTaskEvents, claimTask, derivePause, submitDecision,
+  buildApprovalFlow,
   fetchParticipations, reassignTask, participateTask,
   fetchDelegations, createDelegation, revokeDelegation,
   normalizeParticipations, canReassignTask, formatSlaRemaining, validateDelegationForm } from '@/services/taskService'
@@ -355,6 +352,9 @@ const approvalSteps = computed(() => {
   const steps = policySnapshot.value?.steps
   return Array.isArray(steps) ? steps : []
 })
+
+/** [9.13.4.5] 实例流转三步态（步骤 + 已完成步处理人/时间归属） */
+const flowModel = computed(() => buildApprovalFlow(task.value, events.value))
 
 const conditionExplains = computed(() => {
   const items = policySnapshot.value?.conditions_explain
@@ -465,17 +465,6 @@ const decideHint = computed(() => {
   if (!hasApprovePermission.value) return `缺少审批权限（${docRefType.value}:approve）`
   return ''
 })
-
-function stepApprover(step) {
-  const type = step.approver_type || 'role'
-  return step.approver_ref ? `${type}：${step.approver_ref}` : type
-}
-
-const APPROVE_MODE_LABELS = { any: '任一通过', all: '全部通过', first: '先到先得' }
-
-function approveModeLabel(mode) {
-  return APPROVE_MODE_LABELS[mode] || mode || '任一通过'
-}
 
 const candidates = computed(() => {
   const c = task.value?.executor_candidates

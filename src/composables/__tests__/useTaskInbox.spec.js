@@ -5,6 +5,34 @@ vi.mock('@/services/taskService', () => ({
   fetchInboxCounts: vi.fn(),
   claimTask: vi.fn(),
   submitDecision: vi.fn(),
+  fetchTaskActions: vi.fn(),
+  BATCH_CONCURRENCY: 4,
+  runWithConcurrency: async (items, limit, worker) => {
+    const list = Array.isArray(items) ? items : []
+    const size = list.length
+    if (!size) return []
+    const width = Number.isFinite(limit) && limit > 0 ? Math.max(1, Math.min(limit, size)) : 1
+    const results = new Array(size)
+    let cursor = 0
+    const drain = async () => {
+      while (cursor < size) {
+        const index = cursor
+        cursor += 1
+        try {
+          results[index] = { ok: true, value: await worker(list[index], index) }
+        } catch (error) {
+          results[index] = { ok: false, error }
+        }
+      }
+    }
+    await Promise.all(Array.from({ length: width }, () => drain()))
+    return results
+  },
+  actionAllowedFromPayload: (res, decision) => {
+    if (!res || res.success !== true || !res.data) return null
+    if (!Array.isArray(res.data.actions)) return null
+    return res.data.actions.some((item) => !!item && item.action === decision)
+  },
   normalizeInboxResponse: (res) => res && res.success
     ? { entries: res.data.entries || [], counts: res.data.counts || {}, total: res.data.total || 0 }
     : { entries: [], counts: {}, total: 0 },
@@ -27,7 +55,7 @@ vi.mock('@/services/taskService', () => ({
   BUCKET_LABELS: { alert: '逾期告警', approval: '待我审核', todo: '我的待办', agent_handoff: 'Agent 移交', claimable: '可认领' }
 }))
 
-import { fetchInbox, fetchInboxCounts, claimTask, submitDecision } from '@/services/taskService'
+import { fetchInbox, fetchInboxCounts, claimTask, submitDecision, fetchTaskActions } from '@/services/taskService'
 import { useTaskInbox } from '../useTaskInbox'
 
 describe('useTaskInbox', () => {
@@ -135,5 +163,27 @@ describe('useTaskInbox', () => {
     const summary = await box.submitBatch(['T-1', 'T-2'], { decision: 'reject', comment: 'no' })
     expect(summary.succeeded).toEqual(['T-2'])
     expect(summary.failed[0].message).toBe('network')
+  })
+
+  it('precheckDecidable：缺该动作 → blocked（驳回），响应失败 → fail-open 保留', async () => {
+    fetchTaskActions
+      .mockResolvedValueOnce({ success: true, data: { actions: [{ action: 'approve' }] } })
+      .mockResolvedValueOnce({ success: true, data: { actions: [] } })
+      .mockResolvedValueOnce({ success: false, message: '403' })
+    const box = useTaskInbox()
+    const out = await box.precheckDecidable(['T-1', 'T-2', 'T-3'], 'reject')
+    expect(out.blocked.map(item => item.task_id)).toEqual(['T-1', 'T-2'])
+    expect(out.blocked[0].message).toBe('无权执行驳回或状态已变化')
+    expect(out.decidable).toEqual(['T-3'])
+  })
+
+  it('precheckDecidable：空 actions 判为不可通过；动作齐全可决策', async () => {
+    fetchTaskActions
+      .mockResolvedValueOnce({ success: true, data: { actions: [] } })
+      .mockResolvedValueOnce({ success: true, data: { actions: [{ action: 'approve' }, { action: 'reject' }] } })
+    const box = useTaskInbox()
+    const out = await box.precheckDecidable(['T-8', 'T-9'], 'approve')
+    expect(out.decidable).toEqual(['T-9'])
+    expect(out.blocked).toEqual([{ task_id: 'T-8', message: '无权执行通过或状态已变化' }])
   })
 })

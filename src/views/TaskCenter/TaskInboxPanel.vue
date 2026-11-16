@@ -73,6 +73,15 @@
         重试失败项
       </AppButton>
     </div>
+    <ul
+      v-if="batchFailedList.length"
+      data-test="batch-fail-list"
+      class="tip-batch-fail-list"
+    >
+      <li v-for="item in batchFailedList" :key="item.task_id" data-test="batch-fail-item">
+        {{ item.task_id }}：{{ item.message || '未知原因' }}<span v-if="item.httpStatus">（{{ item.httpStatus }}）</span><span v-if="item.retryable"> · 可重试</span>
+      </li>
+    </ul>
 
     <div v-if="loading" data-test="loading" class="tip-state">加载中…</div>
     <div v-else-if="error" data-test="error" class="tip-state tip-error">{{ error }}</div>
@@ -116,6 +125,7 @@ import { computed, onMounted, ref } from 'vue'
 import { ElMessageBox } from 'element-plus'
 import { AppCard, AppButton } from '@/components/common'
 import { useTaskInbox } from '@/composables/useTaskInbox'
+import { BATCH_MAX_SIZE } from '@/services/taskService'
 import { statusLabel } from '@/constants/taskStatus'
 
 defineEmits(['open-detail'])
@@ -127,16 +137,17 @@ const props = defineProps({
 })
 
 const {
-  rows, activeBucket, loading, error, buckets, setBucket, load, submitBatch
+  rows, activeBucket, loading, error, buckets, setBucket, load, submitBatch, precheckDecidable
 } = useTaskInbox({ appId: props.appId, limit: props.limit })
 
-// ---- 批量审批（D-AP-12：逐条 submitDecision，失败不中断）----
+// ---- 批量审批（D-AP-12：逐条 submitDecision，失败不中断；§9.13.4.3 护栏）----
 const selectedIds = ref([])
 const batchComment = ref('')
 const batchRunning = ref('')
 const batchMessage = ref('')
 const batchFailed = ref(false)
 const batchRetryableIds = ref([])
+const batchFailedList = ref([])
 const lastDecision = ref('approve')
 
 const approvalRows = computed(() => rows.value.filter(row => row.type === 'approval'))
@@ -153,7 +164,16 @@ function reload() {
 }
 
 function toggleSelectAll(checked) {
-  selectedIds.value = checked ? approvalRows.value.map(row => row.task_id) : []
+  if (!checked) {
+    selectedIds.value = []
+    return
+  }
+  const ids = approvalRows.value.map(row => row.task_id)
+  selectedIds.value = ids.slice(0, BATCH_MAX_SIZE)
+  if (ids.length > BATCH_MAX_SIZE) {
+    batchFailed.value = false
+    batchMessage.value = `最多批量 ${BATCH_MAX_SIZE} 项，已选择前 ${BATCH_MAX_SIZE} 项，请分批处理`
+  }
 }
 
 function toggleRow(taskId) {
@@ -162,7 +182,7 @@ function toggleRow(taskId) {
     : [...selectedIds.value, taskId]
 }
 
-async function decideBatch(taskIds, decision) {
+async function decideBatch(taskIds, decision, blocked = []) {
   if (!taskIds.length) return
   if (decision === 'reject' && !batchComment.value.trim()) {
     batchFailed.value = true
@@ -173,16 +193,22 @@ async function decideBatch(taskIds, decision) {
   batchFailed.value = false
   batchMessage.value = ''
   batchRetryableIds.value = []
+  batchFailedList.value = []
   lastDecision.value = decision
   try {
     const summary = await submitBatch(taskIds, { decision, comment: batchComment.value.trim() })
     batchRetryableIds.value = summary.retryableIds
+    batchFailedList.value = summary.failed.map(item => ({
+      ...item,
+      retryable: item.httpStatus === 502
+    }))
     batchFailed.value = summary.failed.length > 0
     let text = ''
     text += `成功 ${summary.succeeded.length} / 失败 ${summary.failed.length}`
     if (summary.failed.length) {
       text += `：${summary.failed.map(item => item.message || item.task_id).join('；')}`
     }
+    if (blocked.length) text += `；已排除 ${blocked.length} 项不可决策`
     batchMessage.value = text
     selectedIds.value = selectedIds.value.filter(id => !summary.succeeded.includes(id))
     if (summary.succeeded.length && !summary.failed.length) batchComment.value = ''
@@ -202,13 +228,26 @@ const batchActionLabels = {
 async function runBatch(decision) {
   const ids = selectedIds.value.slice()
   if (!ids.length) return
+  if (ids.length > BATCH_MAX_SIZE) {
+    batchFailed.value = true
+    batchMessage.value = `选中 ${ids.length} 项超过批量上限 ${BATCH_MAX_SIZE}，请分批处理`
+    return
+  }
   const action = batchActionLabels[decision]
   try {
     await ElMessageBox.confirm(`确认${action}选中的 ${ids.length} 项审批任务？`, '批量审批', { type: 'warning' })
   } catch (_) {
     return
   }
-  await decideBatch(ids, decision)
+  // 点击前预判：无权限/状态已变化的项先排除，避免逐条 403
+  const { decidable, blocked } = await precheckDecidable(ids, decision)
+  if (!decidable.length) {
+    batchFailed.value = true
+    batchRunning.value = ''
+    batchMessage.value = '选中项均不可决策（无权限或状态已变化）'
+    return
+  }
+  await decideBatch(decidable, decision, blocked)
 }
 
 function retryBatch() {
@@ -243,6 +282,11 @@ onMounted(load)
   display: flex; align-items: center; gap: 8px; flex-wrap: wrap;
   margin-bottom: 12px; font-size: 13px; color: var(--color-text-secondary);
 }
+.tip-batch-fail-list {
+  margin: 0 0 12px; padding-left: 24px;
+  font-size: 12px; color: var(--color-text-secondary);
+}
+.tip-batch-fail-list li { margin: 2px 0; }
 .tip-list { list-style: none; margin: 0; padding: 0; }
 .tip-row { padding: 10px 8px; border-bottom: 1px solid var(--color-border); cursor: pointer; }
 .tip-row--approval { border-left: 2px solid var(--color-primary); }

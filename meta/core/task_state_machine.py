@@ -19,7 +19,7 @@
 """
 from __future__ import annotations
 
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from typing import Callable, Dict, FrozenSet, Optional, Tuple
 
 from meta.core.task_schema import TASK_STATUSES
@@ -48,7 +48,7 @@ class TransitionRule:
 
 
 # ─────────────────────────────────────────────────────────────────────────────
-# 迁移表（逐条抄 §7.2 mermaid，共 18 条；不发明）
+# 迁移表（§7.2 mermaid 18 条 + §9.13.4.2-3 补齐取消出边 4 条 = 22 条；不发明）
 # ─────────────────────────────────────────────────────────────────────────────
 
 TRANSITION_TABLE: Tuple[TransitionRule, ...] = (
@@ -59,15 +59,18 @@ TRANSITION_TABLE: Tuple[TransitionRule, ...] = (
                    "记 claim 人与时间"),
     TransitionRule("ready", "skipped", "引擎（条件边判定）", "edge_condition_failed",
                    "通知依赖方按 skipped 语义处理"),
+    TransitionRule("ready", "cancelled", "创建者/管理员（取消）", None, ""),
     TransitionRule("claimed", "in_progress", "executor", None, "注入 trace span"),
     TransitionRule("claimed", "ready", "引擎（自动回收）", "claim_timed_out",
                    "回收进入队列，通知原认领人"),
+    TransitionRule("claimed", "cancelled", "创建者/管理员（取消）", None, ""),
     TransitionRule("in_progress", "waiting_approval", "executor（needs_review / interrupt / 人工提交）",
                    "reviewer_configured", "生成审核子任务（human + type=approval）"),
     TransitionRule("waiting_approval", "in_progress", "审核人（驳回返修）", "review_permission",
                    "审核意见写入 WORKLOG"),
     TransitionRule("waiting_approval", "done", "审核人（通过）", "approve_authorized", ""),
     TransitionRule("waiting_approval", "failed", "审核人（拒绝且不可返修）", "review_permission", ""),
+    TransitionRule("waiting_approval", "cancelled", "创建者/管理员（取消）", None, ""),
     TransitionRule("in_progress", "blocked", "executor（外部等待/依赖失败）", None, ""),
     TransitionRule("blocked", "in_progress", "引擎（阻塞解除）", None, ""),
     TransitionRule("in_progress", "done", "executor 完成", "acceptance_passed",
@@ -78,6 +81,7 @@ TRANSITION_TABLE: Tuple[TransitionRule, ...] = (
     TransitionRule("failed", "ready", "引擎（retry 未超限，指数退避）", "retry_available", ""),
     TransitionRule("failed", "dead", "引擎（retry 超限）", "retry_exhausted",
                    "死信 + 告警"),
+    TransitionRule("failed", "cancelled", "创建者/管理员（取消）", None, ""),
     TransitionRule("dead", "ready", "人工干预后重放", None, ""),
 )
 
@@ -310,3 +314,94 @@ def check_meta_object_status_update(meta_obj, old_record, changes) -> None:
     if str(old_status) == str(new_status):
         return
     require_transition(str(old_status), str(new_status))
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# 动作目录（spec §9.13.4.2 / D-AP-17）
+# 声明「状态 × 类型 → 可用动作」，REST 只做权限映射，前端只按返回渲染按钮。
+# 与迁移表同源：本模块只做结构声明，不查库、不鉴权。
+# ─────────────────────────────────────────────────────────────────────────────
+
+#: 非终态（可改派 / 可挂起 / 可取消的执行区间；`dead` 可人工重放故列入）
+ACTIVE_STATES: FrozenSet[str] = TASK_STATES - TERMINAL_STATES
+
+
+@dataclass(frozen=True)
+class TaskAction:
+    """一个可对任务执行的动作（状态区间 + 端点 + 权限码三合一）。"""
+
+    action: str
+    label: str
+    endpoint: str        # 「METHOD /path」，`{id}` 由调用方替换
+    allowed_from: FrozenSet[str]
+    to_state: str = ""   # 目标状态；'' = 不改任务状态（侧通道：改派 / 参与 / 挂起）
+    types: Optional[FrozenSet[str]] = None   # None = 不限任务类型
+    permission: str = "task.view"
+    available: bool = True    # 端点是否已上线（False = 已声明、待实现）
+    confirm: bool = False     # 前端是否需要二次确认
+    note: str = ""
+
+
+# 展示顺序 = 详情抽屉按钮顺序（先可推进的，再改派/挂起/撤回/取消）
+TASK_ACTIONS: Tuple[TaskAction, ...] = (
+    TaskAction("claim", "认领", "POST /api/v1/tasks/{id}/claim",
+               frozenset({"ready"}), to_state="claimed",
+               permission="task.claim"),
+    TaskAction("start", "启动执行", "POST /api/v1/tasks/{id}/start",
+               frozenset({"ready", "claimed", "in_progress"}),
+               permission="admin"),
+    TaskAction("decision", "审批决策", "POST /api/v1/tasks/{id}/decision",
+               frozenset({"waiting_approval"}), types=frozenset({"approval"}),
+               permission="{bo}:approve", confirm=True,
+               note="approve / reject / allow_rework 的目标态由决策协议裁决"),
+    TaskAction("participate", "登记参与", "POST /api/v1/tasks/{id}/participate",
+               frozenset({"waiting_approval"}), types=frozenset({"approval"}),
+               permission="task.view"),
+    TaskAction("reassign", "改派", "POST /api/v1/tasks/{id}/assign",
+               ACTIVE_STATES, permission="task.assign", confirm=True,
+               note="审批任务的服务层附加约束：仅 waiting_approval + 目标非提交人"),
+    TaskAction("delegate", "委托", "POST /api/v1/task-delegations",
+               ACTIVE_STATES, permission="task.delegate", available=False,
+               note="当前仅有委托单端点，任务级委托待补"),
+    TaskAction("hold", "挂起", "POST /api/v1/tasks/{id}/hold",
+               ACTIVE_STATES, permission="task.hold", confirm=True,
+               note="只写 task_events（不改状态列）；body 需 hold_code"),
+    TaskAction("resume", "解除挂起", "POST /api/v1/tasks/{id}/resume",
+               ACTIVE_STATES, permission="task.hold",
+               note="与 hold 严格交替；只写 task_events（不改状态列）"),
+    TaskAction("release", "释放认领", "POST /api/v1/tasks/{id}/release",
+               frozenset({"claimed"}), to_state="ready",
+               permission="task.claim", available=False,
+               note="待补（迁移表已含 claimed→ready 回收边）"),
+    TaskAction("withdraw", "撤回", "POST /api/v1/tasks/{id}/withdraw",
+               frozenset({"waiting_approval"}), types=frozenset({"approval"}),
+               permission="owner", confirm=True,
+               note="仅提交人且无有效 approve；单据回退（§9.13.4.2 第 4 条）"),
+    TaskAction("cancel", "取消", "POST /api/v1/tasks/{id}/cancel",
+               frozenset({"pending", "ready", "claimed", "in_progress",
+                          "failed", "waiting_approval"}),
+               permission="owner_or_admin", confirm=True,
+               note="§9.13.4.2 第 3 条：created_by 或 admin；审批撤回走 withdraw"),
+)
+
+TASK_ACTION_MAP: Dict[str, TaskAction] = {a.action: a for a in TASK_ACTIONS}
+
+
+def applicable_actions(state: str, task_type: Optional[str] = None,
+                       *, include_unavailable: bool = False
+                       ) -> Tuple[TaskAction, ...]:
+    """返回某状态（+任务类型）下结构可用的动作。
+
+    只看「状态 × 类型 × 端点是否上线」，**不看用户权限**；权限由 REST 层映射。
+    """
+    validate_state(state)
+    result = []
+    for decl in TASK_ACTIONS:
+        if state not in decl.allowed_from:
+            continue
+        if decl.types is not None and str(task_type or "") not in decl.types:
+            continue
+        if not decl.available and not include_unavailable:
+            continue
+        result.append(decl)
+    return tuple(result)

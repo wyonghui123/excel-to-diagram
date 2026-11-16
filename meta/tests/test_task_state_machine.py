@@ -7,7 +7,7 @@ pytestmark = pytest.mark.unit
 测试 meta.core.task_state_machine 模块（A2：11 态迁移表 + 迁移守卫）
 
 覆盖目标（对齐 §12.1 Phase 0 验收「全量迁移表有单测覆盖」）：
-  1. 迁移表与 §7.2 spec 一致（18 条，逐条核对）
+  1. 迁移表与 §7.2 spec 一致（18 条 + §9.13.4.2-3 取消出边 4 条 = 22 条）
   2. 11×11 全量组合：声明外的迁移一律拒绝
   3. 终态无出边（dead 除外，可人工重放）
   4. 每个守卫的通过 / 拒绝 / 缺上下文 fail-closed
@@ -15,12 +15,15 @@ pytestmark = pytest.mark.unit
 
 from meta.core.task_state_machine import (
     GUARDS,
+    TASK_ACTION_MAP,
+    TASK_ACTIONS,
     TERMINAL_STATES,
     TASK_STATES,
     TRANSITION_TABLE,
     TaskTransitionError,
     TransitionContext,
     allowed_transitions,
+    applicable_actions,
     assert_transition,
     can_transition,
     evaluate_transition,
@@ -49,6 +52,11 @@ EXPECTED_TRANSITIONS = {
     ("failed", "ready"),
     ("failed", "dead"),
     ("dead", "ready"),
+    # §9.13.4.2 第 3 条：cancel 允许的来源状态补齐（pending/in_progress 已有）
+    ("ready", "cancelled"),
+    ("claimed", "cancelled"),
+    ("failed", "cancelled"),
+    ("waiting_approval", "cancelled"),
 }
 
 EXPECTED_STATES = {
@@ -87,10 +95,10 @@ class TestTransitionTable:
         assert len(TASK_STATES) == 11
 
     def test_transition_table_matches_spec(self):
-        """TC-TSM-002: 迁移表恰为 spec 派生的 18 条"""
+        """TC-TSM-002: 迁移表恰为 spec 派生的 22 条（18 + 取消补齐 4）"""
         actual = {(r.from_state, r.to_state) for r in TRANSITION_TABLE}
         assert actual == EXPECTED_TRANSITIONS
-        assert len(actual) == 18
+        assert len(actual) == 22
 
     def test_no_duplicate_rule(self):
         """TC-TSM-003: 同一 (from,to) 不重复声明"""
@@ -323,3 +331,50 @@ class TestEvaluateAndRequire:
         for frm, to, ctx in steps:
             require_transition(frm, to, ctx)
         assert is_terminal("done") is True
+
+
+class TestTaskActions:
+    """TC-TSM-050~ 动作目录（spec §9.13.4.2 / D-AP-17）"""
+
+    def test_action_declarations_are_consistent(self):
+        """TC-TSM-050: 动作名唯一、可抵达状态合法、索引与元组一致"""
+        names = [a.action for a in TASK_ACTIONS]
+        assert len(names) == len(set(names))
+        assert TASK_ACTION_MAP.keys() == set(names)
+        for decl in TASK_ACTIONS:
+            if decl.to_state:
+                validate_state(decl.to_state)
+            for state in decl.allowed_from:
+                validate_state(state)
+
+    def test_ready_state_offers_claim_and_start(self):
+        """TC-TSM-051: ready → 认领 + 启动 + 取消（hold 已上线 / delegate 未上线）"""
+        acts = {a.action for a in applicable_actions("ready", "story")}
+        assert "claim" in acts
+        assert "start" in acts
+        assert "cancel" in acts       # §9.13.6 第 2 步已上线
+        assert "hold" in acts
+        assert "delegate" not in acts  # available=False，未上线不暴露
+
+    def test_approval_waiting_offers_decision_only_for_approval(self):
+        """TC-TSM-052: 审批动作按任务类型过滤（故事任务不出决策按钮）"""
+        approval = {a.action for a in applicable_actions("waiting_approval", "approval")}
+        story = {a.action for a in applicable_actions("waiting_approval", "story")}
+        assert "decision" in approval and "participate" in approval
+        assert "withdraw" in approval      # §9.13.6 第 3 步已上线
+        assert "decision" not in story
+        assert "withdraw" not in story
+
+    def test_terminal_state_has_no_actions(self):
+        """TC-TSM-053: 终态无任何动作"""
+        for state in ("done", "cancelled", "skipped"):
+            assert applicable_actions(state, "approval") == ()
+
+    def test_unavailable_actions_can_be_listed(self):
+        """TC-TSM-054: 声明但端点未上线的动作默认隐去，显式要求时可见"""
+        default = {a.action for a in applicable_actions("ready", "story")}
+        full = {a.action for a in applicable_actions(
+            "ready", "story", include_unavailable=True)}
+        assert "delegate" not in default
+        assert "delegate" in full
+        assert "release" not in full   # claimed 专用（allowed_from 先于 available 过滤）

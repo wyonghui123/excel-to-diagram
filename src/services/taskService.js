@@ -15,6 +15,7 @@
  */
 
 import { apiV1, apiV2 } from '@/utils/httpClient'
+import { statusLabel, statusTone } from '@/constants/taskStatus'
 
 // ============================================================================
 // 1. 常量 — 分区（顺序即优先级，与 A8 BUCKETS 对齐）
@@ -138,6 +139,62 @@ export function summarizeBatchResults(results) {
   }
 }
 
+// ============================================================================
+// 3.5.1 批量护栏 — 上限 / 并发池 / 动作预判（§9.13.4.3）
+// ============================================================================
+
+/** 单次批量上限（选中 > 50 条时提示分批，UI 层使用） */
+export const BATCH_MAX_SIZE = 50
+
+/** 批量并发上限（简单 Promise 池，避免瞬时打爆服务端） */
+export const BATCH_CONCURRENCY = 4
+
+/**
+ * 简单 Promise 池：结果数组与输入同序，worker 抛错不中断其他项。
+ * 每项返回 `{ok:true, value}` 或 `{ok:false, error}`。
+ * @param {Array} items
+ * @param {number} limit 并发上限（非法值回落 1；实际并发 = min(limit, items.length)）
+ * @param {(item:any, index:number)=>Promise<any>} worker
+ * @returns {Promise<Array<{ok:boolean, value?:any, error?:any}>>}
+ */
+export function runWithConcurrency(items, limit, worker) {
+  const list = Array.isArray(items) ? items : []
+  const size = list.length
+  if (!size) return Promise.resolve([])
+  const width = Number.isFinite(limit) && limit > 0
+    ? Math.max(1, Math.min(Math.floor(limit), size))
+    : 1
+  const results = new Array(size)
+  let cursor = 0
+  async function drain() {
+    while (cursor < size) {
+      const index = cursor
+      cursor += 1
+      try {
+        results[index] = { ok: true, value: await worker(list[index], index) }
+      } catch (error) {
+        results[index] = { ok: false, error }
+      }
+    }
+  }
+  return Promise.all(Array.from({ length: width }, () => drain())).then(() => results)
+}
+
+/**
+ * 动作预判：`GET /tasks/{id}/actions` 的 actions 是否含该决策动作。
+ * 三态：true（含）/ false（响应成功但缺该动作）/ null（响应失败或结构异常，无法判定）。
+ * 无法判定时由服务端兜底，不做前端拦截（fail-open）。
+ * @param {{success?:boolean,data?:Object}|null} res
+ * @param {'approve'|'reject'} decision
+ * @returns {boolean|null}
+ */
+export function actionAllowedFromPayload(res, decision) {
+  if (!res || res.success !== true || !res.data) return null
+  const actions = res.data.actions
+  if (!Array.isArray(actions)) return null
+  return actions.some(item => !!item && item.action === decision)
+}
+
 function _qs(params) {
   const sp = new URLSearchParams()
   Object.entries(params || {}).forEach(([k, v]) => {
@@ -225,6 +282,120 @@ export function validateDelegationForm(form = {}) {
 }
 
 // ============================================================================
+// 3.7 纯函数 — 单据侧只读审批投影（§9.13.4.1）
+// ============================================================================
+
+/**
+ * 实例流转三步态（纯函数，可单测）：步骤列表 + done/active/pending。
+ * 数据源：任务详情 `inputs.policy_snapshot.steps` + 基础列 `stage_no` / `status`。
+ * 已完成步的处理人不伪造：仅当事件 payload.step_no / payload.stage_no 命中该步
+ * 且 actor 非空时归属，多条取 occurred_at 最新（同刻取最后）。
+ *
+ * @param {Object|null} task 审批任务（需含 inputs.policy_snapshot）
+ * @param {Array} events 任务活动流（升序）
+ * @returns {{hitPolicy:boolean,missReason:string,currentStage:number,steps:Array}}
+ */
+export function buildApprovalFlow(task, events = []) {
+  const inputs = task?.inputs && typeof task.inputs === 'object' ? task.inputs : {}
+  const snapshot = inputs.policy_snapshot && typeof inputs.policy_snapshot === 'object'
+    ? inputs.policy_snapshot
+    : {}
+  const rawSteps = Array.isArray(snapshot.steps) ? snapshot.steps : []
+  const currentStage = Number(task?.stage_no) || 1
+  const allDone = task?.status === 'done'
+  const list = Array.isArray(events) ? events : []
+
+  const steps = rawSteps
+    .filter(step => step && typeof step === 'object')
+    // 缺省 step_no 时先按位置补序号再排序，避免补号与既有序号撞车（仅用于展示/三态，不写回数据）
+    .map((step, index) => {
+      const stepNo = _stepNo(step) || index + 1
+      // 三态以 stage_no 为准（同 stage = 并行审批人）；旧快照无 stage_no 时回落 step_no（逐步串行）
+      return { step, stepNo, stageNo: _stepNo(step, 'stage_no') || stepNo }
+    })
+    .sort((a, b) => (a.stageNo - b.stageNo) || (a.stepNo - b.stepNo))
+    .map(({ step, stepNo, stageNo }) => {
+      let state = 'pending'
+      if (allDone) state = 'done'
+      else if (stageNo < currentStage) state = 'done'
+      else if (stageNo === currentStage) state = 'active'
+
+      let hit = null
+      if (state === 'done') {
+        for (const ev of list) {
+          if (!ev || !ev.actor) continue
+          const payload = ev.payload && typeof ev.payload === 'object' ? ev.payload : null
+          if (!payload) continue
+          const byStep = Number(payload.step_no) === stepNo
+          const byStage = Number(payload.stage_no) === stageNo
+          if (!byStep && !byStage) continue
+          if (!hit || String(ev.occurred_at || '') >= String(hit.occurred_at || '')) hit = ev
+        }
+      }
+
+      return {
+        step_no: stepNo,
+        stage_no: stageNo,
+        approverLabel: step.approver_ref || step.approver_type || '',
+        approveMode: step.approve_mode,
+        slaHours: step.sla_hours ?? null,
+        state,
+        actor: hit ? hit.actor : '',
+        occurredAt: hit ? (hit.occurred_at || '') : ''
+      }
+    })
+
+  return {
+    hitPolicy: snapshot.hit_policy !== false,
+    missReason: snapshot.hit_policy === false ? '未命中策略，回落默认链' : '',
+    currentStage,
+    steps
+  }
+}
+
+/** 步骤号归一：非法值回落 0（仅用于排序/比较，不伪造展示值） */
+function _stepNo(step, key = 'step_no') {
+  const n = Number(step?.[key])
+  return Number.isFinite(n) && n > 0 ? n : 0
+}
+
+/**
+ * 单据详情页只读审批投影（纯函数，可单测）。
+ * 数据源：`GET /tasks?doc_ref_*` 的最新一条 + 活动流（升序）。
+ * 不读单据 `approval_status`（投影列只展示），状态文案走 `taskStatus.js` 单一真源。
+ *
+ * @param {Object|null} task 最新审批任务
+ * @param {Array} events 任务活动流（`list_task_events` 升序）
+ * @returns {{id:string,statusLabel:string,tone:string,assignee:string,
+ *            stage:number,stageTotal:number,policyName:string,
+ *            events:Array,legacyRef:boolean}|null}
+ */
+export function buildApprovalProjection(task, events = []) {
+  if (!task) return null
+  const inputs = task.inputs && typeof task.inputs === 'object' ? task.inputs : {}
+  const snapshot = inputs.policy_snapshot && typeof inputs.policy_snapshot === 'object'
+    ? inputs.policy_snapshot
+    : {}
+  const steps = Array.isArray(snapshot.steps) ? snapshot.steps : []
+  const stages = new Set(
+    steps.map(step => (Number(step?.stage_no) > 0 ? Number(step.stage_no) : 1))
+  )
+  const recent = (Array.isArray(events) ? events : []).slice(-3).reverse()
+  return {
+    id: task.id,
+    statusLabel: statusLabel(task),
+    tone: statusTone(task),
+    assignee: task.assignee || '',
+    stage: Number(task.stage_no) > 0 ? Number(task.stage_no) : 1,
+    stageTotal: stages.size || 1,
+    policyName: snapshot.policy_name || '',
+    events: recent,
+    legacyRef: !task.doc_ref_type || !task.doc_ref_id,
+    flow: buildApprovalFlow(task, events)
+  }
+}
+
+// ============================================================================
 // 4. API — v1 task.v1 端点
 // ============================================================================
 
@@ -241,6 +412,11 @@ export async function fetchInboxCounts({ appId } = {}) {
 /** 任务详情（行级可见性 fail-closed） */
 export async function fetchTaskDetail(taskId) {
   return apiV1.get(`/tasks/${encodeURIComponent(taskId)}`)
+}
+
+/** 任务可用动作（状态 × 权限；只读，动作用于批量预判） */
+export async function fetchTaskActions(taskId) {
+  return apiV1.get(`/tasks/${encodeURIComponent(taskId)}/actions`)
 }
 
 /** 任务活动流 */
@@ -308,10 +484,12 @@ export async function revokeDelegation(id) {
   return apiV1.delete(`/task-delegations/${id}`)
 }
 
-/** 运维监控列表（限管理员） */
-export async function fetchTasks({ status, type, appId, executorType, page, pageSize } = {}) {
+/** 任务列表（管理员全量；非管理员需同时传 docRefType + docRefId，按行级可见性收敛） */
+export async function fetchTasks({ status, type, appId, executorType,
+                                   docRefType, docRefId, page, pageSize } = {}) {
   return apiV1.get(`/tasks${_qs({
-    status, type, app_id: appId, executor_type: executorType, page, page_size: pageSize
+    status, type, app_id: appId, executor_type: executorType,
+    doc_ref_type: docRefType, doc_ref_id: docRefId, page, page_size: pageSize
   })}`)
 }
 
@@ -322,10 +500,14 @@ export async function fetchWorkflowSchedules() {
 
 export default {
   BUCKET_ORDER, BUCKET_LABELS, DELEGATION_SCOPES,
+  BATCH_MAX_SIZE, BATCH_CONCURRENCY,
   derivePause, formatTaskRow, normalizeInboxResponse,
   sortApprovalFirst, summarizeBatchResults,
+  runWithConcurrency, actionAllowedFromPayload,
   normalizeParticipations, canReassignTask, formatSlaRemaining, validateDelegationForm,
-  fetchInbox, fetchInboxCounts, fetchTaskDetail, fetchTaskEvents, claimTask, submitDecision,
+  buildApprovalProjection, buildApprovalFlow,
+  fetchInbox, fetchInboxCounts, fetchTaskDetail, fetchTaskActions, fetchTaskEvents,
+  claimTask, submitDecision,
   fetchParticipations, reassignTask, participateTask,
   fetchDelegations, createDelegation, revokeDelegation,
   fetchTasks, fetchWorkflowSchedules
