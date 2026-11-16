@@ -21,11 +21,31 @@ from meta.core.doc_flow_attach import attach_edge
 logger = logging.getLogger(__name__)
 
 OBJECT_TYPE = 'purchase_order'
-PO_TABLE = 'purchase_orders'
-PO_LINE_TABLE = 'purchase_order_lines'
-REQUISITION_TABLE = 'requisitions'
-REQUISITION_LINE_TABLE = 'requisition_lines'
-ALLOCATION_TABLE = 'demand_allocations'
+def _table_name(entity: str, fallback: str) -> str:
+    """表名走元模型 SSOT；未声明时回退字面量。"""
+    from meta.core.metadata_resolver import MetadataResolver
+    return MetadataResolver.get_table_name(entity) or fallback
+
+
+def _po_table() -> str:
+    return _table_name('purchase_order', 'purchase_orders')
+
+
+def _po_line_table() -> str:
+    return _table_name('purchase_order_line', 'purchase_order_lines')
+
+
+def _requisition_table() -> str:
+    return _table_name('requisition', 'requisitions')
+
+
+def _requisition_line_table() -> str:
+    return _table_name('requisition_line', 'requisition_lines')
+
+
+def _allocation_table() -> str:
+    return _table_name('demand_allocation', 'demand_allocations')
+
 
 DEFAULT_HEADER_TYPE_CODE = 'PO_STD'
 # requisition_line.line_type → purchase_order_line 行类型编码（v177 种子）
@@ -173,7 +193,7 @@ class RequisitionToPoService:
         rows = self.ds.query(
             'SELECT id, requisition_no, status, requester_org_id, deliver_to_org_id, '
             'deliver_to_location_id, need_date, description FROM %s WHERE id = ?'
-            % REQUISITION_TABLE, [requisition_id])
+            % _requisition_table(), [requisition_id])
         if not rows:
             raise ConversionError('采购申请不存在: %s' % requisition_id,
                                   'REQUISITION_NOT_FOUND')
@@ -185,7 +205,7 @@ class RequisitionToPoService:
             'SELECT id, line_no, line_type, item_id, description, qty, uom_id, '
             'need_date, deliver_to_location_id, cost_center_id, status '
             'FROM %s WHERE requisition_id = ? ORDER BY line_no, id'
-            % REQUISITION_LINE_TABLE, [requisition_id])
+            % _requisition_line_table(), [requisition_id])
 
         remaining = {r['id']: self._remaining_qty(r['id'], r['qty']) for r in rows}
         requested = {}
@@ -234,7 +254,7 @@ class RequisitionToPoService:
         rows = self.ds.query(
             'SELECT COALESCE(SUM(qty), 0) AS allocated FROM %s '
             "WHERE demand_bo = 'requisition' AND demand_line_id = ? AND status = ?"
-            % ALLOCATION_TABLE, [requisition_line_id, _ALLOCATION_ACTIVE])
+            % _allocation_table(), [requisition_line_id, _ALLOCATION_ACTIVE])
         allocated = float(rows[0].get('allocated') or 0) if rows else 0.0
         return float(line_qty or 0) - allocated
 

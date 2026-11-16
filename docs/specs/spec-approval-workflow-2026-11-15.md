@@ -1,6 +1,6 @@
 # 审批流 Spec（Approval Workflow P0）
 
-> 版本：v0.12 ｜ 日期：2026-11-16 ｜ 状态：P0 已交付（M1-M3 验收通过）；M4（P2）任务域通用能力已实现并验收（M4-1~M4-5，§8），二次检查与元数据驱动审计见 §8.9；M5（通用任务引擎）已实施并验收（§9.8）；2026-11-16 完成存量表名/列名规范化（§9.10）
+> 版本：v0.14 ｜ 日期：2026-11-16 ｜ 状态：P0 已交付（M1-M3 验收通过）；M4（P2）任务域通用能力已实现并验收（M4-1~M4-5，§8），二次检查与元数据驱动审计见 §8.9；M5（通用任务引擎）已实施并验收（§9.8）；2026-11-16 完成存量表名/列名规范化（§9.10）、取人解析行业复核（§9.11）与二次审计后的全仓运行期表名收口（§9.12）
 > 定位：把审批域从「5 个真源半驱动」收敛为「2 个真源 + 派生」，并补齐前端审批动作与策略配置
 > 判尺：单一事实源（SSOT）+ 元数据驱动；不造重型框架、不做超范围重构
 > 复用底座：[`decision_effect.py`](../../meta/core/decision_effect.py)｜[`approval_meta_loader.py`](../../meta/core/approval_meta_loader.py)｜[`document_approval_service.py`](../../meta/services/document_approval_service.py)｜[`task_decision_api.py`](../../meta/api/task_decision_api.py)
@@ -877,3 +877,121 @@ python d:\filework\test.py --file meta/tests/test_effective_intents.py,meta/test
 | `meta/core/_computed_count_clause.py:136/140/150` | 聚合子查询拼表名 | 属通用查询内核，改动面广，需独立回归 |
 | `meta/core/persistence_interceptor.py:1316/1323` | 写入前表名推导 | 同上 |
 | `meta/core/interceptors/key_template_interceptor.py:130/196` | 候选表 `[t, ts, tes]` 探测 | 属「表不存在时探测候选」逻辑，非 SSOT 解析，保留 |
+
+### 9.11 取人解析行业复核与合理性确认（2026-11-16）
+
+> 目的：确认 §9.5 取人器契约（声明式 `approver_type` + 运行期解析 + 快照冻结 + `assign_explain` 留痕 + 元模型表名）在头部产品中是否成立，并据此补决策与分期。
+
+#### 9.11.1 结论
+
+**合理性成立，不需要架构调整。** 五家产品的共同范式与 §9.5 一致：审批侧只声明「要谁」，由运行期引擎解析成具体人并**物化成审批实例/审批记录**；差异只在三点——解析的数据访问封装在哪一层、是否有规则试算、无审批人时如何兜底。对应处置见 §9.11.4。
+
+#### 9.11.2 对标矩阵
+
+| 维度 | 我们（`C`） | Oracle Fusion（`F`） | SAP（`S`） | Salesforce（`P`） | ServiceNow（`P`） | 飞书（`P`） |
+|---|---|---|---|---|---|---|
+| 审批人声明 | `steps[].approver_type` + `routing_json` | 审批规则 + list builder 类型 | 责任规则（Rule Resolution） | `ApprovalProcess` 每步 approver | `Ask for Approval` 的 Rules | 审批人类型（上级 / 部门负责人 / 角色） |
+| 支持类型 | user / role / group / org / position / job_level / manager / manager_chain / position_hierarchy / expression / initiator_choice | Supervisory、Job Level、Position，自定义 manager 类型自动出现 | 职能 / 岗位 / 组织 / 自定义函数模块 | 指定用户 / manager hierarchy / queue / 记录上的 User 字段 | 用户 / 组 / 前序步骤输出 | 上级 / 部门负责人 / 角色 / 连续多级部门负责人 |
+| 解析时机 | 建任务时 `resolve` 并冻结 | AMX 运行期生成审批列表 | workflow step 运行期 agent determination | 提交时生成审批实例 | Flow 运行期 | 提交时生成审批实例 |
+| 物化载体 | `policy_snapshot` + `executor_config.assign_explain` / `assign_reason` + candidates | AMX 审批列表 | workflow container | 审批实例 + Approval History | `sysapproval_approver` 行 | 审批实例 |
+| 无审批人 | 空池 + `assign_reason`，由策略层决定 | 规则校验（Validate）+ 模拟 | 规则测试/模拟 | 按 step 的 rejection 行为 | 须显式配 rejection rules，否则流程停在 waiting | — |
+| 规则试算 | 未做（§1.1 只规划了「策略命中试算」） | 有（Simulate Approval Rules，多模块） | 有（Testing and Simulating Rules） | 元数据矩阵可直接预览 | Flow 测试/调试 | — |
+
+#### 9.11.3 数据访问归属（对「取人器直连 SQL」的定性）
+
+| 产品 | 找人时的数据访问 | 对 §9.5 的映射 |
+|---|---|---|
+| SAP | 责任规则调 `RH_STRUC_GET` 等函数模块 / CDS view 取组织与主管；社区性能实践进一步建议预计算 + 共享内存缓存 | 取人器 ≈ 该封装层；表名/列名走元模型（§9.10 S2） |
+| ServiceNow | `GlideRecord` 查 `sys_user_group` / `sysapproval_approver` | 平台 API 访问平台表 |
+| Oracle | AMX list builder 内部上溯主管链，业务模块不写 SQL | 引擎内部完成 |
+| Salesforce | 层级字段 / queue / User 字段由平台解析 | 元数据驱动 |
+
+→ **头部同样直连表，但直连的是「平台的表 + 平台的访问组件」。** 我们的取人器扮演的就是这个平台组织服务角色；§9.10 收口后其 SQL 的表名/列名全部来自元模型，定性为「平台内部能力」，不属于「审批业务代码硬编码 SQL」。
+
+#### 9.11.4 三处差距与处置
+
+| # | 差距 | 头部证据 | 处置 |
+|---|---|---|---|
+| G1 | 缺取人试算/模拟 | Oracle「Simulate Approval Rules」（HCM 21D / HR 22A / Compensation 23A）、SAP「Testing and Simulating Rules」 | **新增 D-AP-13**：不做新引擎，复用 `resolver.resolve` + `assign_explain` 提供试算，归 P1（M6 候选） |
+| G2 | 无审批人兜底语义未配置化 | ServiceNow 明确「无匹配审批人须配 rejection rules，否则停在 waiting」；Oracle 有规则 Validate | **新增 D-AP-14**：策略层增加 `on_empty`（`fail` / `skip` / `to_admin`）；resolver 保持中立只报原因，归 P2（与 D-AP-10 同批） |
+| G3 | 取人结果未预计算/缓存 | SAP 建议预计算 manager 分配 + SHMA 缓存 | **新增 D-AP-15**：暂不引入。当前仅 4 个审批 BO、单任务一次解析；出现「批量建任务（导入/定时）」再评估，记为观察项不立项 |
+
+#### 9.11.5 新增决策
+
+| ID | 决策 | 备选 | 理由 |
+|---|---|---|---|
+| **D-AP-13** | 取人试算 = 输入 `{object_type, record_id, policy_id?}` → 复用 `resolver.resolve` 输出候选人与 `assign_explain`，不落任务 | 新建模拟引擎 | `explain` 契约已与 `rule_predicate` 同构，试算只是「不写库地跑一遍」，零新逻辑 |
+| **D-AP-14** | 空池兜底由策略层 `on_empty` 决定：`fail`（默认，保持 fail-closed）/ `skip`（自动通过并留审计）/ `to_admin` | resolver 内自动兜底 | 解析器只回答「谁」，兜底属业务策略；混进 resolver 会另造一套语义 |
+| **D-AP-15** | 取人结果不做预计算缓存；仅当出现批量建任务场景再立项 | 建任务时预计算并缓存链条 | 当前调用量级为「一次任务一次解析」，预计算收益低于失效维护成本（与 SAP 场景的差异：SAP 是批量单据 + 长链） |
+
+#### 9.11.6 与既有决策的一致性复核
+
+| 既有决策 | 头部对应 | 结论 |
+|---|---|---|
+| D-AP-07 快照冻结、策略变更不回写 | Oracle / ServiceNow / Salesforce 均物化审批实例，在途按发起时规则走完 | 一致，保留 |
+| D-AP-06 权限与取人分离 | 头部同样区分「谁是审批人」与「该用户是否有权限操作」 | 一致，保留 |
+| N-AP-03 不做会签多任务，改「单任务 + 参与流水归并」 | 头部有 parallel / unanimous / first-response | 功能等价、实现更轻，保留 |
+| §9.5 空池必须带原因 | 头部以 rejection rules / 规则校验表达同一约束 | 我们更细（逐条 `passed`），保留 |
+
+#### 9.11.7 证据来源
+
+- Oracle：[Approver Types](http://docs.oracle.com/en/cloud/saas/human-resources/25b/faucf/approver-types.html)、[How You Define Approval Rules](https://docs.oracle.com/cloud/saas/financials/24b/faiex/how-you-define-approval-rules.html)、[Various Aspects of Approval Rules](https://docs.oracle.com/en/cloud/saas/procurement/25d/oapro/various-aspects-of-approval-rules.html)、[Using Approval Management](https://docs.public.oneportal.content.oci.oraclecloud.com/en/middleware/fusion-middleware/bpm/12.2.1.3/bpm-develop/using-approval-management.html)、[HCM 21D 审批规则模拟](https://www.oracle.com/webfolder/technetwork/tutorials/tutorial/cloud/r13/wn/hcmcommon/releases/21D/21D-hcm-common-wn.htm)、[HR 22A Simulate Employment Approval Rules](https://www.oracle.com/webfolder/technetwork/tutorials/tutorial/cloud/r13/nfs/ghr/releases/22A/22A-hr-nfs.htm)
+- SAP：[Configure SAP Workflow to Send Purchasing Documents to the Right Approver](https://sapinsider.org/configure-sap-workflow-to-send-purchasing-documents-to-the-right-approver/)、[Using Function Modules in Responsibility Rules](https://signatov.com/sap-workflow-using-function-modules-in-responsibility-rules/)、[Agent Determination Rules（Testing and Simulating Rules）](https://www.sap-press.com/project-management-with-sap-project-system_3614/toc/433)
+- Salesforce：[ApprovalProcess Metadata](https://developer.salesforce.com/docs/atlas.en-us.242.0.api_meta.meta/api_meta/meta_approvalprocess.htm)、[Design Dynamic Approvals That Can Scale](https://www.salesforce.com/blog/metadata-driven-approvals/)
+- ServiceNow：[Flow Designer Approvals Overview](https://www.servicenow.com/community/workflow-automation-articles/flow-designer-approvals-overview-workflow-automation-center-of/tac-p/3541586)、[Ask for Approval（flow action）](http://raw.githubusercontent.com/ServiceNow/ServiceNowDocs/australia/markdown/build-workflows/workflow-studio/ask-approval-flow-designer.md)、[无匹配审批人需配 rejection rules](https://www.servicenow.com/community/itsm-forum/in-the-flow-design-how-to-exclude-one-person-from-approving-the/td-p/2487836)
+- 飞书：[管理员设计审批流程](https://www.feishu.cn/hc/zh-CN/articles/360036163653-%E8%AE%BE%E8%AE%A1%E5%AE%A1%E6%89%B9%E6%B5%81%E7%A8%8B)、[审批节点基础配置](https://ae.feishu.cn/hc/zh-CN/articles/147857102726)、[Lark 审批管理员手册](https://www.larksuite.com/hc/zh-CN/articles/360034502513-lark-%E5%AE%A1%E6%89%B9%E7%AE%A1%E7%90%86%E5%91%98%E6%89%8B%E5%86%8C)
+
+### 9.12 存量规范化第 2 步（2026-11-16，二次审计后执行）
+
+#### 9.12.1 判据复核
+
+§9.10 只覆盖「取人器 + 层级子查询」；二次审计把判据扩到**整个 `meta/` 的运行期 SQL**，并明确区分两类同名现象：
+
+| 现象 | 判定 | 处置 |
+|---|---|---|
+| 运行期用 `entity + 's'` / `'ies'` **猜**表名 | 违反 SSOT（改名即静默查错表） | 改为 `MetadataResolver.get_table_name(entity)`，未声明才回退并留痕 |
+| 模块级 `X_TABLE = 'xxx'` 常量**字面量** | 违反 SSOT（同表多处各写一份） | 改为**访问函数**（调用时解析），保留字面量作兜底 |
+| 迁移脚本 `vNNN__*.py` 内的表名常量 | 冻结快照（DDL 本身即历史事实） | 不动 |
+| `condition_parser.py` / `hierarchy_loader.py` 的静态兜底 | 刻意静态（解析器自身的引导 fallback） | 不动 |
+
+#### 9.12.2 改动清单（批次 A-F，共 25 文件）
+
+| 批次 | 文件 | 改法 |
+|---|---|---|
+| A | `meta/core/runtime_dimension_resolver.py`（`_to_table_name`） | 先取 `get_table_name(bo_id)`，未声明才复数化 + `warning` |
+| A | `meta/core/interceptors/persistence_interceptor.py`（关联目标表） | `get_table_name(rel_target_entity)`，回退原有复数化 |
+| B | `amount_trace_service.py` / `amount_recalc_service.py` / `batch_selection_policy_service.py` / `batch_selection_service.py` / `query/computed_subqueries.py` | 本地表名字典改为 `(实体, 兜底表)`，运行期解析；`_COUNT_CHILDREN_MAP` 改为三元组 `(子实体, 兜底表, 外键)` |
+| C | `condition_permission_service.py`（`_get_display_name_for_id`） | 字段→实体映射 + `get_column_name`；**顺带修存量 bug**：`organizations` / `departments` 表并不存在（库内实为 `orgs`），且显示列 `domain_name`/`org_name` 等均不存在（实为 `name`） |
+| D | `resource_inheritance_engine.py` | `RESOURCE_TABLE_MAP.get(dim, f'{dim}s')` 全部收敛到 `_resource_table()`（链声明 → 元模型 → 复数化） |
+| D | `org_context_resolver.py` | `_row_org('projects'|'sales_orders'|'locations')` 改传实体；`orgs` / `sales_order_lines` 直连改 `_table()` |
+| D | `core/association/fallback.py` | `AUDIT_CHILD_CONFIG` 子项改**实体名**，表名由 `_audit_child_table()` 运行期解析（`audit_logs.object_type` 仍写解析后的表名，语义不变） |
+| E | `api/audit_api.py` / `api/stats_api.py` | `meta['table']` 与 `_safe_count(ds,'products'…)` 改 `_business_table()` / `_stats_table()` |
+| F | `receipt_service` / `handling_unit_service` / `serial_number_service` / `shipment_service` / `vendor_invoice_match_service` / `transfer_order_guard_service` / `purchase_order_guard_service` / `purchase_order_fulfillment_service` / `requisition_po_conversion` / `project_task_guard` / `vendor_payment_term_service` / `document_approval_decision` | 模块级 `*_TABLE` 常量 → 访问函数（`_line_table()` 等），全量引用点同步；`project_task_guard` 访问器保持公开（被 `sales_order_guard_service` 引用） |
+
+**交叉引用同步**（常量改名后必须一起改，否则 ImportError）：
+
+- `meta/services/receipt_actions.py`：`SCHEDULE_TABLE` → `_schedule_table()`
+- `meta/core/interceptors/vendor_invoice_guard_interceptor.py`：`LINE_TABLE` → `_line_table()`
+- `meta/services/sales_order_guard_service.py`：`project_task_guard.TASK_TABLE` → `project_task_guard.task_table()`
+
+#### 9.12.3 验证
+
+```powershell
+python d:\filework\test.py --file meta/tests/test_receipt_service.py,...（22 个受影响文件）
+```
+
+结果：**492 passed, 1 skipped, exit 0**（耗时约 41s，端口 3014）。
+
+已确认的**基线失败**（与本次改动无关，属集成模块 P1 的 fixture 漂移，另行处理）：
+`meta/tests/test_shipment_single_fact.py` 6 例 —— 测试自建 `doc_flow_rule` 表缺 `condition` 列，而 `doc_flow_rule_store.upsert_rules` 已按 `31d61199` 的新 DDL 写入。
+
+#### 9.12.4 保留项（P2，已知问题，不在本轮修）
+
+| 位置 | 现状 | 原因 |
+|---|---|---|
+| `condition_permission_service._get_user_org_info` | 仍查 `users.department_id / organization_id` | 生产 `users` 实为 `primary_org_id`，整段在异常保护内静默返回空；属业务口径问题（部门=组织层级），需产品确认后单独改，避免误改权限范围 |
+| `dimension_scope_engine.py` / `view_dependency_guard.py` | 复数化兜底 | 兜底仅命中未注册维度，风险低 |
+| `import_export_service.py` 若干处 | 导入映射内置表名 | 属导入模板声明，随模板版本走 |
+| `condition_parser.py` / `hierarchy_loader.py` | 静态兜底 | 解析器引导层，刻意保留 |
+
+**结论**：BO 业务表的运行期表名/列名已全部经 `MetadataResolver`（或层级声明）解析，字面量仅作为「未声明」兜底且均带可读回退；平台内核表（`users` / `user_permission_sets` / `tasks` / `audit_logs` / `approval_policies`）保有直连注释，符合 §9.10 三分类口径。

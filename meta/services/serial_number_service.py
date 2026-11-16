@@ -19,17 +19,56 @@ from meta.core.state_machine_loader import get_state_machine
 
 logger = logging.getLogger(__name__)
 
-SERIAL_TABLE = 'serial_numbers'
-SERIAL_TX_TABLE = 'serial_transactions'
-LINK_TABLE = 'document_serial_links'
-ITEM_TABLE = 'items'
-ORG_TABLE = 'orgs'
-LOCATION_TABLE = 'locations'
-RECEIPT_TABLE = 'receipts'
-RECEIPT_LINE_TABLE = 'receipt_lines'
-SHIPMENT_TABLE = 'shipments'
-SHIPMENT_LINE_TABLE = 'shipment_lines'
-INV_TX_TABLE = 'inventory_transactions'
+
+def _table_name(entity: str, fallback: str) -> str:
+    """表名走元模型 SSOT；未声明时回退字面量。"""
+    from meta.core.metadata_resolver import MetadataResolver
+    return MetadataResolver.get_table_name(entity) or fallback
+
+
+def _serial_table() -> str:
+    return _table_name('serial_number', 'serial_numbers')
+
+
+def _serial_tx_table() -> str:
+    return _table_name('serial_transaction', 'serial_transactions')
+
+
+def _link_table() -> str:
+    return _table_name('document_serial_link', 'document_serial_links')
+
+
+def _item_table() -> str:
+    return _table_name('item', 'items')
+
+
+def _org_table() -> str:
+    return _table_name('org', 'orgs')
+
+
+def _location_table() -> str:
+    return _table_name('location', 'locations')
+
+
+def _receipt_table() -> str:
+    return _table_name('receipt', 'receipts')
+
+
+def _receipt_line_table() -> str:
+    return _table_name('receipt_line', 'receipt_lines')
+
+
+def _shipment_table() -> str:
+    return _table_name('shipment', 'shipments')
+
+
+def _shipment_line_table() -> str:
+    return _table_name('shipment_line', 'shipment_lines')
+
+
+def _inv_tx_table() -> str:
+    return _table_name('inventory_transaction', 'inventory_transactions')
+
 
 DOC_RECEIPT = 'receipt'
 DOC_SHIPMENT = 'shipment'
@@ -49,8 +88,8 @@ WORK_ORDER_COMPONENT_TABLE = 'work_order_components'
 
 #: 单据行表映射（用于按行 id 补读 serial_no，兼容未加列的旧替身）
 LINE_TABLE_BY_DOC = {
-    DOC_RECEIPT: RECEIPT_LINE_TABLE,
-    DOC_SHIPMENT: SHIPMENT_LINE_TABLE,
+    DOC_RECEIPT: _receipt_line_table(),
+    DOC_SHIPMENT: _shipment_line_table(),
     DOC_TRANSFER: TRANSFER_LINE_TABLE,
     DOC_ADJUSTMENT: ADJ_LINE_TABLE,
     DOC_COUNT: CNT_LINE_TABLE,
@@ -99,11 +138,11 @@ def serial_schema_ready(ds: Any) -> bool:
     try:
         rows = ds.query(
             'SELECT name FROM sqlite_master WHERE type = ? AND name IN (?, ?, ?)',
-            ['table', SERIAL_TABLE, SERIAL_TX_TABLE, LINK_TABLE])
+            ['table', _serial_table(), _serial_tx_table(), _link_table()])
         if len({row.get('name') for row in rows}) < 3:
             return False
         columns = {row.get('name') for row in ds.query(
-            'PRAGMA table_info(%s)' % ITEM_TABLE)}
+            'PRAGMA table_info(%s)' % _item_table())}
         return {'serial_tracked', 'require_on_receipt',
                 'require_on_issue'} <= columns
     except Exception:
@@ -172,7 +211,7 @@ class SerialNumberService:
             raise SerialNumberError('该物料未启用序列号管理',
                                     field_name='item_id',
                                     rule='SERIAL_ITEM_NOT_TRACKED')
-        self._require_row(ORG_TABLE, org_id, '库存组织', 'SERIAL_ORG_NOT_FOUND')
+        self._require_row(_org_table(), org_id, '库存组织', 'SERIAL_ORG_NOT_FOUND')
         source_type = str(data.get('source_type') or 'received')
         self._assert_source_type(source_type)
         quality_status = str(data.get('quality_status') or 'unrestricted')
@@ -191,7 +230,7 @@ class SerialNumberService:
                 ' source_doc_type, source_doc_id, received_at, produced_at, '
                 ' remark, created_at, updated_at) '
                 "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)"
-                % SERIAL_TABLE,
+                % _serial_table(),
                 [item_id, org_id, serial_no, data.get('uii'),
                  data.get('batch_id'), data.get('revision'), STATUS_DEFINED,
                  quality_status, data.get('current_location_id'),
@@ -272,7 +311,7 @@ class SerialNumberService:
         """收货过账前置：逐行校验快捷录入与 require_on_receipt 数量。"""
         lines = self.ds.query(
             'SELECT * FROM %s WHERE receipt_id = ? AND status <> ?'
-            % RECEIPT_LINE_TABLE, [receipt_id, 'cancelled'])
+            % _receipt_line_table(), [receipt_id, 'cancelled'])
         for line in lines:
             net = _as_float(line.get('qty_received')) \
                 - _as_float(line.get('qty_rejected'))
@@ -283,7 +322,7 @@ class SerialNumberService:
         """发运过账前置：逐行校验快捷录入与 require_on_issue 数量。"""
         lines = self.ds.query(
             'SELECT * FROM %s WHERE delivery_id = ? AND status <> ?'
-            % SHIPMENT_LINE_TABLE, [shipment_id, 'cancelled'])
+            % _shipment_line_table(), [shipment_id, 'cancelled'])
         for line in lines:
             self._precheck_line(line, _as_float(line.get('qty')), DOC_SHIPMENT,
                                 'require_on_issue',
@@ -293,7 +332,7 @@ class SerialNumberService:
         """采购退货出库前置：逐行校验 require_on_issue 序列号数量。"""
         lines = self.ds.query(
             'SELECT * FROM %s WHERE receipt_id = ? AND status <> ?'
-            % RECEIPT_LINE_TABLE, [receipt_id, 'cancelled'])
+            % _receipt_line_table(), [receipt_id, 'cancelled'])
         for line in lines:
             net = _as_float(line.get('qty_received')) \
                 - _as_float(line.get('qty_rejected'))
@@ -336,13 +375,13 @@ class SerialNumberService:
     # ------------------------------------------------------------------
     def register_receipt(self, receipt_id: Any) -> Dict[str, Any]:
         """收货过账后登记：建号或复用、写 receive 事件与 link、置 in_stores。"""
-        header = self._require_row(RECEIPT_TABLE, receipt_id, '收货单',
+        header = self._require_row(_receipt_table(), receipt_id, '收货单',
                                    'SERIAL_RECEIPT_NOT_FOUND')
         org_id = header.get('inventory_org_id') or header.get('org_id')
         location_id = header.get('deliver_to_location_id')
         lines = self.ds.query(
             'SELECT * FROM %s WHERE receipt_id = ? AND status <> ?'
-            % RECEIPT_LINE_TABLE, [receipt_id, 'cancelled'])
+            % _receipt_line_table(), [receipt_id, 'cancelled'])
         registered = 0
         for line in lines:
             registered += self._register_receipt_line(
@@ -404,7 +443,7 @@ class SerialNumberService:
                      batch_id: Any, header: Dict[str, Any],
                      line: Dict[str, Any], inv_tx_id: Any,
                      txn_date: str) -> None:
-        serial = self._require_row(SERIAL_TABLE, serial_id, '序列号',
+        serial = self._require_row(_serial_table(), serial_id, '序列号',
                                    'SERIAL_NOT_FOUND')
         if serial.get('usage_status') == STATUS_SCRAPPED:
             raise SerialNumberError('已报废序列号不能再收货',
@@ -413,7 +452,7 @@ class SerialNumberService:
         self._assert_org(serial, org_id)
         existing = self.ds.query(
             'SELECT id FROM %s WHERE serial_id = ? AND txn_type = ? '
-            'AND doc_type = ? AND doc_id = ? AND line_id = ?' % SERIAL_TX_TABLE,
+            'AND doc_type = ? AND doc_id = ? AND line_id = ?' % _serial_tx_table(),
             [serial_id, TXN_RECEIVE, DOC_RECEIPT, header.get('id'),
              line.get('id')])
         now = _now()
@@ -436,19 +475,19 @@ class SerialNumberService:
         self.ds.execute(
             'UPDATE %s SET usage_status = ?, current_location_id = ?, '
             'batch_id = COALESCE(?, batch_id), received_at = COALESCE(received_at, ?), '
-            'updated_at = ? WHERE id = ?' % SERIAL_TABLE,
+            'updated_at = ? WHERE id = ?' % _serial_table(),
             [STATUS_IN_STORES, location_id, batch_id, now, now, serial_id])
 
     def register_receipt_return(self, receipt_id: Any,
                                 txn_by_line: Optional[Dict[Any, Any]] = None
                                 ) -> Dict[str, Any]:
         """采购退货出库登记：校验在库、写 return_to_vendor 事件、置 shipped。"""
-        header = self._require_row(RECEIPT_TABLE, receipt_id, '收货单',
+        header = self._require_row(_receipt_table(), receipt_id, '收货单',
                                    'SERIAL_RECEIPT_NOT_FOUND')
         org_id = header.get('inventory_org_id') or header.get('org_id')
         lines = self.ds.query(
             'SELECT * FROM %s WHERE receipt_id = ? AND status <> ?'
-            % RECEIPT_LINE_TABLE, [receipt_id, 'cancelled'])
+            % _receipt_line_table(), [receipt_id, 'cancelled'])
         txn_by_line = txn_by_line or {}
         registered = 0
         for line in lines:
@@ -504,7 +543,7 @@ class SerialNumberService:
         count = 0
         for link in links:
             serial = self._require_row(
-                SERIAL_TABLE, link.get('serial_id'), '序列号', 'SERIAL_NOT_FOUND')
+                _serial_table(), link.get('serial_id'), '序列号', 'SERIAL_NOT_FOUND')
             self._assert_org(serial, org_id)
             if serial.get('usage_status') not in OUTBOUND_ALLOWED:
                 raise SerialNumberError(
@@ -514,7 +553,7 @@ class SerialNumberService:
             existing = self.ds.query(
                 'SELECT id FROM %s WHERE serial_id = ? AND txn_type = ? '
                 'AND doc_type = ? AND doc_id = ? AND line_id = ?'
-                % SERIAL_TX_TABLE,
+                % _serial_tx_table(),
                 [serial['id'], TXN_RETURN_VENDOR, DOC_RECEIPT,
                  header.get('id'), line.get('id')])
             now = _now()
@@ -531,19 +570,19 @@ class SerialNumberService:
             self.ds.execute(
                 'UPDATE %s SET usage_status = ?, current_location_id = NULL, '
                 'shipped_at = COALESCE(shipped_at, ?), updated_at = ? WHERE id = ?'
-                % SERIAL_TABLE, [STATUS_SHIPPED, now, now, serial['id']])
+                % _serial_table(), [STATUS_SHIPPED, now, now, serial['id']])
             count += 1
         return count
 
     def register_shipment(self, shipment_id: Any) -> Dict[str, Any]:
         """发运过账后登记：校验在库、写 ship 事件与 link、置 shipped。"""
-        header = self._require_row(SHIPMENT_TABLE, shipment_id, '交货单',
+        header = self._require_row(_shipment_table(), shipment_id, '交货单',
                                    'SERIAL_SHIPMENT_NOT_FOUND')
         org_id = self._shipment_org_id(header)
         location_id = header.get('ship_from_location_id')
         lines = self.ds.query(
             'SELECT * FROM %s WHERE delivery_id = ? AND status <> ?'
-            % SHIPMENT_LINE_TABLE, [shipment_id, 'cancelled'])
+            % _shipment_line_table(), [shipment_id, 'cancelled'])
         registered = 0
         for line in lines:
             registered += self._register_shipment_line(
@@ -614,13 +653,13 @@ class SerialNumberService:
         count = 0
         for link in links:
             serial = self._require_row(
-                SERIAL_TABLE, link.get('serial_id'), '序列号', 'SERIAL_NOT_FOUND')
+                _serial_table(), link.get('serial_id'), '序列号', 'SERIAL_NOT_FOUND')
             self._assert_org(serial, org_id)
             # 整箱发运先于录号执行：同单据已由 ship_hu 置 shipped 的号不再校验在库（§11.15 P1-2）
             shipped_by_doc = self.ds.query(
                 'SELECT id FROM %s WHERE serial_id = ? AND doc_type = ? '
                 'AND doc_id = ? AND usage_to = ?'
-                % SERIAL_TX_TABLE,
+                % _serial_tx_table(),
                 [serial['id'], DOC_SHIPMENT, header.get('id'), STATUS_SHIPPED])
             if not shipped_by_doc \
                     and serial.get('usage_status') not in OUTBOUND_ALLOWED \
@@ -633,7 +672,7 @@ class SerialNumberService:
             existing = self.ds.query(
                 'SELECT id FROM %s WHERE serial_id = ? AND txn_type = ? '
                 'AND doc_type = ? AND doc_id = ? AND line_id = ?'
-                % SERIAL_TX_TABLE,
+                % _serial_tx_table(),
                 [serial['id'], TXN_SHIP, DOC_SHIPMENT, header.get('id'),
                  line.get('id')])
             now = _now()
@@ -650,7 +689,7 @@ class SerialNumberService:
             self.ds.execute(
                 'UPDATE %s SET usage_status = ?, current_location_id = NULL, '
                 'shipped_at = COALESCE(shipped_at, ?), updated_at = ? WHERE id = ?'
-                % SERIAL_TABLE, [STATUS_SHIPPED, now, now, serial['id']])
+                % _serial_table(), [STATUS_SHIPPED, now, now, serial['id']])
             count += 1
         return count
 
@@ -661,7 +700,7 @@ class SerialNumberService:
                       reason: str = '',
                       doc: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
         """按 §3.5 白名单流转；非法跳转抛 SERIAL_STATUS_TRANSITION_INVALID。"""
-        serial = self._require_row(SERIAL_TABLE, serial_id, '序列号',
+        serial = self._require_row(_serial_table(), serial_id, '序列号',
                                    'SERIAL_NOT_FOUND')
         if to_status not in USAGE_STATUSES:
             raise SerialNumberError('未知用途状态：%s' % to_status,
@@ -706,7 +745,7 @@ class SerialNumberService:
                 params.append(now)
             params.append(serial_id)
             self.ds.execute(
-                'UPDATE %s SET %s WHERE id = ?' % (SERIAL_TABLE,
+                'UPDATE %s SET %s WHERE id = ?' % (_serial_table(),
                                                    ', '.join(updates)), params)
         return {'id': serial_id, 'from_status': current, 'to_status': to_status}
 
@@ -714,7 +753,7 @@ class SerialNumberService:
         """库存反冲：写反向事件并回退主档状态，不删除原 link（D13）。"""
         rows = self.ds.query(
             'SELECT * FROM %s WHERE inventory_transaction_id = ? ORDER BY id'
-            % SERIAL_TX_TABLE, [inventory_transaction_id])
+            % _serial_tx_table(), [inventory_transaction_id])
         now = _now()
         reversed_count = 0
         with self.ds.transaction():
@@ -722,7 +761,7 @@ class SerialNumberService:
                 if not row.get('usage_to') or not row.get('usage_from'):
                     continue
                 serial = self._require_row(
-                    SERIAL_TABLE, row.get('serial_id'), '序列号',
+                    _serial_table(), row.get('serial_id'), '序列号',
                     'SERIAL_NOT_FOUND')
                 if serial.get('usage_status') != row.get('usage_to'):
                     continue
@@ -752,7 +791,7 @@ class SerialNumberService:
                 params.append(row.get('serial_id'))
                 self.ds.execute(
                     'UPDATE %s SET %s WHERE id = ?'
-                    % (SERIAL_TABLE, ', '.join(updates)), params)
+                    % (_serial_table(), ', '.join(updates)), params)
                 reversed_count += 1
         return {'inventory_transaction_id': inventory_transaction_id,
                 'reversed': reversed_count}
@@ -764,7 +803,7 @@ class SerialNumberService:
         if not serial_no:
             raise SerialNumberError('序列号不能为空', field_name='serial_no',
                                     rule='SERIAL_NO_REQUIRED')
-        sql = 'SELECT * FROM %s WHERE serial_no = ?' % SERIAL_TABLE
+        sql = 'SELECT * FROM %s WHERE serial_no = ?' % _serial_table()
         params: List[Any] = [serial_no]
         if not _blank(org_id):
             sql += ' AND org_id = ?'
@@ -778,10 +817,10 @@ class SerialNumberService:
         for serial in rows:
             transactions = self.ds.query(
                 'SELECT * FROM %s WHERE serial_id = ? ORDER BY txn_date, id'
-                % SERIAL_TX_TABLE, [serial['id']])
+                % _serial_tx_table(), [serial['id']])
             documents = self.ds.query(
                 'SELECT * FROM %s WHERE serial_id = ? ORDER BY id'
-                % LINK_TABLE, [serial['id']])
+                % _link_table(), [serial['id']])
             matches.append({
                 'org_id': serial.get('org_id'),
                 'serial': serial,
@@ -797,7 +836,7 @@ class SerialNumberService:
                               reason: str = '',
                               doc: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
         """三值质量状态自由流转；只改 quality_status，不动用途轴（D12）。"""
-        serial = self._require_row(SERIAL_TABLE, serial_id, '序列号',
+        serial = self._require_row(_serial_table(), serial_id, '序列号',
                                    'SERIAL_NOT_FOUND')
         self._assert_quality_status(to_quality)
         if serial.get('usage_status') == STATUS_SCRAPPED:
@@ -821,7 +860,7 @@ class SerialNumberService:
                 remark=reason or '质量状态变更')
             self.ds.execute(
                 'UPDATE %s SET quality_status = ?, updated_at = ? WHERE id = ?'
-                % SERIAL_TABLE, [to_quality, now, serial_id])
+                % _serial_table(), [to_quality, now, serial_id])
         return {'id': serial_id, 'from': current, 'to': to_quality,
                 'idempotent': False}
 
@@ -830,7 +869,7 @@ class SerialNumberService:
                       reason: str = '',
                       doc: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
         """退货预留：`issued→returned`；`to_stores=True` 再落库 `returned→in_stores`。"""
-        serial = self._require_row(SERIAL_TABLE, serial_id, '序列号',
+        serial = self._require_row(_serial_table(), serial_id, '序列号',
                                    'SERIAL_NOT_FOUND')
         current = serial.get('usage_status')
         if current not in (STATUS_ISSUED, STATUS_RETURNED):
@@ -856,7 +895,7 @@ class SerialNumberService:
                 self.ds.execute(
                     'UPDATE %s SET usage_status = ?, current_location_id = ?, '
                     'batch_id = COALESCE(?, batch_id), updated_at = ? WHERE id = ?'
-                    % SERIAL_TABLE,
+                    % _serial_table(),
                     [STATUS_RETURNED, location_id, batch_id, now, serial_id])
                 current = STATUS_RETURNED
                 if not to_stores:
@@ -882,7 +921,7 @@ class SerialNumberService:
                 'UPDATE %s SET usage_status = ?, current_location_id = ?, '
                 'batch_id = COALESCE(?, batch_id), received_at = '
                 'COALESCE(received_at, ?), updated_at = ? WHERE id = ?'
-                % SERIAL_TABLE,
+                % _serial_table(),
                 [STATUS_IN_STORES, location_id, batch_id, now, now, serial_id])
         return {'id': serial_id, 'from_status': origin,
                 'to_status': STATUS_IN_STORES}
@@ -898,7 +937,7 @@ class SerialNumberService:
                     raise SerialNumberError('序列号不能为空',
                                             field_name='serial_no',
                                             rule='SERIAL_NO_REQUIRED')
-                self._require_row(SERIAL_TABLE, serial_id, '序列号',
+                self._require_row(_serial_table(), serial_id, '序列号',
                                   'SERIAL_NOT_FOUND')
                 self._ensure_link(doc_type, doc_id, line_id, serial_id,
                                   direction)
@@ -946,7 +985,7 @@ class SerialNumberService:
                     exists = self.ds.query(
                         'SELECT id FROM %s WHERE serial_id = ? AND txn_type = ? '
                         'AND doc_type = ? AND doc_id = ? AND line_id = ?'
-                        % SERIAL_TX_TABLE,
+                        % _serial_tx_table(),
                         [serial['id'], 'transfer_out', DOC_TRANSFER,
                          header.get('id'), line.get('id')])
                     if not exists:
@@ -964,7 +1003,7 @@ class SerialNumberService:
                             remark='调拨单 %s 发货' % header.get('transfer_order_no'))
                     self.ds.execute(
                         'UPDATE %s SET usage_status = ?, current_location_id = NULL, '
-                        'updated_at = ? WHERE id = ?' % SERIAL_TABLE,
+                        'updated_at = ? WHERE id = ?' % _serial_table(),
                         [STATUS_IN_TRANSIT, _now(), serial['id']])
                     registered += 1
         return {'transfer_order_id': transfer_order_id,
@@ -979,7 +1018,7 @@ class SerialNumberService:
         """TO 来源收货过账：写 transfer_in 事件、主档落库并迁移组织（FR-002）。"""
         header = self._require_row(TRANSFER_TABLE, transfer_order_id, '调拨单',
                                    'SERIAL_TRANSFER_NOT_FOUND')
-        receipt = self._require_row(RECEIPT_TABLE, receipt_id, '收货单',
+        receipt = self._require_row(_receipt_table(), receipt_id, '收货单',
                                     'SERIAL_RECEIPT_NOT_FOUND')
         target_org = header.get('to_org_id')
         target_location = (receipt.get('deliver_to_location_id')
@@ -990,12 +1029,12 @@ class SerialNumberService:
             for rline, line, links in groups:
                 for link in links:
                     serial = self._require_row(
-                        SERIAL_TABLE, link.get('serial_id'), '序列号',
+                        _serial_table(), link.get('serial_id'), '序列号',
                         'SERIAL_NOT_FOUND')
                     exists = self.ds.query(
                         'SELECT id FROM %s WHERE serial_id = ? AND txn_type = ? '
                         'AND doc_type = ? AND doc_id = ? AND line_id = ?'
-                        % SERIAL_TX_TABLE,
+                        % _serial_tx_table(),
                         [serial['id'], 'transfer_in', DOC_TRANSFER,
                          header.get('id'), line.get('id')])
                     if exists:
@@ -1039,7 +1078,7 @@ class SerialNumberService:
                         'UPDATE %s SET org_id = ?, usage_status = ?, '
                         'current_location_id = ?, batch_id = COALESCE(?, batch_id), '
                         'received_at = COALESCE(received_at, ?), updated_at = ? '
-                        'WHERE id = ?' % SERIAL_TABLE,
+                        'WHERE id = ?' % _serial_table(),
                         [target_org, STATUS_IN_STORES, target_location, batch_id,
                          now, now, serial['id']])
                     registered += 1
@@ -1050,11 +1089,11 @@ class SerialNumberService:
                                  receipt_id: Any) -> List[Any]:
         header = self._require_row(TRANSFER_TABLE, transfer_order_id, '调拨单',
                                    'SERIAL_TRANSFER_NOT_FOUND')
-        self._require_row(RECEIPT_TABLE, receipt_id, '收货单',
+        self._require_row(_receipt_table(), receipt_id, '收货单',
                           'SERIAL_RECEIPT_NOT_FOUND')
         rlines = self.ds.query(
             'SELECT * FROM %s WHERE receipt_id = ? AND status <> ?'
-            % RECEIPT_LINE_TABLE, [receipt_id, 'cancelled'])
+            % _receipt_line_table(), [receipt_id, 'cancelled'])
         groups: List[Any] = []
         for rline in rlines:
             net = _as_float(rline.get('qty_received')) \
@@ -1077,12 +1116,12 @@ class SerialNumberService:
                     rule='SERIAL_TRANSFER_COUNT_MISMATCH')
             for link in links:
                 serial = self._require_row(
-                    SERIAL_TABLE, link.get('serial_id'), '序列号',
+                    _serial_table(), link.get('serial_id'), '序列号',
                     'SERIAL_NOT_FOUND')
                 exists = self.ds.query(
                     'SELECT id FROM %s WHERE serial_id = ? AND txn_type = ? '
                     'AND doc_type = ? AND doc_id = ? AND line_id = ?'
-                    % SERIAL_TX_TABLE,
+                    % _serial_tx_table(),
                     [serial['id'], 'transfer_in', DOC_TRANSFER,
                      header.get('id'), line.get('id')])
                 if exists:
@@ -1213,7 +1252,7 @@ class SerialNumberService:
                 line_id=line.get('id'), remark='调整单状态转移')
             self.ds.execute(
                 'UPDATE %s SET quality_status = ?, updated_at = ? WHERE id = ?'
-                % SERIAL_TABLE, [target, _now(), serial['id']])
+                % _serial_table(), [target, _now(), serial['id']])
 
     def _apply_adjust_in(self, header: Dict[str, Any],
                          line: Dict[str, Any], serial: Dict[str, Any],
@@ -1222,7 +1261,7 @@ class SerialNumberService:
         exists = self.ds.query(
             'SELECT id FROM %s WHERE serial_id = ? AND txn_type = ? '
             'AND doc_type = ? AND doc_id = ? AND line_id = ?'
-            % SERIAL_TX_TABLE,
+            % _serial_tx_table(),
             [serial['id'], TXN_ADJUST, DOC_ADJUSTMENT, header.get('id'),
              line.get('id')])
         if exists:
@@ -1252,7 +1291,7 @@ class SerialNumberService:
             'UPDATE %s SET usage_status = ?, quality_status = ?, '
             'current_location_id = ?, batch_id = COALESCE(?, batch_id), '
             'received_at = COALESCE(received_at, ?), updated_at = ? WHERE id = ?'
-            % SERIAL_TABLE,
+            % _serial_table(),
             [STATUS_IN_STORES,
              line.get('to_stock_status') or serial.get('quality_status'),
              line.get('location_id'), line.get('batch_id'), now, now,
@@ -1265,7 +1304,7 @@ class SerialNumberService:
         exists = self.ds.query(
             'SELECT id FROM %s WHERE serial_id = ? AND txn_type = ? '
             'AND doc_type = ? AND doc_id = ? AND line_id = ?'
-            % SERIAL_TX_TABLE,
+            % _serial_tx_table(),
             [serial['id'], 'scrap', DOC_ADJUSTMENT, header.get('id'),
              line.get('id')])
         if exists:
@@ -1291,7 +1330,7 @@ class SerialNumberService:
         self.ds.execute(
             'UPDATE %s SET usage_status = ?, current_location_id = NULL, '
             'scrapped_at = COALESCE(scrapped_at, ?), updated_at = ? WHERE id = ?'
-            % SERIAL_TABLE, [STATUS_SCRAPPED, now, now, serial['id']])
+            % _serial_table(), [STATUS_SCRAPPED, now, now, serial['id']])
         return True
 
     # ------------------------------------------------------------------
@@ -1364,7 +1403,7 @@ class SerialNumberService:
         exists = self.ds.query(
             'SELECT id FROM %s WHERE serial_id = ? AND txn_type = ? '
             'AND doc_type = ? AND doc_id = ? AND line_id = ?'
-            % SERIAL_TX_TABLE,
+            % _serial_tx_table(),
             [serial['id'], TXN_ADJUST, DOC_COUNT, header.get('id'),
              line.get('id')])
         if exists:
@@ -1393,7 +1432,7 @@ class SerialNumberService:
             'UPDATE %s SET usage_status = ?, quality_status = ?, '
             'current_location_id = ?, batch_id = COALESCE(?, batch_id), '
             'received_at = COALESCE(received_at, ?), updated_at = ? WHERE id = ?'
-            % SERIAL_TABLE,
+            % _serial_table(),
             [STATUS_IN_STORES,
              line.get('stock_status') or serial.get('quality_status'),
              line.get('location_id'), line.get('batch_id'), now, now,
@@ -1406,7 +1445,7 @@ class SerialNumberService:
         exists = self.ds.query(
             'SELECT id FROM %s WHERE serial_id = ? AND txn_type = ? '
             'AND doc_type = ? AND doc_id = ? AND line_id = ?'
-            % SERIAL_TX_TABLE,
+            % _serial_tx_table(),
             [serial['id'], 'scrap', DOC_COUNT, header.get('id'),
              line.get('id')])
         if exists:
@@ -1431,7 +1470,7 @@ class SerialNumberService:
         self.ds.execute(
             'UPDATE %s SET usage_status = ?, current_location_id = NULL, '
             'scrapped_at = COALESCE(scrapped_at, ?), updated_at = ? WHERE id = ?'
-            % SERIAL_TABLE, [STATUS_SCRAPPED, now, now, serial['id']])
+            % _serial_table(), [STATUS_SCRAPPED, now, now, serial['id']])
         return True
 
     # ------------------------------------------------------------------
@@ -1440,13 +1479,13 @@ class SerialNumberService:
     def precheck_completion(self, work_order_id: Any,
                             receipt_id: Any) -> None:
         """完工过账前置（无副作用）：成品录号 + 组件号合法性（D7）。"""
-        header = self._require_row(RECEIPT_TABLE, receipt_id, '收货单',
+        header = self._require_row(_receipt_table(), receipt_id, '收货单',
                                    'SERIAL_RECEIPT_NOT_FOUND')
         work_order = self._require_production_order(work_order_id)
         org_id = header.get('inventory_org_id') or header.get('org_id')
         lines = self.ds.query(
             'SELECT * FROM %s WHERE receipt_id = ? AND status <> ?'
-            % RECEIPT_LINE_TABLE, [receipt_id, 'cancelled'])
+            % _receipt_line_table(), [receipt_id, 'cancelled'])
         for line in lines:
             net = _as_float(line.get('qty_received')) \
                 - _as_float(line.get('qty_rejected'))
@@ -1458,7 +1497,7 @@ class SerialNumberService:
                             event_key: Any = None,
                             parent_serial_id: Any = None) -> Dict[str, Any]:
         """完工过账登记：成品建档入库 + 组件耗用 + 写单父谱系（D3/D4/D6）。"""
-        header = self._require_row(RECEIPT_TABLE, receipt_id, '收货单',
+        header = self._require_row(_receipt_table(), receipt_id, '收货单',
                                    'SERIAL_RECEIPT_NOT_FOUND')
         work_order = self._require_production_order(work_order_id)
         org_id = header.get('inventory_org_id') or header.get('org_id')
@@ -1467,7 +1506,7 @@ class SerialNumberService:
                     or header.get('receipt_date') or _now())
         lines = self.ds.query(
             'SELECT * FROM %s WHERE receipt_id = ? AND status <> ?'
-            % RECEIPT_LINE_TABLE, [receipt_id, 'cancelled'])
+            % _receipt_line_table(), [receipt_id, 'cancelled'])
         # 先做全量校验，任何不合法都不落库
         groups = self._completion_groups(work_order, org_id)
         produced: List[Dict[str, Any]] = []
@@ -1497,7 +1536,7 @@ class SerialNumberService:
         events = self.ds.query(
             'SELECT * FROM %s WHERE txn_type IN (?, ?) AND '
             '((doc_type = ? AND doc_id = ?) OR (doc_type = ? AND doc_id = ?)) '
-            'ORDER BY id' % SERIAL_TX_TABLE,
+            'ORDER BY id' % _serial_tx_table(),
             [TXN_RECEIVE, 'issue', DOC_RECEIPT, receipt_id,
              DOC_WORK_ORDER, work_order_id])
         now = _now()
@@ -1505,7 +1544,7 @@ class SerialNumberService:
         with self.ds.transaction():
             for event in events:
                 serial = self._require_row(
-                    SERIAL_TABLE, event.get('serial_id'), '序列号',
+                    _serial_table(), event.get('serial_id'), '序列号',
                     'SERIAL_NOT_FOUND')
                 if serial.get('usage_status') != event.get('usage_to'):
                     continue
@@ -1532,14 +1571,14 @@ class SerialNumberService:
                 params.append(serial['id'])
                 self.ds.execute(
                     'UPDATE %s SET %s WHERE id = ?'
-                    % (SERIAL_TABLE, ', '.join(updates)), params)
+                    % (_serial_table(), ', '.join(updates)), params)
                 reverted += 1
         return {'work_order_id': work_order_id, 'receipt_id': receipt_id,
                 'reverted': reverted}
 
     def genealogy(self, serial_id: Any, depth: Any = 1) -> Dict[str, Any]:
         """只读谱系：向上找父号、向下找子号；depth 截断 1..5，防环。"""
-        serial = self._require_row(SERIAL_TABLE, serial_id, '序列号',
+        serial = self._require_row(_serial_table(), serial_id, '序列号',
                                    'SERIAL_NOT_FOUND')
         try:
             depth = int(depth or 1)
@@ -1602,7 +1641,7 @@ class SerialNumberService:
             rows: List[Dict[str, Any]] = []
             for link in links:
                 serial = self._require_row(
-                    SERIAL_TABLE, link.get('serial_id'), '序列号',
+                    _serial_table(), link.get('serial_id'), '序列号',
                     'SERIAL_NOT_FOUND')
                 if str(serial.get('item_id')) \
                         != str(component.get('component_item_id')):
@@ -1669,7 +1708,7 @@ class SerialNumberService:
         now = _now()
         produced: List[Dict[str, Any]] = []
         for link in links:
-            serial = self._require_row(SERIAL_TABLE, link.get('serial_id'),
+            serial = self._require_row(_serial_table(), link.get('serial_id'),
                                        '序列号', 'SERIAL_NOT_FOUND')
             if serial.get('usage_status') == STATUS_SCRAPPED:
                 raise SerialNumberError('已报废序列号不能再完工入库',
@@ -1679,7 +1718,7 @@ class SerialNumberService:
             existing = self.ds.query(
                 'SELECT id FROM %s WHERE serial_id = ? AND txn_type = ? '
                 'AND doc_type = ? AND doc_id = ? AND line_id = ?'
-                % SERIAL_TX_TABLE,
+                % _serial_tx_table(),
                 [serial['id'], TXN_RECEIVE, DOC_RECEIPT, header.get('id'),
                  line.get('id')])
             if not existing:
@@ -1702,7 +1741,7 @@ class SerialNumberService:
                 'UPDATE %s SET usage_status = ?, source_type = ?, '
                 'current_location_id = ?, produced_at = COALESCE(produced_at, ?), '
                 'received_at = COALESCE(received_at, ?), updated_at = ? '
-                'WHERE id = ?' % SERIAL_TABLE,
+                'WHERE id = ?' % _serial_table(),
                 [STATUS_IN_STORES, 'produced', location_id, txn_date, txn_date,
                  now, serial['id']])
             produced.append(dict(serial, usage_status=STATUS_IN_STORES))
@@ -1713,7 +1752,7 @@ class SerialNumberService:
                             parent_serial_id: Any = None) -> Optional[Any]:
         has_components = any(rows for _component, rows in groups)
         if not _blank(parent_serial_id):
-            parent = self._require_row(SERIAL_TABLE, parent_serial_id, '序列号',
+            parent = self._require_row(_serial_table(), parent_serial_id, '序列号',
                                        'SERIAL_NOT_FOUND')
             self._assert_org(parent, org_id)
             return parent['id']
@@ -1737,7 +1776,7 @@ class SerialNumberService:
         existing = self.ds.query(
             'SELECT id FROM %s WHERE serial_id = ? AND txn_type = ? '
             'AND doc_type = ? AND doc_id = ? AND line_id = ?'
-            % SERIAL_TX_TABLE,
+            % _serial_tx_table(),
             [serial['id'], 'issue', DOC_WORK_ORDER, work_order.get('id'),
              component.get('id')])
         if existing:
@@ -1761,7 +1800,7 @@ class SerialNumberService:
         params.append(serial['id'])
         self.ds.execute(
             'UPDATE %s SET %s WHERE id = ?'
-            % (SERIAL_TABLE, ', '.join(updates)), params)
+            % (_serial_table(), ', '.join(updates)), params)
         return True
 
     def _genealogy_up(self, serial: Dict[str, Any], remaining: int,
@@ -1771,7 +1810,7 @@ class SerialNumberService:
         parent_id = serial.get('parent_serial_id')
         if _blank(parent_id) or parent_id in seen:
             return []
-        rows = self.ds.query('SELECT * FROM %s WHERE id = ?' % SERIAL_TABLE,
+        rows = self.ds.query('SELECT * FROM %s WHERE id = ?' % _serial_table(),
                              [parent_id])
         if not rows:
             return []
@@ -1787,7 +1826,7 @@ class SerialNumberService:
             return []
         rows = self.ds.query(
             'SELECT * FROM %s WHERE parent_serial_id = ? ORDER BY id'
-            % SERIAL_TABLE, [serial_id])
+            % _serial_table(), [serial_id])
         children: List[Dict[str, Any]] = []
         for row in rows:
             if row['id'] in seen:
@@ -1819,14 +1858,14 @@ class SerialNumberService:
     def line_link_count(self, doc_type: str, line_id: Any) -> int:
         rows = self.ds.query(
             'SELECT COUNT(*) AS cnt FROM %s WHERE doc_type = ? AND line_id = ?'
-            % LINK_TABLE, [doc_type, line_id])
+            % _link_table(), [doc_type, line_id])
         return int(rows[0]['cnt']) if rows else 0
 
     # ------------------------------------------------------------------
     # 内部工具
     # ------------------------------------------------------------------
     def _require_item(self, item_id: Any) -> Dict[str, Any]:
-        return self._require_row(ITEM_TABLE, item_id, '物料',
+        return self._require_row(_item_table(), item_id, '物料',
                                  'SERIAL_ITEM_NOT_FOUND')
 
     def _require_row(self, table: str, row_id: Any, label: str,
@@ -1846,7 +1885,7 @@ class SerialNumberService:
                      serial_no: str) -> Optional[Dict[str, Any]]:
         rows = self.ds.query(
             'SELECT * FROM %s WHERE item_id = ? AND org_id = ? AND serial_no = ?'
-            % SERIAL_TABLE, [item_id, org_id, serial_no])
+            % _serial_table(), [item_id, org_id, serial_no])
         return rows[0] if rows else None
 
     def _ensure_serial(self, item: Dict[str, Any], org_id: Any, serial_no: str,
@@ -1863,7 +1902,7 @@ class SerialNumberService:
             ' quality_status, source_type, source_doc_type, source_doc_id, '
             ' received_at, created_at, updated_at) '
             'VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)'
-            % SERIAL_TABLE,
+            % _serial_table(),
             [item.get('id'), org_id, serial_no, STATUS_DEFINED, quality_status,
              source_type,
              source_doc_type or ('receipt' if header.get('receipt_no')
@@ -1874,7 +1913,7 @@ class SerialNumberService:
             serial_id, TXN_CREATE, now, org_to_id=org_id,
             usage_to=STATUS_DEFINED, quality_to=quality_status,
             remark='过账快捷录入建档')
-        return self._require_row(SERIAL_TABLE, serial_id, '序列号',
+        return self._require_row(_serial_table(), serial_id, '序列号',
                                  'SERIAL_NOT_FOUND')
 
     def _line_serials(self, line: Dict[str, Any], doc_type: str, qty: Any,
@@ -1930,7 +1969,7 @@ class SerialNumberService:
                 field_name='serial_no', rule=rule)
         rows: List[Dict[str, Any]] = []
         for link_row in links:
-            serial = self._require_row(SERIAL_TABLE, link_row.get('serial_id'),
+            serial = self._require_row(_serial_table(), link_row.get('serial_id'),
                                        '序列号', 'SERIAL_NOT_FOUND')
             self._assert_serial_available(serial, org_id, direction, allowed)
             rows.append(serial)
@@ -1980,12 +2019,12 @@ class SerialNumberService:
     def _links(self, doc_type: str, line_id: Any) -> List[Dict[str, Any]]:
         return self.ds.query(
             'SELECT * FROM %s WHERE doc_type = ? AND line_id = ? ORDER BY id'
-            % LINK_TABLE, [doc_type, line_id])
+            % _link_table(), [doc_type, line_id])
 
     def _find_inv_tx(self, event_key: str, line_id: Any) -> Optional[Any]:
         rows = self.ds.query(
             'SELECT id FROM %s WHERE source_event_key = ? AND source_line_id = ?'
-            % INV_TX_TABLE, [event_key, line_id])
+            % _inv_tx_table(), [event_key, line_id])
         return rows[0]['id'] if rows else None
 
     def _resolve_batch_id(self, org_id: Any, item_id: Any,
@@ -2001,7 +2040,7 @@ class SerialNumberService:
         location_id = header.get('ship_from_location_id')
         if not _blank(location_id):
             rows = self.ds.query(
-                'SELECT org_id FROM %s WHERE id = ?' % LOCATION_TABLE,
+                'SELECT org_id FROM %s WHERE id = ?' % _location_table(),
                 [location_id])
             if rows:
                 return rows[0].get('org_id')
@@ -2025,7 +2064,7 @@ class SerialNumberService:
         values.append(_now())
         cursor = self.ds.execute(
             'INSERT INTO %s (%s) VALUES (%s)' % (
-                SERIAL_TX_TABLE, ', '.join(columns),
+                _serial_tx_table(), ', '.join(columns),
                 ', '.join(['?'] * len(columns))), values)
         return cursor.lastrowid
 

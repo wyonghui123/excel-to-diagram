@@ -20,21 +20,69 @@ from typing import Any, Dict, List, Optional
 
 logger = logging.getLogger(__name__)
 
-HU_TABLE = 'handling_units'
+
+def _table_name(entity: str, fallback: str) -> str:
+    """表名走元模型 SSOT；未声明时回退字面量。"""
+    from meta.core.metadata_resolver import MetadataResolver
+    return MetadataResolver.get_table_name(entity) or fallback
+
+
+def _hu_table() -> str:
+    return _table_name('handling_unit', 'handling_units')
+
+
 ITEM_TABLE = 'handling_unit_items'
-TX_TABLE = 'hu_transactions'
-SERIAL_TABLE = 'serial_numbers'
-SERIAL_TX_TABLE = 'serial_transactions'
-LINK_TABLE = 'document_serial_links'
-ORG_TABLE = 'orgs'
-LOCATION_TABLE = 'locations'
-BATCH_TABLE = 'batches'
-RECEIPT_TABLE = 'receipts'
-RECEIPT_LINE_TABLE = 'receipt_lines'
-SHIPMENT_TABLE = 'shipments'
-SHIPMENT_LINE_TABLE = 'shipment_lines'
-TRANSFER_TABLE = 'transfer_orders'
-TRANSFER_LINE_TABLE = 'transfer_order_lines'
+def _tx_table() -> str:
+    return _table_name('hu_transaction', 'hu_transactions')
+
+
+def _serial_table() -> str:
+    return _table_name('serial_number', 'serial_numbers')
+
+
+def _serial_tx_table() -> str:
+    return _table_name('serial_transaction', 'serial_transactions')
+
+
+def _link_table() -> str:
+    return _table_name('document_serial_link', 'document_serial_links')
+
+
+def _org_table() -> str:
+    return _table_name('org', 'orgs')
+
+
+def _location_table() -> str:
+    return _table_name('location', 'locations')
+
+
+def _batch_table() -> str:
+    return _table_name('batch', 'batches')
+
+
+def _receipt_table() -> str:
+    return _table_name('receipt', 'receipts')
+
+
+def _receipt_line_table() -> str:
+    return _table_name('receipt_line', 'receipt_lines')
+
+
+def _shipment_table() -> str:
+    return _table_name('shipment', 'shipments')
+
+
+def _shipment_line_table() -> str:
+    return _table_name('shipment_line', 'shipment_lines')
+
+
+def _transfer_table() -> str:
+    return _table_name('transfer_order', 'transfer_orders')
+
+
+def _transfer_line_table() -> str:
+    return _table_name('transfer_order_line', 'transfer_order_lines')
+
 
 STATUS_PLANNED = 'planned'
 STATUS_OPEN = 'open'
@@ -93,13 +141,12 @@ def document_links_ready(ds: Any) -> bool:
         return False
 
 
-
 def hu_schema_ready(ds: Any) -> bool:
     """P6a-2 前置：三张 HU 表齐全才启用装箱 / 整箱发运钩子。"""
     try:
         rows = ds.query(
             'SELECT name FROM sqlite_master WHERE type = ? AND name IN (?, ?, ?)',
-            ['table', HU_TABLE, ITEM_TABLE, TX_TABLE])
+            ['table', _hu_table(), ITEM_TABLE, _tx_table()])
         return len({row.get('name') for row in rows}) >= 3
     except Exception:
         return False
@@ -170,10 +217,10 @@ class HandlingUnitService:
         return rows[0]
 
     def _get_hu(self, hu_id: Any) -> Dict[str, Any]:
-        return self._require_row(HU_TABLE, hu_id, '包装容器', 'HU_NOT_FOUND')
+        return self._require_row(_hu_table(), hu_id, '包装容器', 'HU_NOT_FOUND')
 
     def _find_hu(self, hu_no: Any, org_id: Any = None) -> Optional[Dict[str, Any]]:
-        sql = 'SELECT * FROM %s WHERE hu_no = ?' % HU_TABLE
+        sql = 'SELECT * FROM %s WHERE hu_no = ?' % _hu_table()
         params: List[Any] = [str(hu_no or '').strip()]
         if not _blank(org_id):
             sql += ' AND org_id = ?'
@@ -210,7 +257,7 @@ class HandlingUnitService:
                 break
             chain.append(int(current))
             rows = self.ds.query(
-                'SELECT parent_hu_id FROM %s WHERE id = ?' % HU_TABLE, [current])
+                'SELECT parent_hu_id FROM %s WHERE id = ?' % _hu_table(), [current])
             current = rows[0].get('parent_hu_id') if rows else None
         return chain
 
@@ -233,7 +280,7 @@ class HandlingUnitService:
             return None
         try:
             rows = self.ds.query(
-                'SELECT org_id FROM %s WHERE id = ?' % LOCATION_TABLE,
+                'SELECT org_id FROM %s WHERE id = ?' % _location_table(),
                 [location_id])
         except Exception:
             return None
@@ -267,7 +314,7 @@ class HandlingUnitService:
             'AND COALESCE(doc_id, -1) = COALESCE(?, -1) '
             'AND COALESCE(line_id, -1) = COALESCE(?, -1) '
             'AND COALESCE(serial_id, -1) = COALESCE(?, -1)'
-            % (TX_TABLE, "''", "''"),
+            % (_tx_table(), "''", "''"),
             [hu_id, txn_type, doc_type, doc_id, line_id, serial_id])
         if existing:
             return int(existing[0]['id'])
@@ -275,7 +322,7 @@ class HandlingUnitService:
             'INSERT INTO %s (hu_id, serial_id, child_hu_id, txn_type, '
             ' from_hu_id, to_hu_id, from_location_id, to_location_id, '
             ' doc_type, doc_id, line_id, txn_at, remark, created_at) '
-            "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)" % TX_TABLE,
+            "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)" % _tx_table(),
             [hu_id, serial_id, payload.get('child_hu_id'), txn_type,
              payload.get('from_hu_id'), payload.get('to_hu_id'),
              payload.get('from_location_id'), payload.get('to_location_id'),
@@ -303,7 +350,7 @@ class HandlingUnitService:
         if _blank(org_id):
             raise HandlingUnitError('库存组织不能为空', field_name='org_id',
                                     rule='HU_ORG_MISMATCH')
-        self._require_row(ORG_TABLE, org_id, '库存组织', 'HU_ORG_MISMATCH')
+        self._require_row(_org_table(), org_id, '库存组织', 'HU_ORG_MISMATCH')
         hu_type = str(data.get('hu_type') or 'carton').strip().lower()
         if hu_type not in HU_TYPES:
             raise HandlingUnitError('容器类型不合法：%s' % hu_type,
@@ -337,7 +384,7 @@ class HandlingUnitService:
                 ' uom_id, source_doc_type, source_doc_id, remark, '
                 ' created_at, updated_at) '
                 "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)"
-                % HU_TABLE,
+                % _hu_table(),
                 [hu_no, hu_type, data.get('packaging_item_id'), org_id,
                  location_id, parent_id, root_id, STATUS_OPEN,
                  1 if data.get('is_reusable') else 0,
@@ -348,7 +395,7 @@ class HandlingUnitService:
                  data.get('source_doc_id'), data.get('remark'), now, now])
             hu_id = int(cursor.lastrowid)
             self.ds.execute(
-                'UPDATE %s SET root_hu_id = ? WHERE id = ?' % HU_TABLE,
+                'UPDATE %s SET root_hu_id = ? WHERE id = ?' % _hu_table(),
                 [hu_id if _blank(root_id) else root_id, hu_id])
             self._insert_txn(hu_id, TXN_CREATE, now,
                              from_hu_id=None, to_hu_id=hu_id,
@@ -389,7 +436,7 @@ class HandlingUnitService:
             if not _blank(location) and int(location) != int(hu.get('location_id') or 0):
                 self.ds.execute(
                     'UPDATE %s SET location_id = ?, updated_at = ? WHERE id = ?'
-                    % HU_TABLE, [location, _now(), hu['id']])
+                    % _hu_table(), [location, _now(), hu['id']])
         logger.info('[hu] pack id=%s lines=%s', hu['id'], packed)
         return {'hu_id': hu['id'], 'packed': packed,
                 'location_id': location}
@@ -456,7 +503,7 @@ class HandlingUnitService:
         root = hu.get('root_hu_id') or hu['id']
         self.ds.execute(
             'UPDATE %s SET parent_hu_id = ?, root_hu_id = ?, updated_at = ? '
-            'WHERE id = ?' % HU_TABLE, [hu['id'], root, _now(), child_id])
+            'WHERE id = ?' % _hu_table(), [hu['id'], root, _now(), child_id])
         self._recalc_root(child_id, root)
         self._insert_txn(hu['id'], TXN_PACK, child_hu_id=child_id,
                          from_hu_id=child_id, to_hu_id=hu['id'],
@@ -465,7 +512,7 @@ class HandlingUnitService:
     def _recalc_root(self, hu_id: Any, root_id: Any) -> None:
         for descendant in self._descendant_ids(hu_id):
             self.ds.execute(
-                'UPDATE %s SET root_hu_id = ? WHERE id = ?' % HU_TABLE,
+                'UPDATE %s SET root_hu_id = ? WHERE id = ?' % _hu_table(),
                 [root_id, descendant])
 
     def _pack_material(self, hu: Dict[str, Any], line: Dict[str, Any],
@@ -476,7 +523,7 @@ class HandlingUnitService:
         if _blank(serial_id) and not _blank(line.get('serial_no')):
             rows = self.ds.query(
                 'SELECT id FROM %s WHERE item_id = ? AND org_id = ? '
-                'AND serial_no = ?' % SERIAL_TABLE,
+                'AND serial_no = ?' % _serial_table(),
                 [line.get('item_id'), hu['org_id'],
                  str(line.get('serial_no')).strip()])
             if not rows:
@@ -486,7 +533,7 @@ class HandlingUnitService:
             serial_id = rows[0]['id']
 
         if not _blank(serial_id):
-            serial = self._require_row(SERIAL_TABLE, serial_id, '序列号',
+            serial = self._require_row(_serial_table(), serial_id, '序列号',
                                        'HU_NOT_FOUND')
             if int(serial['org_id']) != int(hu['org_id']):
                 raise HandlingUnitError('序列号与容器不属于同一组织',
@@ -552,7 +599,7 @@ class HandlingUnitService:
                     child_id = row['child_hu_id']
                     self.ds.execute(
                         'UPDATE %s SET parent_hu_id = NULL, root_hu_id = id, '
-                        'updated_at = ? WHERE id = ?' % HU_TABLE,
+                        'updated_at = ? WHERE id = ?' % _hu_table(),
                         [_now(), child_id])
                     self._recalc_root(child_id, child_id)
                 self.ds.execute('DELETE FROM %s WHERE id = ?' % ITEM_TABLE,
@@ -613,7 +660,7 @@ class HandlingUnitService:
                     continue
             serial_id = row.get('serial_id')
             if not _blank(serial_id):
-                serial = self._require_row(SERIAL_TABLE, serial_id, '序列号',
+                serial = self._require_row(_serial_table(), serial_id, '序列号',
                                            'HU_NOT_FOUND')
                 serial_location = serial.get('current_location_id')
                 if _blank(location):
@@ -643,7 +690,7 @@ class HandlingUnitService:
         with self.ds.transaction():
             self.ds.execute(
                 'UPDATE %s SET status = ?, location_id = ?, sealed_at = ?, '
-                'updated_at = ? WHERE id = ?' % HU_TABLE,
+                'updated_at = ? WHERE id = ?' % _hu_table(),
                 [STATUS_SEALED, location, now, now, hu['id']])
             self._insert_txn(hu['id'], TXN_SEAL, now,
                              from_location_id=hu.get('location_id'),
@@ -660,7 +707,7 @@ class HandlingUnitService:
         with self.ds.transaction():
             self.ds.execute(
                 'UPDATE %s SET status = ?, sealed_at = NULL, updated_at = ? '
-                'WHERE id = ?' % HU_TABLE, [STATUS_OPEN, now, hu['id']])
+                'WHERE id = ?' % _hu_table(), [STATUS_OPEN, now, hu['id']])
             self._insert_txn(hu['id'], TXN_UNSEAL, now, remark='开封')
         return {'hu_id': hu['id'], 'status': STATUS_OPEN}
 
@@ -682,7 +729,7 @@ class HandlingUnitService:
         with self.ds.transaction():
             self.ds.execute(
                 'UPDATE %s SET status = ?, cycle_no = ?, sealed_at = NULL, '
-                'shipped_at = NULL, updated_at = ? WHERE id = ?' % HU_TABLE,
+                'shipped_at = NULL, updated_at = ? WHERE id = ?' % _hu_table(),
                 [STATUS_OPEN, cycle_no, now, hu['id']])
             self._insert_txn(hu['id'], TXN_REUSE, now,
                              remark='复用第 %s 次' % cycle_no)
@@ -705,7 +752,7 @@ class HandlingUnitService:
                     [hu['id']])
             self.ds.execute(
                 'UPDATE %s SET status = ?, voided_at = ?, parent_hu_id = NULL, '
-                'updated_at = ? WHERE id = ?' % HU_TABLE,
+                'updated_at = ? WHERE id = ?' % _hu_table(),
                 [STATUS_VOID, now, now, hu['id']])
             self._insert_txn(hu['id'], TXN_VOID, now,
                              remark=reason or '作废')
@@ -723,19 +770,19 @@ class HandlingUnitService:
         if _blank(to_location_id):
             raise HandlingUnitError('目标库位不能为空', field_name='location_id',
                                     rule='HU_NOT_FOUND')
-        self._require_row(LOCATION_TABLE, to_location_id, '库位', 'HU_NOT_FOUND')
+        self._require_row(_location_table(), to_location_id, '库位', 'HU_NOT_FOUND')
         self._assert_org_location(hu['org_id'], to_location_id)
         moved = self._descendant_ids(hu['id'])
         now = _now()
         with self.ds.transaction():
             for descendant in moved:
                 rows = self.ds.query(
-                    'SELECT location_id FROM %s WHERE id = ?' % HU_TABLE,
+                    'SELECT location_id FROM %s WHERE id = ?' % _hu_table(),
                     [descendant])
                 from_location = rows[0].get('location_id') if rows else None
                 self.ds.execute(
                     'UPDATE %s SET location_id = ?, updated_at = ? WHERE id = ?'
-                    % HU_TABLE, [to_location_id, now, descendant])
+                    % _hu_table(), [to_location_id, now, descendant])
                 self._insert_txn(descendant, TXN_MOVE, now,
                                  from_location_id=from_location,
                                  to_location_id=to_location_id,
@@ -778,7 +825,7 @@ class HandlingUnitService:
                 if _blank(target.get('location_id')) \
                         and not _blank(source.get('location_id')):
                     self.ds.execute(
-                        'UPDATE %s SET location_id = ? WHERE id = ?' % HU_TABLE,
+                        'UPDATE %s SET location_id = ? WHERE id = ?' % _hu_table(),
                         [source['location_id'], target['id']])
                     target['location_id'] = source['location_id']
                 rows = self._contents(source['id'])
@@ -789,7 +836,7 @@ class HandlingUnitService:
                     if row.get('content_type') == CONTENT_HU:
                         self.ds.execute(
                             'UPDATE %s SET parent_hu_id = ?, root_hu_id = ?, '
-                            'updated_at = ? WHERE id = ?' % HU_TABLE,
+                            'updated_at = ? WHERE id = ?' % _hu_table(),
                             [target['id'], target.get('root_hu_id') or target['id'],
                              now, row['child_hu_id']])
                         self._recalc_root(
@@ -804,7 +851,7 @@ class HandlingUnitService:
                     moved += 1
                 self.ds.execute(
                     'UPDATE %s SET status = ?, voided_at = ?, parent_hu_id = NULL, '
-                    'updated_at = ? WHERE id = ?' % HU_TABLE,
+                    'updated_at = ? WHERE id = ?' % _hu_table(),
                     [STATUS_VOID, now, now, source['id']])
                 self._insert_txn(source['id'], TXN_VOID, now,
                                  from_hu_id=source['id'],
@@ -838,7 +885,7 @@ class HandlingUnitService:
             if _blank(target.get('location_id')) \
                     and not _blank(source.get('location_id')):
                 self.ds.execute(
-                    'UPDATE %s SET location_id = ? WHERE id = ?' % HU_TABLE,
+                    'UPDATE %s SET location_id = ? WHERE id = ?' % _hu_table(),
                     [source['location_id'], target['id']])
             for row in rows:
                 self.ds.execute(
@@ -847,7 +894,7 @@ class HandlingUnitService:
                 if row.get('content_type') == CONTENT_HU:
                     self.ds.execute(
                         'UPDATE %s SET parent_hu_id = ?, root_hu_id = ?, '
-                        'updated_at = ? WHERE id = ?' % HU_TABLE,
+                        'updated_at = ? WHERE id = ?' % _hu_table(),
                         [target['id'], target.get('root_hu_id') or target['id'],
                          now, row['child_hu_id']])
                     self._recalc_root(
@@ -899,7 +946,7 @@ class HandlingUnitService:
         target_status = STATUS_IN_TRANSIT if in_transit else STATUS_SHIPPED
         with self.ds.transaction():
             for serial_id in serial_ids:
-                serial = self._require_row(SERIAL_TABLE, serial_id, '序列号',
+                serial = self._require_row(_serial_table(), serial_id, '序列号',
                                            'HU_NOT_FOUND')
                 if serial.get('usage_status') != 'in_stores':
                     raise HandlingUnitError(
@@ -909,7 +956,7 @@ class HandlingUnitService:
             for hu_item in tree:
                 self.ds.execute(
                     'UPDATE %s SET status = ?, location_id = NULL, '
-                    'shipped_at = ?, updated_at = ? WHERE id = ?' % HU_TABLE,
+                    'shipped_at = ?, updated_at = ? WHERE id = ?' % _hu_table(),
                     [target_status, None if in_transit else now, now, hu_item])
                 self._insert_txn(hu_item, TXN_SHIP, now,
                                  from_location_id=hu.get('location_id'),
@@ -948,7 +995,7 @@ class HandlingUnitService:
                                     rule=error.rule or 'HU_SERIAL_NOT_IN_STORES')
 
     def reverse_hu_transaction(self, hu_txn_id: Any) -> Dict[str, Any]:
-        rows = self.ds.query('SELECT * FROM %s WHERE id = ?' % TX_TABLE, [hu_txn_id])
+        rows = self.ds.query('SELECT * FROM %s WHERE id = ?' % _tx_table(), [hu_txn_id])
         if not rows:
             raise HandlingUnitError('容器事件不存在：%s' % hu_txn_id,
                                     field_name='id', rule='HU_NOT_FOUND')
@@ -987,10 +1034,10 @@ class HandlingUnitService:
                 continue
             self.ds.execute(
                 'UPDATE %s SET status = ?, shipped_at = NULL, updated_at = ? '
-                'WHERE id = ?' % HU_TABLE, [STATUS_SEALED, now, hu_item])
+                'WHERE id = ?' % _hu_table(), [STATUS_SEALED, now, hu_item])
         location = hu.get('location_id') or txn.get('from_location_id')
         for serial_id in self._leaf_serial_ids(hu['id']):
-            serial = self._require_row(SERIAL_TABLE, serial_id, '序列号',
+            serial = self._require_row(_serial_table(), serial_id, '序列号',
                                        'HU_NOT_FOUND')
             if serial.get('usage_status') != 'shipped':
                 continue
@@ -999,13 +1046,13 @@ class HandlingUnitService:
                 ' org_to_id, location_from_id, location_to_id, usage_from, '
                 ' usage_to, doc_type, doc_id, line_id, remark, created_at) '
                 "VALUES (?, 'adjust', ?, ?, ?, NULL, ?, 'shipped', 'in_stores', "
-                " ?, ?, ?, ?, ?)" % SERIAL_TX_TABLE,
+                " ?, ?, ?, ?, ?)" % _serial_tx_table(),
                 [serial_id, now, serial.get('org_id'), serial.get('org_id'),
                  location, txn.get('doc_type'), txn.get('doc_id'),
                  txn.get('line_id'), '容器反冲还原在库', now])
             self.ds.execute(
                 'UPDATE %s SET usage_status = ?, current_location_id = ?, '
-                'shipped_at = NULL, updated_at = ? WHERE id = ?' % SERIAL_TABLE,
+                'shipped_at = NULL, updated_at = ? WHERE id = ?' % _serial_table(),
                 ['in_stores', location, now, serial_id])
 
     def _undo_pack(self, txn: Dict[str, Any], hu: Dict[str, Any],
@@ -1020,7 +1067,7 @@ class HandlingUnitService:
                 [hu['id'], txn['child_hu_id']])
             self.ds.execute(
                 'UPDATE %s SET parent_hu_id = NULL, root_hu_id = id, '
-                'updated_at = ? WHERE id = ?' % HU_TABLE,
+                'updated_at = ? WHERE id = ?' % _hu_table(),
                 [now, txn['child_hu_id']])
             self._recalc_root(txn['child_hu_id'], txn['child_hu_id'])
 
@@ -1028,7 +1075,7 @@ class HandlingUnitService:
         """按单据反冲：倒序回退该单据产生的容器事件（红冲接线用）。"""
         rows = self.ds.query(
             'SELECT id FROM %s WHERE doc_type = ? AND doc_id = ? '
-            'AND txn_type IN (?, ?, ?, ?) ORDER BY id DESC' % TX_TABLE,
+            'AND txn_type IN (?, ?, ?, ?) ORDER BY id DESC' % _tx_table(),
             [doc_type, doc_id, TXN_PACK, TXN_SHIP, TXN_MOVE, TXN_CREATE])
         reversed_count = 0
         for row in rows:
@@ -1080,7 +1127,7 @@ class HandlingUnitService:
         if not _blank(serial_id):
             serials = self.ds.query(
                 'SELECT serial_no, usage_status, quality_status, item_id, '
-                'batch_id, current_location_id FROM %s WHERE id = ?' % SERIAL_TABLE,
+                'batch_id, current_location_id FROM %s WHERE id = ?' % _serial_table(),
                 [serial_id])
             if serials:
                 item['serial_no'] = serials[0].get('serial_no')
@@ -1099,7 +1146,7 @@ class HandlingUnitService:
 
     def _txn_history(self, hu_id: Any) -> List[Dict[str, Any]]:
         return self.ds.query(
-            'SELECT * FROM %s WHERE hu_id = ? ORDER BY txn_at, id' % TX_TABLE,
+            'SELECT * FROM %s WHERE hu_id = ? ORDER BY txn_at, id' % _tx_table(),
             [hu_id])
 
     def hu_stock(self, hu_id: Any, mode: str = 'exploded') -> Dict[str, Any]:
@@ -1129,7 +1176,7 @@ class HandlingUnitService:
         if not serial_no:
             raise HandlingUnitError('序列号不能为空', field_name='serial_no',
                                     rule='HU_NOT_FOUND')
-        sql = 'SELECT * FROM %s WHERE serial_no = ?' % SERIAL_TABLE
+        sql = 'SELECT * FROM %s WHERE serial_no = ?' % _serial_table()
         params: List[Any] = [serial_no]
         if not _blank(org_id):
             sql += ' AND org_id = ?'
@@ -1163,7 +1210,7 @@ class HandlingUnitService:
                 'path': path,
                 'history': self.ds.query(
                     'SELECT * FROM %s WHERE serial_id = ? ORDER BY txn_at, id'
-                    % TX_TABLE, [serial['id']]),
+                    % _tx_table(), [serial['id']]),
             })
         return {'serial_no': serial_no, 'matches': matches}
 
@@ -1174,13 +1221,13 @@ class HandlingUnitService:
         """收货 / 完工过账后按行 hu_no 建箱并装箱；完工只装成品行。"""
         if not hu_schema_ready(self.ds):
             return {'skipped': True, 'packed': 0}
-        header = self._require_row(RECEIPT_TABLE, receipt_id, '收货单',
+        header = self._require_row(_receipt_table(), receipt_id, '收货单',
                                    'HU_NOT_FOUND')
         org_id = header.get('inventory_org_id') or header.get('org_id')
         location_id = header.get('deliver_to_location_id')
         lines = self.ds.query(
             'SELECT * FROM %s WHERE receipt_id = ? AND status <> ?'
-            % RECEIPT_LINE_TABLE, [receipt_id, 'cancelled'])
+            % _receipt_line_table(), [receipt_id, 'cancelled'])
         packed = 0
         seal_candidates: List[int] = []
         for line in lines:
@@ -1258,7 +1305,7 @@ class HandlingUnitService:
                 continue
             self.ds.execute(
                 'UPDATE %s SET status = ?, shipped_at = ?, updated_at = ? '
-                'WHERE id = ?' % HU_TABLE,
+                'WHERE id = ?' % _hu_table(),
                 [STATUS_SHIPPED, now, now, hu_item])
             self._insert_txn(hu_item, TXN_SHIP, now, from_hu_id=hu_item,
                              doc_type=DOC_RECEIPT, doc_id=receipt_id,
@@ -1271,7 +1318,7 @@ class HandlingUnitService:
             -> List[Dict[str, Any]]:
         serials = self.ds.query(
             'SELECT serial_id FROM %s WHERE doc_type = ? AND line_id = ? '
-            'ORDER BY id' % LINK_TABLE, [DOC_RECEIPT, line.get('id')])
+            'ORDER BY id' % _link_table(), [DOC_RECEIPT, line.get('id')])
         qty = _as_float(line.get('qty_received')) - _as_float(line.get('qty_rejected'))
         expected = int(round(qty))
         if serials:
@@ -1291,7 +1338,7 @@ class HandlingUnitService:
             return None
         rows = self.ds.query(
             'SELECT id FROM %s WHERE item_id = ? AND org_id = ? AND batch_no = ?'
-            % BATCH_TABLE, [item_id, org_id, str(lot_no).strip()])
+            % _batch_table(), [item_id, org_id, str(lot_no).strip()])
         return rows[0]['id'] if rows else None
 
     def ship_shipment(self, shipment_id: Any) -> Dict[str, Any]:
@@ -1302,12 +1349,12 @@ class HandlingUnitService:
         """
         if not hu_schema_ready(self.ds):
             return {'skipped': True, 'shipped': 0, 'skipped_lines': 0}
-        header = self._require_row(SHIPMENT_TABLE, shipment_id, '交货单',
+        header = self._require_row(_shipment_table(), shipment_id, '交货单',
                                    'HU_NOT_FOUND')
         org_id = self._location_org(header.get('ship_from_location_id'))
         lines = self.ds.query(
             'SELECT * FROM %s WHERE delivery_id = ? AND status <> ?'
-            % SHIPMENT_LINE_TABLE, [shipment_id, 'cancelled'])
+            % _shipment_line_table(), [shipment_id, 'cancelled'])
         groups: Dict[str, List[Dict[str, Any]]] = {}
         for line in lines:
             hu_no = str(line.get('hu_no') or '').strip()
@@ -1345,14 +1392,14 @@ class HandlingUnitService:
         if not hu_schema_ready(self.ds):
             return {'skipped': True, 'moved': 0, 'shipped': 0,
                     'skipped_lines': 0}
-        header = self._require_row(TRANSFER_TABLE, transfer_order_id, '调拨单',
+        header = self._require_row(_transfer_table(), transfer_order_id, '调拨单',
                                    'HU_NOT_FOUND')
         from_org = header.get('from_org_id')
         to_org = header.get('to_org_id')
         to_location = header.get('to_location_id')
         lines = self.ds.query(
             'SELECT * FROM %s WHERE transfer_order_id = ? AND status <> ?'
-            % TRANSFER_LINE_TABLE, [transfer_order_id, 'cancelled'])
+            % _transfer_line_table(), [transfer_order_id, 'cancelled'])
         groups: Dict[str, List[Dict[str, Any]]] = {}
         for line in lines:
             hu_no = str(line.get('hu_no') or '').strip()
@@ -1419,9 +1466,9 @@ class HandlingUnitService:
         容器时必须显式 qty，且 SUM(qty) 不得超过行数量。
         """
         line_tables = {
-            DOC_RECEIPT: RECEIPT_LINE_TABLE,
-            DOC_SHIPMENT: SHIPMENT_LINE_TABLE,
-            DOC_TRANSFER: TRANSFER_LINE_TABLE,
+            DOC_RECEIPT: _receipt_line_table(),
+            DOC_SHIPMENT: _shipment_line_table(),
+            DOC_TRANSFER: _transfer_line_table(),
         }
         if doc_type not in line_tables:
             raise HandlingUnitError('不支持的单据类型：%s' % doc_type,
@@ -1431,7 +1478,7 @@ class HandlingUnitService:
             raise HandlingUnitError('未执行 v216，单据容器关系不可用',
                                     field_name='hu_id',
                                     rule='HU_LINK_SCHEMA_MISSING')
-        self._require_row(HU_TABLE, hu_id, '包装容器', 'HU_NOT_FOUND')
+        self._require_row(_hu_table(), hu_id, '包装容器', 'HU_NOT_FOUND')
         line = self._require_row(line_tables[doc_type], line_id, '单据行',
                                  'HU_LINE_NOT_FOUND')
         total = _as_float(line.get('qty'))
@@ -1476,7 +1523,7 @@ class HandlingUnitService:
             'h.org_id AS hu_org_id '
             'FROM %s l JOIN %s h ON h.id = l.hu_id '
             'WHERE l.doc_type = ? AND l.doc_id = ? ORDER BY l.id'
-            % (DOC_HU_LINK_TABLE, HU_TABLE), [doc_type, doc_id])
+            % (DOC_HU_LINK_TABLE, _hu_table()), [doc_type, doc_id])
 
     def hu_documents(self, hu_id: Any) -> List[Dict[str, Any]]:
         """容器 → 单据反查清单。"""
@@ -1539,7 +1586,7 @@ class HandlingUnitService:
             ' cycle_no, gross_weight, tare_weight, net_weight, volume, uom_id, '
             ' source_doc_type, source_doc_id, sealed_at, created_at, updated_at) '
             'VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)'
-            % HU_TABLE,
+            % _hu_table(),
             [hu_no, source.get('hu_type') or 'carton',
              source.get('packaging_item_id'), org_id, location_id,
              parent_id, None, STATUS_SEALED,
@@ -1554,7 +1601,7 @@ class HandlingUnitService:
         if parent_id is not None:
             parent = self._get_hu(parent_id)
             root_id = parent.get('root_hu_id') or target_id
-        self.ds.execute('UPDATE %s SET root_hu_id = ? WHERE id = ?' % HU_TABLE,
+        self.ds.execute('UPDATE %s SET root_hu_id = ? WHERE id = ?' % _hu_table(),
                         [root_id, target_id])
         self._insert_txn(target_id, TXN_CREATE, now, **doc)
 
@@ -1571,7 +1618,7 @@ class HandlingUnitService:
             batch_id = None
             if row.get('batch_id'):
                 src_batch = self.ds.query(
-                    'SELECT batch_no FROM %s WHERE id = ?' % BATCH_TABLE,
+                    'SELECT batch_no FROM %s WHERE id = ?' % _batch_table(),
                     [row['batch_id']])
                 batch_no = src_batch[0].get('batch_no') if src_batch else None
                 batch_id = self._resolve_batch(org_id, row.get('item_id'), batch_no)

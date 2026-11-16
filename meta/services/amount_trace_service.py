@@ -34,9 +34,16 @@ logger = logging.getLogger(__name__)
 
 DEFAULT_DECIMALS = 2
 
+
+def _table(entity: str, fallback: str) -> str:
+    """表名走元模型 SSOT；未声明时回退字面量。"""
+    from meta.core.metadata_resolver import MetadataResolver
+    return MetadataResolver.get_table_name(entity) or fallback
+
 # 对象 → 表 / 日期 / 单据号 / 主子关系
 OBJECTS: Dict[str, Dict[str, Any]] = {
     'sales_order': {
+        'entity': 'sales_order',
         'header_table': 'sales_orders',
         'line_table': 'sales_order_lines',
         'line_fk': 'order_id',
@@ -45,6 +52,7 @@ OBJECTS: Dict[str, Dict[str, Any]] = {
         'kernel': 'so',
     },
     'purchase_order': {
+        'entity': 'purchase_order',
         'header_table': 'purchase_orders',
         'line_table': 'purchase_order_lines',
         'line_fk': 'order_id',
@@ -53,6 +61,7 @@ OBJECTS: Dict[str, Dict[str, Any]] = {
         'kernel': 'po',
     },
     'vendor_invoice': {
+        'entity': 'vendor_invoice',
         'header_table': 'vendor_invoices',
         'line_table': 'vendor_invoice_lines',
         'line_fk': 'invoice_id',
@@ -61,6 +70,7 @@ OBJECTS: Dict[str, Dict[str, Any]] = {
         'kernel': 'vi',
     },
     'customer_invoice': {
+        'entity': 'customer_invoice',
         'header_table': 'customer_invoices',
         'line_table': 'customer_invoice_lines',
         'line_fk': 'invoice_id',
@@ -142,7 +152,7 @@ class AmountTraceService:
         if not conf:
             return None
         header = self._fetch(
-            'SELECT * FROM %s WHERE id = ?' % conf['header_table'], [record_id])
+            'SELECT * FROM %s WHERE id = ?' % _table(conf['entity'], conf['header_table']), [record_id])
         if not header:
             return None
 
@@ -235,7 +245,7 @@ class AmountTraceService:
         decimals = currency['decimal_places']
         rows = self._fetch_all(
             'SELECT * FROM %s WHERE %s = ? ORDER BY id'
-            % (conf['line_table'], conf['line_fk']), [header.get('id')])
+            % (_table(conf['entity'] + '_line', conf['line_table']), conf['line_fk']), [header.get('id')])
         lines = []
         for row in rows:
             block = self._line_block(row, conf['kernel'], kernel, decimals)
@@ -252,7 +262,7 @@ class AmountTraceService:
         decimals = currency['decimal_places']
         rows = self._fetch_all(
             'SELECT * FROM %s WHERE %s = ? ORDER BY id'
-            % (conf['line_table'], conf['line_fk']), [header.get('id')])
+            % (_table(conf['entity'] + '_line', conf['line_table']), conf['line_fk']), [header.get('id')])
         lines = []
         for row in rows:
             block = self._ci_line_block(row, service, decimals)

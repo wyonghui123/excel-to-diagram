@@ -17,11 +17,31 @@ from typing import Any, Dict, Iterable, Optional
 
 logger = logging.getLogger(__name__)
 
-ACCOUNT_TABLE = 'vendor_accounts'
-PO_TABLE = 'purchase_orders'
-PO_LINE_TABLE = 'purchase_order_lines'
-PO_SCHEDULE_TABLE = 'purchase_order_schedules'
-RECEIPT_LINE_TABLE = 'receipt_lines'
+
+def _table_name(entity: str, fallback: str) -> str:
+    """表名走元模型 SSOT；未声明时回退字面量。"""
+    from meta.core.metadata_resolver import MetadataResolver
+    return MetadataResolver.get_table_name(entity) or fallback
+
+
+def _account_table() -> str:
+    return _table_name('vendor_account', 'vendor_accounts')
+
+
+def _po_table() -> str:
+    return _table_name('purchase_order', 'purchase_orders')
+
+
+def _po_line_table() -> str:
+    return _table_name('purchase_order_line', 'purchase_order_lines')
+
+
+def _po_schedule_table() -> str:
+    return _table_name('purchase_order_schedule', 'purchase_order_schedules')
+
+
+def _receipt_line_table() -> str:
+    return _table_name('receipt_line', 'receipt_lines')
 
 
 def _blank(value: Any) -> bool:
@@ -72,17 +92,18 @@ class VendorPaymentTermService:
         if account_id is None:
             return None
         rows = self._query(
-            'SELECT default_payment_term_id FROM vendor_accounts WHERE id = ?',
-            [account_id], ACCOUNT_TABLE)
+            'SELECT default_payment_term_id FROM {0} WHERE id = ?'.format(
+                _account_table()),
+            [account_id], _account_table())
         return _int(rows[0].get('default_payment_term_id')) if rows else None
 
     # ---------------------------------------------------------------- 内部实现
     def _po_id_from_line(self, line: Dict[str, Any]) -> Optional[int]:
         """行锚点 → 采购订单 id（计划期次 > 订单行 > 收货行）。"""
         for field, table in (
-                ('schedule_id', PO_SCHEDULE_TABLE),
-                ('order_line_id', PO_LINE_TABLE),
-                ('receipt_line_id', RECEIPT_LINE_TABLE),
+                ('schedule_id', _po_schedule_table()),
+                ('order_line_id', _po_line_table()),
+                ('receipt_line_id', _receipt_line_table()),
         ):
             row_id = _int(line.get(field))
             if row_id is None:
@@ -97,8 +118,8 @@ class VendorPaymentTermService:
 
     def _po_payment_term(self, po_id: int) -> Optional[int]:
         rows = self._query(
-            'SELECT payment_term_id FROM purchase_orders WHERE id = ?',
-            [po_id], PO_TABLE)
+            'SELECT payment_term_id FROM {0} WHERE id = ?'.format(_po_table()),
+            [po_id], _po_table())
         return _int(rows[0].get('payment_term_id')) if rows else None
 
     def _query(self, sql: str, params: list, table: str) -> list:

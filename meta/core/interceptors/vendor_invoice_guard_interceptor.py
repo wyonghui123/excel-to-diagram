@@ -32,7 +32,6 @@ from meta.services.vendor_invoice_match_service import (
     ADJUSTMENT_INCREASE,
     CATEGORY_ADJUSTMENT,
     CATEGORY_INVOICE,
-    LINE_TABLE,
     STATUS_CANCELLED,
     STATUS_DRAFT,
     STATUS_POSTED,
@@ -40,6 +39,7 @@ from meta.services.vendor_invoice_match_service import (
     STATUS_SUBMITTED,
     VendorInvoiceError,
     VendorInvoiceMatchService,
+    _line_table,
 )
 
 if TYPE_CHECKING:
@@ -306,14 +306,14 @@ class VendorInvoiceGuardInterceptor(Interceptor):
     def _next_line_no(service: VendorInvoiceMatchService, invoice_id: Any) -> int:
         rows = service.ds.query(
             'SELECT COALESCE(MAX(line_no), 0) + 1 AS next_no '
-            'FROM {0} WHERE invoice_id = ?'.format(LINE_TABLE), [invoice_id])
+            'FROM {0} WHERE invoice_id = ?'.format(_line_table()), [invoice_id])
         return int(rows[0]['next_no'] or 1) if rows else 1
 
     @staticmethod
     def _require_line(service: VendorInvoiceMatchService,
                       line_id: Any) -> Dict[str, Any]:
         rows = service.ds.query(
-            'SELECT * FROM {0} WHERE id = ?'.format(LINE_TABLE), [line_id])
+            'SELECT * FROM {0} WHERE id = ?'.format(_line_table()), [line_id])
         if not rows:
             raise VendorInvoiceError(
                 '采购发票行不存在', 'VI_LINE_NOT_FOUND', 'id')
@@ -323,7 +323,7 @@ class VendorInvoiceGuardInterceptor(Interceptor):
     def _require_source_line(service: VendorInvoiceMatchService,
                              line_id: Any) -> None:
         rows = service.ds.query(
-            'SELECT id FROM {0} WHERE id = ?'.format(LINE_TABLE), [line_id])
+            'SELECT id FROM {0} WHERE id = ?'.format(_line_table()), [line_id])
         if not rows:
             raise VendorInvoiceError(
                 '调整行回指的原发票行不存在', 'VI_ADJUSTMENT_ANCHOR_REQUIRED',

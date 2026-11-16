@@ -44,6 +44,15 @@ def _require_audit_log_read():
         'error_code': 'permission.audit_log.read.missing',
     }, 403)
 
+def _business_table(entity: str) -> str:
+    """表名走层级 / 元模型 SSOT；未声明时回退 BUSINESS_KEY_METADATA 字面量。"""
+    from meta.core.hierarchy_loader import get_table_map
+    from meta.core.metadata_resolver import MetadataResolver
+    return (get_table_map().get(entity)
+            or MetadataResolver.get_table_name(entity)
+            or (BUSINESS_KEY_METADATA.get(entity) or {}).get('table', entity))
+
+
 # 业务对象元数据定义 - 定义各对象类型的business key配置
 BUSINESS_KEY_METADATA = {
     'user': {
@@ -713,7 +722,7 @@ def _generate_business_key(data_source, object_type: str, object_id: str, field_
             
             try:
                 cursor = data_source.execute(
-                    f"SELECT {fields_str} FROM {meta['table']} WHERE id = ?",
+                    f"SELECT {fields_str} FROM {_business_table(object_type)} WHERE id = ?",
                     [int(object_id)]
                 )
                 row = cursor.fetchone()

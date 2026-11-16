@@ -22,8 +22,8 @@ from typing import Any, Dict, List, Optional
 from meta.services.receipt_service import (
     ReceiptError,
     ReceiptService,
-    SCHEDULE_TABLE,
     SOURCE_PURCHASE_ORDER,
+    _schedule_table,
 )
 
 logger = logging.getLogger(__name__)
@@ -83,7 +83,7 @@ def _lines_from_schedules(service: ReceiptService,
         'COALESCE(received_qty, 0) AS received_qty, '
         "COALESCE(completion_source, '') AS completion_source "
         'FROM %s WHERE order_id = ? AND status IN (%s) ORDER BY id'
-        % (SCHEDULE_TABLE, ', '.join(['?'] * len(PENDING_STATUSES))),
+        % (_schedule_table(), ', '.join(['?'] * len(PENDING_STATUSES))),
         [order_id] + list(PENDING_STATUSES))
 
     lines: List[Dict[str, Any]] = []

@@ -36,10 +36,28 @@ from typing import Any, Dict, List, Optional
 
 logger = logging.getLogger(__name__)
 
-ORDER_TABLE = 'purchase_orders'
-LINE_TABLE = 'purchase_order_lines'
-SCHEDULE_TABLE = 'purchase_order_schedules'
-TYPE_TABLE = 'type_definitions'
+
+def _table_name(entity: str, fallback: str) -> str:
+    """表名走元模型 SSOT；未声明时回退字面量。"""
+    from meta.core.metadata_resolver import MetadataResolver
+    return MetadataResolver.get_table_name(entity) or fallback
+
+
+def _order_table() -> str:
+    return _table_name('purchase_order', 'purchase_orders')
+
+
+def _line_table() -> str:
+    return _table_name('purchase_order_line', 'purchase_order_lines')
+
+
+def _schedule_table() -> str:
+    return _table_name('purchase_order_schedule', 'purchase_order_schedules')
+
+
+def _type_table() -> str:
+    return _table_name('type_definition', 'type_definitions')
+
 
 LINE_STATUS_CANCELLED = 'cancelled'
 ORDER_STATUS_CLOSED = 'closed'
@@ -118,7 +136,7 @@ class PurchaseOrderFulfillmentService:
         while True:
             rows = self.ds.query(
                 'SELECT id, status, fulfillment_status FROM %s '
-                'ORDER BY id LIMIT ? OFFSET ?' % ORDER_TABLE, [size, offset])
+                'ORDER BY id LIMIT ? OFFSET ?' % _order_table(), [size, offset])
             if not rows:
                 break
             for order in rows:
@@ -181,7 +199,7 @@ class PurchaseOrderFulfillmentService:
     def _load_order(self, order_id: Any) -> Optional[Dict[str, Any]]:
         rows = self.ds.query(
             'SELECT id, status, fulfillment_status FROM %s WHERE id = ?'
-            % ORDER_TABLE, [order_id])
+            % _order_table(), [order_id])
         return rows[0] if rows else None
 
     def _fetch_line_stats(self, where: str, params: list) -> List[Dict[str, Any]]:
@@ -207,7 +225,7 @@ class PurchaseOrderFulfillmentService:
             'WHERE %s '
             'GROUP BY l.id, l.order_id, l.status, l.fulfillment_status, l.qty, '
             '         t.delivery_relevant'
-            % (LINE_TABLE, TYPE_TABLE, SCHEDULE_TABLE, where)
+            % (_line_table(), _type_table(), _schedule_table(), where)
         )
         args = [SCHEDULE_STATUS_COMPLETED, SCHEDULE_STATUS_PENDING[0],
                 SCHEDULE_STATUS_PENDING[1], SCHEDULE_STATUS_CANCELLED,
@@ -217,14 +235,14 @@ class PurchaseOrderFulfillmentService:
     def _write_if_changed_line(self, row: Dict[str, Any], status: str) -> bool:
         """派生值变化才写状态；无变化只刷新派生确认时间。"""
         if row.get('fulfillment_status') == status:
-            self._touch_derived_at(LINE_TABLE, row['id'])
+            self._touch_derived_at(_line_table(), row['id'])
             return False
         self._write_line(row['id'], status)
         return True
 
     def _write_if_changed_order(self, order: Dict[str, Any], status: str) -> bool:
         if order.get('fulfillment_status') == status:
-            self._touch_derived_at(ORDER_TABLE, order['id'])
+            self._touch_derived_at(_order_table(), order['id'])
             return False
         self._write_order(order['id'], status)
         return True
@@ -234,14 +252,14 @@ class PurchaseOrderFulfillmentService:
             'UPDATE %s SET fulfillment_status = ?, '
             "fulfillment_derived_at = datetime('now'), "
             "updated_at = datetime('now') "
-            'WHERE id = ?' % LINE_TABLE, [status, line_id])
+            'WHERE id = ?' % _line_table(), [status, line_id])
 
     def _write_order(self, order_id: Any, status: str) -> None:
         self.ds.execute(
             'UPDATE %s SET fulfillment_status = ?, '
             "fulfillment_derived_at = datetime('now'), "
             "updated_at = datetime('now') "
-            'WHERE id = ?' % ORDER_TABLE, [status, order_id])
+            'WHERE id = ?' % _order_table(), [status, order_id])
 
     def _touch_derived_at(self, table: str, row_id: Any) -> None:
         """只刷新派生确认时间，不改状态值、不动 updated_at。"""

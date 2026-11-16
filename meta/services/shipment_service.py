@@ -28,12 +28,36 @@ from meta.core.doc_flow_reversal import release_target_edges
 
 logger = logging.getLogger(__name__)
 
-HEADER_TABLE = 'shipments'
-LINE_TABLE = 'shipment_lines'
-SCHEDULE_TABLE = 'sales_order_schedules'
-ORDER_TABLE = 'sales_orders'
-ORDER_LINE_TABLE = 'sales_order_lines'
-ORG_TABLE = 'orgs'
+
+def _table_name(entity: str, fallback: str) -> str:
+    """表名走元模型 SSOT；未声明时回退字面量。"""
+    from meta.core.metadata_resolver import MetadataResolver
+    return MetadataResolver.get_table_name(entity) or fallback
+
+
+def _header_table() -> str:
+    return _table_name('shipment', 'shipments')
+
+
+def _line_table() -> str:
+    return _table_name('shipment_line', 'shipment_lines')
+
+
+def _schedule_table() -> str:
+    return _table_name('sales_order_schedule', 'sales_order_schedules')
+
+
+def _order_table() -> str:
+    return _table_name('sales_order', 'sales_orders')
+
+
+def _order_line_table() -> str:
+    return _table_name('sales_order_line', 'sales_order_lines')
+
+
+def _org_table() -> str:
+    return _table_name('org', 'orgs')
+
 
 SCHEDULE_KIND_DELIVERY = 'delivery'
 SCHEDULE_PENDING_STATUSES = ('planned', 'confirmed')
@@ -271,11 +295,11 @@ class ShipmentService:
         # 先落状态，再按交货行事实重算计划行（R-SF-05：禁止第二套算术）
         self.ds.execute(
             'UPDATE %s SET status = ?, updated_at = ? WHERE delivery_id = ? '
-            'AND status <> ?' % LINE_TABLE,
+            'AND status <> ?' % _line_table(),
             [STATUS_SHIPPED, now, delivery_id, STATUS_CANCELLED])
         self.ds.execute(
             'UPDATE %s SET status = ?, actual_ship_date = ?, updated_at = ? '
-            'WHERE id = ?' % HEADER_TABLE,
+            'WHERE id = ?' % _header_table(),
             [STATUS_SHIPPED, now, now, delivery_id])
         self._refresh_schedule_delivery(grouped.keys())
 
@@ -493,9 +517,9 @@ class ShipmentService:
         且不一致时报 ``DN_CATEGORY_MISMATCH``，避免「退货单发正向料」的静默错账。
         """
         ship_category = self._load_document_category(
-            self._column_value(HEADER_TABLE, delivery_id, 'document_type_id'))
+            self._column_value(_header_table(), delivery_id, 'document_type_id'))
         order_category = self._load_document_category(
-            self._column_value(ORDER_TABLE, order_id, 'document_type_id'))
+            self._column_value(_order_table(), order_id, 'document_type_id'))
         if ship_category and order_category and ship_category != order_category:
             raise ShipmentError(
                 '交货单类型类别（%s）与来源订单类型类别（%s）不一致'
@@ -613,11 +637,11 @@ class ShipmentService:
         now = actual_arrival_date or _now()
         self.ds.execute(
             'UPDATE %s SET status = ?, actual_arrival_date = ?, signature_ref = ?, '
-            'updated_at = ? WHERE id = ?' % HEADER_TABLE,
+            'updated_at = ? WHERE id = ?' % _header_table(),
             [STATUS_DELIVERED, now, signature_ref, now, delivery_id])
         self.ds.execute(
             'UPDATE %s SET status = ?, updated_at = ? WHERE delivery_id = ? '
-            'AND status <> ?' % LINE_TABLE,
+            'AND status <> ?' % _line_table(),
             [STATUS_DELIVERED, now, delivery_id, STATUS_CANCELLED])
         return {'id': header['id'], 'status': STATUS_DELIVERED,
                 'idempotent': False}
@@ -631,13 +655,13 @@ class ShipmentService:
                                     field_name='status', rule='DN_STATE_INVALID')
             now = _now()
             self.ds.execute(
-                'UPDATE %s SET status = ?, updated_at = ? WHERE id = ?' % HEADER_TABLE,
+                'UPDATE %s SET status = ?, updated_at = ? WHERE id = ?' % _header_table(),
                 [STATUS_CANCELLED, now, delivery_id])
             self.ds.execute(
-                'UPDATE %s SET status = ?, updated_at = ? WHERE delivery_id = ?' % LINE_TABLE,
+                'UPDATE %s SET status = ?, updated_at = ? WHERE delivery_id = ?' % _line_table(),
                 [STATUS_CANCELLED, now, delivery_id])
             line_ids = [row['id'] for row in self.ds.query(
-                'SELECT id FROM %s WHERE delivery_id = ?' % LINE_TABLE,
+                'SELECT id FROM %s WHERE delivery_id = ?' % _line_table(),
                 [header['id']])]
             release_target_edges(self.ds, 'shipment_line', line_ids,
                                  reversed_by='shipment_service.cancel')
@@ -713,11 +737,11 @@ class ShipmentService:
         delivered_sum = (
             '(SELECT COALESCE(SUM(qty), 0) FROM {0} '
             ' WHERE schedule_id = ? AND status IN ({1}))'.format(
-                LINE_TABLE, counted))
+                _line_table(), counted))
         last_delivery = (
             '(SELECT delivery_id FROM {0} '
             ' WHERE schedule_id = ? AND status IN ({1}) '
-            ' ORDER BY id DESC LIMIT 1)'.format(LINE_TABLE, counted))
+            ' ORDER BY id DESC LIMIT 1)'.format(_line_table(), counted))
         now = _now()
         for schedule_id in ids:
             self.ds.execute(
@@ -727,7 +751,7 @@ class ShipmentService:
                 '         THEN ? ELSE ? END, '
                 'delivery_id = %s, '
                 'updated_at = ? WHERE id = ?' % (
-                    SCHEDULE_TABLE, delivered_sum, delivered_sum,
+                    _schedule_table(), delivered_sum, delivered_sum,
                     last_delivery),
                 [schedule_id, schedule_id, SCHEDULE_STATUS_COMPLETED,
                  'confirmed', schedule_id, now, schedule_id])
@@ -747,11 +771,11 @@ class ShipmentService:
     def _mark_reversed(self, delivery_id, now, reason) -> None:
         self.ds.execute(
             'UPDATE %s SET status = ?, reversed_at = ?, reversal_reason = ?, '
-            'updated_at = ? WHERE id = ?' % HEADER_TABLE,
+            'updated_at = ? WHERE id = ?' % _header_table(),
             [STATUS_REVERSED, now, reason, now, delivery_id])
         self.ds.execute(
             'UPDATE %s SET status = ?, updated_at = ? WHERE delivery_id = ? '
-            'AND status <> ?' % LINE_TABLE,
+            'AND status <> ?' % _line_table(),
             [STATUS_REVERSED, now, delivery_id, STATUS_CANCELLED])
 
     # ------------------------------------------------------------------ 行编辑 / 删除
@@ -793,7 +817,7 @@ class ShipmentService:
         self.ds.execute(
             'UPDATE %s SET schedule_id = ?, order_line_id = ?, item_id = ?, '
             'uom_id = ?, qty = ?, lot_no = ?, serial_no = ?, updated_at = ? '
-            'WHERE id = ?' % LINE_TABLE,
+            'WHERE id = ?' % _line_table(),
             [values['schedule_id'], values['order_line_id'], values['item_id'],
              values['uom_id'], values['qty'], values['lot_no'],
              values['serial_no'], values['updated_at'], line['id']])
@@ -898,7 +922,7 @@ class ShipmentService:
                                 self._period(order.get('order_date')))
         rows = self.ds.query(
             'SELECT delivery_no FROM %s WHERE delivery_no LIKE ? '
-            'ORDER BY delivery_no DESC LIMIT 1' % HEADER_TABLE,
+            'ORDER BY delivery_no DESC LIMIT 1' % _header_table(),
             [prefix + '%'])
         seq = 1
         if rows:
@@ -919,7 +943,7 @@ class ShipmentService:
     def _org_code(self, org_id: Any) -> str:
         if _blank(org_id):
             return 'ORG'
-        rows = self.ds.query('SELECT code FROM %s WHERE id = ?' % ORG_TABLE,
+        rows = self.ds.query('SELECT code FROM %s WHERE id = ?' % _org_table(),
                              [org_id])
         code = rows[0].get('code') if rows else None
         return str(code) if not _blank(code) else 'ORG'
@@ -1014,7 +1038,7 @@ class ShipmentService:
     def _insert_header(self, row: Dict[str, Any]) -> int:
         columns = list(row.keys())
         sql = 'INSERT INTO %s (%s) VALUES (%s)' % (
-            HEADER_TABLE, ', '.join(columns), ', '.join('?' * len(columns)))
+            _header_table(), ', '.join(columns), ', '.join('?' * len(columns)))
         cursor = self.ds.execute(sql, [row[c] for c in columns])
         return int(getattr(cursor, 'lastrowid', 0) or 0)
 
@@ -1027,7 +1051,7 @@ class ShipmentService:
             'INSERT INTO %s (delivery_id, schedule_id, order_line_id, item_id, '
             'uom_id, qty, lot_no, serial_no, project_task_id, '
             'status, created_at, updated_at) '
-            'VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)' % LINE_TABLE,
+            'VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)' % _line_table(),
             [delivery_id, item['schedule']['id'], item['order_line']['id'],
              item['order_line'].get('item_id'), item['order_line'].get('uom_id'),
              float(item['qty']), item.get('lot_no'), item.get('serial_no'),
@@ -1038,7 +1062,7 @@ class ShipmentService:
     def _transition_header(self, delivery_id: Any, status: str) -> Dict[str, Any]:
         now = _now()
         self.ds.execute(
-            'UPDATE %s SET status = ?, updated_at = ? WHERE id = ?' % HEADER_TABLE,
+            'UPDATE %s SET status = ?, updated_at = ? WHERE id = ?' % _header_table(),
             [status, now, delivery_id])
         return {'id': int(delivery_id), 'status': status}
 
@@ -1049,7 +1073,7 @@ class ShipmentService:
             return None
         rows = self.ds.query(
             'SELECT id, order_no, org_id, order_date, status, '
-            'ship_to_party_id, ship_to_address_text FROM %s WHERE id = ?' % ORDER_TABLE,
+            'ship_to_party_id, ship_to_address_text FROM %s WHERE id = ?' % _order_table(),
             [order_id])
         return rows[0] if rows else None
 
@@ -1060,7 +1084,7 @@ class ShipmentService:
             'SELECT id, order_id, line_id, schedule_kind, plant_location_id, '
             'promised_date, promised_qty, status, '
             'COALESCE(delivered_qty, 0) AS delivered_qty '
-            'FROM %s WHERE id = ?' % SCHEDULE_TABLE, [schedule_id])
+            'FROM %s WHERE id = ?' % _schedule_table(), [schedule_id])
         return rows[0] if rows else None
 
     def _load_order_line(self, line_id: Any) -> Optional[Dict[str, Any]]:
@@ -1069,7 +1093,7 @@ class ShipmentService:
         # G15 P2：整行读取，兼容未加 project_task_id 的旧库/测试库；
         # 需要时取 order_line['project_task_id']（缺省视为 0）。
         rows = self.ds.query(
-            'SELECT * FROM %s WHERE id = ?' % ORDER_LINE_TABLE, [line_id])
+            'SELECT * FROM %s WHERE id = ?' % _order_line_table(), [line_id])
         return rows[0] if rows else None
 
     def _require_header(self, delivery_id: Any) -> Dict[str, Any]:
@@ -1078,7 +1102,7 @@ class ShipmentService:
                                 rule='DN_NOT_FOUND')
         # 整行读取：兼容旧库缺 project_id / owner_party_id 列
         rows = self.ds.query(
-            'SELECT * FROM %s WHERE id = ?' % HEADER_TABLE, [delivery_id])
+            'SELECT * FROM %s WHERE id = ?' % _header_table(), [delivery_id])
         if not rows:
             raise ShipmentError('交货单不存在', field_name='id',
                                 rule='DN_NOT_FOUND')
@@ -1087,13 +1111,13 @@ class ShipmentService:
     def _load_lines(self, delivery_id: Any) -> List[Dict[str, Any]]:
         # 整行读取：兼容旧库缺 project_task_id 列
         return self.ds.query(
-            'SELECT * FROM %s WHERE delivery_id = ? ORDER BY id' % LINE_TABLE,
+            'SELECT * FROM %s WHERE delivery_id = ? ORDER BY id' % _line_table(),
             [delivery_id])
 
     def _require_line(self, line_id: Any) -> Dict[str, Any]:
         rows = self.ds.query(
             'SELECT id, delivery_id, schedule_id, order_line_id, item_id, uom_id, '
-            'qty, lot_no, serial_no, status FROM %s WHERE id = ?' % LINE_TABLE,
+            'qty, lot_no, serial_no, status FROM %s WHERE id = ?' % _line_table(),
             [line_id])
         if not rows:
             raise ShipmentError('交货行不存在', field_name='id', rule='DN_NOT_FOUND')

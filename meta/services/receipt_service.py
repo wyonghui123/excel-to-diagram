@@ -36,19 +36,65 @@ from meta.core.doc_flow_schema import POOL_AP_MATCH
 
 logger = logging.getLogger(__name__)
 
-HEADER_TABLE = 'receipts'
-LINE_TABLE = 'receipt_lines'
-SCHEDULE_TABLE = 'purchase_order_schedules'
-ORDER_TABLE = 'purchase_orders'
-ORDER_LINE_TABLE = 'purchase_order_lines'
-ALLOCATION_TABLE = 'demand_allocations'
-TYPE_TABLE = 'type_definitions'
-LOCATION_TABLE = 'locations'
-PARTY_RELATION_TABLE = 'party_relations'
-PARAM_TABLE = 'control_parameter_defs'
-PARAM_VALUE_TABLE = 'control_parameter_values'
-ORG_TABLE = 'orgs'
-ORG_FUNCTION_TABLE = 'org_functions'
+
+def _table_name(entity: str, fallback: str) -> str:
+    """表名走元模型 SSOT；未声明时回退字面量。"""
+    from meta.core.metadata_resolver import MetadataResolver
+    return MetadataResolver.get_table_name(entity) or fallback
+
+
+def _header_table() -> str:
+    return _table_name('receipt', 'receipts')
+
+
+def _line_table() -> str:
+    return _table_name('receipt_line', 'receipt_lines')
+
+
+def _schedule_table() -> str:
+    return _table_name('purchase_order_schedule', 'purchase_order_schedules')
+
+
+def _order_table() -> str:
+    return _table_name('purchase_order', 'purchase_orders')
+
+
+def _order_line_table() -> str:
+    return _table_name('purchase_order_line', 'purchase_order_lines')
+
+
+def _allocation_table() -> str:
+    return _table_name('demand_allocation', 'demand_allocations')
+
+
+def _type_table() -> str:
+    return _table_name('type_definition', 'type_definitions')
+
+
+def _location_table() -> str:
+    return _table_name('location', 'locations')
+
+
+def _party_relation_table() -> str:
+    return _table_name('party_relation', 'party_relations')
+
+
+def _param_table() -> str:
+    return _table_name('control_parameter_def', 'control_parameter_defs')
+
+
+def _param_value_table() -> str:
+    return _table_name('control_parameter_value', 'control_parameter_values')
+
+
+def _org_table() -> str:
+    return _table_name('org', 'orgs')
+
+
+def _org_function_table() -> str:
+    return _table_name('org_function', 'org_functions')
+
+
 FUNCTION_INVENTORY = 'inventory'
 
 SOURCE_PURCHASE_ORDER = 'purchase_order'
@@ -621,12 +667,12 @@ class ReceiptService:
         # 5. 状态置位
         self.ds.execute(
             'UPDATE %s SET status = ?, updated_at = ? WHERE receipt_id = ? '
-            'AND status = ?' % LINE_TABLE,
+            'AND status = ?' % _line_table(),
             [STATUS_POSTED, now, header['id'], STATUS_DRAFT])
         self.ds.execute(
             'UPDATE %s SET status = ?, actual_arrival_date = COALESCE(?, '
             'actual_arrival_date, receipt_date), updated_at = ? WHERE id = ?'
-            % HEADER_TABLE,
+            % _header_table(),
             [STATUS_POSTED, actual_arrival_date, now, header['id']])
 
         # 6. 库存过账（同事务；开关关闭时内部自动跳过）
@@ -696,12 +742,12 @@ class ReceiptService:
         now = actual_arrival_date or _now()
         self.ds.execute(
             'UPDATE %s SET status = ?, updated_at = ? WHERE receipt_id = ? '
-            'AND status = ?' % LINE_TABLE,
+            'AND status = ?' % _line_table(),
             [STATUS_POSTED, now, header['id'], STATUS_DRAFT])
         self.ds.execute(
             'UPDATE %s SET status = ?, actual_arrival_date = COALESCE(?, '
             'actual_arrival_date, receipt_date), updated_at = ? WHERE id = ?'
-            % HEADER_TABLE,
+            % _header_table(),
             [STATUS_POSTED, actual_arrival_date, now, header['id']])
 
         # 库存入账：TO 来源收货写 RCV_TO（org=inventory_org_id）
@@ -746,12 +792,12 @@ class ReceiptService:
         now = actual_arrival_date or _now()
         self.ds.execute(
             'UPDATE %s SET status = ?, updated_at = ? WHERE receipt_id = ? '
-            'AND status = ?' % LINE_TABLE,
+            'AND status = ?' % _line_table(),
             [STATUS_POSTED, now, header['id'], STATUS_DRAFT])
         self.ds.execute(
             'UPDATE %s SET status = ?, actual_arrival_date = COALESCE(?, '
             'actual_arrival_date, receipt_date), updated_at = ? WHERE id = ?'
-            % HEADER_TABLE,
+            % _header_table(),
             [STATUS_POSTED, actual_arrival_date, now, header['id']])
 
         txns = self._post_receipt_inventory(header, checked, 'RCV_WO')
@@ -797,12 +843,12 @@ class ReceiptService:
         now = actual_arrival_date or _now()
         self.ds.execute(
             'UPDATE %s SET status = ?, updated_at = ? WHERE receipt_id = ? '
-            'AND status = ?' % LINE_TABLE,
+            'AND status = ?' % _line_table(),
             [STATUS_POSTED, now, header['id'], STATUS_DRAFT])
         self.ds.execute(
             'UPDATE %s SET status = ?, actual_arrival_date = COALESCE(?, '
             'actual_arrival_date, receipt_date), updated_at = ? WHERE id = ?'
-            % HEADER_TABLE,
+            % _header_table(),
             [STATUS_POSTED, actual_arrival_date, now, header['id']])
 
         txns = self._post_receipt_inventory(header, checked, UNORDERED_TXN_TYPE)
@@ -839,7 +885,7 @@ class ReceiptService:
                 'FROM %s l JOIN %s r ON r.id = l.receipt_id '
                 'WHERE r.source_doc_type = ? AND r.source_doc_id = ? '
                 'AND r.status = ? AND r.reversal_of_receipt_id IS NULL'
-                % (LINE_TABLE, HEADER_TABLE),
+                % (_line_table(), _header_table()),
                 [SOURCE_WORK_ORDER, work_order_id, STATUS_POSTED])
         except Exception as error:  # noqa: BLE001 - 旧库缺列按 0 处理
             logger.warning('[receipt] 汇总工单 %s 完工量失败: %s',
@@ -860,13 +906,13 @@ class ReceiptService:
         now = _now()
         with self.ds.transaction():
             self.ds.execute(
-                'UPDATE %s SET status = ?, updated_at = ? WHERE id = ?' % HEADER_TABLE,
+                'UPDATE %s SET status = ?, updated_at = ? WHERE id = ?' % _header_table(),
                 [STATUS_CANCELLED, now, header['id']])
             self.ds.execute(
-                'UPDATE %s SET status = ?, updated_at = ? WHERE receipt_id = ?' % LINE_TABLE,
+                'UPDATE %s SET status = ?, updated_at = ? WHERE receipt_id = ?' % _line_table(),
                 [STATUS_CANCELLED, now, header['id']])
             line_ids = [row['id'] for row in self.ds.query(
-                'SELECT id FROM %s WHERE receipt_id = ?' % LINE_TABLE,
+                'SELECT id FROM %s WHERE receipt_id = ?' % _line_table(),
                 [header['id']])]
             release_target_edges(self.ds, 'receipt_line', line_ids,
                                  reversed_by='receipt_service.cancel')
@@ -1090,19 +1136,19 @@ class ReceiptService:
         """红字单自动过账（行 + 头）。"""
         self.ds.execute(
             'UPDATE %s SET status = ?, updated_at = ? WHERE receipt_id = ? '
-            'AND status = ?' % LINE_TABLE,
+            'AND status = ?' % _line_table(),
             [STATUS_POSTED, now, red_id, STATUS_DRAFT])
         self.ds.execute(
             'UPDATE %s SET status = ?, actual_arrival_date = COALESCE(?, '
             'actual_arrival_date, receipt_date), updated_at = ? WHERE id = ?'
-            % HEADER_TABLE,
+            % _header_table(),
             [STATUS_POSTED, red_row['actual_arrival_date'], now, red_id])
 
     def _mark_original_lines_reversed(self, receipt_id: Any, now: str) -> None:
         """原单全部已过账行置 reversed（抬头状态由编排器推进）。"""
         self.ds.execute(
             'UPDATE %s SET status = ?, updated_at = ? WHERE receipt_id = ? '
-            'AND status = ?' % LINE_TABLE,
+            'AND status = ?' % _line_table(),
             [STATUS_REVERSED, now, receipt_id, STATUS_POSTED])
 
     def apply_schedule_reversal(self, schedule_id: Any, net: Any,
@@ -1420,7 +1466,7 @@ class ReceiptService:
         rows = self.ds.query(
             "SELECT project_id, project_task_id FROM %s "
             "WHERE target_bo = 'receipt' AND target_line_id = ? "
-            "AND status = 'active'" % ALLOCATION_TABLE,
+            "AND status = 'active'" % _allocation_table(),
             [line.get('id')])
         pairs = {(int(row.get('project_id') or 0),
                   int(row.get('project_task_id') or 0)) for row in rows}
@@ -1674,7 +1720,7 @@ class ReceiptService:
             "AND COALESCE(completion_source, '') <> '%s' "
             'AND (promised_qty IS NULL '
             '     OR COALESCE(received_qty, 0) + ? <= promised_qty * (1 + ?))'
-            % (SCHEDULE_TABLE, COMPLETION_SOURCE_SHORT_CLOSE),
+            % (_schedule_table(), COMPLETION_SOURCE_SHORT_CLOSE),
             [float(net), float(rejected), now, schedule['id'],
              float(net), float(tol)])
         if not getattr(cursor, 'rowcount', 0):
@@ -1698,7 +1744,7 @@ class ReceiptService:
                     'WHERE id = ? AND status = ? '
                     'AND promised_qty IS NOT NULL '
                     'AND COALESCE(received_qty, 0) >= promised_qty'
-                    % SCHEDULE_TABLE,
+                    % _schedule_table(),
                     [SCHEDULE_STATUS_COMPLETED, COMPLETION_SOURCE_RECEIPT,
                      schedule['status'], now, schedule['id'],
                      schedule['status']])
@@ -1708,7 +1754,7 @@ class ReceiptService:
         """红字单：净收减回；仅回退由收货置位的完成（R-RC-10）。"""
         self.ds.execute(
             'UPDATE %s SET received_qty = COALESCE(received_qty, 0) - ?, '
-            'updated_at = ? WHERE id = ?' % SCHEDULE_TABLE,
+            'updated_at = ? WHERE id = ?' % _schedule_table(),
             [float(net), now, schedule['id']])
         row = self._load_schedule(schedule['id']) or {}
         promised = row.get('promised_qty')
@@ -1720,7 +1766,7 @@ class ReceiptService:
                 'completion_source = NULL, completion_prev_status = NULL, '
                 'updated_at = ? WHERE id = ? '
                 "AND completion_source = '%s'"
-                % (SCHEDULE_TABLE, COMPLETION_SOURCE_RECEIPT),
+                % (_schedule_table(), COMPLETION_SOURCE_RECEIPT),
                 ['confirmed', now, schedule['id']])
 
     # ------------------------------------------------------------------ 需求分配
@@ -1766,7 +1812,7 @@ class ReceiptService:
             return
         source_rows = self.ds.query(
             "SELECT * FROM %s WHERE target_bo = 'receipt' "
-            'AND target_line_id = ? ORDER BY id' % ALLOCATION_TABLE,
+            'AND target_line_id = ? ORDER BY id' % _allocation_table(),
             [line['reversal_of_line_id']])
         for row in source_rows:
             self._insert_allocation(row, red_receipt_id, line, schedule,
@@ -1776,13 +1822,13 @@ class ReceiptService:
         return self.ds.query(
             "SELECT * FROM %s WHERE target_bo = 'purchase_order' "
             "AND target_schedule_id = ? AND status = 'active' ORDER BY id"
-            % ALLOCATION_TABLE, [schedule_id])
+            % _allocation_table(), [schedule_id])
 
     def _received_net_by_demand(self, schedule_id: Any) -> Dict[Any, Decimal]:
         rows = self.ds.query(
             "SELECT demand_line_id, COALESCE(SUM(qty), 0) AS total FROM %s "
             "WHERE target_bo = 'receipt' AND target_schedule_id = ? "
-            'GROUP BY demand_line_id' % ALLOCATION_TABLE, [schedule_id])
+            'GROUP BY demand_line_id' % _allocation_table(), [schedule_id])
         return {row['demand_line_id']: _dec(row.get('total') or 0) for row in rows}
 
     def _insert_allocation(self, source: Dict[str, Any], receipt_id: Any,
@@ -1796,7 +1842,7 @@ class ReceiptService:
             'cost_center_id, expense_account_code, asset_category_code, '
             'charge_basis, status, created_at, updated_at) '
             "VALUES (?, ?, ?, ?, ?, ?, ?, 'receipt', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, "
-            "'active', ?, ?)" % ALLOCATION_TABLE,
+            "'active', ?, ?)" % _allocation_table(),
             [source.get('demand_bo'), source.get('demand_id'),
              source.get('demand_line_id'), source.get('demand_line_no'),
              source.get('demand_need_date'), source.get('project_id'),
@@ -1814,7 +1860,7 @@ class ReceiptService:
                                rule='RC_DOC_TYPE_INVALID')
         rows = self.ds.query(
             'SELECT id, code, scope_bo, level, document_category FROM %s '
-            'WHERE id = ?' % TYPE_TABLE, [type_id])
+            'WHERE id = ?' % _type_table(), [type_id])
         if not rows:
             raise ReceiptError('单据类型不存在', field_name='document_type_id',
                                rule='RC_DOC_TYPE_INVALID')
@@ -1833,7 +1879,7 @@ class ReceiptService:
         rows = self.ds.query(
             "SELECT id, code, document_category FROM %s WHERE scope_bo = 'receipt' "
             "AND level = 'header' AND document_category = ? ORDER BY id LIMIT 1"
-            % TYPE_TABLE, [category])
+            % _type_table(), [category])
         if not rows:
             raise ReceiptError(
                 '缺少收货单类型（document_category=%s）' % category,
@@ -2098,7 +2144,7 @@ class ReceiptService:
         try:
             rows = self.ds.query(
                 'SELECT id, default_value FROM %s WHERE code = ? AND status = ?'
-                % PARAM_TABLE, [UNORDERED_PARAM, 'active'])
+                % _param_table(), [UNORDERED_PARAM, 'active'])
             if not rows:
                 return False
             value = rows[0].get('default_value')
@@ -2106,7 +2152,7 @@ class ReceiptService:
                 scoped = self.ds.query(
                     'SELECT value FROM %s WHERE control_parameter_id = ? '
                     "AND status = 'active' AND org_id = ? ORDER BY id DESC LIMIT 1"
-                    % PARAM_VALUE_TABLE, [rows[0]['id'], org_id])
+                    % _param_value_table(), [rows[0]['id'], org_id])
                 if scoped and not _blank(scoped[0].get('value')):
                     value = scoped[0]['value']
             return _truthy(value)
@@ -2136,7 +2182,7 @@ class ReceiptService:
             return
         try:
             rows = self.ds.query(
-                'SELECT status FROM %s WHERE id = ?' % LOCATION_TABLE,
+                'SELECT status FROM %s WHERE id = ?' % _location_table(),
                 [location_id])
         except Exception as e:  # noqa: BLE001 - 旧环境无 locations 表
             logger.warning('[receipt] 读取库位失败（跳过校验）: %s', e)
@@ -2157,7 +2203,7 @@ class ReceiptService:
                 "SELECT 1 FROM %s WHERE role = 'vendor' "
                 "AND COALESCE(status, 'active') = 'active' "
                 'AND (party1_id = ? OR party2_id = ?) LIMIT 1'
-                % PARTY_RELATION_TABLE, [party_id, party_id])
+                % _party_relation_table(), [party_id, party_id])
         except Exception as e:  # noqa: BLE001 - 无关系表时 fail-open
             logger.warning('[receipt] 读取 vendor 关系失败（跳过校验）: %s', e)
             return
@@ -2308,7 +2354,7 @@ class ReceiptService:
     def _insert_header(self, row: Dict[str, Any]) -> int:
         columns = list(row.keys())
         sql = 'INSERT INTO %s (%s) VALUES (%s)' % (
-            HEADER_TABLE, ', '.join(columns), ', '.join(['?'] * len(columns)))
+            _header_table(), ', '.join(columns), ', '.join(['?'] * len(columns)))
         cursor = self.ds.execute(sql, [row[c] for c in columns])
         return int(getattr(cursor, 'lastrowid', 0) or 0)
 
@@ -2319,7 +2365,7 @@ class ReceiptService:
             'rejection_reason_code, rejection_disposition, lot_no, serial_no, '
             'putaway_location_id, status, reversal_of_line_id, created_at, updated_at) '
             'VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)'
-            % LINE_TABLE,
+            % _line_table(),
             [receipt_id, item.get('line_no'), item.get('schedule_id'),
              item.get('source_line_id'), item.get('order_id'),
              item.get('order_line_id'), item.get('item_id'), item.get('uom_id'),
@@ -2403,7 +2449,7 @@ class ReceiptService:
             'SELECT id, order_no, document_type_id, org_id, purchase_org_id, '
             'purchase_legal_entity_id, supplier_party_id, origin_purchase_order_id, '
             'origin_receipt_id, return_reason, '
-            'project_id, deliver_to_location_id FROM %s WHERE id = ?' % ORDER_TABLE,
+            'project_id, deliver_to_location_id FROM %s WHERE id = ?' % _order_table(),
             [order_id])
         return rows[0] if rows else None
 
@@ -2412,7 +2458,7 @@ class ReceiptService:
             return None
         rows = self.ds.query(
             'SELECT id, order_id, item_id, uom_id FROM %s WHERE id = ?'
-            % ORDER_LINE_TABLE, [line_id])
+            % _order_line_table(), [line_id])
         return rows[0] if rows else None
 
     # ------------------------------------------------------- 采购退货（D6）
@@ -2422,7 +2468,7 @@ class ReceiptService:
         if _blank(type_id):
             return None
         rows = self.ds.query(
-            'SELECT document_category FROM %s WHERE id = ?' % TYPE_TABLE,
+            'SELECT document_category FROM %s WHERE id = ?' % _type_table(),
             [type_id])
         if not rows:
             return None
@@ -2451,7 +2497,7 @@ class ReceiptService:
         original = self.ds.query(
             'SELECT COALESCE(SUM(l.qty_received - l.qty_rejected), 0) AS qty '
             'FROM %s l WHERE l.receipt_id = ? AND l.item_id = ? '
-            'AND l.status = ?' % LINE_TABLE,
+            'AND l.status = ?' % _line_table(),
             [origin_receipt_id, item_id, STATUS_POSTED])
         original_qty = _dec(original[0].get('qty') if original else 0)
         used = self.ds.query(
@@ -2463,7 +2509,7 @@ class ReceiptService:
             'JOIN %s t ON t.id = r.document_type_id '
             'WHERE o.origin_receipt_id = ? AND l.item_id = ? '
             'AND r.status = ? AND t.document_category = ? AND r.id <> ?'
-            % (LINE_TABLE, HEADER_TABLE, ORDER_TABLE, TYPE_TABLE),
+            % (_line_table(), _header_table(), _order_table(), _type_table()),
             [origin_receipt_id, item_id, STATUS_POSTED, DOC_CATEGORY_RETURN,
              line.get('receipt_id') or 0])
         used_qty = _dec(used[0].get('qty') if used else 0)
@@ -2485,12 +2531,12 @@ class ReceiptService:
             'JOIN %s t ON t.id = r.document_type_id '
             'WHERE l.schedule_id = ? AND l.status = ? AND r.status = ? '
             'AND t.document_category = ?'
-            % (LINE_TABLE, HEADER_TABLE, TYPE_TABLE),
+            % (_line_table(), _header_table(), _type_table()),
             [schedule_id, STATUS_POSTED, STATUS_POSTED, DOC_CATEGORY_RETURN])
         value = _q4(_dec(rows[0].get('qty') if rows else 0))
         self.ds.execute(
             'UPDATE %s SET returned_qty = ?, updated_at = ? WHERE id = ?'
-            % SCHEDULE_TABLE, [float(value), now or _now(), schedule_id])
+            % _schedule_table(), [float(value), now or _now(), schedule_id])
         return value
 
     def _serial_infra_ready(self) -> bool:
@@ -2570,7 +2616,7 @@ class ReceiptService:
             'completion_source, completion_prev_status, '
             'COALESCE(received_qty, 0) AS received_qty, '
             'COALESCE(rejected_qty, 0) AS rejected_qty '
-            'FROM %s WHERE id = ?' % SCHEDULE_TABLE, [schedule_id])
+            'FROM %s WHERE id = ?' % _schedule_table(), [schedule_id])
         return rows[0] if rows else None
 
     def _load_schedule_context(self, line: Dict[str, Any]) -> Dict[str, Any]:
@@ -2589,7 +2635,7 @@ class ReceiptService:
             'received_from_party_id, reason_code, '
             'supplier_party_id, supplier_delivery_no, org_id, purchase_org_id, '
             'inventory_org_id, deliver_to_location_id, project_id, received_by, '
-            'status, reversal_of_receipt_id FROM %s WHERE id = ?' % HEADER_TABLE,
+            'status, reversal_of_receipt_id FROM %s WHERE id = ?' % _header_table(),
             [receipt_id])
         if not rows:
             raise ReceiptError('收货单不存在', field_name='id',
@@ -2603,7 +2649,7 @@ class ReceiptService:
                'qty_rejected, rejection_reason_code, rejection_disposition, '
                'lot_no, serial_no, putaway_location_id, status, '
                'reversal_of_line_id FROM %s WHERE receipt_id = ?'
-               % LINE_TABLE)
+               % _line_table())
         params: List[Any] = [receipt_id]
         if status:
             sql += ' AND status = ?'
@@ -2616,7 +2662,7 @@ class ReceiptService:
             'order_id, order_line_id, item_id, uom_id, qty_received, qty_rejected, '
             'rejection_reason_code, rejection_disposition, lot_no, serial_no, '
             'putaway_location_id, status, reversal_of_line_id FROM %s WHERE id = ?'
-            % LINE_TABLE, [line_id])
+            % _line_table(), [line_id])
         if not rows:
             raise ReceiptError('收货行不存在', field_name='id', rule='RC_NOT_FOUND')
         return rows[0]
@@ -2624,7 +2670,7 @@ class ReceiptService:
     def _reversal_exists(self, receipt_id: Any) -> bool:
         rows = self.ds.query(
             'SELECT 1 FROM %s WHERE reversal_of_receipt_id = ? '
-            'AND status <> ? LIMIT 1' % HEADER_TABLE,
+            'AND status <> ? LIMIT 1' % _header_table(),
             [receipt_id, STATUS_CANCELLED])
         return bool(rows)
 
@@ -2636,7 +2682,7 @@ class ReceiptService:
         库未启用单据流（无视图）时返回空：不阻断未接入发票域的收货流程。
         """
         rows = self.ds.query(
-            'SELECT id FROM %s WHERE receipt_id = ?' % LINE_TABLE, [receipt_id])
+            'SELECT id FROM %s WHERE receipt_id = ?' % _line_table(), [receipt_id])
         line_ids = [str(row['id']) for row in rows if row.get('id') is not None]
         if not line_ids:
             return []

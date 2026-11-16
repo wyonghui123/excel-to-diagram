@@ -18,10 +18,29 @@ from meta.services.sales_order_amount_service import SalesOrderAmountService, _a
 
 logger = logging.getLogger(__name__)
 
-ORDER_TABLE = 'purchase_orders'
-LINE_TABLE = 'purchase_order_lines'
-SCHEDULE_TABLE = 'purchase_order_schedules'
-ALLOCATION_TABLE = 'demand_allocations'
+
+def _table_name(entity: str, fallback: str) -> str:
+    """表名走元模型 SSOT；未声明时回退字面量。"""
+    from meta.core.metadata_resolver import MetadataResolver
+    return MetadataResolver.get_table_name(entity) or fallback
+
+
+def _order_table() -> str:
+    return _table_name('purchase_order', 'purchase_orders')
+
+
+def _line_table() -> str:
+    return _table_name('purchase_order_line', 'purchase_order_lines')
+
+
+def _schedule_table() -> str:
+    return _table_name('purchase_order_schedule', 'purchase_order_schedules')
+
+
+def _allocation_table() -> str:
+    return _table_name('demand_allocation', 'demand_allocations')
+
+
 SCOPE_BO = 'purchase_order'
 
 ORDER_STATUSES = ('draft', 'submitted', 'confirmed', 'closed', 'cancelled')

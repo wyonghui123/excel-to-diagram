@@ -553,7 +553,7 @@ class RuntimeDimensionResolver:
 
     @staticmethod
     def _to_table_name(bo_id: str) -> str:
-        """BO 标识符 → 表名（简化版：复数化）
+        """BO 标识符 → 表名（元模型 SSOT 优先；未声明时回退复数化并留痕）
 
         例：
             'sub_domain' → 'sub_domains'
@@ -562,11 +562,21 @@ class RuntimeDimensionResolver:
         """
         if not bo_id:
             return bo_id
+
+        from meta.core.metadata_resolver import MetadataResolver
+        declared = MetadataResolver.get_table_name(bo_id)
+        if declared:
+            return declared
+
         if bo_id.endswith('s'):
-            return bo_id
-        if bo_id.endswith('y') and len(bo_id) > 1 and bo_id[-2] not in 'aeiou':
-            return bo_id[:-1] + 'ies'
-        return bo_id + 's'
+            fallback = bo_id
+        elif bo_id.endswith('y') and len(bo_id) > 1 and bo_id[-2] not in 'aeiou':
+            fallback = bo_id[:-1] + 'ies'
+        else:
+            fallback = bo_id + 's'
+        logger.warning(
+            "元模型未声明 table_name，回退复数化: %s → %s", bo_id, fallback)
+        return fallback
 
 
 # 单例

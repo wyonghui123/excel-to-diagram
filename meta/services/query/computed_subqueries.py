@@ -110,21 +110,30 @@ def build_count_relations_expr(
 # count_children
 # ─────────────────────────────────────────────────────────
 
-# 层级映射: parent_type -> (child_table, child_parent_fk)
+# 层级映射: parent_type -> (child_entity, child_table_fallback, child_parent_fk)
 # [R0-3 2026-06-11] 扩展支持 product->version + enum_type->enum_value
 # 必须与 meta/core/computed_field_query.py:_COUNT_CHILDREN_OBJECTS 同步
 _COUNT_CHILDREN_MAP = {
-    "version":        ("domains",         "version_id"),
-    "domain":         ("sub_domains",     "domain_id"),
-    "sub_domain":     ("service_modules", "sub_domain_id"),
-    "service_module": ("business_objects", "service_module_id"),
-    "product":        ("versions",        "product_id"),
-    "enum_type":      ("enum_values",     "enum_type_id"),
+    "version":        ("domain",          "domains",          "version_id"),
+    "domain":         ("sub_domain",      "sub_domains",      "domain_id"),
+    "sub_domain":     ("service_module",  "service_modules",  "sub_domain_id"),
+    "service_module": ("business_object", "business_objects", "service_module_id"),
+    "product":        ("version",         "versions",         "product_id"),
+    "enum_type":      ("enum_value",      "enum_values",      "enum_type_id"),
 }
 
 # [R0-3 2026-06-11] 同步支持矩阵 (供 meta/core/computed_field_query.py 调用)
 # 注意: 这个 list 必须与 _COUNT_CHILDREN_MAP 的 keys 完全一致
 COUNT_CHILDREN_SUPPORTED = set(_COUNT_CHILDREN_MAP.keys())
+
+
+def _child_table(entity: str, fallback: str) -> str:
+    """子表名走层级声明 / 元模型 SSOT；两者都未声明时回退字面量。"""
+    from meta.core.hierarchy_loader import get_table_map
+    from meta.core.metadata_resolver import MetadataResolver
+    return (get_table_map().get(entity)
+            or MetadataResolver.get_table_name(entity)
+            or fallback)
 
 
 def build_count_children_expr(
@@ -146,7 +155,8 @@ def build_count_children_expr(
             f"[ComputedSubqueries] count_children: unsupported object_type={object_type}"
         )
         return None
-    child_table, fk = mapping
+    child_entity, fallback, fk = mapping
+    child_table = _child_table(child_entity, fallback)
     return (
         f"(SELECT COUNT(*) FROM {child_table} "
         f"WHERE {child_table}.{fk} = {table_name}.id)"

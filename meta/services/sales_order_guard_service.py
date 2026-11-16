@@ -906,7 +906,7 @@ class SalesOrderGuardService:
                 field_name='project_task_id', rule=SO_LINE_TASK_PROJECT_REQUIRED)
 
         if not project_task_guard.table_exists(
-                self.ds, project_task_guard.TASK_TABLE):
+                self.ds, project_task_guard.task_table()):
             return
 
         try:

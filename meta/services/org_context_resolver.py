@@ -9,11 +9,30 @@
 """
 
 
+from typing import Optional
+
+
 def _to_int(value) -> int:
     try:
         return int(float(value))
     except (TypeError, ValueError):
         return 0
+
+
+#: 元模型未声明 table_name 时的兜底表名（仅用于防御，正常均由元模型解析）
+_FALLBACK_TABLES = {
+    'project': 'projects',
+    'sales_order': 'sales_orders',
+    'sales_order_line': 'sales_order_lines',
+    'location': 'locations',
+    'org': 'orgs',
+}
+
+
+def _table(entity: str) -> Optional[str]:
+    """表名走元模型 SSOT；未声明时回退 _FALLBACK_TABLES。"""
+    from meta.core.metadata_resolver import MetadataResolver
+    return MetadataResolver.get_table_name(entity) or _FALLBACK_TABLES.get(entity)
 
 
 class OrgNotResolved(Exception):
@@ -43,7 +62,7 @@ class OrgContextResolver:
             candidates=fields)
 
     def from_project(self, project_id) -> int:
-        org_id = self._row_org('projects', _to_int(project_id))
+        org_id = self._row_org('project', _to_int(project_id))
         if org_id:
             return org_id
         raise OrgNotResolved('项目 %s 未解析到库存组织' % project_id)
@@ -64,10 +83,10 @@ class OrgContextResolver:
         org_id = 0
         project_id = _to_int(work_order.get('project_id'))
         if project_id:
-            org_id = self._row_org('projects', project_id)
+            org_id = self._row_org('project', project_id)
         order_id = _to_int(work_order.get('order_id'))
         if not org_id and order_id:
-            org_id = self._row_org('sales_orders', order_id)
+            org_id = self._row_org('sales_order', order_id)
         if not org_id:
             org_id = self._so_line_org(_to_int(work_order.get('order_line_id')))
         if not org_id and order_id:
@@ -80,7 +99,8 @@ class OrgContextResolver:
         """仅当系统只有一个活跃组织时兜底；多组织不猜。"""
         try:
             rows = self._ds.query(
-                "SELECT id FROM orgs WHERE status = 'active' ORDER BY id")
+                "SELECT id FROM {0} WHERE status = 'active' ORDER BY id"
+                .format(_table('org')))
         except Exception:
             rows = []
         if len(rows) == 1:
@@ -91,8 +111,11 @@ class OrgContextResolver:
             '系统存在 %s 个活跃组织，无法唯一确定库存组织' % len(rows))
 
     # ---------------------------------------------------------------- 内部
-    def _row_org(self, table: str, row_id: int) -> int:
+    def _row_org(self, entity: str, row_id: int) -> int:
         if row_id <= 0:
+            return 0
+        table = _table(entity)
+        if not table:
             return 0
         try:
             rows = self._ds.query(
@@ -102,15 +125,18 @@ class OrgContextResolver:
         return _to_int(rows[0].get('org_id')) if rows else 0
 
     def _location_org(self, location_id) -> int:
-        return self._row_org('locations', _to_int(location_id))
+        return self._row_org('location', _to_int(location_id))
 
     def _so_line_org(self, line_id: int) -> int:
         """销售订单行发运/生产库位所属组织。"""
         if line_id <= 0:
             return 0
+        table = _table('sales_order_line')
+        if not table:
+            return 0
         try:
             rows = self._ds.query(
-                'SELECT plant_location_id FROM sales_order_lines WHERE id = ?',
+                'SELECT plant_location_id FROM %s WHERE id = ?' % table,
                 [line_id])
         except Exception:
             return 0
@@ -121,12 +147,16 @@ class OrgContextResolver:
         """订单全部行指向同一组织时才兜底，避免跨厂/跨组织猜测。"""
         if order_id <= 0:
             return 0
+        line_table = _table('sales_order_line')
+        loc_table = _table('location')
+        if not line_table or not loc_table:
+            return 0
         try:
             rows = self._ds.query(
-                'SELECT DISTINCT loc.org_id FROM sales_order_lines l '
-                'JOIN locations loc ON loc.id = l.plant_location_id '
+                'SELECT DISTINCT loc.org_id FROM {0} l '
+                'JOIN {1} loc ON loc.id = l.plant_location_id '
                 'WHERE l.order_id = ? AND loc.org_id IS NOT NULL '
-                'AND loc.org_id > 0', [order_id])
+                'AND loc.org_id > 0'.format(line_table, loc_table), [order_id])
         except Exception:
             return 0
         org_ids = {_to_int(row.get('org_id')) for row in rows}

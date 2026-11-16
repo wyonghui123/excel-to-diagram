@@ -911,21 +911,28 @@ class ConditionPermissionService:
     def _get_display_name_for_id(self, field: str, value_id: int) -> Optional[str]:
         """根据字段名和ID值查询对应的业务显示名称"""
         try:
-            # 根据字段名推断关联的表和显示字段
-            table_mapping = {
-                'version_id': ('versions', 'name'),
-                'domain_id': ('domains', 'domain_name'),
-                'sub_domain_id': ('sub_domains', 'sub_domain_name'),
-                'product_id': ('products', 'product_name'),
-                'service_module_id': ('service_modules', 'module_name'),
-                'business_object_id': ('business_objects', 'object_name'),
-                'organization_id': ('organizations', 'org_name'),
-                'department_id': ('departments', 'dept_name'),
-                'employee_id': ('employees', 'employee_name'),
+            # 条件字段 → 元模型实体（表名 / 显示列均走 SSOT；未声明才回退约定）
+            entity_mapping = {
+                'version_id': 'version',
+                'domain_id': 'domain',
+                'sub_domain_id': 'sub_domain',
+                'product_id': 'product',
+                'service_module_id': 'service_module',
+                'business_object_id': 'business_object',
+                'organization_id': 'org',
+                'department_id': 'org',
+                'employee_id': 'employee',
             }
 
-            if field in table_mapping:
-                table_name, display_col = table_mapping[field]
+            entity = entity_mapping.get(field)
+            if entity:
+                from meta.core.metadata_resolver import MetadataResolver
+                table_name = (get_table_map().get(entity)
+                              or MetadataResolver.get_table_name(entity))
+                if not table_name:
+                    return None
+                display_col = (MetadataResolver.get_column_name(entity, 'name')
+                               or 'name')
                 cursor = self.ds.execute(
                     f"SELECT {display_col} FROM {table_name} WHERE id = ?",
                     [value_id]

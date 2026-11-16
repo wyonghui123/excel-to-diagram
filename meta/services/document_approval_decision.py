@@ -19,7 +19,13 @@ from typing import Any, Dict
 logger = logging.getLogger(__name__)
 
 OBJECT_TYPE = 'purchase_order'
-TABLE = 'purchase_orders'
+
+
+def _po_table() -> str:
+    """采购订单表名走元模型 SSOT；未声明时回退字面量。"""
+    from meta.core.metadata_resolver import MetadataResolver
+    return MetadataResolver.get_table_name('purchase_order') or 'purchase_orders'
+
 
 _STATUS_SUBMITTED = 'submitted'
 _STATUS_CONFIRMED = 'confirmed'
@@ -86,7 +92,7 @@ def _decide(params: Dict[str, Any], *, target_status: str,
     try:
         ds = _get_ds()
         rows = ds.query(
-            'SELECT id, status, approval_status FROM {0} WHERE id = ?'.format(TABLE),
+            'SELECT id, status, approval_status FROM {0} WHERE id = ?'.format(_po_table()),
             [record_id])
         if not rows:
             return _envelope_error('采购订单不存在: {0}'.format(record_id), 'NOT_FOUND')
@@ -121,7 +127,7 @@ def _decide(params: Dict[str, Any], *, target_status: str,
 
     # 复核落库结果：框架对未知动作会返回默认 success=True，不能只信返回值
     rows = ds.query(
-        'SELECT status, approval_status FROM {0} WHERE id = ?'.format(TABLE),
+        'SELECT status, approval_status FROM {0} WHERE id = ?'.format(_po_table()),
         [record_id])
     actual_status = rows[0].get('status') if rows else None
     actual_approval = rows[0].get('approval_status') if rows else None

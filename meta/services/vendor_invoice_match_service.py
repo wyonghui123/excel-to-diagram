@@ -53,18 +53,54 @@ from meta.services.sales_order_amount_service import (
 
 logger = logging.getLogger(__name__)
 
-HEADER_TABLE = 'vendor_invoices'
-LINE_TABLE = 'vendor_invoice_lines'
+
+def _table_name(entity: str, fallback: str) -> str:
+    """表名走元模型 SSOT；未声明时回退字面量。"""
+    from meta.core.metadata_resolver import MetadataResolver
+    return MetadataResolver.get_table_name(entity) or fallback
+
+
+def _header_table() -> str:
+    return _table_name('vendor_invoice', 'vendor_invoices')
+
+
+def _line_table() -> str:
+    return _table_name('vendor_invoice_line', 'vendor_invoice_lines')
+
+
 SCOPE_BO = 'vendor_invoice'
-SCHEDULE_TABLE = 'purchase_order_schedules'
-ORDER_LINE_TABLE = 'purchase_order_lines'
-ORDER_TABLE = 'purchase_orders'
-RECEIPT_LINE_TABLE = 'receipt_lines'
-RECEIPT_TABLE = 'receipts'
+def _schedule_table() -> str:
+    return _table_name('purchase_order_schedule', 'purchase_order_schedules')
+
+
+def _order_line_table() -> str:
+    return _table_name('purchase_order_line', 'purchase_order_lines')
+
+
+def _order_table() -> str:
+    return _table_name('purchase_order', 'purchase_orders')
+
+
+def _receipt_line_table() -> str:
+    return _table_name('receipt_line', 'receipt_lines')
+
+
+def _receipt_table() -> str:
+    return _table_name('receipt', 'receipts')
+
+
 # AP Payment Plan（Spec §23）：过账时按付款条件生成的应付期次
-INVOICE_SCHEDULE_TABLE = 'vendor_invoice_schedules'
-PAYMENT_TERM_TABLE = 'payment_terms'
-PAYMENT_TERM_LINE_TABLE = 'payment_term_lines'
+def _invoice_schedule_table() -> str:
+    return _table_name('vendor_invoice_schedule', 'vendor_invoice_schedules')
+
+
+def _payment_term_table() -> str:
+    return _table_name('payment_term', 'payment_terms')
+
+
+def _payment_term_line_table() -> str:
+    return _table_name('payment_term_line', 'payment_term_lines')
+
 
 #: 期次金额合计校验容差（单位：元，4 位小数）
 SCHEDULE_AMOUNT_EPSILON = Decimal('0.0001')
@@ -389,31 +425,31 @@ class VendorInvoiceMatchService:
     def _require_header(self, invoice_id: Any) -> Dict[str, Any]:
         if not invoice_id:
             raise VendorInvoiceError('缺少采购发票 ID', 'VI_NOT_FOUND', 'id')
-        row = self._one('SELECT * FROM {0} WHERE id = ?'.format(HEADER_TABLE), [_int(invoice_id)])
+        row = self._one('SELECT * FROM {0} WHERE id = ?'.format(_header_table()), [_int(invoice_id)])
         if not row:
             raise VendorInvoiceError('采购发票不存在: {0}'.format(invoice_id), 'VI_NOT_FOUND', 'id')
         return row
 
     def _load_lines(self, invoice_id: Any) -> List[Dict[str, Any]]:
         return self._rows(
-            'SELECT * FROM {0} WHERE invoice_id = ? ORDER BY line_no, id'.format(LINE_TABLE),
+            'SELECT * FROM {0} WHERE invoice_id = ? ORDER BY line_no, id'.format(_line_table()),
             [_int(invoice_id)],
         )
 
     def _load_line(self, line_id: Any) -> Optional[Dict[str, Any]]:
-        return self._one('SELECT * FROM {0} WHERE id = ?'.format(LINE_TABLE), [_int(line_id)])
+        return self._one('SELECT * FROM {0} WHERE id = ?'.format(_line_table()), [_int(line_id)])
 
     def _schedule(self, schedule_id: Any) -> Optional[Dict[str, Any]]:
-        return self._one('SELECT * FROM {0} WHERE id = ?'.format(SCHEDULE_TABLE), [_int(schedule_id)])
+        return self._one('SELECT * FROM {0} WHERE id = ?'.format(_schedule_table()), [_int(schedule_id)])
 
     def _order_line(self, order_line_id: Any) -> Optional[Dict[str, Any]]:
-        return self._one('SELECT * FROM {0} WHERE id = ?'.format(ORDER_LINE_TABLE), [_int(order_line_id)])
+        return self._one('SELECT * FROM {0} WHERE id = ?'.format(_order_line_table()), [_int(order_line_id)])
 
     def _order(self, order_id: Any) -> Optional[Dict[str, Any]]:
-        return self._one('SELECT * FROM {0} WHERE id = ?'.format(ORDER_TABLE), [_int(order_id)])
+        return self._one('SELECT * FROM {0} WHERE id = ?'.format(_order_table()), [_int(order_id)])
 
     def _receipt_line(self, receipt_line_id: Any) -> Optional[Dict[str, Any]]:
-        return self._one('SELECT * FROM {0} WHERE id = ?'.format(RECEIPT_LINE_TABLE), [_int(receipt_line_id)])
+        return self._one('SELECT * FROM {0} WHERE id = ?'.format(_receipt_line_table()), [_int(receipt_line_id)])
 
     def _consumed_qty(self, source_bo: str, source_id: Any, pool: str) -> float:
         """已消耗量（含红字冲减），口径与 v_doc_flow_consumed_qty 一致。"""
@@ -431,7 +467,7 @@ class VendorInvoiceMatchService:
             receipt_id = receipt.get('receipt_id')
             if receipt_id:
                 row = self._one(
-                    'SELECT status, receipt_no FROM {0} WHERE id = ?'.format(RECEIPT_TABLE),
+                    'SELECT status, receipt_no FROM {0} WHERE id = ?'.format(_receipt_table()),
                     [_int(receipt_id)]) or {}
                 status = _s(row.get('status')).lower()
                 if status and status not in RECEIPT_STATUS_MATCHABLE:
@@ -655,7 +691,7 @@ class VendorInvoiceMatchService:
             header_status = MATCH_OVERRIDDEN if match_status == MATCH_OVERRIDDEN else match_status
             self.ds.execute(
                 'UPDATE {0} SET match_status = ?, match_exception_reason = ?, '
-                'match_matched_at = ?, match_matched_by = ?, updated_at = ? WHERE id = ?'.format(HEADER_TABLE),
+                'match_matched_at = ?, match_matched_by = ?, updated_at = ? WHERE id = ?'.format(_header_table()),
                 [header_status, match_reason, _now(), user_name, _now(), _int(invoice_id)],
             )
         return {
@@ -688,7 +724,7 @@ class VendorInvoiceMatchService:
         self._allocate_charges(invoice_id, header)
 
         self.ds.execute(
-            'UPDATE {0} SET status = ?, updated_at = ? WHERE id = ?'.format(HEADER_TABLE),
+            'UPDATE {0} SET status = ?, updated_at = ? WHERE id = ?'.format(_header_table()),
             [STATUS_SUBMITTED, _now(), _int(invoice_id)],
         )
         self._audit(invoice_id, 'submit', user_name=user_name,
@@ -747,7 +783,7 @@ class VendorInvoiceMatchService:
 
             self.ds.execute(
                 'UPDATE {0} SET status = ?, posting_date = COALESCE(posting_date, ?), '
-                'updated_at = ? WHERE id = ?'.format(HEADER_TABLE),
+                'updated_at = ? WHERE id = ?'.format(_header_table()),
                 [STATUS_POSTED, header.get('invoice_date') or _now(), _now(), _int(invoice_id)],
             )
 
@@ -772,7 +808,7 @@ class VendorInvoiceMatchService:
                 '已过账发票不可取消，请走红冲: {0}'.format(header.get('status')),
                 'VI_STATE_INVALID', 'status')
         self.ds.execute(
-            'UPDATE {0} SET status = ?, updated_at = ? WHERE id = ?'.format(HEADER_TABLE),
+            'UPDATE {0} SET status = ?, updated_at = ? WHERE id = ?'.format(_header_table()),
             [STATUS_CANCELLED, _now(), _int(invoice_id)],
         )
         self._audit(invoice_id, 'cancel', user_name=user_name)
@@ -808,7 +844,7 @@ class VendorInvoiceMatchService:
                 header['payment_term_id'] = payment_term_id
                 self.ds.execute(
                     'UPDATE {0} SET payment_term_id = ?, updated_at = ? '
-                    'WHERE id = ?'.format(HEADER_TABLE),
+                    'WHERE id = ?'.format(_header_table()),
                     [payment_term_id, _now(), _int(header.get('id'))],
                 )
         term = None
@@ -948,7 +984,7 @@ class VendorInvoiceMatchService:
             source_rows = self._rows(
                 'SELECT payment_term_line_id, ratio_percent, due_date FROM {0} '
                 'WHERE invoice_id = ? ORDER BY schedule_no'.format(
-                    INVOICE_SCHEDULE_TABLE),
+                    _invoice_schedule_table()),
                 [source_id])
         if not source_rows:
             self._audit(invoice_id, 'schedule_skip', extra={
@@ -989,22 +1025,22 @@ class VendorInvoiceMatchService:
 
     def _load_payment_term(self, term_id: Any) -> Optional[Dict[str, Any]]:
         rows = self.ds.query(
-            'SELECT * FROM {0} WHERE id = ?'.format(PAYMENT_TERM_TABLE), [term_id])
+            'SELECT * FROM {0} WHERE id = ?'.format(_payment_term_table()), [term_id])
         return rows[0] if rows else None
 
     def _load_payment_term_lines(self, term_id: Any) -> List[Dict[str, Any]]:
         return self.ds.query(
             'SELECT * FROM {0} WHERE payment_term_id = ? ORDER BY seq'
-            .format(PAYMENT_TERM_LINE_TABLE), [term_id])
+            .format(_payment_term_line_table()), [term_id])
 
     def _insert_schedule(self, row: Dict[str, Any]) -> int:
         row = dict(row)
         row.pop('id', None)
-        columns = [key for key in row if key in self._columns(INVOICE_SCHEDULE_TABLE)]
+        columns = [key for key in row if key in self._columns(_invoice_schedule_table())]
         if not columns:
             return 0
         sql = 'INSERT INTO {0} ({1}) VALUES ({2})'.format(
-            INVOICE_SCHEDULE_TABLE, ', '.join(columns),
+            _invoice_schedule_table(), ', '.join(columns),
             ', '.join('?' * len(columns)))
         cursor = self.ds.execute(sql, [_db_value(row[c]) for c in columns])
         return _int(getattr(cursor, 'lastrowid', 0))
@@ -1034,14 +1070,14 @@ class VendorInvoiceMatchService:
                 continue
             self.ds.execute(
                 'UPDATE {0} SET match_status = ?, override_reason = ?, overridden_by = ?, '
-                'overridden_at = ?, updated_at = ? WHERE id = ?'.format(LINE_TABLE),
+                'overridden_at = ?, updated_at = ? WHERE id = ?'.format(_line_table()),
                 [MATCH_OVERRIDDEN, reason, user_name, now, now, _int(line.get('id'))],
             )
             touched += 1
 
         self.ds.execute(
             'UPDATE {0} SET match_status = ?, match_matched_at = ?, match_matched_by = ?, '
-            'updated_at = ? WHERE id = ?'.format(HEADER_TABLE),
+            'updated_at = ? WHERE id = ?'.format(_header_table()),
             [MATCH_OVERRIDDEN, now, user_name, now, _int(invoice_id)],
         )
         self._audit(invoice_id, 'override_match', user_name=user_name,
@@ -1057,7 +1093,7 @@ class VendorInvoiceMatchService:
             return None
         rows = self._rows(
             "SELECT id, invoice_no, supplier_invoice_no, status FROM {0} "
-            "WHERE supplier_account_id = ? AND status IN ('submitted', 'posted')".format(HEADER_TABLE),
+            "WHERE supplier_account_id = ? AND status IN ('submitted', 'posted')".format(_header_table()),
             [_int(supplier_account_id)],
         )
         for row in rows:
@@ -1260,7 +1296,7 @@ class VendorInvoiceMatchService:
             'AND l.line_type_id IN ({2}) '
             'AND EXISTS (SELECT 1 FROM {0} g WHERE g.invoice_id = h.id '
             'AND g.order_line_id IN (SELECT id FROM {3} WHERE order_id = ?))'.format(
-                LINE_TABLE, HEADER_TABLE, placeholders, ORDER_LINE_TABLE),
+                _line_table(), _header_table(), placeholders, _order_line_table()),
             list(type_ids) + [_int(order_id)]) or []
         return _f(rows[0].get('total')) if rows else 0.0
 
@@ -1312,7 +1348,7 @@ class VendorInvoiceMatchService:
         for order_id in order_ids:
             order = self._one(
                 'SELECT header_surcharge_amount, header_discount_amount '
-                'FROM {0} WHERE id = ?'.format(ORDER_TABLE), [_int(order_id)]) or {}
+                'FROM {0} WHERE id = ?'.format(_order_table()), [_int(order_id)]) or {}
             targets[order_id] = (_f(order.get('header_surcharge_amount'))
                                  + _f(order.get('header_discount_amount')))
         if len(order_ids) > 1:
@@ -1441,7 +1477,7 @@ class VendorInvoiceMatchService:
                 original = self._load_line(line.get('invoice_line_id'))
                 if original:
                     original_header = self._one(
-                        'SELECT direction, document_category FROM {0} WHERE id = ?'.format(HEADER_TABLE),
+                        'SELECT direction, document_category FROM {0} WHERE id = ?'.format(_header_table()),
                         [_int(original.get('invoice_id'))])
                     if original_header and _int(original_header.get('direction')) == header_direction:
                         raise VendorInvoiceError(
@@ -1479,7 +1515,7 @@ class VendorInvoiceMatchService:
             if _blank(rate) or abs(_f(rate) - 1.0) > EPS:
                 self.ds.execute(
                     'UPDATE {0} SET exchange_rate = 1, updated_at = ? WHERE id = ?'.format(
-                        HEADER_TABLE),
+                        _header_table()),
                     [_now(), _int(header.get('id'))],
                 )
                 header['exchange_rate'] = 1.0
@@ -1884,7 +1920,7 @@ class VendorInvoiceMatchService:
             'price_source = ?, price_trace = ?, '
             'qty_over_receipt = ?, price_diff_amount = ?, price_diff_percent = ?, '
             'match_status = ?, match_exception_reason = ?, override_reason = ?, '
-            'overridden_by = ?, overridden_at = ?, updated_at = ? WHERE id = ?'.format(LINE_TABLE),
+            'overridden_by = ?, overridden_at = ?, updated_at = ? WHERE id = ?'.format(_line_table()),
             [result.get('schedule_id'), result.get('order_line_id'), result.get('po_unit_price'),
              result.get('price_source'), result.get('price_trace'),
              result.get('qty_over_receipt'), result.get('price_diff_amount'),
@@ -1963,7 +1999,7 @@ class VendorInvoiceMatchService:
         if _blank(original_id):
             return ''
         row = self._one(
-            'SELECT document_category FROM {0} WHERE id = ?'.format(HEADER_TABLE),
+            'SELECT document_category FROM {0} WHERE id = ?'.format(_header_table()),
             [_int(original_id)])
         return _s(row.get('document_category')) if row else ''
 
@@ -2581,7 +2617,7 @@ class VendorInvoiceMatchService:
         return self._one(
             'SELECT id, invoice_no, status FROM {0} '
             'WHERE reversal_of_invoice_id = ? '
-            "AND status != 'cancelled'".format(HEADER_TABLE),
+            "AND status != 'cancelled'".format(_header_table()),
             [_int(invoice_id)],
         )
 
@@ -2600,7 +2636,7 @@ class VendorInvoiceMatchService:
                 'VI_NUMBER_UNAVAILABLE', 'invoice_no') from exc
 
     def _insert_header(self, data: Dict[str, Any]) -> int:
-        columns = self._columns(HEADER_TABLE)
+        columns = self._columns(_header_table())
         payload = {key: _db_value(value) for key, value in data.items()
                    if key in columns}
         if not payload:
@@ -2608,20 +2644,20 @@ class VendorInvoiceMatchService:
         names = ', '.join(payload)
         marks = ', '.join('?' for _ in payload)
         cursor = self.ds.execute(
-            'INSERT INTO {0} ({1}) VALUES ({2})'.format(HEADER_TABLE, names, marks),
+            'INSERT INTO {0} ({1}) VALUES ({2})'.format(_header_table(), names, marks),
             list(payload.values()),
         )
         new_id = _int(getattr(cursor, 'lastrowid', 0))
         if not new_id:
             row = self._one(
                 'SELECT id FROM {0} WHERE invoice_no = ? ORDER BY id DESC LIMIT 1'
-                .format(HEADER_TABLE), [payload.get('invoice_no')])
+                .format(_header_table()), [payload.get('invoice_no')])
             new_id = _int(row.get('id')) if row else 0
         return new_id
 
     def _insert_lines(self, invoice_id: int, lines: List[Dict[str, Any]],
                       now: str, negate: bool = True) -> List[int]:
-        columns = self._columns(LINE_TABLE)
+        columns = self._columns(_line_table())
         new_ids: List[int] = []
         for index, line in enumerate(lines, start=1):
             payload = {key: _db_value(value) for key, value in line.items()
@@ -2650,7 +2686,7 @@ class VendorInvoiceMatchService:
             names = ', '.join(payload)
             marks = ', '.join('?' for _ in payload)
             cursor = self.ds.execute(
-                'INSERT INTO {0} ({1}) VALUES ({2})'.format(LINE_TABLE, names, marks),
+                'INSERT INTO {0} ({1}) VALUES ({2})'.format(_line_table(), names, marks),
                 list(payload.values()),
             )
             new_ids.append(_int(getattr(cursor, 'lastrowid', 0)))

@@ -7,23 +7,40 @@ from meta.core.table_name_validator import validate_table_name
 
 logger = logging.getLogger(__name__)
 
+#: 子对象级联声明：父表 → {子对象实体: 外键信息}
+#: 表名由 _audit_child_table() 走层级 / 元模型 SSOT 解析，此处只声明语义。
 AUDIT_CHILD_CONFIG = {
     'products': {
-        'children': {'versions': 'product_id'},
+        'children': {'version': 'product_id'},
     },
     'versions': {
-        'children': {'domains': 'version_id', 'business_objects': 'version_id'},
+        'children': {'domain': 'version_id', 'business_object': 'version_id'},
     },
     'domains': {
-        'children': {'sub_domains': 'domain_id', 'business_objects': 'domain_id'},
+        'children': {'sub_domain': 'domain_id', 'business_object': 'domain_id'},
     },
     'business_objects': {
-        'children': {'annotations': {'target_type': 'business_object', 'target_id': True}},
+        'children': {'annotation': {'target_type': 'business_object', 'target_id': True}},
     },
     'permission_sets': {
-        'children': {'permission_set_permissions': 'permission_set_id'},
+        'children': {'permission_set_permission': 'permission_set_id'},
     },
 }
+
+
+def _audit_child_table(entity: str) -> str:
+    """审计子对象表名：层级声明 → 元模型 → 复数化兜底。"""
+    from meta.core.hierarchy_loader import get_table_map
+    from meta.core.metadata_resolver import MetadataResolver
+    table = (get_table_map().get(entity)
+             or MetadataResolver.get_table_name(entity))
+    if table:
+        return table
+    if entity.endswith('s'):
+        return entity
+    if entity.endswith('y') and entity[-2] not in 'aeiou':
+        return entity[:-1] + 'ies'
+    return entity + 's'
 
 
 def fallback_associate(engine, context: ActionContext) -> ActionResult:
@@ -217,13 +234,15 @@ def query_audit_logs(context: ActionContext) -> ActionResult:
         child_config = AUDIT_CHILD_CONFIG.get(object_type, {}).get('children', {})
         for child_type, fk_info in child_config.items():
             try:
-                child_ids = _query_child_ids(data_source, child_type, fk_info, src_id)
+                child_table = _audit_child_table(child_type)
+                child_ids = _query_child_ids(
+                    data_source, child_table, fk_info, src_id)
                 if not child_ids:
                     continue
 
                 placeholders = ','.join(['?'] * len(child_ids))
                 l3_where = f"object_type = ? AND object_id IN ({placeholders})"
-                l3_params = [child_type] + child_ids
+                l3_params = [child_table] + child_ids
                 if action:
                     l3_where = f"({l3_where}) AND action = ?"
                     l3_params.append(action)

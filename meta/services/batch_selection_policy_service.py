@@ -20,8 +20,27 @@ from typing import Any, Dict, List, Optional
 
 logger = logging.getLogger(__name__)
 
-POLICY_TABLE = 'batch_selection_policies'
-ATTRIBUTE_DEFINITION_TABLE = 'attribute_definitions'
+
+def _table(entity: str, fallback: str) -> str:
+    """表名走元模型 SSOT；未声明时回退字面量。"""
+    from meta.core.metadata_resolver import MetadataResolver
+    return MetadataResolver.get_table_name(entity) or fallback
+
+
+def _policy_table() -> str:
+    return _table('batch_selection_policy', 'batch_selection_policies')
+
+
+def _attribute_definition_table() -> str:
+    return _table('attribute_definition', 'attribute_definitions')
+
+
+#: 范围类型 → (元模型实体, 兜底表名)
+SCOPE_ENTITIES = {
+    'item': ('item', 'items'),
+    'item_group': ('item_group', 'item_groups'),
+    'org': ('org', 'orgs'),
+}
 
 RULE_VERSION = 1
 DEFAULT_LIMIT = 100
@@ -33,6 +52,13 @@ SCOPE_TABLES = {
     'item_group': 'item_groups',
     'org': 'orgs',
 }
+
+
+def _scope_table(scope_type: str) -> str:
+    entity, fallback = SCOPE_ENTITIES[scope_type]
+    return _table(entity, fallback)
+
+
 SCOPES = tuple(SCOPE_TABLES.keys())
 STATUS_ACTIVE = 'active'
 STATUS_INACTIVE = 'inactive'
@@ -128,7 +154,7 @@ class BatchSelectionPolicyService:
         merged['scope_type'] = scope_type
         if not self._scope_exists(scope_type, merged['scope_ref']):
             raise BatchSelectionPolicyError(
-                f'范围编码 {merged["scope_ref"]} 在 {SCOPE_TABLES[scope_type]} 中不存在。',
+                f'范围编码 {merged["scope_ref"]} 在 {_scope_table(scope_type)} 中不存在。',
                 field_name='scope_ref', rule='BATCH_SELECTION_SCOPE_NOT_FOUND')
 
         status = str(merged.get('status') or STATUS_ACTIVE).strip().lower()
@@ -354,7 +380,7 @@ class BatchSelectionPolicyService:
             rule, sort_keys=True, separators=(',', ':'), ensure_ascii=False)
 
     def _scope_exists(self, scope_type: str, code: str) -> bool:
-        table = SCOPE_TABLES[scope_type]
+        table = _scope_table(scope_type)
         try:
             rows = self.ds.query(
                 f'SELECT 1 AS ok FROM {table} WHERE code = ? LIMIT 1', [code]) or []
@@ -368,7 +394,7 @@ class BatchSelectionPolicyService:
             return False
         try:
             rows = self.ds.query(
-                f'SELECT 1 AS ok FROM {ATTRIBUTE_DEFINITION_TABLE} '
+                f'SELECT 1 AS ok FROM {_attribute_definition_table()} '
                 'WHERE code = ? LIMIT 1', [code]) or []
         except Exception:
             return False
@@ -377,7 +403,7 @@ class BatchSelectionPolicyService:
     def _check_priority_unique(self, policy: Dict[str, Any],
                                self_id: Any) -> None:
         rows = self.ds.query(
-            f'SELECT id, code FROM {POLICY_TABLE} '
+            f'SELECT id, code FROM {_policy_table()} '
             "WHERE status = 'active' AND scope_type = ? AND scope_ref = ? "
             'AND priority = ?', [policy['scope_type'], policy['scope_ref'],
                                  policy['priority']]) or []

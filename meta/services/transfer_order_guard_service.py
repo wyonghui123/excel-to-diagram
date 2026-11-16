@@ -39,13 +39,40 @@ from meta.services.transfer_order_service import (
 
 logger = logging.getLogger(__name__)
 
-HEADER_TABLE = 'transfer_orders'
-LINE_TABLE = 'transfer_order_lines'
-TYPE_TABLE = 'type_definitions'
-ORG_TABLE = 'orgs'
-ORG_FUNCTION_TABLE = 'org_functions'
-ITEM_TABLE = 'items'
-LOCATION_TABLE = 'locations'
+
+def _table_name(entity: str, fallback: str) -> str:
+    """表名走元模型 SSOT；未声明时回退字面量。"""
+    from meta.core.metadata_resolver import MetadataResolver
+    return MetadataResolver.get_table_name(entity) or fallback
+
+
+def _header_table() -> str:
+    return _table_name('transfer_order', 'transfer_orders')
+
+
+def _line_table() -> str:
+    return _table_name('transfer_order_line', 'transfer_order_lines')
+
+
+def _type_table() -> str:
+    return _table_name('type_definition', 'type_definitions')
+
+
+def _org_table() -> str:
+    return _table_name('org', 'orgs')
+
+
+def _org_function_table() -> str:
+    return _table_name('org_function', 'org_functions')
+
+
+def _item_table() -> str:
+    return _table_name('item', 'items')
+
+
+def _location_table() -> str:
+    return _table_name('location', 'locations')
+
 
 SCOPE_BO = 'transfer_order'
 FUNCTION_INVENTORY = 'inventory'
@@ -162,7 +189,7 @@ class TransferOrderGuardService:
             try:
                 existing = self._query(
                     'SELECT id FROM %s WHERE reversal_of_transfer_id = ? LIMIT 1'
-                    % HEADER_TABLE, [reversal_of])
+                    % _header_table(), [reversal_of])
             except Exception as error:  # noqa: BLE001 - 旧库列缺失不阻断
                 logger.warning('[transfer_order_guard] 查询反向单失败: %s', error)
                 existing = []
@@ -631,7 +658,7 @@ class TransferOrderGuardService:
         try:
             rows = self._query(
                 'SELECT id, org_id FROM %s WHERE id IN (%s)'
-                % (LOCATION_TABLE, ', '.join(['?'] * len(ids))), ids)
+                % (_location_table(), ', '.join(['?'] * len(ids))), ids)
         except Exception as error:  # noqa: BLE001 - 旧库缺 org_id 列不阻断
             logger.warning('[transfer_order_guard] 读取库位归属失败: %s', error)
             return
@@ -719,7 +746,7 @@ class TransferOrderGuardService:
             'status, approval_status, fulfillment_status, from_org_id, '
             'to_org_id, legal_entity_id, from_location_id, to_location_id, '
             'reversal_of_transfer_id '
-            'FROM %s WHERE id = ?' % HEADER_TABLE,
+            'FROM %s WHERE id = ?' % _header_table(),
             [transfer_order_id])
         return rows[0] if rows else None
 
@@ -728,14 +755,14 @@ class TransferOrderGuardService:
             'SELECT id, transfer_order_id, line_no, line_type_id, item_id, '
             'uom_id, qty, qty_shipped, qty_received, status '
             'FROM %s WHERE transfer_order_id = ? ORDER BY line_no, id'
-            % LINE_TABLE, [transfer_order_id])
+            % _line_table(), [transfer_order_id])
 
     def _next_line_no(self, transfer_order_id: Any) -> int:
         """行号按 10 / 20 / 30 递增；并发撞号由 `UNIQUE(transfer_order_id, line_no)` 兜底。"""
         rows = self._query(
             'SELECT MAX(CAST(line_no AS INTEGER)) AS mx FROM %s '
             "WHERE transfer_order_id = ? AND line_no NOT GLOB '*[^0-9]*'"
-            % LINE_TABLE, [transfer_order_id])
+            % _line_table(), [transfer_order_id])
         current = rows[0].get('mx') if rows else None
         return int(current or 0) + LINE_NO_STEP
 
@@ -745,7 +772,7 @@ class TransferOrderGuardService:
         rows = self._query(
             'SELECT id, transfer_order_id, line_no, line_type_id, item_id, '
             'uom_id, qty, qty_shipped, qty_received, status '
-            'FROM %s WHERE id = ?' % LINE_TABLE, [line_id])
+            'FROM %s WHERE id = ?' % _line_table(), [line_id])
         return rows[0] if rows else None
 
     def _load_type(self, type_id: Any) -> Optional[Dict[str, Any]]:
@@ -753,14 +780,14 @@ class TransferOrderGuardService:
             return None
         rows = self._query(
             'SELECT id, code, scope_bo, level, status FROM %s WHERE id = ?'
-            % TYPE_TABLE, [type_id])
+            % _type_table(), [type_id])
         return rows[0] if rows else None
 
     def _load_org(self, org_id: Any) -> Optional[Dict[str, Any]]:
         if _blank(org_id):
             return None
         rows = self._query(
-            'SELECT id, parent_id, status FROM %s WHERE id = ?' % ORG_TABLE,
+            'SELECT id, parent_id, status FROM %s WHERE id = ?' % _org_table(),
             [org_id])
         return rows[0] if rows else None
 
@@ -768,7 +795,7 @@ class TransferOrderGuardService:
         if _blank(item_id):
             return None
         rows = self._query(
-            'SELECT id, status, item_type FROM %s WHERE id = ?' % ITEM_TABLE,
+            'SELECT id, status, item_type FROM %s WHERE id = ?' % _item_table(),
             [item_id])
         return rows[0] if rows else None
 
@@ -784,7 +811,7 @@ class TransferOrderGuardService:
         try:
             rows = self._query(
                 'SELECT 1 FROM %s WHERE org_id = ? AND function_type = ? LIMIT 1'
-                % ORG_FUNCTION_TABLE, [org_id, function_type])
+                % _org_function_table(), [org_id, function_type])
         except Exception as error:  # noqa: BLE001 - 旧环境 / 替身无职能表
             logger.warning('[transfer_order_guard] 读取组织职能 %s 失败: %s',
                            org_id, error)

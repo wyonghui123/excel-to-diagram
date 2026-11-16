@@ -50,6 +50,19 @@ def _safe_count(ds, table, where_clause='', params=None):
         return 0
 
 
+def _stats_table(entity: str) -> str:
+    """统计表名走层级 / 元模型 SSOT；未声明时回退复数化。"""
+    from meta.core.hierarchy_loader import get_table_map
+    from meta.core.metadata_resolver import MetadataResolver
+    table = (get_table_map().get(entity)
+             or MetadataResolver.get_table_name(entity))
+    if table:
+        return table
+    if entity.endswith('y') and entity[-2] not in 'aeiou':
+        return entity[:-1] + 'ies'
+    return entity if entity.endswith('s') else entity + 's'
+
+
 def _compute_trend(ds, table, date_field='created_at'):
     week_start = (datetime.utcnow() - timedelta(days=7)).strftime('%Y-%m-%d')
     month_start = (datetime.utcnow() - timedelta(days=30)).strftime('%Y-%m-%d')
@@ -116,25 +129,25 @@ def _compute_scoped_stats(ds, domain_ids):
         params = list(domain_ids)
 
         scoped_domains = _safe_count(
-            ds, 'domains',
+            ds, _stats_table('domain'),
             f'id IN ({placeholders})', params
         )
 
         scoped_bo = _safe_count(
-            ds, 'business_objects bo',
+            ds, f'{_stats_table("business_object")} bo',
             f"""bo.service_module_id IN (
-                SELECT sm.id FROM service_modules sm
-                JOIN sub_domains sd ON sm.sub_domain_id = sd.id
+                SELECT sm.id FROM {_stats_table("service_module")} sm
+                JOIN {_stats_table("sub_domain")} sd ON sm.sub_domain_id = sd.id
                 WHERE sd.domain_id IN ({placeholders})
             )""", params
         )
 
         scoped_rel = _safe_count(
-            ds, 'relationships r',
+            ds, f'{_stats_table("relationship")} r',
             f"""r.source_business_object_id IN (
-                SELECT bo.id FROM business_objects bo
-                JOIN service_modules sm ON bo.service_module_id = sm.id
-                JOIN sub_domains sd ON sm.sub_domain_id = sd.id
+                SELECT bo.id FROM {_stats_table("business_object")} bo
+                JOIN {_stats_table("service_module")} sm ON bo.service_module_id = sm.id
+                JOIN {_stats_table("sub_domain")} sd ON sm.sub_domain_id = sd.id
                 WHERE sd.domain_id IN ({placeholders})
             )""", params
         )
@@ -154,19 +167,19 @@ def get_stats_overview():
         ds = _get_data_source()
 
         result = {
-            'products': _safe_count(ds, 'products'),
-            'versions': _safe_count(ds, 'versions'),
-            'domains': _safe_count(ds, 'domains'),
-            'business_objects': _safe_count(ds, 'business_objects'),
-            'relationships': _safe_count(ds, 'relationships'),
+            'products': _safe_count(ds, _stats_table('product')),
+            'versions': _safe_count(ds, _stats_table('version')),
+            'domains': _safe_count(ds, _stats_table('domain')),
+            'business_objects': _safe_count(ds, _stats_table('business_object')),
+            'relationships': _safe_count(ds, _stats_table('relationship')),
         }
 
         trends = {
-            'products': _compute_trend(ds, 'products'),
-            'versions': _compute_trend(ds, 'versions'),
-            'domains': _compute_trend(ds, 'domains'),
-            'business_objects': _compute_trend(ds, 'business_objects'),
-            'relationships': _compute_trend(ds, 'relationships'),
+            'products': _compute_trend(ds, _stats_table('product')),
+            'versions': _compute_trend(ds, _stats_table('version')),
+            'domains': _compute_trend(ds, _stats_table('domain')),
+            'business_objects': _compute_trend(ds, _stats_table('business_object')),
+            'relationships': _compute_trend(ds, _stats_table('relationship')),
         }
 
         user = get_current_user()

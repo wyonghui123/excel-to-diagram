@@ -40,6 +40,12 @@ LINE_TABLE = {
 }
 
 
+def _table(entity: str, fallback: str) -> str:
+    """表名走元模型 SSOT；未声明时回退字面量。"""
+    from meta.core.metadata_resolver import MetadataResolver
+    return MetadataResolver.get_table_name(entity) or fallback
+
+
 class AmountRecalcError(ValueError):
     """重算被拒绝（状态不允许 / 对象不支持 / 单据不存在）。"""
 
@@ -81,11 +87,12 @@ class AmountRecalcService:
     def _load_header(self, object_type: str, record_id: Any) -> Dict[str, Any]:
         rows = self.ds.query(
             'SELECT id, status FROM %s WHERE id = ?'
-            % HEADER_TABLE[object_type], [record_id])
+            % _table(object_type, HEADER_TABLE[object_type]), [record_id])
         return dict(rows[0]) if rows else {}
 
     def _line_ids(self, object_type: str, record_id: Any):
         table, fk = LINE_TABLE[object_type]
+        table = _table(object_type + '_line', table)
         rows = self.ds.query(
             'SELECT id FROM %s WHERE %s = ? ORDER BY id'
             % (table, fk), [record_id])

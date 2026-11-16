@@ -9,6 +9,7 @@ from meta.core.action_executor import ActionRegistry
 from meta.core.association_engine import AssociationEngine
 from meta.core.enrichment_engine import EnrichmentEngine
 from meta.core.models import FieldStorage
+from meta.core.metadata_resolver import MetadataResolver
 # [FIX 2026-06-04] Reuse the Element Plus sortable column index suffix stripper
 # from sql_adapters. Frontend (el-table) sends ordering like "-updated_at:1"
 # where ":1" is the column index, not part of the field name.
@@ -1312,11 +1313,14 @@ class PersistenceInterceptor(Interceptor):
             if not rel_source_field and rel_target_entity:
                 inferred_fk = f"{meta_object.id}_id"
                 rel_source_field = inferred_fk
-            rel_target_table = (
-                rel_target_entity + 's'
-                if rel_target_entity and not rel_target_entity.endswith('s')
-                else rel_target_entity
-            )
+            rel_target_table = MetadataResolver.get_table_name(rel_target_entity)
+            if not rel_target_table:
+                # 元模型未声明 table_name：回退复数化并留痕
+                rel_target_table = (
+                    rel_target_entity + 's'
+                    if rel_target_entity and not rel_target_entity.endswith('s')
+                    else rel_target_entity
+                )
             rel_singular = re.sub(r'(ship$|ies$|es$|s$)', '', rel_name)
             rel_name_matched = (
                 rel_name == base_name

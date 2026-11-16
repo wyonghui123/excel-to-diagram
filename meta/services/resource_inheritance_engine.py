@@ -92,6 +92,15 @@ RESOURCE_METADATA_MAP: Dict[str, Dict[str, Any]] = {
 }
 
 
+def _resource_table(bo_name: str) -> str:
+    """资源表名：授权链声明 → 元模型 SSOT → 复数化兜底。"""
+    table = RESOURCE_TABLE_MAP.get(bo_name)
+    if table:
+        return table
+    from meta.core.metadata_resolver import MetadataResolver
+    return MetadataResolver.get_table_name(bo_name) or f'{bo_name}s'
+
+
 def get_resource_type(bo_name: str) -> Optional[str]:
     """获取 BO 的资源类型"""
     meta = RESOURCE_METADATA_MAP.get(bo_name)
@@ -160,7 +169,7 @@ class ResourceInheritanceEngine:
             if not parent_field or not current_values:
                 result[child_dim] = set()
                 continue
-            child_table = RESOURCE_TABLE_MAP.get(child_dim, f'{child_dim}s')
+            child_table = _resource_table(child_dim)
             try:
                 placeholders = ','.join('?' * len(current_values))
                 rows = self._ds.execute(
@@ -264,8 +273,8 @@ class ResourceInheritanceEngine:
         # 构造沿 chain 反查 SQL: child.id → ... → ancestor.id
         # 例: child=version, ancestor=product → SELECT v.id, p.id FROM versions v JOIN products p ON p.id=v.product_id
         #     WHERE v.id IN (...) AND p.id IN (...)
-        child_table = RESOURCE_TABLE_MAP.get(child_dim, f'{child_dim}s')
-        ancestor_table = RESOURCE_TABLE_MAP.get(ancestor_dim, f'{ancestor_dim}s')
+        child_table = _resource_table(child_dim)
+        ancestor_table = _resource_table(ancestor_dim)
 
         # 构造 JOIN 路径 (child_dim → ancestor_dim)
         chain_idx_child = HIERARCHY_CHAIN.index(child_dim)
@@ -286,7 +295,7 @@ class ResourceInheritanceEngine:
         prev_dim = child_dim
         for idx in range(chain_idx_child - 1, chain_idx_anc - 1, -1):
             cur_dim = HIERARCHY_CHAIN[idx]
-            cur_table = RESOURCE_TABLE_MAP.get(cur_dim, f'{cur_dim}s')
+            cur_table = _resource_table(cur_dim)
             cur_alias = cur_dim[0]
             parent_field = PARENT_FIELD_MAP.get(prev_dim)
             if not parent_field:
@@ -384,7 +393,7 @@ class ResourceInheritanceEngine:
             )
             return allowed
 
-        table = meta['table']
+        table = _resource_table(resource_type)
         source_field = meta.get('source_field', 'source_bo_id')
         target_field = meta.get('target_field', 'target_bo_id')
         relation_field = meta.get('relation_field')
@@ -646,7 +655,7 @@ class ResourceInheritanceEngine:
             parent_meta = RESOURCE_METADATA_MAP.get(parent_type)
             if not parent_meta:
                 return None
-            parent_table = parent_meta['table']
+            parent_table = _resource_table(parent_type)
             row = self._ds.execute(
                 f'SELECT * FROM {parent_table} WHERE id = ? LIMIT 1',
                 [parent_id],
@@ -732,7 +741,7 @@ class ResourceInheritanceEngine:
             if not parent_field or not current_vals:
                 result[parent_dim] = set()
                 break
-            current_table = RESOURCE_TABLE_MAP.get(current_dim, f'{current_dim}s')
+            current_table = _resource_table(current_dim)
             try:
                 placeholders = ','.join('?' * len(current_vals))
                 rows = self._ds.execute(
@@ -882,7 +891,7 @@ class ResourceInheritanceEngine:
             parent_meta = RESOURCE_METADATA_MAP.get(parent_type)
             if not parent_meta:
                 break
-            parent_table = parent_meta['table']
+            parent_table = _resource_table(parent_type)
             try:
                 row = self._ds.execute(
                     f'SELECT * FROM {parent_table} WHERE id = ? LIMIT 1',

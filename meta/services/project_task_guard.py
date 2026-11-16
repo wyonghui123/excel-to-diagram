@@ -31,14 +31,26 @@ RULE_TASK_REQUIRED = 'PROJECT_TASK_REQUIRED'
 RULE_TASK_LOCKED = 'PROJECT_TASK_LOCKED'
 RULE_TASK_REFERENCED = 'PROJECT_TASK_REFERENCED'
 
-TASK_TABLE = 'project_tasks'
-PROJECT_TABLE = 'projects'
 
-#: G9 引用来源（表名, 列名, 人读标签）
+def _table_name(entity: str, fallback: str) -> str:
+    """表名走元模型 SSOT；未声明时回退字面量。"""
+    from meta.core.metadata_resolver import MetadataResolver
+    return MetadataResolver.get_table_name(entity) or fallback
+
+
+def task_table() -> str:
+    return _table_name('project_task', 'project_tasks')
+
+
+def project_table() -> str:
+    return _table_name('project', 'projects')
+
+
+#: G9 引用来源（实体名, 兜底表名, 列名, 人读标签）
 REFERENCE_SOURCES = (
-    ('work_orders', 'project_task_id', '工单'),
-    ('inventory_transactions', 'project_task_id', '库存事务'),
-    ('receipt_lines', 'project_task_id', '收货行'),
+    ('work_order', 'work_orders', 'project_task_id', '工单'),
+    ('inventory_transaction', 'inventory_transactions', 'project_task_id', '库存事务'),
+    ('receipt_line', 'receipt_lines', 'project_task_id', '收货行'),
 )
 
 
@@ -89,11 +101,11 @@ def table_columns(ds, name: str) -> set:
 def load_task(ds, task_id: Any) -> Optional[Dict[str, Any]]:
     """读取任务；表/列缺失或任务不存在时返回 None。"""
     tid = to_int(task_id)
-    if not tid or not table_exists(ds, TASK_TABLE):
+    if not tid or not table_exists(ds, task_table()):
         return None
     rows = ds.query(
         'SELECT id, project_id, task_type, status FROM %s WHERE id = ?'
-        % TASK_TABLE, [tid])
+        % task_table(), [tid])
     return rows[0] if rows else None
 
 
@@ -164,30 +176,30 @@ def assert_engineered_task_required(ds, project_id: Any, task_id: Any) -> None:
     pid = to_int(project_id)
     if not pid or to_int(task_id):
         return
-    if not table_exists(ds, PROJECT_TABLE) \
-            or 'design_mode' not in table_columns(ds, PROJECT_TABLE):
+    if not table_exists(ds, project_table()) \
+            or 'design_mode' not in table_columns(ds, project_table()):
         return
     rows = ds.query(
-        'SELECT design_mode FROM %s WHERE id = ?' % PROJECT_TABLE, [pid])
+        'SELECT design_mode FROM %s WHERE id = ?' % project_table(), [pid])
     if not rows:
         return
     mode = str(rows[0].get('design_mode') or '').strip().lower()
     if mode != DESIGN_MODE_ENGINEERED:
         return
-    if not table_exists(ds, TASK_TABLE):
+    if not table_exists(ds, task_table()):
         return
     count = 0
-    columns = table_columns(ds, TASK_TABLE)
+    columns = table_columns(ds, task_table())
     if 'task_type' in columns:
         found = ds.query(
             'SELECT COUNT(*) AS total FROM %s WHERE project_id = ? '
-            'AND task_type = ?' % TASK_TABLE,
+            'AND task_type = ?' % task_table(),
             [pid, TASK_TYPE_ACTIVITY])
         count = to_int(found[0].get('total')) if found else 0
     else:
         found = ds.query(
             'SELECT COUNT(*) AS total FROM %s WHERE project_id = ?'
-            % TASK_TABLE, [pid])
+            % task_table(), [pid])
         count = to_int(found[0].get('total')) if found else 0
     if count > 1:
         raise ProjectTaskGuardError(
@@ -203,7 +215,8 @@ def reference_counts(ds, task_id: Any) -> Dict[str, int]:
     counts: Dict[str, int] = {}
     if not tid:
         return counts
-    for table, column, label in REFERENCE_SOURCES:
+    for entity, fallback, column, label in REFERENCE_SOURCES:
+        table = _table_name(entity, fallback)
         if not table_exists(ds, table) or column not in table_columns(ds, table):
             continue
         rows = ds.query(

@@ -24,8 +24,15 @@ from meta.services.batch_selection_policy_service import (
 
 logger = logging.getLogger(__name__)
 
-POLICY_TABLE = 'batch_selection_policies'
 BATCH_TABLE = 'batches'
+
+
+def _policy_table() -> str:
+    """表名走元模型 SSOT；未声明时回退字面量。"""
+    from meta.core.metadata_resolver import MetadataResolver
+    return MetadataResolver.get_table_name(
+        'batch_selection_policy') or 'batch_selection_policies'
+
 
 SCOPE_ORDER = ('item', 'item_group', 'org')
 
@@ -232,7 +239,7 @@ class BatchSelectionService:
     def _load_policies(self, scope_type: str,
                        scope_ref: str) -> List[Dict[str, Any]]:
         return self.ds.query(
-            f"SELECT * FROM {POLICY_TABLE} WHERE status = 'active' "
+            f"SELECT * FROM {_policy_table()} WHERE status = 'active' "
             'AND scope_type = ? AND scope_ref = ? ORDER BY priority, id',
             [scope_type, scope_ref]) or []
 
