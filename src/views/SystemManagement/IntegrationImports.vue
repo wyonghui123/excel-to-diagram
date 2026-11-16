@@ -4,76 +4,29 @@
     subtitle="staging 三段式：落库 → 校验 → 提交；批次保留期后可下载错误报告"
   >
     <AppCard title="导入批次">
-      <div class="toolbar">
-        <AppInput
-          v-model="filters.object_type"
-          size="sm"
-          placeholder="对象类型（如 item）"
-          clearable
-          class="w-170"
-          @keyup.enter="reload"
-        />
-        <AppButton variant="secondary" size="sm" :loading="loading" @click="reload">刷新</AppButton>
-        <span class="spacer" />
-        <span class="hint">共 {{ total }} 个批次</span>
-      </div>
-
-      <div v-if="error" class="alert">{{ error }}</div>
-      <EmptyState
-        v-else-if="!loading && !rows.length"
-        type="empty"
-        title="暂无导入批次"
-        description="导入文件落 staging 后，批次会出现在这里"
-      />
-      <div v-else class="table-wrap">
-        <table class="data-table">
-          <thead>
-            <tr>
-              <th>批次号</th>
-              <th>总行数</th>
-              <th>待提交</th>
-              <th>已导入</th>
-              <th>失败行</th>
-              <th>创建时间</th>
-              <th>过期时间</th>
-              <th>状态</th>
-              <th class="col-action">操作</th>
-            </tr>
-          </thead>
-          <tbody>
-            <tr v-for="row in rows" :key="row.batch_no">
-              <td class="mono">{{ row.batch_no }}</td>
-              <td class="mono">{{ row.total }}</td>
-              <td class="mono">{{ row.pending }}</td>
-              <td class="mono">{{ row.imported }}</td>
-              <td class="mono">
-                <span v-if="row.invalid" class="bad">{{ row.invalid }}</span>
-                <span v-else>0</span>
-              </td>
-              <td class="mono">{{ row.created_at }}</td>
-              <td class="mono">{{ row.expires_at }}</td>
-              <td>
-                <span :class="['tag', row.expired ? 'tag-off' : 'tag-on']">
-                  {{ row.expired ? '已过期' : '有效' }}
-                </span>
-              </td>
-              <td class="col-action">
-                <AppButton variant="ghost" size="sm" @click="openBatch(row)">明细</AppButton>
-              </td>
-            </tr>
-          </tbody>
-        </table>
-      </div>
-
-      <Pagination
-        v-if="total > 0"
-        v-model:current="page"
-        v-model:page-size="pageSize"
-        :total="total"
-        class="pager"
-        @change="load"
-        @pageSizeChange="onSizeChange"
-      />
+      <!-- 批次列表的列 / 标签 / 徽标由 meta/schemas/import_staging_rows.yaml
+           的 list 块（批次聚合视图）驱动；对象类型是查询条件，放在工具栏。
+           批次下钻抽屉是本页唯一保留的复合视图（动作 detail 只声明入口） -->
+      <MetaResourcePage
+        ref="resourceRef"
+        object-type="import_staging_rows"
+        :extra-params="extraParams"
+        @row-action="onRowAction"
+      >
+        <template #toolbar>
+          <div class="toolbar">
+            <AppInput
+              v-model="objectTypeInput"
+              size="sm"
+              placeholder="对象类型（如 item）"
+              clearable
+              class="w-170"
+              @keyup.enter="applyFilter"
+            />
+            <AppButton variant="secondary" size="sm" @click="applyFilter">刷新</AppButton>
+          </div>
+        </template>
+      </MetaResourcePage>
     </AppCard>
 
     <Drawer v-model="drawer" :title="`批次 ${currentBatch}`" width="920px">
@@ -119,7 +72,7 @@
       <div v-if="rowError" class="alert">{{ rowError }}</div>
       <EmptyState
         v-else-if="!rowLoading && !rowsDetail.length"
-        type="empty"
+        type="folder"
         title="该批次没有匹配的行"
       />
       <div v-else class="table-wrap">
@@ -140,7 +93,7 @@
               <td class="mono">{{ row.object_type }}</td>
               <td class="mono">{{ row.row_no }}</td>
               <td>
-                <span :class="['tag', rowStatusClass(row.status)]">{{ row.status }}</span>
+                <span :class="['tag', rowStatusClass(row.status)]">{{ rowStatusLabel(row.status) }}</span>
               </td>
               <td class="mono">{{ row.error_field || '-' }}</td>
               <td class="mono">{{ row.error_code || '-' }}</td>
@@ -165,28 +118,42 @@
 </template>
 
 <script setup>
-import { ref, reactive, onMounted } from 'vue'
+import { computed, ref, reactive, onMounted, nextTick } from 'vue'
 import {
-  PageShell, AppCard, AppButton, AppInput, AppSelect, Drawer, EmptyState, Pagination,
+  PageShell, AppCard, AppButton, AppInput, AppSelect, Drawer,
+  EmptyState, Pagination, MetaResourcePage,
 } from '@/components/common'
 import { useMessage } from '@/composables/useMessage'
 import {
-  fetchImportBatches, fetchImportBatch, fetchImportRows, fetchImportErrorReport,
+  fetchImportBatch, fetchImportRows, fetchImportErrorReport,
+  fetchIntegrationOptions,
 } from '@/services/integrationService'
 
 defineOptions({ name: 'IntegrationImports' })
 
+// 语义色 → 现有样式类；标签与颜色本身仍来自 YAML 的 ui.options
+const TAG_BY_COLOR = {
+  success: 'tag-on',
+  warning: 'tag-warn',
+  danger: 'tag-bad',
+  info: 'tag-off',
+  gray: 'tag-off',
+}
+
 const toast = useMessage()
+const resourceRef = ref(null)
 
-const STAGING_STATUSES = ['pending', 'valid', 'invalid', 'imported', 'skipped']
+// 对象类型是批次聚合视图的额外查询参数：输入后点「刷新」或回车才生效
+const objectTypeInput = ref('')
+const appliedObjectType = ref('')
+const extraParams = computed(() => ({ object_type: appliedObjectType.value || undefined }))
 
-const rows = ref([])
-const total = ref(0)
-const page = ref(1)
-const pageSize = ref(20)
-const loading = ref(false)
-const error = ref('')
-const filters = reactive({ object_type: '' })
+async function applyFilter() {
+  appliedObjectType.value = objectTypeInput.value.trim()
+  // extraParams 作为 prop 传给列表页：先等父组件把新值传下去，否则 refresh 会读到上一轮参数
+  await nextTick()
+  resourceRef.value?.refresh?.()
+}
 
 const drawer = ref(false)
 const currentBatch = ref('')
@@ -200,47 +167,28 @@ const rowPageSize = ref(50)
 const rowLoading = ref(false)
 const rowError = ref('')
 const rowFilters = reactive({ status: '', object_type: '' })
-const rowStatusOptions = STAGING_STATUSES.map((v) => ({ value: v, label: v }))
+
+// 取值域来自后端 YAML 元数据（GET /integrations/options），前端不再维护常量数组
+const stagingStatus = ref([])
+const rowStatusOptions = computed(() => stagingStatus.value)
+const stagingStatusMap = computed(() => Object.fromEntries(
+  stagingStatus.value.map((item) => [item.value, item]),
+))
+
+function rowStatusLabel(status) {
+  return stagingStatusMap.value[status]?.label || status
+}
 
 function rowStatusClass(status) {
-  if (status === 'imported') return 'tag-on'
-  if (status === 'invalid') return 'tag-bad'
-  if (status === 'valid') return 'tag-warn'
-  return 'tag-off'
+  const color = stagingStatusMap.value[status]?.color
+  return TAG_BY_COLOR[color] || 'tag-off'
 }
 
-async function load() {
-  loading.value = true
-  error.value = ''
-  try {
-    const res = await fetchImportBatches({
-      object_type: filters.object_type || undefined,
-      page: page.value,
-      page_size: pageSize.value,
-    })
-    if (res.success) {
-      rows.value = res.data?.items || []
-      total.value = res.data?.total ?? rows.value.length
-    } else {
-      error.value = res.message || '加载批次失败'
-      rows.value = []
-      total.value = 0
-    }
-  } finally {
-    loading.value = false
-  }
+function onRowAction({ action, row }) {
+  if (action.id === 'detail' && row) openBatch(row)
 }
 
-function reload() {
-  page.value = 1
-  load()
-}
-
-function onSizeChange() {
-  page.value = 1
-  load()
-}
-
+// ---------------- 批次明细 ----------------
 async function openBatch(row) {
   currentBatch.value = row.batch_no
   summary.value = null
@@ -315,7 +263,14 @@ async function downloadReport() {
   }
 }
 
-onMounted(load)
+async function loadOptions() {
+  const res = await fetchIntegrationOptions()
+  if (res.success) {
+    stagingStatus.value = (res.data || {}).staging_status || []
+  }
+}
+
+onMounted(loadOptions)
 </script>
 
 <style scoped>
@@ -371,7 +326,6 @@ onMounted(load)
 }
 .data-table .mono { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; }
 .data-table .ellipsis { max-width: 260px; overflow: hidden; text-overflow: ellipsis; }
-.col-action { text-align: right; }
 .tag {
   display: inline-block;
   padding: 1px 8px;

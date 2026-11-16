@@ -261,6 +261,18 @@ def create_subscription():
     webhook_url = data.get('webhook_url', '')
     webhook_secret = data.get('webhook_secret', '')
     filter_condition = data.get('filter_condition', {})
+
+    # FR-2：订阅可引用集成连接（connection_id），投递目标以连接的 endpoint/secret 为准
+    connection_id = data.get('connection_id')
+    if connection_id in (None, ''):
+        connection_id = None
+    else:
+        try:
+            connection_id = int(connection_id)
+        except (TypeError, ValueError):
+            return error_response('connection_id 必须为整数', status=400)
+        if not ds.find_by_id('integration_connection', connection_id):
+            return error_response('connection_id 对应的连接不存在', status=400)
     
     if not object_type:
         return error_response('object_type is required')
@@ -271,8 +283,8 @@ def create_subscription():
             status=400
         )
 
-    if channel == 'webhook' and not webhook_url:
-        return error_response('webhook_url is required for webhook channel')
+    if channel == 'webhook' and not webhook_url and connection_id is None:
+        return error_response('webhook channel 需要 webhook_url 或 connection_id')
     
     subscription = {
         'user_id': user_id,
@@ -285,6 +297,8 @@ def create_subscription():
         'enabled': 1,
         'created_at': datetime.now().isoformat()
     }
+    if connection_id is not None:
+        subscription['connection_id'] = connection_id
     
     try:
         sub_id = ds.insert('change_subscriptions', subscription)
@@ -342,6 +356,20 @@ def update_subscription(sub_id):
     data = request.get_json() or {}
     
     update_data = {}
+    
+    # FR-2：允许绑定/解绑集成连接（connection_id=null 表示解绑）
+    if 'connection_id' in data:
+        raw_conn = data.get('connection_id')
+        if raw_conn in (None, ''):
+            update_data['connection_id'] = None
+        else:
+            try:
+                conn_id = int(raw_conn)
+            except (TypeError, ValueError):
+                return error_response('connection_id 必须为整数', status=400)
+            if not ds.find_by_id('integration_connection', conn_id):
+                return error_response('connection_id 对应的连接不存在', status=400)
+            update_data['connection_id'] = conn_id
     
     if 'event_types' in data:
         event_types = data['event_types']

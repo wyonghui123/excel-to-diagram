@@ -17,7 +17,8 @@ from __future__ import annotations
 import logging
 import os
 import time
-from typing import Any, List, Optional
+from pathlib import Path
+from typing import Any, Dict, List, Optional, Tuple
 
 from flask import Blueprint, request, send_file
 from werkzeug.utils import secure_filename
@@ -30,6 +31,7 @@ from meta.api.notification_api import (
     _retry_debounce,
     _same_user,
 )
+from meta.core.yaml_loader import load_yaml_file
 from meta.services.auth_middleware import get_current_user, is_admin, login_required
 from meta.services.import_staging_service import ImportStagingService
 from meta.services.integration_connection_service import (
@@ -98,6 +100,106 @@ def _bool_arg(name: str) -> Optional[bool]:
     return raw.strip().lower() in ('1', 'true', 'yes', 'on')
 
 
+# ------------------------------------------------------------------ 取值域
+#: 选项来源：键名（前端消费）→ (YAML 文件 stem, 字段 id)。
+#: 纪律：本表只声明「哪些字段的取值域要暴露」，值本身一律来自 meta/schemas/*.yaml；
+#:      前端不得再复制一份常量数组（见 plan-integration-p1p2-2026-11-16.md §6.4 S3）。
+OPTION_SOURCES = {
+    'connection_channel': ('integration_connection', 'channel_type'),
+    'connection_direction': ('integration_connection', 'direction'),
+    'connection_auth_type': ('integration_connection', 'auth_type'),
+    'delivery_status': ('notification_delivery', 'status'),
+    'delivery_channel': ('notification_delivery', 'channel'),
+    'delivery_target_type': ('notification_delivery', 'target_type'),
+    'delivery_direction': ('notification_delivery', 'direction'),
+    'staging_status': ('import_staging_rows', 'status'),
+}
+
+SCHEMA_DIR = Path(__file__).resolve().parents[1] / 'schemas'
+
+_options_cache: Optional[Dict[str, List[Dict[str, Any]]]] = None
+
+#: 列表排序白名单：MetaListPage 的列排序下发 `?ordering=field` / `?ordering=-field`，
+#: 只认白名单内的列（未声明的排序参数一律忽略，避免拼接任意列名）。
+CONNECTION_ORDER_COLUMNS = {
+    'code', 'name', 'channel_type', 'direction', 'auth_type',
+    'has_secret', 'timeout_ms', 'retry_max', 'enabled', 'updated_at',
+}
+DELIVERY_ORDER_COLUMNS = {
+    'id': 'd.id',
+    'event_type': 'e.event_type',
+    'object_type': 'e.object_type',
+    'connection_code': 'c.code',
+    'channel': 'd.channel',
+    'target': 'd.target',
+    'direction': 'd.direction',
+    'target_type': 'd.target_type',
+    'status': 'd.status',
+    'attempts': 'd.attempts',
+    'next_retry_at': 'd.next_retry_at',
+    'created_at': 'd.created_at',
+}
+
+
+def _parse_ordering() -> Tuple[Optional[str], bool]:
+    """解析 `?ordering=[-]field`，返回 (field, desc)；未声明返回 (None, False)。"""
+    raw = (request.args.get('ordering') or '').strip()
+    if not raw:
+        return None, False
+    if raw.startswith('-'):
+        return raw[1:], True
+    return raw, False
+
+
+def _sort_rows(rows: List[Dict[str, Any]], allowed: set) -> List[Dict[str, Any]]:
+    """内存排序（连接列表在服务层已全量取出，分页前排序即可）。"""
+    field, desc = _parse_ordering()
+    if not field or field not in allowed:
+        return rows
+    return sorted(rows, key=lambda r: (r.get(field) is None, r.get(field)), reverse=desc)
+
+
+def _field_options(object_id: str, field_id: str) -> List[Dict[str, Any]]:
+    obj = load_yaml_file(str(SCHEMA_DIR / ('%s.yaml' % object_id)))
+    if obj is None:
+        raise RuntimeError('元数据加载失败: %s' % object_id)
+    for meta_field in obj.fields:
+        if meta_field.id == field_id:
+            return [dict(item) for item in (meta_field.ui.options or [])]
+    raise RuntimeError('字段未声明取值域: %s.%s' % (object_id, field_id))
+
+
+def build_options() -> Dict[str, Any]:
+    """取各字段的取值域；`retryable_status` 是 `delivery_status` 的子集。"""
+    global _options_cache
+    if _options_cache is None:
+        _options_cache = {
+            key: _field_options(*source) for key, source in OPTION_SOURCES.items()
+        }
+    payload: Dict[str, Any] = {
+        key: [dict(item) for item in values]
+        for key, values in _options_cache.items()
+    }
+    labels = {item.get('value'): item.get('label')
+              for item in payload['delivery_status']}
+    payload['retryable_status'] = [
+        {'value': value, 'label': labels.get(value, value)}
+        for value in RETRYABLE_STATUSES
+    ]
+    return payload
+
+
+@integration_module_bp.route('/api/v2/integrations/options', methods=['GET'])
+@login_required
+def list_options():
+    """配置面 / 运行面 / 交付面的下拉取值域（单一事实来自 YAML）。"""
+    try:
+        return ok(build_options())
+    except RuntimeError as exc:
+        logger.error('[integration] 取值域加载失败: %s', exc)
+        return error_response('取值域元数据加载失败', status=500)
+
+
 # ------------------------------------------------------------------ 连接配置
 @integration_module_bp.route('/api/v2/integrations/connections', methods=['GET'])
 @login_required
@@ -110,11 +212,17 @@ def list_connections():
         rows = _service().list_connections(
             enabled=_bool_arg('enabled'),
             channel_type=request.args.get('channel_type') or None,
-            keyword=request.args.get('keyword') or None,
+            # MetaListPage 的 keyword 过滤器会以 `search` 下发，两个名字都接受
+            keyword=request.args.get('keyword') or request.args.get('search') or None,
         )
     except IntegrationConnectionError as exc:
         return error_response(str(exc), status=400)
-    return ok_list(rows)
+    rows = _sort_rows(rows, CONNECTION_ORDER_COLUMNS)
+    page = _int_arg('page', 1, 1)
+    page_size = _int_arg('page_size', DEFAULT_PAGE_SIZE, 1, MAX_PAGE_SIZE)
+    start = (page - 1) * page_size
+    return ok_list(rows[start:start + page_size], total=len(rows),
+                   page=page, page_size=page_size)
 
 
 @integration_module_bp.route('/api/v2/integrations/connections', methods=['POST'])
@@ -203,7 +311,7 @@ def list_deliveries():
     service = _service()
     if not service.has_delivery_facts():
         return error_response(
-            '投递事实列未就绪，请先执行 v279 迁移', status=503)
+            '投递事实列未就绪，请执行集成模块数据层迁移', status=503)
 
     page = _int_arg('page', 1, 1)
     page_size = _int_arg('page_size', DEFAULT_PAGE_SIZE, 1, MAX_PAGE_SIZE)
@@ -235,6 +343,13 @@ def list_deliveries():
 
     clause = (' WHERE ' + ' AND '.join(where)) if where else ''
 
+    # 列排序：只认 YAML 列声明过的白名单，默认按主键倒序（最新在前）
+    order_sql = 'd.id DESC'
+    order_field, order_desc = _parse_ordering()
+    order_column = DELIVERY_ORDER_COLUMNS.get(order_field or '')
+    if order_column:
+        order_sql = '%s %s' % (order_column, 'DESC' if order_desc else 'ASC')
+
     total_row = ds.execute(
         'SELECT COUNT(*) FROM %s d%s' % (DELIVERY_TABLE, clause),
         tuple(params)).fetchone()
@@ -249,14 +364,91 @@ def list_deliveries():
         'FROM %s d '
         'LEFT JOIN change_events e ON e.id = d.event_id '
         'LEFT JOIN integration_connection c ON c.id = d.connection_id'
-        '%s ORDER BY d.id DESC LIMIT ? OFFSET ?'
-        % (DELIVERY_TABLE, clause),
+        '%s ORDER BY %s LIMIT ? OFFSET ?'
+        % (DELIVERY_TABLE, clause, order_sql),
         tuple(params) + (page_size, (page - 1) * page_size))
     rows = cursor.fetchall()
     columns = [desc[0] for desc in cursor.description]
 
     items = [dict(zip(columns, row)) for row in rows]
     return ok_list(items, total=total, page=page, page_size=page_size)
+
+
+@integration_module_bp.route('/api/v2/integrations/deliveries/stats', methods=['GET'])
+@login_required
+def delivery_stats():
+    """投递状态分布（运行面顶部指标）。
+
+    `retry_exhausted` 是派生判定（status=failed 且 next_retry_at IS NULL ⇒ 重试预算
+    已耗尽、进入终态），**不是**新的状态值 —— 状态集合仍只由 YAML `delivery_status`
+    声明（见 plan-integration-p1p2 §6.4 S6）。
+    """
+    denied = _require_service() or _require_admin()
+    if denied:
+        return denied
+    if not _service().has_delivery_facts():
+        return error_response(
+            '投递事实列未就绪，请执行集成模块数据层迁移', status=503)
+
+    status_counts = {
+        row[0]: int(row[1])
+        for row in ds.execute(
+            'SELECT status, COUNT(*) FROM %s GROUP BY status' % DELIVERY_TABLE
+        ).fetchall()
+    }
+    exhausted_row = ds.execute(
+        'SELECT COUNT(*) FROM %s WHERE status = ? AND next_retry_at IS NULL'
+        % DELIVERY_TABLE, ('failed',)).fetchone()
+    latency_row = ds.execute(
+        'SELECT AVG((julianday(delivered_at) - julianday(created_at)) * 86400000.0) '
+        'FROM %s WHERE status = ? AND delivered_at IS NOT NULL' % DELIVERY_TABLE,
+        ('delivered',)).fetchone()
+
+    avg_latency_ms = None
+    if latency_row and latency_row[0] is not None:
+        avg_latency_ms = int(round(float(latency_row[0])))
+    try:
+        payload = shape_delivery_stats(
+            status_counts,
+            int(exhausted_row[0]) if exhausted_row else 0,
+            avg_latency_ms,
+        )
+    except RuntimeError as exc:
+        logger.error('[integration] 投递统计取值域加载失败: %s', exc)
+        return error_response('取值域元数据加载失败', status=500)
+    return ok(payload)
+
+
+def shape_delivery_stats(status_counts: Dict[str, int],
+                         retry_exhausted: int,
+                         avg_latency_ms: Optional[int] = None) -> Dict[str, Any]:
+    """纯整形：状态顺序与标题一律取自 YAML 声明（`delivery_status`）。"""
+    declared = build_options()['delivery_status']
+    known = [item['value'] for item in declared]
+    by_status = [
+        {
+            'value': item['value'],
+            'label': item['label'],
+            'count': int(status_counts.get(item['value'], 0)),
+        }
+        for item in declared
+    ]
+    # 库里若出现未声明状态（历史数据 / 手工写入），保留但排在末尾，不静默丢数
+    for value, count in status_counts.items():
+        if value not in known:
+            by_status.append({'value': value, 'label': value, 'count': int(count)})
+
+    return {
+        'total': sum(int(count) for count in status_counts.values()),
+        'by_status': by_status,
+        'retryable': sum(int(status_counts.get(status, 0))
+                         for status in RETRYABLE_STATUSES),
+        'retry_exhausted': int(retry_exhausted),
+        'avg_latency_ms': (None if avg_latency_ms is None
+                           else int(round(float(avg_latency_ms)))),
+        'latency_note': 'delivered_at - created_at 的均值（毫秒）；'
+                        '只统计已投递且时间戳可解析的行，None = 无样本',
+    }
 
 
 @integration_module_bp.route(
@@ -307,6 +499,7 @@ def retry_delivery(delivery_id):
             'reset': 0,
             'attempted': 0,
             'debounced': True,
+            'message': '5 秒内重复点击已忽略',
         })
     _retry_debounce[debounce_key] = now_monotonic
 
@@ -332,6 +525,7 @@ def retry_delivery(delivery_id):
         'event_id': event_id,
         'reset': 1,
         'debounced': False,
+        'message': '已重置 1 条投递',
         **stats,
     })
 

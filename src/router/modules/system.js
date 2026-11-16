@@ -81,17 +81,40 @@ export default [
   },
   {
     // 集成模块·配置面（spec-integration-module §8 视图一）：连接定义 + 连通性测试
+    // 视图由 route.meta.integrationResource + integration_connection.yaml 驱动
     path: '/system/integration-connections',
     name: 'integration-connections',
-    component: () => import('@/views/SystemManagement/IntegrationConnections.vue'),
-    meta: { title: '集成连接', requiresAuth: true, requiresAdmin: true }
+    component: () => import('@/views/SystemManagement/IntegrationResourceView.vue'),
+    meta: {
+      title: '集成连接',
+      requiresAuth: true,
+      requiresAdmin: true,
+      integrationResource: {
+        objectType: 'integration_connection',
+        title: '集成连接',
+        subtitle: '配置面：渠道 / 鉴权 / 超时重试；订阅与投递共用同一份连接',
+        cardTitle: '连接列表',
+        formHint: '密钥只接受引用（env: / vault:），不接受明文；留空表示无密钥。'
+      }
+    }
   },
   {
     // 集成模块·运行面（§8 视图二）：in/out messages 投递事实 + 单条重试
+    // 视图由 route.meta.integrationResource + notification_delivery.yaml 驱动
     path: '/system/integration-deliveries',
     name: 'integration-deliveries',
-    component: () => import('@/views/SystemManagement/IntegrationDeliveries.vue'),
-    meta: { title: '消息运行面', requiresAuth: true, requiresAdmin: true }
+    component: () => import('@/views/SystemManagement/IntegrationResourceView.vue'),
+    meta: {
+      title: '消息运行面',
+      requiresAuth: true,
+      requiresAdmin: true,
+      integrationResource: {
+        objectType: 'notification_delivery',
+        title: '消息运行面',
+        subtitle: 'in / out messages：投递事实、失败原因与单条重试',
+        cardTitle: '投递实例'
+      }
+    }
   },
   {
     // 集成模块·交付面（§8 视图三）：导入批次聚合 + 行级错误 + 错误报告下载

@@ -20,8 +20,13 @@ export const deleteConnection = (code) => apiV2.delete(`${BASE}/connections/${en
 export const testConnection = (code) =>
   apiV2.post(`${BASE}/connections/${enc(code)}/test`, {})
 
+// --- 取值域：下拉选项统一来自后端 YAML 元数据（前端不再复制常量数组）---
+export const fetchIntegrationOptions = () => apiV2.get(`${BASE}/options`)
+
 // --- 运行面：投递实例 ---
 export const fetchDeliveries = (params = {}) => apiV2.get(`${BASE}/deliveries`, { params })
+// 顶部指标：状态分布 / 可重试 / 重试耗尽 / 平均耗时（后端聚合，状态标题来自 YAML）
+export const fetchDeliveryStats = () => apiV2.get(`${BASE}/deliveries/stats`)
 export const retryDelivery = (id) => apiV2.post(`${BASE}/deliveries/${enc(id)}/retry`, {})
 
 // --- 交付面：导入批次 ---

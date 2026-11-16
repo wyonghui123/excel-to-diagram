@@ -27,6 +27,8 @@ try:
     from meta.core import yaml_compat as yaml
 except ImportError:  # 作为脚本直接运行（sys.path 无项目根）时回退
     import yaml
+# yaml_compat 只导出 safe_load，没有 YAMLError；取不到时退化为 ValueError 兜底
+_YAML_ERROR = getattr(yaml, 'YAMLError', ValueError)
 if sys.stdout.encoding != 'utf-8':
     sys.stdout = io.TextIOWrapper(sys.stdout.buffer, encoding='utf-8', errors='replace')
 
@@ -46,7 +48,68 @@ MIGRATION_OWNED_MENUS = (
 
 # [P0-5 2026-11-09] 声明同步逻辑版本：步骤 5/6/6.5 的同步语义一旦变更就 +1，
 #   使库中旧哈希必然失配，强制下一次启动执行一次全量同步。
-_SYNC_DECLARATION_VERSION = 1
+#   v2 (2026-11-16, S4): 集成模块三项菜单的展示字段改由 YAML `ui_view_config.menu` 提供。
+_SYNC_DECLARATION_VERSION = 2
+
+
+def _schemas_dir():
+    """meta/schemas 目录（本脚本可脱离应用独立执行，故不依赖 meta 包定位）。"""
+    return os.path.join(
+        os.path.dirname(os.path.dirname(os.path.abspath(__file__))), 'schemas')
+
+
+#: YAML `ui_view_config.menu` 键 → system_menus 字段
+_YAML_MENU_FIELDS = (
+    ('label', 'menu_name'),
+    ('route', 'menu_path'),
+    ('icon', 'icon'),
+    ('color', 'color'),
+    ('sort_order', 'sort_order'),
+    ('parent', 'parent_menu'),
+)
+
+
+def _apply_yaml_menu_declarations(system_menus):
+    """[S4 2026-11-16] 用 YAML 的 `ui_view_config.menu` 覆盖菜单展示字段。
+
+    单一事实：label / route / icon / color / sort_order / parent 只写在 YAML；
+    本脚本只保留权限码与页面结构（page_type / bo_bindings / required_permissions）。
+    声明缺失即报错 —— 避免"YAML 改了、脚本还留旧值"的双源漂移。
+    """
+    by_code = {item.get('menu_code'): item for item in system_menus}
+    applied = 0
+    for yaml_path in sorted(glob.glob(os.path.join(_schemas_dir(), '*.yaml'))):
+        try:
+            with open(yaml_path, 'rb') as handle:
+                raw_bytes = handle.read()
+        except OSError as exc:
+            print(f"[菜单声明] 跳过 {os.path.basename(yaml_path)}: {exc}")
+            continue
+        # 先做字节级粗筛：无 ui_view_config 的文件不必解析（213 个 schema 全解析太贵）
+        if b'ui_view_config' not in raw_bytes:
+            continue
+        try:
+            raw = yaml.safe_load(raw_bytes) or {}
+        except _YAML_ERROR as exc:
+            print(f"[菜单声明] 跳过 {os.path.basename(yaml_path)}: {exc}")
+            continue
+        menu = (raw.get('ui_view_config') or {}).get('menu') or {}
+        code = menu.get('code')
+        if not code:
+            continue
+        entry = by_code.get(code)
+        if entry is None:
+            raise ValueError(
+                f"{os.path.basename(yaml_path)} 声明了菜单 {code}，"
+                "但本脚本无对应条目（菜单展示不能只存在于 YAML）")
+        for yaml_key, menu_key in _YAML_MENU_FIELDS:
+            if menu.get(yaml_key) in (None, ''):
+                raise ValueError(
+                    f"菜单 {code} 缺少 ui_view_config.menu.{yaml_key}")
+            entry[menu_key] = menu[yaml_key]
+        applied += 1
+    if applied:
+        print(f"[菜单声明] 已由 YAML 覆盖 {applied} 项菜单展示字段")
 
 
 def _ensure_guard_table(cursor):
@@ -466,13 +529,9 @@ def init_menu_permissions(db_path):
             #   /system/integration-connections 渲染 IntegrationConnections.vue。
             #   形态与 platform-ops-jobs 同口径: 无 BO 绑定, 权限门槛 ['*']（集成
             #   连接的 secret_ref / 端点属管理员职责）, 与前端 meta.requiresAdmin 一致。
+            #   [S4] label/route/icon/color/sort/parent 不写在此处 —— 唯一真源是
+            #   integration_connection.yaml 的 ui_view_config.menu（_apply_yaml_menu_declarations）。
             'menu_code': 'integration-connections',
-            'menu_name': '集成连接',
-            'menu_path': '/system/integration-connections',
-            'icon': 'Connection',
-            'color': '#0ea5e9',
-            'sort_order': 57,
-            'parent_menu': 'system',
             'page_type': 'custom_page',
             'primary_object_type': '',
             'object_types': json.dumps([]),
@@ -483,13 +542,8 @@ def init_menu_permissions(db_path):
         {
             # [集成模块 M5 2026-11-16] 运行面：in/out messages 投递事实 + 单条重试。
             #   数据源是 notification_deliveries（既有投递事实表），不新建收件箱。
+            #   [S4] 展示字段见 notification_delivery.yaml 的 ui_view_config.menu。
             'menu_code': 'integration-deliveries',
-            'menu_name': '消息运行面',
-            'menu_path': '/system/integration-deliveries',
-            'icon': 'Promotion',
-            'color': '#f59e0b',
-            'sort_order': 58,
-            'parent_menu': 'system',
             'page_type': 'custom_page',
             'primary_object_type': '',
             'object_types': json.dumps([]),
@@ -500,13 +554,8 @@ def init_menu_permissions(db_path):
         {
             # [集成模块 M5 2026-11-16] 交付面：导入批次聚合 + 行级错误 + 错误报告下载。
             #   批次身份由 import_staging_rows 反向聚合（无批次表）。
+            #   [S4] 展示字段见 import_staging_rows.yaml 的 ui_view_config.menu。
             'menu_code': 'integration-imports',
-            'menu_name': '导入交付面',
-            'menu_path': '/system/integration-imports',
-            'icon': 'Upload',
-            'color': '#10b981',
-            'sort_order': 60,
-            'parent_menu': 'system',
             'page_type': 'custom_page',
             'primary_object_type': '',
             'object_types': json.dumps([]),
@@ -2760,6 +2809,11 @@ def init_menu_permissions(db_path):
         },
     ]
 
+    # ========== 菜单展示字段：YAML 单一事实（S4） ==========
+    # 集成模块三项菜单的 label/route/icon/color/sort/parent 由 meta/schemas/*.yaml 的
+    # ui_view_config.menu 覆盖；本脚本只保留权限码与页面结构声明。
+    _apply_yaml_menu_declarations(system_menus)
+
     # ========== 平台模块门控（meta/core/platform_modules.py） ==========
     # party 轴（party / party_group / party_relation 三个 tab 的 /party hub）依赖 org
     # 承载 BU/LE 业务职能（org_functions）——仅业务部署（xAPP）成立。BIP 应用架构管理
@@ -2800,7 +2854,7 @@ def init_menu_permissions(db_path):
     # 声明变更（含 DISABLED_PLATFORM_MODULES 切换）⇒ 哈希失配 ⇒ 回退到原全量同步。
     # 步骤 7.5/7.6/7.7/7.8 不受守卫影响：它们处理 DB 侧状态（stale 清理、角色
     #   权限展开），新增角色或权限定义后必须每次重新展开。
-    schemas_dir = os.path.join(os.path.dirname(os.path.dirname(__file__)), 'schemas')
+    schemas_dir = _schemas_dir()
     _ensure_guard_table(cursor)
     declaration_hash = _compute_declaration_hash(system_menus, schemas_dir)
     cursor.execute(

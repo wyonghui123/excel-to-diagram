@@ -122,3 +122,78 @@ class TestNotificationAPI:
         # Blueprint 应能导入
         assert notification_bp is not None
         assert notification_bp.name == 'notification'
+
+
+class _FakeDS:
+    """只实现 find_by_id / insert / update 的极简数据源（订阅 API 单测用）。"""
+
+    def __init__(self, tables):
+        self.tables = tables
+        self.inserted = None
+        self.updated = None
+
+    def find_by_id(self, table, row_id):
+        return (self.tables.get(table) or {}).get(int(row_id))
+
+    def insert(self, table, row):
+        self.inserted = dict(row)
+        return 1
+
+    def update(self, table, row_id, data):
+        self.updated = dict(data)
+
+
+def _flask_app():
+    from flask import Flask
+    return Flask(__name__)
+
+
+class TestSubscriptionConnectionRef:
+    """FR-2：订阅 API 支持引用集成连接（connection_id）。"""
+
+    def test_create_subscription_with_connection_only(self, monkeypatch):
+        """只给 connection_id 时不强制 webhook_url，并落 connection_id。"""
+        import meta.api.notification_api as api
+        fake = _FakeDS({'integration_connection': {7: {'id': 7, 'code': 'ops'}}})
+        monkeypatch.setattr(api, 'ds', fake)
+        monkeypatch.setattr(api, '_current_user_id', lambda: 1)
+        with _flask_app().test_request_context(json={
+                'object_type': 'domain',
+                'channel': 'webhook',
+                'connection_id': 7}):
+            resp, status = api.create_subscription.__wrapped__()
+        assert status == 201
+        assert resp.get_json()['data']['connection_id'] == 7
+        assert fake.inserted['connection_id'] == 7
+        assert fake.inserted['webhook_url'] == ''
+
+    def test_create_subscription_rejects_unknown_connection(self, monkeypatch):
+        """connection_id 指向不存在的连接 → 400。"""
+        import meta.api.notification_api as api
+        fake = _FakeDS({})
+        monkeypatch.setattr(api, 'ds', fake)
+        monkeypatch.setattr(api, '_current_user_id', lambda: 1)
+        with _flask_app().test_request_context(json={
+                'object_type': 'domain',
+                'channel': 'webhook',
+                'connection_id': 404}):
+            resp, status = api.create_subscription.__wrapped__()
+        assert status == 400
+        assert fake.inserted is None
+
+    def test_update_subscription_binds_connection(self, monkeypatch):
+        """PUT 可把既有订阅绑定到连接。"""
+        import meta.api.notification_api as api
+        fake = _FakeDS({
+            'integration_connection': {7: {'id': 7, 'code': 'ops'}},
+            'change_subscriptions': {5: {
+                'id': 5, 'user_id': 1, 'channel': 'webhook',
+                'webhook_url': '', 'connection_id': None}},
+        })
+        monkeypatch.setattr(api, 'ds', fake)
+        monkeypatch.setattr(api, '_current_user_id', lambda: 1)
+        with _flask_app().test_request_context(json={'connection_id': 7}):
+            result = api.update_subscription.__wrapped__(5)
+        resp = result[0] if isinstance(result, tuple) else result
+        assert resp.status_code == 200
+        assert fake.updated == {'connection_id': 7}

@@ -291,13 +291,15 @@ staging → validating → validated → importing → imported
 | 视图 | 路由 | 内容 | 优先级 |
 |---|---|---|---|
 | **配置面** | `/system/integration-connections` | 连接列表、新建/编辑抽屉（含测试按钮）、引用计数 | P1（已实现） |
-| | `/system/integration-subscriptions` | 订阅绑定连接到事件、启停、目标类型 | P1（待建视图；后端订阅 API 可先行） |
+| | `/system/integration-subscriptions` | 订阅绑定连接到事件、启停、目标类型 | P1（待建视图；后端订阅 API 已支持 `connection_id`，POST/PUT 均可绑定/解绑） |
 | | `/system/integration-mappings` | 复制规则与三钩子编辑器（YAML 表单 + 校验） | P2（未实现） |
 | **运行面** | `/system/integration-deliveries` | 投递实例列表：状态、attempts、last_error、next_retry_at；单条重投 | P1（已实现） |
 | | `/system/integration-imports` | 批次列表 + 批次详情抽屉（行级错误表、按 error_code 过滤、下载报告） | P1（已实现，详情为抽屉非独立路由） |
 | **交付面** | `/system/integration-packages` | Package 导出/导入 | P2（未实现） |
 
 设计纪律：配置页与运行页**不共用页面**；运行页只读事实表 + 单一动作（重投/重跑），不提供修改配置的入口。
+
+待办的细化方案、对标依据与优先级见 [plan-integration-p1p2-2026-11-16.md](./plan-integration-p1p2-2026-11-16.md)；单一事实 / 元数据驱动对齐评审（S1~S6）见该文档 §6。
 
 ---
 
@@ -364,6 +366,9 @@ meta/migrations/add_change_notification_tables.sql   （兼容期只读字段，
 |---|---|---|
 | TBD-1 | `integration_connection` 的 `code` 是否允许全局唯一还是按 app 隔离 | 全局唯一：连接是跨应用复用资产 |
 | TBD-2 | `import_staging_rows` 是否需要 `raw_payload` 全文保留（大文件体积） | 保留，但单行 >64KB 截断并标记 `truncated=1` |
-| TBD-3 | 投递 `dead` 状态是否需要自动通知管理员 | 复用消息中心（`category='integration'`），不新开通道 |
+| TBD-3 | 投递终态（`failed` 且 `next_retry_at` 为空）是否需要自动通知管理员 | 复用消息中心（`category='integration'`），不新开通道。不引入 `dead` 状态，见 plan §3.2 |
 | TBD-4 | 映射三钩子是否支持自定义 Python 函数 | 不支持：安全边界内只允许表达式 + Lookup |
 | TBD-5 | 是否需要 `integration_trigger_points` 配置表 | P1 评估；当前可由订阅的 `event_type` 模式承担 |
+| TBD-6 | 投递 payload 是否持久化 | 不持久化：仅保留 `target` / `last_error`，与对标保留期策略一致（plan §3.2） |
+| TBD-7 | 三钩子的写入真源（yaml 声明 vs DB 覆盖层） | 未定，阻塞映射编辑器；候选方案见 plan §3.4 |
+| TBD-8 | `notification_deliveries` 无元数据声明（表因此不在 `sync_schema` 漂移门禁内） | 已解决（2026-11-16）：补 `meta/schemas/notification_delivery.yaml`（`generic_api_mode: disabled`，status/channel 用 `enum_values` 生成 CHECK）；复核确认建表 CHECK 本就是 5 值，**无值域漂移**，见 plan §6.2 |
