@@ -12,11 +12,12 @@
  *   - 文案占位符只支持 {row.<field>} / {data.<field>}
  *   - enabled_when 只支持 { field, in: [] }
  */
-import { apiV1, apiV2 } from '@/utils/httpClient'
+import { apiRoot, apiV1, apiV2 } from '@/utils/httpClient'
 import { ElMessageBox } from 'element-plus'
 
 const API_V2_PREFIX = '/api/v2'
 const API_V1_PREFIX = '/api/v1'
+const API_ROOT_PREFIX = '/api/'
 
 const JSON_FIELD_TYPES = new Set(['json', 'object'])
 const NUMBER_WIDGETS = new Set(['number', 'integer', 'float', 'decimal'])
@@ -40,8 +41,10 @@ export function toApiPath(url) {
 }
 
 /**
- * 按 URL 前缀选择 httpClient 命名空间（v1 / v2）。
+ * 按 URL 前缀选择 httpClient 命名空间（v1 / v2 / apiRoot）。
  * 声明式 data_source / action 允许指向存量 v1 端点，避免拼成 /api/v2/api/v1/...。
+ * [M3 2026-11-16] 非 v1/v2 的 /api/* 端点（如 /api/print/templates）走 apiRoot，
+ * 路径原样传递，避免被误拼成 /api/v2/api/print/...。
  *
  * @returns {{namespace: object, path: string}}
  */
@@ -52,6 +55,9 @@ export function resolveRequest(url) {
   }
   if (text.startsWith(API_V2_PREFIX)) {
     return { namespace: apiV2, path: text.slice(API_V2_PREFIX.length) || '/' }
+  }
+  if (text.startsWith(API_ROOT_PREFIX)) {
+    return { namespace: apiRoot, path: text }
   }
   return { namespace: apiV2, path: text }
 }

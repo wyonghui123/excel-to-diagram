@@ -225,6 +225,8 @@ visible_when: {field: secret_ref, not_empty: true}
 | `RuleCenterPage` + `ApprovalPolicyPanel` | 复合工作台（多对象 + 树 + 矩阵），属 Custom Page 场景 |
 | `PermissionSetCenter` / `RolePermissionCenter` | 树形授权矩阵，交互非 CRUD |
 | `PlatformOpsJobs` / `JobSchedules` | 无对应 YAML，纯运维面 |
+| `HandlingUnitDocs` / `HandlingUnitSeal` | 联接行查询 / 扫码封箱工作台，非对象列表；需联接聚合 + 状态机 + 专用权限（§4.9.3 复核关闭） |
+| `PrintPlatform`（模板/绑定/命中试算 3 Tab） | 复合/派生列 + 专用版式编辑器 + 级联选项 + `/api/print` 管理台；收敛需扩渲染器，违反非目标（§4.9.3 复核关闭） |
 
 ---
 
@@ -471,8 +473,14 @@ ui_view_config:
 
 #### 4.9.3 范围修正
 
+> 2026-11-16 复核结论：两项**正式关闭，不再列为候选**，按显式 extension point 保留手写（对标 Odoo `inherit_id` / Fiori fragment）。证据见本节末。
+
 - `handling_unit`：不做 `variants.docs/seal`。两页分别是「单据↔容器联接行查询」和「扫码封箱工作台」，无 `handling_unit` 对象列表；`variants` 只 patch 对象视图，无法表达联接行聚合与扫码队列。归入 §5.4「明确不动」。
-- `print_template`：不做列表收敛。前置条件缺失：① `resolveRequest` 只识别 `/api/v1`、`/api/v2`，`/api/print` 会被拼成 `/api/v2/api/print/...`；② `template`/`scope` 为复合/派生列，YAML 列文法未声明 computed 形态。列为 M2.5 候选（先扩命名空间 + computed 列），本里程碑保持手写。
+  - 实体列表本身**已经是声明式**（`meta/schemas/handling_unit.yaml` 的 `ui_view_config` 含 9 列/搜索/CRUD 动作，无 `skip_auto_menu`，走 `GenericObjectList`），无需二次迁移。
+  - `HandlingUnitDocs.vue` 的数据源是 `document_hu_link_view`（`boService.query`），行是 link 视图行；`HandlingUnitSeal.vue` 走 `/api/v1/handling-units/scan|seal|batch-seal` 专用端点与 `handling_unit:seal/unseal` 权限，属状态机工作台。
+- `print_template`：不做列表收敛。复核确认 5 个硬缺口：① 命名空间（2026-11-16 已补 `apiRoot` 分支，见 §4.11）；② `template/paper/scope/status` 为复合/派生列，YAML 列文法未声明 computed 形态（R-UI-06 要求字段 ∈ schema）；③ 编辑态是 HTML/CSS/纸张/边距/作用域专用编辑器；④ 筛选选项由 `/api/print/printable` 级联；⑤ 行级动作链含 validate/publish/fork-default 与专用编辑抽屉。
+  - 即使只收敛「列表读」，也必须先扩 ②；扩完仍需保留行内 slot，YAML 只承载一半事实，维护成本高于收益。
+  - `PrintPlatform.vue` 为 3 Tab 管理台（模板/绑定/命中试算），归入 §5.4「明确不动」。
 
 #### 4.9.4 精确改动
 
@@ -615,6 +623,15 @@ ui_view_config:
 
 - 删除 `useListPreferences.js` 与 MetaListPage 中的接线即可；`localStorage` 残留键无副作用（不被读取）。
 - 不影响后端、YAML 与其他页面。
+
+---
+
+### 4.11 命名空间扩展：任意 `/api/*` 走 apiRoot（2026-11-16）
+
+- 背景：`resolveRequest` 原先只识别 `/api/v1`、`/api/v2`，其余一律按 v2 处理；`/api/print/templates` 会被拼成 `/api/v2/api/print/templates`。这是 `print_template` 声明式化的前置缺口①。
+- 改动：`src/services/metaResourceService.js` 增加 `API_ROOT_PREFIX = '/api/'` 分支，**保留完整路径**并选用 `apiRoot` 命名空间；v1/v2 分支顺序不变，裸路径回退行为不变。
+- 边界：仅解决寻址，不解决复合/派生列（缺口②）与专用编辑器（缺口③-⑤），因此 M2.5 仍不立项。
+- 验证：`metaResourceService.dataSource.spec.js` 新增 `/api/print/templates`、`/api/integrations/feeds` 两断言；既有 v1/v2/裸路径断言不变。
 
 ---
 

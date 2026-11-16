@@ -7,10 +7,10 @@ vi.mock('@/utils/httpClient', () => {
     put: vi.fn(),
     delete: vi.fn(),
   })
-  return { apiV1: makeNamespace(), apiV2: makeNamespace() }
+  return { apiRoot: makeNamespace(), apiV1: makeNamespace(), apiV2: makeNamespace() }
 })
 
-import { apiV1, apiV2 } from '@/utils/httpClient'
+import { apiRoot, apiV1, apiV2 } from '@/utils/httpClient'
 import {
   applyOrderingBridge,
   buildFetcher,
@@ -38,6 +38,16 @@ describe('resolveRequest（v1 / v2 命名空间路由）', () => {
     const resolved = resolveRequest('/integrations/deliveries')
     expect(resolved.namespace).toBe(apiV2)
     expect(resolved.path).toBe('/integrations/deliveries')
+  })
+
+  it('/api/* 非 v1/v2 端点走 apiRoot 并保留完整路径', () => {
+    const print = resolveRequest('/api/print/templates')
+    expect(print.namespace).toBe(apiRoot)
+    expect(print.path).toBe('/api/print/templates')
+
+    const other = resolveRequest('/api/integrations/feeds')
+    expect(other.namespace).toBe(apiRoot)
+    expect(other.path).toBe('/api/integrations/feeds')
   })
 })
 
