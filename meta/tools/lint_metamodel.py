@@ -1078,6 +1078,234 @@ def lint_capabilities(docs=None):
     return violations, scanned, report
 
 
+#: R-UI-03：允许出现在 params_map 值域的「前端参数名」。
+#: 按真实需求扩展；新增前端参数名必须先加到这里。
+UI_PARAMS_ALLOWED = {
+    "page", "pageSize", "page_size", "sort", "order", "keyword",
+    # 既有资源页已在用的前端参数（S8 落地口径，勿删）
+    "object_type", "ordering",
+    # M1 audit_log：筛选/日期区间/排序桥接的前端参数名
+    "action", "user_name", "created_at_start", "created_at_end",
+    "sort_field", "sort_direction",
+}
+_UI_CONDITION_OPS = ("in", "equals", "not_empty")
+_UI_PLACEHOLDER_RE = re.compile(r"\{([^{}]+)\}")
+_UI_VARIANT_NAME_RE = re.compile(r"^[a-z][a-z0-9_]*$")
+
+
+def _ui_schema_field_ids(raw: dict) -> set:
+    ids = set()
+    for field in raw.get("fields") or ():
+        if isinstance(field, dict):
+            field_id = field.get("id") or field.get("name")
+            if field_id:
+                ids.add(str(field_id))
+    return ids
+
+
+def _ui_check_condition(cond, field_ids: set, where: str, violations: list, label: str) -> None:
+    """R-UI-08：封闭条件文法（单层，不嵌套/不表达式）。"""
+    if not isinstance(cond, dict) or not cond:
+        violations.append((label, where, "R-UI-08：条件必须是对象"))
+        return
+    field = cond.get("field")
+    ops = [op for op in _UI_CONDITION_OPS if op in cond]
+    extra = set(cond) - {"field"} - set(ops)
+    if not isinstance(field, str) or not field or len(ops) != 1 or extra:
+        violations.append(
+            (label, where, "R-UI-08：条件文法仅 {field, in|equals|not_empty}，禁止嵌套/表达式"))
+        return
+    if field not in field_ids:
+        violations.append((label, where, "R-UI-08：条件字段 %r 不存在于 schema" % field))
+    if ops[0] == "in" and (not isinstance(cond["in"], list) or not cond["in"]):
+        violations.append((label, where, "R-UI-08：in 必须是非空数组"))
+    if ops[0] == "not_empty" and not isinstance(cond["not_empty"], bool):
+        violations.append((label, where, "R-UI-08：not_empty 必须是布尔"))
+
+
+def _ui_check_roles(roles, where: str, violations: list, label: str) -> None:
+    if roles is None:
+        return
+    if not isinstance(roles, list) or not all(isinstance(r, str) and r for r in roles):
+        violations.append((label, where, "R-UI-08：roles 必须是非空字符串数组"))
+
+
+def _ui_check_placeholders(url, field_ids: set, where: str, violations: list, label: str) -> None:
+    """R-UI-05：占位符仅 {row.<field>} / {id}，且 field 必须存在。"""
+    for token in _UI_PLACEHOLDER_RE.findall(str(url or "")):
+        token = token.strip()
+        if token == "id":
+            continue
+        if token.startswith("row.") and token[4:] in field_ids:
+            continue
+        violations.append((label, where, "R-UI-05：非法占位符 {%s}" % token))
+
+
+def _lint_ui_view_block(label: str, prefix: str, cfg: dict, field_ids: set, violations: list,
+                        strict: bool = False) -> None:
+    """strict=True（version>=2）才启用列字段存在性/filter_type 硬校验；
+    v1 语义已冻结，仅校验新声明（条件/roles/data_source）。"""
+    lst = cfg.get("list")
+    if not isinstance(lst, dict):
+        return
+    has_data_source = isinstance(lst.get("data_source"), dict)
+
+    data_source = lst.get("data_source")
+    if isinstance(data_source, dict):
+        url = str(data_source.get("url") or "")
+        if not url.startswith("/api/"):
+            violations.append(
+                (label, prefix + ".list.data_source.url", "R-UI-02：url 必须以 /api/ 开头"))
+        if str(data_source.get("method") or "get").lower() not in ("get", "post"):
+            violations.append(
+                (label, prefix + ".list.data_source.method", "R-UI-02：method 只能是 GET/POST"))
+        for key in ("items_path", "total_path"):
+            if not str(data_source.get(key) or "").strip():
+                violations.append(
+                    (label, prefix + ".list.data_source." + key, "R-UI-02：%s 必填" % key))
+        params = data_source.get("params_map")
+        if isinstance(params, dict):
+            for key, value in params.items():
+                if str(value) not in UI_PARAMS_ALLOWED:
+                    violations.append(
+                        (label, prefix + ".list.data_source.params_map." + str(key),
+                         "R-UI-03：不支持的前端参数 %r（允许：%s）"
+                         % (value, "/".join(sorted(UI_PARAMS_ALLOWED)))))
+        _ui_check_placeholders(url, field_ids, prefix + ".list.data_source.url", violations, label)
+
+    actions = lst.get("actions")
+    seen_action_ids = set()
+    if isinstance(actions, list):
+        for index, action in enumerate(actions):
+            where = "%s.list.actions[%d]" % (prefix, index)
+            if not isinstance(action, dict):
+                violations.append((label, where, "R-UI-04：动作必须是对象"))
+                continue
+            action_id = action.get("id") or action.get("action") or action.get("key")
+            if not action_id:
+                violations.append((label, where, "R-UI-04：动作缺少 id"))
+            elif action_id in seen_action_ids:
+                violations.append((label, where, "R-UI-04：动作 id %r 重复" % action_id))
+            else:
+                seen_action_ids.add(action_id)
+            position = action.get("position")
+            if position is not None and position not in ("row", "toolbar"):
+                violations.append(
+                    (label, where + ".position", "R-UI-04：position ∈ {row,toolbar}"))
+            http = action.get("http")
+            if isinstance(http, dict):
+                url = http.get("url")
+                if not url:
+                    violations.append((label, where + ".http.url", "R-UI-04：http.url 必填"))
+                _ui_check_placeholders(url, field_ids, where + ".http.url", violations, label)
+            dialog = action.get("dialog")
+            if dialog is not None and dialog not in ("none", "form"):
+                violations.append((label, where + ".dialog", "R-UI-04：dialog ∈ {none,form}"))
+            if action.get("visible_when") is not None:
+                _ui_check_condition(
+                    action["visible_when"], field_ids, where + ".visible_when", violations, label)
+            _ui_check_roles(action.get("roles"), where + ".roles", violations, label)
+
+    columns = lst.get("columns")
+    if isinstance(columns, list):
+        for index, column in enumerate(columns):
+            where = "%s.list.columns[%d]" % (prefix, index)
+            if not isinstance(column, dict):
+                violations.append((label, where, "R-UI-06：列必须是对象"))
+                continue
+            field_id = column.get("field") or column.get("key")
+            if not field_id:
+                violations.append((label, where, "R-UI-06：列缺少 field/key"))
+            elif strict and not has_data_source and field_id not in field_ids and (
+                    not column.get("computed") and not column.get("value_help")):
+                violations.append(
+                    (label, where,
+                     "R-UI-06：字段 %r 不存在（computed/value_help 列豁免）" % field_id))
+            if strict and column.get("filterable") is True and not str(
+                    column.get("filter_type") or "").strip():
+                violations.append(
+                    (label, where + ".filter_type", "R-UI-06：filterable 列必须声明 filter_type"))
+            if column.get("visible_when") is not None:
+                _ui_check_condition(
+                    column["visible_when"], field_ids, where + ".visible_when", violations, label)
+            _ui_check_roles(column.get("roles"), where + ".roles", violations, label)
+
+
+def lint_ui_config(docs=None) -> tuple:
+    """R-UI-01..08：ui_view_config / variants / 条件文法 lint。"""
+    violations = []
+    scanned = 0
+
+    for label, raw in _iter_raw_docs(docs):
+        if not isinstance(raw, dict):
+            continue
+        if raw.get("_error"):
+            violations.append((label, "yaml", raw["_error"]))
+            continue
+
+        field_ids = _ui_schema_field_ids(raw)
+
+        # 字段级条件只读 / 角色（即使没有 ui_view_config 也要校验）
+        for field in raw.get("fields") or ():
+            if not isinstance(field, dict):
+                continue
+            field_id = str(field.get("id") or field.get("name") or "?")
+            ui = field.get("ui")
+            if not isinstance(ui, dict):
+                continue
+            if ui.get("readonly_when") is not None:
+                _ui_check_condition(
+                    ui["readonly_when"], field_ids,
+                    "fields.%s.ui.readonly_when" % field_id, violations, label)
+            _ui_check_roles(ui.get("roles"), "fields.%s.ui.roles" % field_id, violations, label)
+
+        cfg = raw.get("ui_view_config")
+        if not isinstance(cfg, dict):
+            continue
+        scanned += 1
+
+        version = cfg.get("version", 1)
+        if version not in (1, 2):
+            violations.append(
+                (label, "ui_view_config.version", "R-UI-01：version 只能是 1 或 2"))
+            version = 1
+
+        variants = cfg.get("variants")
+        if variants is not None and not isinstance(variants, dict):
+            violations.append(
+                (label, "ui_view_config.variants", "R-UI-07：variants 必须是对象"))
+            variants = {}
+        variants = variants or {}
+        if variants and version < 2:
+            violations.append(
+                (label, "ui_view_config.variants", "R-UI-01：声明 variants 必须 version: 2"))
+
+        _lint_ui_view_block(
+            label, "ui_view_config", cfg, field_ids, violations, strict=(version >= 2))
+
+        for name, patch in variants.items():
+            where = "ui_view_config.variants.%s" % name
+            if not _UI_VARIANT_NAME_RE.match(str(name)) or str(name) == "default":
+                violations.append(
+                    (label, where, "R-UI-07：变体名须匹配 ^[a-z][a-z0-9_]*$ 且不能是 default"))
+            if not isinstance(patch, dict):
+                violations.append((label, where, "R-UI-07：变体必须是对象"))
+                continue
+            if "variants" in patch:
+                violations.append((label, where + ".variants", "R-UI-07：变体不得嵌套 variants"))
+                continue
+            try:
+                from meta.core.ui_config.variant_merge import merge_patch
+                merged, _merge_warnings = merge_patch(cfg, patch, where="ui_view_config")
+            except Exception as exc:  # noqa: BLE001
+                violations.append((label, where, "R-UI-07：合并失败 %s" % exc))
+                continue
+            merged.pop("variants", None)
+            _lint_ui_view_block(label, where, merged, field_ids, violations, strict=True)
+
+    return violations, scanned
+
+
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--relations", action="store_true",
@@ -1092,15 +1320,17 @@ def main() -> int:
                         help="R-MM-03 字段策略声明 + 派生状态字段矩阵 lint")
     parser.add_argument("--capabilities", action="store_true",
                         help="R24/R28 能力维度单层承运 lint")
+    parser.add_argument("--ui-config", action="store_true",
+                        help="R-UI-01..08 ui_view_config / variants / 条件文法 lint")
     parser.add_argument("--all", action="store_true",
                         help="全部已实现 lint（relations + actions + permissions + "
-                             "doc-flow + field-policies + capabilities）")
+                             "doc-flow + field-policies + capabilities + ui-config）")
     args = parser.parse_args()
 
     # 无参数时默认执行全部已实现项，便于直接 `python meta/tools/lint_metamodel.py`
     run_all = args.all or not (
         args.relations or args.actions or args.permissions or args.doc_flow
-        or args.field_policies or args.capabilities
+        or args.field_policies or args.capabilities or args.ui_config
     )
 
     failed = False
@@ -1157,6 +1387,14 @@ def main() -> int:
         print("[capabilities] %d schema(s) scanned, %d violation(s)；单层承运键：%s"
               % (scanned, len(violations),
                  "/".join(capability_report["l1_only_field_keys"])))
+        failed = failed or bool(violations)
+
+    if run_all or args.ui_config:
+        violations, scanned = lint_ui_config()
+        for file_label, field, reason in violations:
+            print("[ui-config] %s :: %s — %s" % (file_label, field, reason))
+        print("[ui-config] %d ui_view_config(s) scanned, %d violation(s)"
+              % (scanned, len(violations)))
         failed = failed or bool(violations)
 
     return 1 if failed else 0

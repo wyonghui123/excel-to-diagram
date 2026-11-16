@@ -6,6 +6,7 @@
 """
 
 import os
+import re
 import logging
 from flask import Blueprint, request, jsonify
 from dataclasses import asdict
@@ -369,7 +370,7 @@ def get_form_view_config(object_type: str):
 def _empty_block(name: str) -> Any:
     """block 构建失败时的空块（形状与正常块一致，前端可安全渲染）"""
     if name == 'list':
-        return {'columns': [], 'actions': []}
+        return {'columns': [], 'actions': [], 'data_source': None, 'stats': None}
     if name == 'detail':
         return {'sections': [], 'tabs': []}
     if name == 'form':
@@ -381,13 +382,64 @@ def _empty_block(name: str) -> Any:
     return {}
 
 
-def _action_to_dict(action: Any) -> dict:
+def _warn(warnings: list, code: str, where: str, message: str) -> None:
+    """ui-meta 运行期降级警告（不抛错，页面继续可用）。"""
+    if warnings is None:
+        return
+    warnings.append({'code': code, 'where': where, 'message': message})
+
+
+#: M0 条件文法：只允许 {field, in|equals|not_empty} 单层（禁止嵌套/表达式）。
+_CONDITION_OPS = ('in', 'equals', 'not_empty')
+
+
+def _validate_condition(condition: Any, field_map: dict = None) -> str:
+    """校验封闭条件文法；返回错误码（'' = 合法）。"""
+    if not isinstance(condition, dict) or not condition:
+        return 'UNKNOWN_CONDITION'
+    field = condition.get('field')
+    if not isinstance(field, str) or not field:
+        return 'UNKNOWN_CONDITION'
+    ops = [op for op in _CONDITION_OPS if op in condition]
+    if len(ops) != 1:
+        return 'UNKNOWN_CONDITION'
+    if set(condition) - {'field', ops[0]}:
+        return 'UNKNOWN_CONDITION'
+    if ops[0] == 'in' and (not isinstance(condition['in'], list) or not condition['in']):
+        return 'UNKNOWN_CONDITION'
+    if ops[0] == 'not_empty' and not isinstance(condition['not_empty'], bool):
+        return 'UNKNOWN_CONDITION'
+    if field_map is not None and field not in field_map:
+        return 'UNKNOWN_FIELD'
+    return ''
+
+
+def _valid_roles(roles: Any) -> bool:
+    return isinstance(roles, list) and all(isinstance(r, str) and r for r in roles)
+
+
+def _action_to_dict(action: Any, field_map: dict = None, warnings: list = None) -> dict:
     """动作声明统一成 dict（字符串形态保留 id/label），不注入 enabled。"""
     if isinstance(action, dict):
-        return dict(action)
-    if isinstance(action, str):
-        return {'id': action, 'label': action}
-    return {}
+        item = dict(action)
+    elif isinstance(action, str):
+        item = {'id': action, 'label': action}
+    else:
+        return {}
+
+    ident = item.get('id') or item.get('label') or ''
+    if item.get('visible_when'):
+        error = _validate_condition(item['visible_when'], field_map)
+        if error:
+            item.pop('visible_when', None)
+            _warn(warnings, error, f'actions.{ident}.visible_when', '条件非法，已忽略 visible_when')
+    if 'roles' in item:
+        if not _valid_roles(item['roles']):
+            item.pop('roles', None)
+            _warn(warnings, 'UNKNOWN_CONDITION', f'actions.{ident}.roles', 'roles 必须是字符串数组，已忽略')
+        elif not item['roles']:
+            item.pop('roles')
+    return item
 
 
 def _section_columns(section) -> int:
@@ -413,23 +465,86 @@ def _tab_dict(tab) -> dict:
     }
 
 
-def _list_block(config, meta_obj) -> dict:
+def _list_column_dict(col, field_map: dict, warnings: list = None) -> dict:
+    """列表列下发（前端 MetaListPage 的唯一消费口径）。
+
+    枚举标签/颜色按「列级声明 → 字段 ui.options → 字段 enum_values」回落，
+    保证 payload / 状态这类字段只需在 YAML 字段上声明一次 `ui.options`，
+    表格和下拉就都显示中文标签，不必再在前端维护映射。
+    """
+    meta_field = field_map.get(col.key)
+    ui = getattr(meta_field, 'ui', None) if meta_field is not None else None
+    options = list(col.enum_values or [])
+    if not options and ui is not None:
+        options = list(getattr(ui, 'options', None) or [])
+    if not options and meta_field is not None:
+        options = list(getattr(meta_field, 'enum_values', None) or [])
+
+    # 展示类型：view_config_service 会用字段类型覆盖列的 type（如 switch 字段是
+    # integer），这里按「两值 0/1 枚举」还原成 boolean，前端才会渲染成 启用/停用 徽标
+    display_type = col.field_type or ''
+    values = {str(opt.get('value')).lower() for opt in options if isinstance(opt, dict)}
+    if values and len(values) <= 2 and values <= {'0', '1', 'true', 'false'}:
+        display_type = 'boolean'
+
+    badge_colors = {}
+    for opt in options:
+        if not isinstance(opt, dict) or not opt.get('color'):
+            continue
+        value = opt.get('value')
+        # 键统一转成字符串：前端按 String(rawValue) 命中，0/1 与 true/false 都能对上
+        badge_colors[str(value).lower()] = opt['color']
+    filter_options = list(col.filter_options or []) or options
+    payload = {
+        'field': col.key,
+        'label': col.title or (meta_field.name if meta_field is not None else '') or col.key,
+        'type': display_type,
+        'width': col.width,
+        'position': col.position,
+        'importance': col.importance,
+        'sortable': bool(col.sortable),
+        'filterable': bool(col.filterable),
+        'filter_type': col.filter_type or '',
+        'filter_options': filter_options,
+        'filter_placeholder': col.filter_placeholder or '',
+        'enum_type': col.enum_type or '',
+        'tag_enum': col.enum_type or '',
+        'enum_values': options,
+        'badge_colors': badge_colors,
+        'api_param_key': col.api_param_key or '',
+        'format': col.format or '',
+        'hidden_in_list': bool(col.hidden_in_list),
+        'computed': bool(col.computed),
+        'searchable': bool(getattr(col, 'searchable', True)),
+    }
+    # [M0 2026-11-16] 条件可见性 / 角色：仅非空时下发（未声明 ⇒ 输出不变）
+    visible_when = getattr(col, 'visible_when', None) or {}
+    if visible_when:
+        error = _validate_condition(visible_when, field_map)
+        if error:
+            _warn(warnings, error, f'list.columns.{col.key}.visible_when',
+                  '条件非法，已忽略 visible_when')
+        else:
+            payload['visible_when'] = dict(visible_when)
+    roles = list(getattr(col, 'roles', None) or [])
+    if roles:
+        payload['roles'] = roles
+    return payload
+
+
+def _list_block(config, meta_obj, warnings: list = None) -> dict:
     lst = getattr(config, 'list', None)
     if not lst:
         return _empty_block('list')
+    field_map = {f.id: f for f in getattr(meta_obj, 'fields', []) or []}
+    # [S8] 声明式数据源/指标：未声明时下发 null（前端继续走既有 fetcher，行为不变）
+    data_source = dict(getattr(lst, 'data_source', None) or {}) or None
+    stats = dict(getattr(lst, 'stats', None) or {}) or None
     return {
-        'columns': [
-            {
-                'field': col.key,
-                'label': col.title or col.key,
-                'width': col.width,
-                'sortable': bool(col.sortable),
-                'filterable': bool(col.filterable),
-                'tag_enum': col.enum_type or '',
-            }
-            for col in lst.columns
-        ],
-        'actions': [_action_to_dict(a) for a in lst.actions],
+        'columns': [_list_column_dict(col, field_map, warnings) for col in lst.columns],
+        'actions': [_action_to_dict(a, field_map, warnings) for a in lst.actions],
+        'data_source': data_source,
+        'stats': stats,
     }
 
 
@@ -452,14 +567,19 @@ def _detail_block(config, meta_obj) -> dict:
     }
 
 
-def _form_block(config, meta_obj) -> dict:
+def _form_block(config, meta_obj, warnings: list = None) -> dict:
     form = getattr(config, 'form', None)
     if not form:
         return _empty_block('form')
     field_map = {f.id: f for f in getattr(meta_obj, 'fields', []) or []}
     fields = []
     for section in form.sections:
-        for field_id in section.fields:
+        field_ids = list(section.fields or [])
+        if not field_ids:
+            # 分区用 columns 声明布局时（集成模块三张表均如此），字段在各列里
+            for column in getattr(section, 'columns', []) or []:
+                field_ids.extend(getattr(column, 'fields', []) or [])
+        for field_id in field_ids:
             meta_field = field_map.get(field_id)
             if not meta_field:
                 continue
@@ -468,13 +588,37 @@ def _form_block(config, meta_obj) -> dict:
                 'key': field_id,
                 'label': meta_field.name,
                 'widget': ui.widget or meta_field.field_type.value,
+                # 字段原始类型（string/integer/json/...）：自定义表单据此做
+                # JSON 文本与对象的互转等控件级处理
+                'field_type': meta_field.field_type.value,
                 'required': bool(meta_field.required),
                 'readonly': bool(ui.readonly),
                 'visible': bool(ui.visible),
                 'enum_type': meta_field.enum_type or '',
+                # 字段级取值域与默认值：自定义表单（如集成模块抽屉）直接用这两项
+                # 渲染下拉与初始值，不再在前端复制一份常量表 / emptyForm。
+                'options': [dict(opt) for opt in (ui.options or [])],
+                'default': meta_field.default,
             }
+            if ui.placeholder:
+                item['placeholder'] = ui.placeholder
+            help_text = getattr(ui, 'help_text', '')
+            if help_text:
+                item['help_text'] = help_text
             if ui.visible_when:
                 item['visible_when'] = ui.visible_when
+            # [M0 2026-11-16] 条件只读 + 字段级角色：仅非空时下发
+            readonly_when = getattr(ui, 'readonly_when', None)
+            if readonly_when:
+                error = _validate_condition(readonly_when, field_map)
+                if error:
+                    _warn(warnings, error, f'form.fields.{field_id}.readonly_when',
+                          '条件非法，已忽略 readonly_when')
+                else:
+                    item['readonly_when'] = dict(readonly_when)
+            field_roles = list(getattr(ui, 'roles', None) or [])
+            if field_roles:
+                item['roles'] = field_roles
             if ui.col_span:
                 item['col_span'] = ui.col_span
             if ui.depends_on:
@@ -498,19 +642,74 @@ def _filters_block(config, meta_obj) -> Any:
 
 
 def _policies_block(meta_obj) -> dict:
-    """字段级策略声明（只输出非默认声明，空对象表示全部按默认口径）。"""
+    """字段级策略声明（只输出非默认声明，空对象表示全部按默认口径）。
+
+    [M0 2026-11-16] 纳入条件只读与字段级 roles：permission 优先，roles 取并集。
+    """
     result = {}
     for meta_field in getattr(meta_obj, 'fields', []) or []:
         perm = getattr(meta_field, 'permission', None)
-        if not perm:
+        ui = getattr(meta_field, 'ui', None)
+        ui_roles = list(getattr(ui, 'roles', None) or [])
+        readonly_when = getattr(ui, 'readonly_when', None)
+        has_permission_decl = bool(perm) and (
+            perm.readable is False or perm.writable is False or bool(perm.roles)
+        )
+        if not (has_permission_decl or ui_roles or readonly_when):
             continue
-        if perm.readable is False or perm.writable is False or perm.roles:
-            result[meta_field.id] = {
-                'readable': bool(perm.readable),
-                'writable': bool(perm.writable),
-                'roles': list(perm.roles or []),
-            }
+        roles = list(perm.roles or []) if perm else []
+        for role in ui_roles:
+            if role not in roles:
+                roles.append(role)
+        entry = {
+            'readable': bool(perm.readable) if perm else True,
+            'writable': bool(perm.writable) if perm else True,
+            'roles': roles,
+        }
+        if isinstance(readonly_when, dict) and not _validate_condition(readonly_when):
+            entry['readonly_when'] = dict(readonly_when)
+        result[meta_field.id] = entry
     return result
+
+
+def _ui_view_sources(object_type: str, view: str = None) -> list:
+    """[M0] explain=1：定位 ui_view_config 所在 YAML 与近似行号（仅诊断用）。"""
+    try:
+        schema_dir = get_yaml_schema_dir()
+        if not schema_dir or not os.path.isdir(schema_dir):
+            return []
+        id_pattern = re.compile(r'^id:\s*' + re.escape(object_type) + r'\s*$')
+        sources = []
+        for name in sorted(os.listdir(schema_dir)):
+            if not name.endswith(('.yaml', '.yml')):
+                continue
+            path = os.path.join(schema_dir, name)
+            try:
+                with open(path, encoding='utf-8') as handle:
+                    lines = handle.read().splitlines()
+            except OSError:
+                continue
+            if not any(id_pattern.match(line) for line in lines):
+                continue
+            anchors = [
+                ('ui_view_config', re.compile(r'^ui_view_config:\s*$')),
+                ('list.columns', re.compile(r'^ {4}columns:\s*$')),
+                ('list.actions', re.compile(r'^ {4}actions:\s*$')),
+                ('variants', re.compile(r'^ {2}variants:\s*$')),
+            ]
+            if view:
+                anchors.append(
+                    ('variants.' + view, re.compile(r'^ {4}' + re.escape(view) + r':\s*$')))
+            for key, pattern in anchors:
+                for index, line in enumerate(lines, start=1):
+                    if pattern.match(line):
+                        sources.append({'file': path, 'key': key, 'line': index})
+                        break
+            break
+        return sources
+    except Exception:  # noqa: BLE001 —— 诊断信息缺失不影响正常响应
+        logger.warning('[ui-meta] explain 来源定位失败: %s', object_type, exc_info=True)
+        return []
 
 
 @meta_bp.route('/<object_type>/ui-meta', methods=['GET'])
@@ -519,9 +718,25 @@ def get_ui_meta(object_type: str):
 
     鉴权口径与相邻 view-config / form-view 一致（蓝图内无额外装饰器，沿用既有口径）。
     任一 block 构建失败只降级该块并置 partial=True，不影响其余块。
+
+    [M0 2026-11-16] 支持 `?view=<variant>`；顶层 `meta` 下发 warnings /
+    effective_view；`?explain=1` 附 sources（YAML 文件 + 近似行号）。
     """
     _ensure_fresh_meta()
-    config = view_config_service.get_or_build_view_config(object_type)
+    view = request.args.get('view') or None
+    explain = request.args.get('explain') == '1'
+    warnings: list = []
+
+    effective_view = view or 'default'
+    if view:
+        available = view_config_service.get_available_views(object_type)
+        if view not in available:
+            _warn(warnings, 'UNKNOWN_VIEW', f'view.{view}',
+                  f'未声明的视图变体，已回退 default（可用: {", ".join(available)}）')
+            effective_view = 'default'
+
+    config = view_config_service.get_or_build_view_config(
+        object_type, view if effective_view != 'default' else None)
     meta_obj = registry.get(object_type)
 
     data: dict = {
@@ -530,9 +745,9 @@ def get_ui_meta(object_type: str):
     partial = False
 
     builders = (
-        ('list', lambda: _list_block(config, meta_obj)),
+        ('list', lambda: _list_block(config, meta_obj, warnings)),
         ('detail', lambda: _detail_block(config, meta_obj)),
-        ('form', lambda: _form_block(config, meta_obj)),
+        ('form', lambda: _form_block(config, meta_obj, warnings)),
         ('filters', lambda: _filters_block(config, meta_obj)),
         ('field_policies', lambda: _policies_block(meta_obj)),
     )
@@ -545,24 +760,35 @@ def get_ui_meta(object_type: str):
             partial = True
 
     # 动作合并：list 动作 + detail 动作，按 id 去重（先到先得）
+    field_map = {f.id: f for f in getattr(meta_obj, 'fields', []) or []}
     merged_actions = []
     seen_action_ids = set()
     for action in (
         list((data.get('list') or {}).get('actions') or [])
         + list((data.get('detail') or {}).get('actions') or [])
     ):
-        item = _action_to_dict(action)
+        item = _action_to_dict(action, field_map, warnings)
         action_id = item.get('id') or item.get('label') or ''
         if action_id in seen_action_ids:
             continue
         seen_action_ids.add(action_id)
         merged_actions.append(item)
 
+    meta_block = {
+        'warnings': warnings,
+        'effective_view': effective_view,
+        'schema_version': data.get('schema_version', ''),
+    }
+    if explain:
+        meta_block['sources'] = _ui_view_sources(
+            object_type, view if effective_view != 'default' else None)
+
     data.update({
         'object_type': object_type,
         'label': (meta_obj.name if meta_obj else '') or object_type,
         'partial': partial,
         'actions': merged_actions,
+        'meta': meta_block,
     })
 
     return jsonify({'success': True, 'data': data})

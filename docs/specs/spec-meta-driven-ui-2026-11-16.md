@@ -1,0 +1,497 @@
+# Spec：元数据驱动 UI 的收敛落地（v1.1 文法 + 地基 + 对象迁移）
+
+- 状态：待评审（Draft）
+- 日期：2026-11-16
+- 关联：`docs/specs/plan-integration-p1p2-2026-11-16.md`（S8-2/S8-3/S8-5 已落地）
+- 对标依据：Salesforce（Dynamic Forms / 决策指南）、ServiceNow（`sys_ui_*`）、SAP Fiori Elements（annotations + extension）、Odoo（`ir.ui.view` 继承）、Oracle Fusion（Page/Application Composer）、Power Apps（model-driven form/view）
+
+---
+
+## 1. 背景与结论
+
+集成三页已收敛为「YAML 声明 + 通用组件」，与头部产品同构。但审计后确认：
+
+| # | 事实 | 影响 |
+|---|---|---|
+| F1 | 仅 3 个对象声明 `list.data_source` + `list.actions` + `menu.route` | 其余对象无法被通用组件驱动 |
+| F2 | `audit_log` 已有 YAML，前端却在 [auditLogMeta.js](file:///d:/filework/excel-to-diagram/src/views/SystemManagement/meta/auditLogMeta.js) 重复声明列/筛选/枚举 | 同一事实两处维护，必然漂移 |
+| F3 | `ui-meta` 已下发 `field_policies`（`readable/writable/roles`），但前端未消费 | 权限/可见性仍散落在页面 `v-if` |
+| F4 | 无 `ui_view_config` 校验；`lint_metamodel.py` 只覆盖 relations/actions/permissions/doc-flow | 配错只有在运行时才暴露 |
+
+对标结论（用于约束设计，不是复述）：
+
+1. 声明式覆盖「列表 / 表单 / 动作 / 菜单」是头部默认，**只读运维列表一律声明式**（ServiceNow `sys_audit` + list view；Salesforce Setup Audit Trail）。
+2. 复杂页保留手写，但**手写点必须是明确的 extension point**（Fiori fragment / Odoo inherit / Power Apps Custom Page），而不是复制整页。
+3. 差异通过**继承/变体**表达，不是复制（Odoo `inherit_id` + xpath）。
+4. 元数据必须是**可校验、可回显、可版本化**的第一类对象（SAP 明确警告注解与模型不同步会报错）。
+
+---
+
+## 2. 目标 / 非目标
+
+### 目标
+- G1 给出 YAML v1.1 文法：对象级**变体（variants）**、条件可见性、字段只读、动作可见性。
+- G2 后端 `ui-meta` 输出可诊断（`warnings` / `explain=1` 来源行号），并新增 `--ui-config` 校验。
+- G3 前端通用组件消费条件与字段策略，未知声明**告警不静默**。
+- G4 按序收敛 `audit_log` → `task_run` → `handling_unit`（列表）→ `print_template`（列表）。
+- G5 用户级列表个性化（列序/列宽/每页条数/筛选）本地持久化，元数据变更自动失效。
+
+### 非目标（明确不做，避免渲染器膨胀）
+- ❌ 前端表达式语言 / 脚本钩子（条件文法封闭、可静态校验）。
+- ❌ 跨对象视图继承（当前真实需求是同对象多视图，用 `variants` 足够）。
+- ❌ 元数据入库（YAML 仍是唯一真源）+ 可视化 Builder。
+- ❌ 通用渲染器承载审批流、字段 diff、向导（`engineering_change` / `rule_center` 继续手写）。
+- ❌ 用户个性化同步到后端（先本地）。
+
+---
+
+## 3. 现状基线（契约事实）
+
+`GET /api/v1/meta/<object_type>/ui-meta`（[meta_api.py:583](file:///d:/filework/excel-to-diagram/meta/api/meta_api.py#L583)）当前输出：
+
+| 键 | 来源 | 说明 |
+|---|---|---|
+| `schema_version` | [view_config_service.py:522](file:///d:/filework/excel-to-diagram/meta/services/view_config_service.py#L515-L525) | schema 目录 hash，可作前端缓存失效键 |
+| `list.columns/actions/data_source/stats` | [`_list_block`](file:///d:/filework/excel-to-diagram/meta/api/meta_api.py#L470-L483) | `data_source`/`stats` 未声明时为 `null` |
+| `form/detail/filters` | `_form_block/_detail_block/_filters_block` | 表单字段与详情分区 |
+| `field_policies` | [`_policies_block`](file:///d:/filework/excel-to-diagram/meta/api/meta_api.py#L567-L580) | 仅输出非默认：`{readable,writable,roles}` |
+| `partial` | 聚合端点 | 单块构建失败降级 |
+
+YAML 侧模型：[UIListViewConfig / UIListViewColumn](file:///d:/filework/excel-to-diagram/meta/core/models_ui_config.py#L9-L73)（已含 `data_source`、`stats`、`detail_mode`）。
+前端消费：[metaResourceService.js](file:///d:/filework/excel-to-diagram/src/services/metaResourceService.js) + [MetaResourcePage.vue](file:///d:/filework/excel-to-diagram/src/components/common/MetaResourcePage.vue)。
+
+---
+
+## 4. 详细设计
+
+### 4.1 YAML v1.1 文法（增量，全部可选）
+
+```yaml
+ui_view_config:
+  version: 2                      # 文法版本；缺省按 1 处理（= 当前行为）
+  menu: {...}                     # 不变；variants 不允许覆盖 menu
+  list:                           # 基础视图（不变）
+    data_source: {...}
+    actions: [...]
+    columns: [...]
+  variants:                       # 新增：同对象多视图（Odoo inherit 的轻量等价物）
+    docs:
+      title: 单据列表
+      list:
+        columns:
+          - field: doc_no
+          - field: status
+            visible_when: {field: status, in: [draft, submitted]}
+        actions:
+          - id: export
+            label: 导出
+            position: toolbar
+            roles: [admin, planner]
+            http: {method: get, url: /api/v2/handling-unit/docs/export}
+```
+
+**合并语义（patch）**：逐层深合并；数组按稳定键合并（`columns→field`、`actions→id`、`form.fields→id`、`filters→key`），同名项覆盖，`_remove: true` 删除。
+
+**条件文法（封闭）**，只允许以下形式之一：
+
+```yaml
+visible_when: {field: status, in: [failed, skipped]}
+readonly_when: {field: source, equals: manual}
+visible_when: {field: secret_ref, not_empty: true}
+```
+
+- 只允许单层条件对象，不嵌套、不允许 `and/or`（多条件请拆列/拆动作）。
+- `field` 必须存在于该对象 schema（lint 校验）。
+- 运行时遇到未知形式：**按“可见/可编辑”降级 + `console.warn` 一次**（理由：后端仍鉴权，隐藏导致空白页更难诊断）。
+
+**作用位置**：
+| 位置 | 支持键 |
+|---|---|
+| `list.columns[]` | `visible_when`、`roles` |
+| `list.actions[]` | `visible_when`、`roles`（已有 `enabled_when`、`confirm`、`success_message`） |
+| `form.fields[]` / 字段 schema | `readonly_when`、`visible_when`、`roles`（与 `permission` 合并，后端 `field_policies` 优先） |
+
+**视图选择**：`GET /ui-meta?view=docs`；前端由 `route.meta.integrationResource.view` 或 `?view=` 传入；未声明 `variants` 时行为完全不变。
+
+### 4.2 后端改动
+
+| 文件 | 改动 | 兼容性 |
+|---|---|---|
+| [meta_api.py](file:///d:/filework/excel-to-diagram/meta/api/meta_api.py#L470-L483) `_list_block` | 列/动作透传 `visible_when/roles`；接受 `view` 参数选变体 | 未声明则输出不变 |
+| `_action_to_dict` | 白名单增加 `visible_when`、`roles` | 纯增量 |
+| `_policies_block` | 合并字段级 `visible_when/readonly_when`（YAML）与 `permission` | 输出结构保持 `{readable,writable,roles}` + 新增可选键 |
+| `get_ui_meta` | 顶层新增 `meta: {warnings: [], effective_view, schema_version}`；`?explain=1` 时附 `sources: [{file, key, line}]` | 新增键，旧消费方无感 |
+| `view_config_service` | 实现 `variants` 合并 + 环检测；合并结果参与 `schema_version` 指纹 | 无 variants 时结果不变 |
+
+**错误分级**（关键决策）：
+- 构建期（lint / doctor / CI）：结构错误**硬失败**（非零退出）。
+- 运行期：结构错误**降级**——跳过该条动作/列，写入 `meta.warnings`，页面仍可用（不能因一个对象配错白屏）。
+
+### 4.3 校验：`lint_metamodel.py --ui-config`
+
+| 规则 | 内容 |
+|---|---|
+| R-UI-01 | `version` ∈ {1,2}；v2 才允许 `variants` |
+| R-UI-02 | `data_source.url` 以 `/api/` 开头；`method` ∈ GET/POST；`items_path/total_path` 必填 |
+| R-UI-03 | `params_map` 值域 ⊆ `{page,pageSize,sort,order,keyword}`；禁止反向 |
+| R-UI-04 | `actions[].id` 唯一；`position` ∈ `{row,toolbar}`；有 `http.url`；`dialog` ∈ `{none,form}` |
+| R-UI-05 | 占位符只允许 `{row.<field>}`、`{id}`，且 `<field>` 存在于 schema |
+| R-UI-06 | `columns[].field` ∈ schema 字段；`filterable: true` 的列必须声明 `filter_type` |
+| R-UI-07 | `variants` 键合法、合并后仍满足以上规则；无自引用 |
+| R-UI-08 | 条件文法合法（4.1），`field` 存在；`roles` 为字符串数组 |
+
+接入：`python meta/tools/lint_metamodel.py --ui-config`（并纳入 `--all`）。
+
+### 4.4 前端改动
+
+**服务层** [metaResourceService.js](file:///d:/filework/excel-to-diagram/src/services/metaResourceService.js) 新增（纯函数，可单测）：
+- `evalCondition(cond, row)` → boolean
+- `isVisible(decl, row)` / `isActionVisible(decl, row)` / `isFieldReadonly(decl, row, policies)`
+- `mergeFieldPolicies(uiMeta.field_policies, localDecl)`（后端优先）
+
+**组件接线**：
+| 组件 | 改动 |
+|---|---|
+| [MetaListPage](file:///d:/filework/excel-to-diagram/src/components/common/MetaListPage/MetaListPage.vue) | 列渲染前过滤 `visible_when=false`；动作列按 `visible_when` 隐藏（不是置灰） |
+| [MetaResourcePage](file:///d:/filework/excel-to-diagram/src/components/common/MetaResourcePage.vue) | `customActions` 与 `variants` 解析；未知 action/字段 → `warnOnce` |
+| [MetaForm.vue](file:///d:/filework/excel-to-diagram/src/components/common/MetaForm.vue) | `field.readonly` 与 `readonly_when` 合并；`roles` 命中失败则只读（不隐藏） |
+
+**规则**：`roles` 仅做展示层过滤，**不替代后端鉴权**；页面不得再为同一字段写 `v-if`。
+
+### 4.5 用户级列表个性化
+
+- 存储：`localStorage['meta-ui:list:<object_type>:<schema_version>']`
+- 内容：`{columnOrder: [], hidden: [], width: {}, pageSize, filters: {}}`
+- 失效：`schema_version`（schema 目录 hash）变化 → 整条丢弃，避免列错位。
+- 范围：仅 `MetaListPage` 内生效；不做后端同步（非目标）。
+
+### 4.6 调试可观测性
+
+- `ui-meta` 顶层 `meta.warnings[]`：`{code, where, message}`（如 `UNKNOWN_CONDITION`、`UNKNOWN_FIELD`）。
+- `?explain=1`：返回 `meta.sources[]`（`file:line`），供排查“这份列到底从哪个 YAML 来的”。
+- 前端对同一 warning 只 `console.warn` 一次（按 `object_type+code` 去重）。
+
+---
+
+## 5. 对象收敛清单
+
+### 5.1 `audit_log`（P0，风险最低）
+
+- **现状**：`AuditLogManagement.vue` 用 `MetaListPage` + 本地 [auditLogMeta.js](file:///d:/filework/excel-to-diagram/src/views/SystemManagement/meta/auditLogMeta.js)（列/筛选/枚举/`baseUrl: /api/v1/audit`）。
+- **YAML 增量**（写进 `meta/schemas/audit_log.yaml`）：
+  ```yaml
+  ui_view_config:
+    list:
+      data_source:
+        url: /api/v1/audit/logs
+        method: get
+        items_path: data.data      # 端点为 {data:[...], total}；经 httpClient 解包后为 data.data
+        total_path: data.total
+        params_map: {page: page, page_size: pageSize, object_type: object_type, action: action}
+      actions:
+        - id: export
+          label: 导出
+          position: toolbar
+          http: {method: get, url: /api/v1/audit/logs/export}
+        - id: detail
+          label: 详情
+          position: row
+          http: {method: get, url: '/api/v1/audit/logs/{row.id}'}
+      columns: [...]      # 从 auditLogMeta.js 迁移，枚举/颜色改由 YAML options 下发
+  ```
+- **页面改造**：删除 `auditLogMeta.js`；`AuditLogManagement.vue` 改为通用壳（保留自定义详情抽屉，作为唯一合法差异）；`SystemAdmin/index.vue` 已走通用页，二者共用同一份 YAML。
+- **实现前置动作**：用 `grep` 复核 `/api/v1/audit/logs` 的返回结构后再回填 `items_path/total_path`（勿凭猜测）。
+- **验收**：表头/筛选/枚举与迁移前逐项一致；导出与详情抽屉可用；`auditLogMeta.spec.js` 删除或改测 YAML 下发。
+
+### 5.2 `task_run`（P1）
+
+- 端点：`GET /api/v2/jobs/runs`；动作 `POST /api/v2/jobs/runs/{id}/retry`、`/cancel`（`jobService.js`）。
+- `enabled_when: {field: status, in: [failed, timeout]}`（retry）/ `in: [running, queued]`（cancel）。
+- 页面 `TaskRuns.vue` 收敛为薄壳；保留日志查看抽屉。
+
+### 5.3 `handling_unit` / `print_template`（P2）
+
+- `handling_unit`：用 `variants.docs` / `variants.seal` 表达两种列表，替代两个页面各写一份列；单据生成抽屉保留。
+- `print_template`：只收敛列表；模板编辑器（`PrintPlatform` 内的编辑器）保留。
+
+### 5.4 明确不动
+
+| 对象/页面 | 原因（对标依据） |
+|---|---|
+| `engineering_change`（List/Detail/Diff 三页） | 审批流 + 字段 diff + 多步动作，属“工作流产物”，头部用 Flow/Screen Flow 承载 |
+| `RuleCenterPage` + `ApprovalPolicyPanel` | 复合工作台（多对象 + 树 + 矩阵），属 Custom Page 场景 |
+| `PermissionSetCenter` / `RolePermissionCenter` | 树形授权矩阵，交互非 CRUD |
+| `PlatformOpsJobs` / `JobSchedules` | 无对应 YAML，纯运维面 |
+
+---
+
+### 4.7 M0 实施契约（decision-complete）
+
+> 本节是 M0 的唯一执行口径。与上文冲突时以本节为准，并同步收窄 §4.1。
+
+#### 4.7.1 决策修订（避免回归）
+
+| # | 修订 | 理由 |
+|---|---|---|
+| D1 | 字段级 `visible_when` **保持 legacy 字符串表达式**（`UIAnnotation.visible_when: Optional[str]`），M0 不把它改成条件对象；表单条件只新增 `readonly_when`（dict）+ `roles` | 该字段已被详情页/表单按表达式字符串消费，改类型必然回归 |
+| D2 | `roles` 未注入当前用户角色上下文时**不隐藏**（默认放行） | 前端拿不到角色时误隐藏会造成“页面空白”，后端仍鉴权 |
+| D3 | 列级 `visible_when` 以 `row=null` 求值，false 即隐藏该列；现有 YAML 均未声明 ⇒ 行为不变 | 与 §4.4「列渲染前过滤」一致，且可静态校验 |
+| D4 | YAML 加载器**不新增抛错路径**：variants / 条件结构错误由 `lint --ui-config` 硬失败，`ui-meta` 运行期降级 + `meta.warnings` | 配错不能白屏（§4.2 错误分级） |
+| D5 | `explain=1` 的 `line` 为 YAML 文本扫描的**近似行号**（首个匹配行），仅用于定位文件 | 现有 registry 未持久化字段级行号，避免为此改造加载链 |
+
+#### 4.7.2 数据模型（`meta/core/models_ui_config.py` / `models_annotations.py`）
+
+- `UIListViewColumn` 新增：`visible_when: Dict[str, Any] = field(default_factory=dict)`、`roles: List[str] = field(default_factory=list)`。
+- `UIViewConfig` 新增：`version: int = 1`、`variants: Dict[str, Dict[str, Any]] = field(default_factory=dict)`（原样保留 patch，不在加载期求值）。
+- `UIAnnotation` 新增：`readonly_when: Optional[Dict[str, Any]] = None`、`roles: List[str] = field(default_factory=list)`。
+
+#### 4.7.3 YAML 加载（`meta/core/yaml_loader.py`）
+
+- `parse_ui_list_view_column`：读取可选 `visible_when`（dict，原样）/ `roles`（字符串数组，过滤非字符串项），写入列模型。
+- `parse_ui_annotation`：读取可选 `readonly_when`（仅接受 dict，否则置 `None`，不抛错）/ `roles`（字符串数组）。
+- `parse_ui_view_config`：读取 `version`（`int`，缺省 1；非法值回落 1）；读取 `variants`（必须是 dict，否则忽略并 `logger.warning`；每项非 dict 的条目丢弃）。其余键透传不变。
+- `_parse_resource_list_actions`：`dict(item)` 已透传 `visible_when/roles`，**不新增校验抛错**（D4）。
+
+#### 4.7.4 变体合并（新文件 `meta/core/ui_config/variant_merge.py`）
+
+纯函数、无 registry 依赖，供 service 与 lint 共用：
+
+- `merge_patch(base: dict, patch: dict, *, where: str = "") -> tuple[dict, list[str]]`
+  - 逐层深合并；dict 递归；标量覆盖；`None` 覆盖。
+  - 数组按稳定键合并：`columns→field|key`、`actions→id|key`、`filters→key`、`detail.sections→key`、`form.sections→key`、`form.fields→id|key`；同键覆盖，新键追加，`_remove: true` 删除。
+  - patch 中出现 `variants` → 忽略并返回 warning `NESTED_VARIANTS`（禁止自引用/嵌套）。
+- `apply_variant(base_config: UIViewConfig, patch: dict) -> tuple[UIViewConfig, list[str]]`
+  - `dataclasses.asdict(base_config)` → `merge_patch` → `parse_ui_view_config`（函数内延迟 import 避免环）。
+  - `version` 固定为 `base.version`，`variants` 置空（变体不携带变体）。
+
+#### 4.7.5 服务层（`meta/services/view_config_service.py`）
+
+- `get_view_config(object_type, view_name)`：
+  - 现有命名视图（`ui_view_configs`）优先，保持原语义；
+  - 若 `view_name` 命中 `base_config.variants`：`apply_variant`，缓存 `object_type:view_name`；失败时回退 base + `logger.warning`（运行期降级）。
+- `get_available_views(object_type)`：在 `["default", *ui_view_configs.keys()]` 后追加 `variants` 键（去重）。
+- `get_or_build_view_config`：签名不变；变体合并后的 config 继续走 `_merge_default_actions` / `_enrich_columns_with_field_meta`；`schema_version` 计算逻辑不变（fallback 指纹天然包含合并结果）。
+
+#### 4.7.6 ui-meta 端点（`meta/api/meta_api.py`）
+
+- `get_ui_meta`：
+  - `view = request.args.get('view') or None`；`explain = request.args.get('explain') == '1'`。
+  - `config = view_config_service.get_or_build_view_config(object_type, view)`。
+  - `warnings: list[dict]` 贯穿各 block builder；结构 `{code, where, message}`。
+  - `view` 不在 `get_available_views` → 记 `UNKNOWN_VIEW`，`effective_view = 'default'`。
+  - 顶层新增 `meta: {warnings, effective_view, schema_version}`；`explain` 时 `meta.sources = _ui_view_sources(object_type, view)`。
+- `_list_column_dict(col, field_map, warnings)`：仅当非空时下发 `visible_when` / `roles`；校验失败 → 跳过该键 + warning（`UNKNOWN_CONDITION` / `UNKNOWN_FIELD`）。
+- `_action_to_dict(action, field_map, warnings)`：dict 形态校验 `visible_when/roles`，非法则删除该键 + warning；字符串形态不变。
+- `_form_block`：字段项仅当非空时追加 `readonly_when`、`roles`；`visible_when` 仍输出 legacy 字符串。
+- `_policies_block`：条目纳入条件扩为「permission 非默认 **或** `ui.readonly_when` **或** `ui.roles`」；输出结构保留 `{readable,writable,roles}`，新增可选 `readonly_when`；`roles` = permission.roles ∪ ui.roles（去重保序）。
+- `_ui_view_sources(object_type, view=None)`（新私有函数）：在 `get_yaml_schema_dir()` 下扫描含 `^id:\s*<object_type>$` 的 YAML，返回 `[{file, key, line}]`，key ∈ `ui_view_config` / `list.columns` / `list.actions` / `variants.<view>`；未命中项省略。仅解释用，失败返回 `[]` 不抛错。
+
+#### 4.7.7 lint（`meta/tools/lint_metamodel.py`）
+
+新增 `lint_ui_config() -> tuple[list, int]`，扫描 `SCHEMAS_DIR.glob("*.yaml")`（跳过 `_` 前缀共享文件），实现 R-UI-01..08：
+
+| 规则 | 判定 |
+|---|---|
+| R-UI-01 | `version ∈ {1,2}`；声明 `variants` 且 `version < 2` → 违规 |
+| R-UI-02 | `list.data_source`：`url` 以 `/api/` 开头；`method ∈ {get,post}`；`items_path`/`total_path` 非空点路径 |
+| R-UI-03 | `params_map` 值 ⊆ `UI_PARAMS_ALLOWED`（lint 顶部常量；当前 = `page/pageSize/page_size/sort/order/keyword/object_type/ordering`，末两项为 S8 既有资源页在用参数，按真实新增需求扩展） |
+| R-UI-04 | `list.actions[]` 身份键 = `id`（v1 兼容 `action`/`key`）；同一视图内唯一；`position ∈ {row,toolbar}`；`http.url` 必填；`dialog ∈ {none,form}` |
+| R-UI-05 | URL 占位符仅 `{row.<field>}` / `{id}`，`<field>` ∈ schema 字段 |
+| R-UI-06 | `columns[].field`（v1 兼容 `key`）∈ schema 字段（`computed: true` / 声明 `value_help` / 有 `data_source` 时豁免）；显式 `filterable: true` 必须声明 `filter_type`。**列字段存在性与 filter_type 仅对 `version >= 2` 硬校验**（v1 语义冻结，避免误伤存量声明） |
+| R-UI-07 | 变体名 `^[a-z][a-z0-9_]*$` 且 ≠ `default`；patch 为 dict；禁止嵌套 `variants`；合并结果重跑 R-UI-02..06 |
+| R-UI-08 | 条件仅 `{field, in|equals|not_empty}` 单层；`in` 非空数组；`not_empty` 布尔；`field` ∈ schema；`roles` 为非空字符串数组；`readonly_when` 仅用于 form 字段 |
+
+CLI：新增 `--ui-config`，并纳入 `--all` 与无参默认全跑；输出格式沿用 `[ui-config] <文件> :: <键> — <原因>`；存在违规退出码 1。
+零违规基线 = 当前 3 个资源页（integration_connection / notification_delivery / import_staging_rows）；若既有声明触发违规，只做**行为等价**修正（如补显式 `filter_type`），不得改变运行时行为。
+
+#### 4.7.8 前端
+
+`src/services/metaResourceService.js`（新增纯函数，均可单测）：
+
+- `evalCondition(cond, row)`：封闭文法；未知形式返回 `true`（降级可见/可编辑）。
+- `isVisible(decl, row)` / `isActionVisible(decl, row)`：`visible_when` 为 false → false；`roles` 命中规则见 D2（未注入角色上下文一律放行）。
+- `isFieldReadonly(decl, row, policies)`：`policies[key].writable === false` → true；`decl.readonly` → true；`evalCondition(decl.readonly_when, row)` → true。
+- `mergeFieldPolicies(uiPolicies, localDecl)`：后端字段策略优先，返回合并结果供表单使用。
+- `setCurrentRoles(roles)` + `warnOnce(objectType, code, message)`（按 `objectType+code` 去重 `console.warn`）。
+- `toFormControls(fields, { editing, keyField, model, policies })`：`disabled` 改为 `isFieldReadonly(...)` 的结果；不破坏现有签名默认值。
+
+组件接线：
+
+| 文件 | 改动 |
+|---|---|
+| `src/services/metaTransformService.js` | `transformColumns` 透传 `visible_when` / `roles`；`transformActions` 透传 `visible_when` / `roles` / `enabled_when` / `http` / `dialog` / `refresh` / `success_message` |
+| `src/composables/useMetaList.js` | `_loadMetaConfig` 调用 `metaService.getUiMeta(obj, { view: config.viewName })`；`_transformMetaToComponentFormat` 后对 `columns` 过滤 `isVisible(col, null)`；`getRowActions(row)` 结果过滤 `isActionVisible(action, row)`；toolbar 过滤 `isVisible(action, null)` |
+| `src/services/metaService.js` | `getUiMeta(objectType, { force, view })`：缓存键 `${objectType}:${view || 'default'}`；`view` 存在时 URL 追加 `?view=<encoded>`；无 `view` 时请求与缓存行为与现状完全一致 |
+| `src/components/common/MetaListPage/MetaListPage.vue` | 新增 `viewName` prop → 传入 `useMetaList`；无 prop 时不改变任何行为 |
+| `src/components/common/MetaResourcePage.vue` | 新增 `view` prop（可由 `route.meta.integrationResource.view` 传入）→ `MetaListPage :view-name`；行动作改 `rowActionsFor(row)` 过滤 `isActionVisible`；`onToolbarAction` 未命中时 `warnOnce(...'UNKNOWN_ACTION')`；`formFields` 传入 `model` 与 `uiMeta.field_policies` |
+| `src/components/common/MetaForm.vue` | 仅消费 `toFormControls` 已算好的 `disabled`，不新增条件逻辑 |
+
+#### 4.7.9 测试与验收（L1 唯一入口）
+
+| 项 | 命令 / 判据 |
+|---|---|
+| 后端既有 | `python d:\filework\test.py --file meta/tests/api/test_ui_meta_data_source.py --force` 全绿 |
+| 新增后端 | `test_ui_meta_variants.py`（合并/未知 view/effective_view）、`test_ui_meta_conditions.py`（条件透传、非法条件降级 warning、explain sources）、`test_lint_ui_config.py`（R-UI-01..08 各 1 正 1 反） |
+| lint | `python meta/tools/lint_metamodel.py --ui-config` 退出码 0；`--all` 不新增违规 |
+| 前端单测 | `metaResourceService.conditions.spec.js`：`evalCondition` 四形态、`isVisible` roles 放行/命中、`isFieldReadonly` 后端优先 |
+| 静态 | `npx eslint src/services/metaResourceService.js src/services/metaTransformService.js src/services/metaService.js src/composables/useMetaList.js src/components/common/MetaResourcePage.vue src/components/common/MetaListPage/MetaListPage.vue` |
+| 构建 | `npx vite build` 通过 |
+| 冒烟 | Playwright 打开集成三页：列数/筛选/枚举/动作与改动前逐项一致（仅允许新增不可见键），无 console error |
+
+#### 4.7.10 交付边界
+
+- 不 commit；不迁移 `audit_log/task_run/handling_unit/print_template`（M1/M2）；不做个性化（M3）。
+- 回滚：删除新增可选键的消费即恢复（YAML 无声明时输出与现状逐字节等价，`schema_version` 之外无新增必需键）。
+
+### 4.8 M1 实施契约：`audit_log` 收敛（decision-complete）
+
+> 本节取代 §5.1 的实现细节；与 §5.1 冲突时以本节为准。M0 已完成并验证。
+
+#### 4.8.1 复核事实（2026-11-16 实测）
+
+| # | 事实 | 结论 |
+|---|---|---|
+| A1 | `auditLogMeta.js` 生产代码零引用（仅 `src/views/SystemManagement/meta/__tests__/auditLogMeta.spec.js` 引用） | 可直接删除，无需页面改造配合 |
+| A2 | `AuditLogManagement.vue` 用 `MetaListPage`（非 `MetaResourcePage`），列/筛选已由 YAML `ui-meta` 驱动 | 只差 `data_source` / `actions` 的声明与消费 |
+| A3 | `GET /api/v1/audit/logs` 返回 `{success, data:[...], total, page, page_size}`；SELECT 不含 `log_category/log_level` | `items_path: data`、`total_path: total`；现有这两列是死列，必须删 |
+| A4 | `buildFetcher / runAction / resolveActionUrl` 硬编码 `apiV2`，`/api/v1/...` 会被拼成 `/api/v2/api/v1/...` | 必须先加命名空间路由 |
+| A5 | `httpClient` 成功分支只透传 `body.data`，`body.total` 丢失 | 需透传顶层 `total`，否则分页 total 退化为本页条数 |
+| A6 | `useMetaList.loadList` 只在显式 `options.fetcher` 时使用声明式 fetcher | 需在无 fetcher 时消费 `list.data_source` |
+| A7 | R-UI-06 要求列字段 ∈ schema；`business_key` 是服务端计算字段，不在 schema | **不声明** `business_key` 列（其展示已由 `object_id` 自定义 cell 内联） |
+| A8 | MetaListPage 对 `action.key === 'export'` 走内建 `handleBatchExport()`（前端 CSV），不读 `http` | 导出保持无 `http` 声明，页面不改 |
+| A9 | MetaListPage 对 `action.key === 'detail'` 在 `enableDetail` 为真时打开**内建**抽屉，否则 emit `detail` | 保留默认值，页面行点击打开自定义抽屉 |
+| A10 | `audit_log` 非 persistent，`/api/v2/bo/audit_log/actions/evaluate` 不可用 → `useMetaList` 行级动作 **fail-closed 全部隐藏**（实测运行实例确认） | **不声明**行级 `detail` 动作；详情仍由行点击触发 |
+
+#### 4.8.2 决策
+
+- **D5** `data_source` 消费点放在 `useMetaList.loadList`：无显式 `options.fetcher` 且 `meta.list.data_source` 存在时使用 `buildFetcher`；`MetaResourcePage` 显式 fetcher 优先，行为不变。
+- **D6** 新增并导出纯函数 `resolveRequest(url, paramsMap)`：`/api/v1/*` → `apiV1` + 去前缀；`/api/v2/*` → `apiV2` + 去前缀；其他 → `apiV2` + 原路径。`buildFetcher / runAction / resolveActionUrl` 统一走它。
+- **D7** 排序桥接：`params_map` 同时声明后端键 `sort_field` 与 `sort_direction` 时，把前端 `ordering`（`-field` / `field`）拆成二者并删除 `ordering`；未声明时原样透传（现有三页零影响）。
+- **D8** `httpClient` 成功分支：`body.total !== undefined` 时补 `result.total`；`buildFetcher` 在 `total_path` 取不到时回退 `result.total`。
+- **D9** 列集合 = 现有 YAML 列 − `log_category` − `log_level`；不新增 `business_key`（A7）；不声明行级 `detail` 动作（A10）。
+- **D10** 删除 `auditLogMeta.js` + `auditLogMeta.spec.js`；以 Python 测试断言 YAML 下发替代。
+- **D11** `lint_metamodel.py` 白名单追加 `action / user_name / created_at_start / created_at_end / sort_field / sort_direction`，仍为白名单硬校验。
+
+#### 4.8.3 精确改动
+
+`meta/schemas/audit_log.yaml`（`ui_view_config` 内）：
+
+```yaml
+ui_view_config:
+  version: 2
+  list:
+    # title / description / defaultSort / pageSize / selectable 保持不变
+    data_source:
+      url: /api/v1/audit/logs
+      method: get
+      items_path: data
+      total_path: total
+      params_map:
+        page: page
+        page_size: pageSize
+        action: action
+        object_type: object_type
+        user_name: user_name
+        start_date: created_at_start
+        end_date: created_at_end
+        sort_field: sort_field
+        sort_direction: sort_direction
+    actions:
+      - id: export        # 保持现状：无 http，走内建前端 CSV
+        label: 导出
+        icon: download
+        type: default
+        position: toolbar
+    # 不声明行级 detail（A10：actions/evaluate 不可用，行级动作 fail-closed）
+```
+
+- 删除 `columns` 中 `log_category`、`log_level` 两项；其余列（含 `trace_id`）原样保留。
+- `detail` 块保持不变（页面使用自定义抽屉，不消费该块）。
+
+前端改动：
+
+| 文件 | 改动 |
+|---|---|
+| `src/services/metaResourceService.js` | 新增导出 `resolveRequest`；`buildFetcher` 用 `resolveRequest` + `applyOrderingBridge`（D7）+ `total` 回退（D8）；`resolveActionUrl`/`runAction` 用 `resolveRequest` |
+| `src/utils/httpClient.js` | 成功分支：`if (body.total !== undefined) result.total = body.total` |
+| `src/composables/useMetaList.js` | `loadList`：`const fetcher = config.fetcher || (metaConfig.value?.list?.data_source ? buildFetcher(metaConfig.value.list.data_source) : null)`，随后 `fetcher ? fetcher(...) : boService.query(...)` |
+| `src/views/SystemManagement/AuditLogManagement.vue` | 不改（A9/A10：行点击自定义抽屉保持现状） |
+
+删除：`src/views/SystemManagement/meta/auditLogMeta.js`、`src/views/SystemManagement/meta/__tests__/auditLogMeta.spec.js`。
+
+新增测试：
+
+- `meta/tests/api/test_ui_meta_audit_log.py`：ui-meta 下发 `data_source`（url/items_path/total_path/params_map）、`actions` id 集合 = `{export, detail}`、columns 不含 `log_category/log_level`、`meta.effective_view == 'default'`。
+- `src/services/__tests__/metaResourceService.dataSource.spec.js`：`resolveRequest` 三形态、`applyOrderingBridge` 命中/未命中、total 回退（mock apiV1/apiV2）。
+
+#### 4.8.4 验证（L1 唯一入口）
+
+| 项 | 命令 / 判据 |
+|---|---|
+| 新增后端 | `python d:\filework\test.py --file meta/tests/api/test_ui_meta_audit_log.py --force` |
+| 既有后端 | `python d:\filework\test.py --file meta/tests/api/test_ui_meta_data_source.py --force` |
+| lint | `python meta/tools/lint_metamodel.py --ui-config` 退出码 0 |
+| 前端单测 | `npx vitest run src/services/__tests__/metaResourceService.dataSource.spec.js src/services/__tests__/metaResourceService.conditions.spec.js` |
+| 静态 | `npx eslint` 仅本次改动文件 |
+| 构建 | `npx vite build` 通过 |
+| 冒烟 | Playwright 审计页：表头 = 日志ID/操作时间/操作人/操作类型/对象类型/对象ID/变更字段/旧值/新值/IP地址/链路ID，无 log_category/log_level；列表有数据（走 v1 data_source）；行点击打开自定义详情抽屉（标题「审计日志详情」）；`error_toasts = 0` |
+
+#### 4.8.5 回滚
+
+- 删除 `audit_log.yaml` 的 `data_source` 块 → `useMetaList` 回退 `boService.query`（D5 分支不触发），前端其余改动对无声明对象零影响。
+- `resolveRequest` / `total` 透传 / 白名单追加均为纯增量，可单独回滚。
+- 删除的两个前端文件可由 git 恢复；不涉及数据迁移。
+
+## 6. 兼容与回滚
+
+- 所有新增键可选；`data_source` 缺省仍为 `null` → 旧 fetcher 路径不变。
+- `version: 2` 才启用 `variants`；v1 语义冻结。
+- 回滚粒度：单对象 YAML 回滚（git）即可恢复，无需前端发版。
+- 运行期降级确保“一个对象配错不白屏”。
+
+---
+
+## 7. 测试计划
+
+| 层 | 内容 | 入口 |
+|---|---|---|
+| 后端单测 | `test_ui_meta_data_source.py` 扩展：variants 合并、条件透传、warnings、explain | `python d:\filework\test.py --file meta/tests/api/test_ui_meta_data_source.py --force` |
+| 新增后端测试 | `test_ui_meta_variants.py`、`test_ui_meta_conditions.py`、`test_lint_ui_config.py` | 同上 |
+| 前端单测 | `metaResourceService` 纯函数（条件/合并/策略优先级） | 现有 vitest 流程 |
+| E2E | 集成三页回归 + `audit_log` 页（列可见性/导出/详情）+ `task_run`（重试置灰） | PlaywrightCLI，FE 3006 / BE 3010 |
+| 静态 | `lint_metamodel.py --ui-config`、`eslint`、`vite build` | — |
+
+---
+
+## 8. 里程碑
+
+| 阶段 | 范围 | 验收 |
+|---|---|---|
+| **M0 地基** | 4.1 文法 + 4.2 后端 + 4.3 lint + 4.4 前端条件消费（不改任何页面） | 集成三页行为零变化；lint 通过；新增单测绿 |
+| **M1 audit_log** | 5.1 | 页面功能与迁移前一致；`auditLogMeta.js` 删除 |
+| **M2 task_run + handling_unit + print_template** | 5.2 / 5.3 | 各自列表声明式，复合抽屉保留 |
+| **M3 个性化 + explain** | 4.5 / 4.6 | 列序/列宽刷新后保留；schema 变更自动失效 |
+
+---
+
+## 9. 风险
+
+| 风险 | 对策 |
+|---|---|
+| 元数据漂移（YAML ≠ 实际字段） | lint R-UI-06 + 启动校验；`explain=1` 定位来源 |
+| 渲染器膨胀成“半个框架” | 条件文法封闭；`variants` 只做 patch，不引入表达式 |
+| 权限误读（前端隐藏当鉴权） | 明确 `roles` 仅展示层；后端策略为准 |
+| 缓存脏（个性化错位） | key 含 `schema_version`，变更即失效 |
+| 调试成本 | `meta.warnings` + 来源行号 + 未知项告警 |
+
+---
+
+## 10. 验收 Checklist
+
+- [ ] `ui-meta` 新增键不破坏现有三页（回归 E2E 全绿）
+- [ ] `lint_metamodel.py --ui-config` 覆盖 R-UI-01..08 并有测试
+- [ ] `audit_log` 列表/筛选/枚举/导出/详情全部由 YAML 驱动，`auditLogMeta.js` 已删
+- [ ] 未知条件/字段/动作在浏览器控制台有一次性 warning，页面不白屏
+- [ ] `variants` 切换（`?view=`）生效，未声明对象行为不变
+- [ ] 个性化在 `schema_version` 变更后自动失效
+- [ ] 文档回填：plan 文档追加 M0–M3 落地记录

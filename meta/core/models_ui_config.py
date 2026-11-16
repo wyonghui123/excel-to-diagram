@@ -46,6 +46,11 @@ class UIListViewColumn:
     # [FIX 2026-06-13] FK 列的 value_help 配置 (YAML 可写 value_help 或 value_help_config)
     #   用于列头 value_help 过滤 + parameter_bindings (如 version_id 上下文)
     value_help: Dict[str, Any] = field(default_factory=dict)
+    # [M0 2026-11-16] 条件可见性（封闭文法 {field, in|equals|not_empty}，见
+    #   docs/specs/spec-meta-driven-ui-2026-11-16.md §4.7）：列以 row=null 求值。
+    visible_when: Dict[str, Any] = field(default_factory=dict)
+    # [M0] 列级角色过滤（仅展示层；空数组 = 不限制）。
+    roles: List[str] = field(default_factory=list)
 
 
 @dataclass
@@ -64,6 +69,12 @@ class UIListViewConfig:
     inlineEdit: Dict[str, Any] = field(default_factory=dict)
     detail_mode: str = "drawer"
     detail_path: str = ""
+    # [S8 2026-11-16] 声明式数据源（plan-integration-p1p2 §6.8 S8-1）。
+    #   仅用于「列表数据不是通用 BO 端点」的资源页（集成模块三视图）；
+    #   未声明时为空 dict，ui-meta 下发 null，前端继续走既有 fetcher。
+    data_source: Dict[str, Any] = field(default_factory=dict)
+    # [S8] 顶部指标条声明（url + 取值路径）；同样只对资源页生效。
+    stats: Dict[str, Any] = field(default_factory=dict)
 
 
 @dataclass
@@ -340,3 +351,8 @@ class UIViewConfig:
     # [UI 元数据聚合 2026-11-13] 视图配置版本号（ui-meta 缓存失效键）；
     #   由 view_config_service.get_or_build_view_config 赋值，不从 YAML 读取。
     schema_version: str = ""
+    # [M0 2026-11-16] YAML v1.1：文法版本（缺省 1 = 当前行为；2 才允许 variants）。
+    version: int = 1
+    # [M0] 对象级变体 patch（原样保留，不在加载期求值；合并语义见
+    #   meta/core/ui_config/variant_merge.py）。键 = 变体名。
+    variants: Dict[str, Dict[str, Any]] = field(default_factory=dict)

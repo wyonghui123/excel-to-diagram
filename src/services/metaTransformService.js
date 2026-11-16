@@ -103,7 +103,11 @@ export function transformColumns(yamlColumns, options = {}) {
 
       // [FIX 2026-06-10] 列头过滤时使用的 API 参数名 (默认与 key 相同)
       //   例: column prop=category_label, api_param_key=category_type → 请求 ?category_type=xxx
-      api_param_key: col.api_param_key || col.apiParamKey || ''
+      api_param_key: col.api_param_key || col.apiParamKey || '',
+
+      // [M0 2026-11-16] 条件可见性 / 角色过滤（未声明时为 null/[]，行为不变）
+      visible_when: col.visible_when || null,
+      roles: col.roles || []
     }
   })
   return sortColumnsByDefaultOrder(transformed, options.fields || [], options.columnOrder || {})
@@ -182,7 +186,16 @@ export function transformActions(yamlActions) {
       show: action.show !== false,
       container: action.container,
       target: action.target,
-      params: action.params
+      params: action.params,
+
+      // [M0 2026-11-16] 声明式动作执行/条件透传（MetaResourcePage 消费）
+      visible_when: action.visible_when || null,
+      roles: action.roles || [],
+      enabled_when: action.enabled_when || null,
+      http: action.http || null,
+      dialog: action.dialog || 'none',
+      refresh: action.refresh !== false,
+      success_message: action.success_message || ''
     }
   }).filter(a => a.show !== false)
 }

@@ -362,7 +362,8 @@ async function _doRequest(method, url, options, traceId, startTime) {
   if (responseType === 'blob') {
     if (!resp.ok) {
       // 尝试解析 JSON 错误信息
-      let errorMsg = `请求失败: ${resp.status}`
+      let errorMsg = resp.status
+      errorMsg = '请求失败: ' + errorMsg
       try {
         const errBody = await resp.json()
         errorMsg = errBody.message || errorMsg
@@ -491,6 +492,10 @@ async function _doRequest(method, url, options, traceId, startTime) {
   }
   if (body.error_code) {
     result.error_code = body.error_code
+  }
+  // 分页端点（如 /api/v1/audit/logs）把 total 放在响应顶层，声明式 fetcher 需要它
+  if (body.total !== undefined) {
+    result.total = body.total
   }
 
   for (const interceptor of responseInterceptors) {

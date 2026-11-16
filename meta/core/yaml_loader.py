@@ -823,6 +823,11 @@ def parse_ui_annotation(data: Dict[str, Any]) -> UIAnnotation:
         value_help=parse_value_help(data),
         visible_when=visible_when,
         col_span=_parse_col_span(data.get("col_span")),
+        # [M0] 字段级条件只读 + 角色过滤（仅接受 dict；非法降级为 None，不抛错）
+        readonly_when=(
+            data.get("readonly_when") if isinstance(data.get("readonly_when"), dict) else None
+        ),
+        roles=[str(r) for r in (data.get("roles") or []) if isinstance(r, str) and r],
     )
 
 
@@ -984,7 +989,154 @@ def parse_ui_list_view_column(data: Dict[str, Any]) -> UIListViewColumn:
         searchable=data.get("searchable", True),
         # [FIX 2026-06-13] FK 列的 value_help 配置 (YAML 写 value_help, 内部存 value_help_config)
         value_help=col_value_help,
+        # [M0 2026-11-16] 条件可见性 / 角色过滤：结构非法由 lint 硬失败，
+        #   加载期只做类型降级（不新增抛错路径，避免配错导致对象整体加载失败）。
+        visible_when=data.get("visible_when") if isinstance(data.get("visible_when"), dict) else {},
+        roles=[str(r) for r in (data.get("roles") or []) if isinstance(r, str) and r],
     )
+
+
+# ---------------------------------------------------------------------------
+# [S8 2026-11-16] 声明式数据源 / 指标 / 动作副作用校验
+#   见 docs/specs/plan-integration-p1p2-2026-11-16.md §6.8 S8-1。
+#   只在 `list.data_source` 已声明时启用严格校验（纯加性：其余对象行为不变），
+#   任何非法声明都在加载期抛 ValueError，不静默降级。
+# ---------------------------------------------------------------------------
+_LIST_API_PREFIX = '/api/'
+_LIST_HTTP_METHODS = ('get', 'post', 'put', 'delete')
+_LIST_ACTION_POSITIONS = ('row', 'toolbar')
+_LIST_ACTION_DIALOGS = ('form', 'none')
+_DOT_PATH_RE = re.compile(r'^[A-Za-z_][A-Za-z0-9_]*(\.[A-Za-z_][A-Za-z0-9_]*)*$')
+_PLACEHOLDER_RE = re.compile(r'\{([^{}]*)\}')
+
+
+def _require_api_url(value: Any, where: str) -> str:
+    if not isinstance(value, str) or not value.startswith(_LIST_API_PREFIX):
+        raise ValueError(f'{where}: url 必须以 {_LIST_API_PREFIX} 开头，实际为 {value!r}')
+    return value
+
+
+def _validate_placeholders(template: str, where: str) -> None:
+    """占位符只允许 `{row.<点路径>}` 与 `{id}`（其余一律拒绝）。"""
+    for raw in _PLACEHOLDER_RE.findall(template):
+        token = raw.strip()
+        if token == 'id':
+            continue
+        if token.startswith('row.') and _DOT_PATH_RE.match(token[4:]):
+            continue
+        raise ValueError(
+            f'{where}: 不允许的占位符 {{{raw}}}（只支持 {{row.<field>}} / {{id}}）')
+
+
+def _parse_list_data_source(data: Any, where: str) -> Dict[str, Any]:
+    if not data:
+        return {}
+    if not isinstance(data, dict):
+        raise ValueError(f'{where}: 必须是对象')
+    url = _require_api_url(data.get('url'), where)
+    _validate_placeholders(url, where)
+    method = str(data.get('method') or 'get').lower()
+    if method not in _LIST_HTTP_METHODS:
+        raise ValueError(f'{where}.method: 只支持 {_LIST_HTTP_METHODS}，实际为 {method!r}')
+
+    items_path = str(data.get('items_path') or '')
+    total_path = str(data.get('total_path') or '')
+    for name, path in (('items_path', items_path), ('total_path', total_path)):
+        if path and not _DOT_PATH_RE.match(path):
+            raise ValueError(f'{where}.{name}: 必须是点路径，实际为 {path!r}')
+
+    params_map = data.get('params_map') or {}
+    if not isinstance(params_map, dict):
+        raise ValueError(f'{where}.params_map: 必须是对象（API 参数名 → 前端参数名）')
+    for key, value in params_map.items():
+        if not isinstance(key, str) or not isinstance(value, str) or not key or not value:
+            raise ValueError(f'{where}.params_map: 键与值都必须是非空字符串，实际为 {key!r}: {value!r}')
+
+    return {
+        'url': url,
+        'method': method,
+        'items_path': items_path,
+        'total_path': total_path,
+        'params_map': dict(params_map),
+    }
+
+
+def _parse_list_stats(data: Any, where: str) -> Dict[str, Any]:
+    if not data:
+        return {}
+    if not isinstance(data, dict):
+        raise ValueError(f'{where}: 必须是对象')
+    url = _require_api_url(data.get('url'), where)
+    _validate_placeholders(url, where)
+    method = str(data.get('method') or 'get').lower()
+    if method not in _LIST_HTTP_METHODS:
+        raise ValueError(f'{where}.method: 只支持 {_LIST_HTTP_METHODS}，实际为 {method!r}')
+    items_from = str(data.get('items_from') or '')
+    if items_from and not _DOT_PATH_RE.match(items_from):
+        raise ValueError(f'{where}.items_from: 必须是点路径，实际为 {items_from!r}')
+    return {'url': url, 'method': method, 'items_from': items_from}
+
+
+def _parse_resource_list_actions(raw: Any, where: str) -> List[Dict[str, Any]]:
+    """资源页动作声明：在既有 actions 之上补 http/confirm/dialog/refresh 等副作用。"""
+    if not raw:
+        return []
+    if not isinstance(raw, list):
+        raise ValueError(f'{where}: 必须是数组')
+
+    actions: List[Dict[str, Any]] = []
+    for index, item in enumerate(raw):
+        if isinstance(item, str):
+            actions.append(item)
+            continue
+        if not isinstance(item, dict):
+            raise ValueError(f'{where}[{index}]: 必须是对象或字符串')
+        action = dict(item)
+        if not (action.get('id') or action.get('label')):
+            raise ValueError(f'{where}[{index}]: 缺少 id / label')
+
+        position = str(action.get('position') or 'toolbar')
+        if position not in _LIST_ACTION_POSITIONS:
+            raise ValueError(
+                f'{where}[{index}].position: 只支持 {_LIST_ACTION_POSITIONS}，实际为 {position!r}')
+        action['position'] = position
+
+        dialog = str(action.get('dialog') or 'none')
+        if dialog not in _LIST_ACTION_DIALOGS:
+            raise ValueError(
+                f'{where}[{index}].dialog: 只支持 {_LIST_ACTION_DIALOGS}，实际为 {dialog!r}')
+        action['dialog'] = dialog
+
+        http = action.get('http')
+        if http is not None:
+            if not isinstance(http, dict):
+                raise ValueError(f'{where}[{index}].http: 必须是对象')
+            method = str(http.get('method') or 'post').lower()
+            if method not in _LIST_HTTP_METHODS:
+                raise ValueError(
+                    f'{where}[{index}].http.method: 只支持 {_LIST_HTTP_METHODS}，实际为 {method!r}')
+            url = _require_api_url(http.get('url'), f'{where}[{index}].http')
+            _validate_placeholders(url, f'{where}[{index}].http')
+            action['http'] = {'method': method, 'url': url}
+
+        if 'refresh' in action:
+            action['refresh'] = bool(action['refresh'])
+
+        enabled_when = action.get('enabled_when')
+        if enabled_when is not None:
+            # 结构化条件（非表达式语言）：{field: status, in: [failed, skipped]}
+            # 行值不在 in 列表内时动作置灰（用于「仅失败可重试」这类守卫）。
+            if not isinstance(enabled_when, dict):
+                raise ValueError(f'{where}[{index}].enabled_when: 必须是对象')
+            field = enabled_when.get('field')
+            values = enabled_when.get('in')
+            if not isinstance(field, str) or not field:
+                raise ValueError(f'{where}[{index}].enabled_when.field: 必须是非空字符串')
+            if not isinstance(values, list) or not values:
+                raise ValueError(f'{where}[{index}].enabled_when.in: 必须是非空数组')
+
+        actions.append(action)
+    return actions
 
 
 def parse_ui_list_view_config(data: Dict[str, Any], fields: List[Dict[str, Any]] = None) -> UIListViewConfig:
@@ -1017,6 +1169,18 @@ def parse_ui_list_view_config(data: Dict[str, Any], fields: List[Dict[str, Any]]
                     col.title = field_name
         columns.append(col)
     
+    # [S8] 资源页声明：只有 data_source 存在时才启用严格校验与结构化动作，
+    #   其余对象完全沿用旧行为（actions 原样透传）。
+    data_source = _parse_list_data_source(
+        data.get("data_source"), 'ui_view_config.list.data_source')
+    if data_source:
+        stats = _parse_list_stats(data.get("stats"), 'ui_view_config.list.stats')
+        actions = _parse_resource_list_actions(
+            data.get("actions", []), 'ui_view_config.list.actions')
+    else:
+        stats = {}
+        actions = data.get("actions", [])
+
     return UIListViewConfig(
         columns=columns,
         defaultSort=data.get("defaultSort", {}),
@@ -1024,13 +1188,15 @@ def parse_ui_list_view_config(data: Dict[str, Any], fields: List[Dict[str, Any]]
         filters=data.get("filters", []),
         pageSize=data.get("pageSize", 20),
         selectable=data.get("selectable", True),
-        actions=data.get("actions", []),
+        actions=actions,
         batch_actions=data.get("batch_actions", []),
         title=data.get("title", ""),
         description=data.get("description", ""),
         inlineEdit=data.get("inlineEdit", {}),
         detail_mode=data.get("detail_mode", "drawer"),
         detail_path=data.get("detail_path", ""),
+        data_source=data_source,
+        stats=stats,
     )
 
 
@@ -1373,7 +1539,22 @@ def parse_ui_view_config(data: Dict[str, Any], fields: List[Dict[str, Any]] = No
     if data.get("change_notification"):
         change_notification_config = parse_change_notification_config(data.get("change_notification"))
 
+    # [M0 2026-11-16] 文法版本 + 变体 patch：变体在此只做类型收口（非 dict 丢弃），
+    #   结构合法性由 lint --ui-config 硬失败；运行期合并失败会降级回基础视图。
+    try:
+        version = int(data.get("version") or 1)
+    except (TypeError, ValueError):
+        version = 1
+    raw_variants = data.get("variants")
+    variants: Dict[str, Any] = {}
+    if isinstance(raw_variants, dict):
+        variants = {str(k): v for k, v in raw_variants.items() if isinstance(v, dict)}
+    elif raw_variants is not None:
+        logger.warning("[YAML Loader] ui_view_config.variants 必须是对象，已忽略: %r", type(raw_variants))
+
     return UIViewConfig(
+        version=version,
+        variants=variants,
         list=list_config,
         detail=detail_config,
         form=form_config,

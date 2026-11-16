@@ -283,6 +283,12 @@ class UIAnnotation:
     visible_when: Optional[str] = None
     # [UI 元数据聚合 2026-11-13] 栅格跨列 1..4；越界/非整数在加载期降级为 None 并 warning。
     col_span: Optional[int] = None
+    # [M0 2026-11-16] 条件只读（封闭文法 {field, in|equals|not_empty}）。
+    #   注意：visible_when 仍是 legacy 字符串表达式（详情页/表单已按表达式消费），
+    #   M0 不改其类型，字段级条件只新增 readonly_when。
+    readonly_when: Optional[Dict[str, Any]] = None
+    # [M0] 字段级角色过滤（仅展示层，空数组 = 不限制）。
+    roles: List[str] = field(default_factory=list)
 
 
 @dataclass

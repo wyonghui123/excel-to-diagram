@@ -215,6 +215,23 @@ class ViewConfigService:
         
         if view_name and view_name != 'default':
             config = meta_object.ui_view_configs.get(view_name)
+            # [M0 2026-11-16] 未命中命名视图时尝试对象级 variants（YAML v1.1）。
+            if config is None:
+                base_config = meta_object.ui_view_config
+                patch = (getattr(base_config, 'variants', None) or {}).get(view_name)
+                if base_config is not None and patch is not None:
+                    try:
+                        from meta.core.ui_config.variant_merge import apply_variant
+                        config, warnings = apply_variant(base_config, patch)
+                        for warning in warnings:
+                            logger.warning(
+                                "[view-config] variants %s/%s: %s",
+                                object_type, view_name, warning)
+                    except Exception as exc:  # noqa: BLE001 —— 配错降级回基础视图
+                        logger.warning(
+                            "[view-config] 变体合并失败，回退基础视图 %s/%s: %s",
+                            object_type, view_name, exc)
+                        config = base_config
         else:
             config = meta_object.ui_view_config
         
@@ -287,6 +304,11 @@ class ViewConfigService:
         
         views = ["default"]
         views.extend(meta_object.ui_view_configs.keys())
+        # [M0 2026-11-16] 变体名也是可用视图（供 ui-meta?view= / 前端路由校验）
+        variants = getattr(meta_object.ui_view_config, 'variants', None) or {}
+        for name in variants.keys():
+            if name not in views:
+                views.append(name)
         return views
     
     def build_list_view_from_fields(self, object_type: str) -> UIListViewConfig:
@@ -1021,6 +1043,12 @@ class ViewConfigService:
     
     def _merge_default_actions(self, list_config, meta_object):
         """合并默认操作到列表配置"""
+        # [S8 2026-11-16] 声明式资源页（list.data_source）的动作完全由 YAML 拥有：
+        #   不注入 create/import/export/batch_delete 等默认动作，避免通用页出现
+        #   没有 http 声明的「空壳按钮」（plan-integration-p1p2 §6.8）。
+        if getattr(list_config, 'data_source', None):
+            return
+
         existing_action_ids = {action.get('id') for action in list_config.actions}
         default_actions = []
         

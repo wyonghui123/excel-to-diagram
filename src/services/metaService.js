@@ -128,22 +128,27 @@ class MetaService extends BaseService {
    * @param {{ force?: boolean }} [options]
    * @returns {Promise<object>} UiMeta（§13.3 形状，snake_case）
    */
-  async getUiMeta(objectType, { force = false } = {}) {
+  async getUiMeta(objectType, { force = false, view = null } = {}) {
     if (!objectType) throw new Error('getUiMeta: objectType 不能为空')
 
+    const cacheKey = view ? `${objectType}:${view}` : objectType
+
     if (!force) {
-      const cached = this._uiMetaCache.get(objectType)
+      const cached = this._uiMetaCache.get(cacheKey)
       if (cached) return cached.data
     }
 
-    if (this._uiMetaInflight.has(objectType)) {
-      return this._uiMetaInflight.get(objectType)
+    if (this._uiMetaInflight.has(cacheKey)) {
+      return this._uiMetaInflight.get(cacheKey)
     }
 
     const promise = (async () => {
       let data
       try {
-        const result = await this._request('GET', `/meta/${objectType}/ui-meta`, { version: 1 })
+        const path = view
+          ? `/meta/${objectType}/ui-meta?view=${encodeURIComponent(view)}`
+          : `/meta/${objectType}/ui-meta`
+        const result = await this._request('GET', path, { version: 1 })
         if (!result?.success) {
           throw new Error(result?.message || `ui-meta 请求失败: ${objectType}`)
         }
@@ -161,18 +166,18 @@ class MetaService extends BaseService {
         }
       }
 
-      const previous = this._uiMetaCache.get(objectType)
+      const previous = this._uiMetaCache.get(cacheKey)
       const entry = { schema_version: data.schema_version || '', data }
       if (previous && previous.schema_version !== entry.schema_version) {
-        logger.debug('ui-meta 版本变化，整块替换:', objectType, previous.schema_version, '→', entry.schema_version)
+        logger.debug('ui-meta 版本变化，整块替换:', cacheKey, previous.schema_version, '→', entry.schema_version)
       }
-      this._uiMetaCache.set(objectType, entry)
+      this._uiMetaCache.set(cacheKey, entry)
       return data
     })().finally(() => {
-      this._uiMetaInflight.delete(objectType)
+      this._uiMetaInflight.delete(cacheKey)
     })
 
-    this._uiMetaInflight.set(objectType, promise)
+    this._uiMetaInflight.set(cacheKey, promise)
     return promise
   }
 

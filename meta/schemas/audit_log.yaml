@@ -579,6 +579,7 @@ fields:
 # UI 视图配置 (元数据驱动)
 # ────────────────────────────────────────────
 ui_view_config:
+  version: 2
   list:
     title: 审计日志
     description: 系统审计日志列表，记录所有业务对象的变更历史
@@ -590,6 +591,24 @@ ui_view_config:
     defaultSort:
       field: created_at
       order: desc
+    # [M1 2026-11-16] 声明式数据源：GET /api/v1/audit/logs → {success, data:[...], total}
+    # items_path/total_path 基于 httpClient 解包后的根（命名空间已把 body.data 提到 result.data）
+    data_source:
+      url: /api/v1/audit/logs
+      method: get
+      items_path: data
+      total_path: total
+      params_map:
+        page: page
+        page_size: pageSize
+        action: action
+        object_type: object_type
+        user_name: user_name
+        start_date: created_at_start
+        end_date: created_at_end
+        # 前端 ordering('-created_at') → 后端 sort_field/sort_direction（applyOrderingBridge）
+        sort_field: sort_field
+        sort_direction: sort_direction
     columns:
       - field: id
         label: 日志ID
@@ -605,64 +624,9 @@ ui_view_config:
         sortable: true
         filterable: true
         filter_type: date_range
-      - field: log_category
-        label: 日志类型
-        width: 100
-        widget: badge
-        sortable: true
-        filterable: true
-        filter_type: select
-        filter_options:
-          - value: business
-            label: 业务审计
-            color: primary
-          - value: security
-            label: 安全日志
-            color: danger
-          - value: operation
-            label: 运营日志
-            color: info
-          - value: performance
-            label: 性能日志
-            color: warning
-          - value: system
-            label: 系统日志
-            color: default
-        badge_colors:
-          business: primary
-          security: danger
-          operation: info
-          performance: warning
-          system: default
-      - field: log_level
-        label: 日志级别
-        width: 80
-        widget: badge
-        sortable: true
-        filterable: true
-        filter_type: select
-        filter_options:
-          - value: DEBUG
-            label: 调试
-            color: default
-          - value: INFO
-            label: 信息
-            color: info
-          - value: WARNING
-            label: 警告
-            color: warning
-          - value: ERROR
-            label: 错误
-            color: danger
-          - value: CRITICAL
-            label: 严重
-            color: danger
-        badge_colors:
-          DEBUG: default
-          INFO: info
-          WARNING: warning
-          ERROR: danger
-          CRITICAL: danger
+      # [M1 2026-11-16] 移除 log_category / log_level 死列：
+      #   1) /api/v1/audit/logs 的 SELECT 不返回这两列，列恒为空
+      #   2) 本页日志均为 business/INFO 常量，无信息量
       - field: user_name
         label: 操作人
         width: 120
@@ -756,6 +720,9 @@ ui_view_config:
         icon: download
         type: default
         position: toolbar
+    # [M1 2026-11-16] 不声明行级 detail 动作：audit_log 非 persistent，
+    #   后端 actions/evaluate 不可用 → useMetaList 行级动作 fail-closed 全部隐藏；
+    #   详情仍由行点击打开页面自定义抽屉（唯一合法差异）。
 
   detail:
     title: 审计日志详情

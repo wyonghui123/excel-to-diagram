@@ -756,6 +756,11 @@ const props = defineProps({
     type: String,
     required: true
   },
+  // [M0 2026-11-16] YAML variants 视图名；空 = 基础视图（行为不变）
+  viewName: {
+    type: String,
+    default: ''
+  },
   options: {
     type: Object,
     default: () => ({})
@@ -970,6 +975,7 @@ const {
   extraRowActions: props.extraRowActions,
   toolbarActionsOverride: props.toolbarActionsOverride,
   batchActionsOverride: props.batchActionsOverride,
+  viewName: props.viewName || null,
   fetcher: props.options.fetcher,
   inlineEdit: props.options.inlineEdit,
   initialFilters: props.initialFilters

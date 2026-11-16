@@ -60,6 +60,8 @@ import {
   filterRowActions as _filterRowActionsSvc,
   inferFieldEditConfig as _inferFieldEditConfigSvc
 } from '@/services/metaTransformService'
+// [M0 2026-11-16] 声明式条件可见性（列/动作）——未声明时恒为 true，行为不变
+import { isVisible as _isVisibleSvc, isActionVisible as _isActionVisibleSvc, buildFetcher } from '@/services/metaResourceService'
 
 /**
  * 统一的错误处理函数
@@ -167,6 +169,8 @@ export function useMetaList(objectTypeOrRef, options = {}) {
     extraRowActions: options.extraRowActions || null,
     // 自定义工具栏操作按钮（embedded/dialog 生效）
     toolbarActionsOverride: options.toolbarActionsOverride || null,
+    // [M0 2026-11-16] 视图变体名（YAML variants）；空 = 基础视图，行为不变
+    viewName: options.viewName || null,
     // 自定义批量操作按钮（embedded/dialog 生效）
     batchActionsOverride: options.batchActionsOverride || null
   }
@@ -432,13 +436,13 @@ export function useMetaList(objectTypeOrRef, options = {}) {
         // [FIX 2026-06-14] 先按 excludeColumnKeys 过滤再 transform,
         //   避免上游传了 columnsOverride + excludeColumnKeys 时两条规则相互干扰
         const filteredCols = _applyExcludeColumnKeys(effectiveColumns)
-        columns.value = _transformColumns(filteredCols)
+        columns.value = _transformColumns(filteredCols).filter(col => _isVisibleSvc(col, null))
         // 先加载元数据，确保 metaConfig.value 可用
         await _loadMetaConfig()
         // [FIX-2026-06-08] _loadMetaConfig() 内部会调 _transformMetaToComponentFormat()
         //   无条件用 metaConfig 的 columns 覆盖 columns.value, 导致 columnsOverride 失效。
         //   重新应用 columnsOverride 保证 compact 模式自定义列生效。
-        columns.value = _transformColumns(filteredCols)
+        columns.value = _transformColumns(filteredCols).filter(col => _isVisibleSvc(col, null))
         // 使用 metaConfig 来富化 columns
         if (metaConfig.value) {
           _enrichColumnsWithFieldMeta(metaConfig.value.list || metaConfig.value)
@@ -519,8 +523,11 @@ export function useMetaList(objectTypeOrRef, options = {}) {
     try {
       const params = _buildQueryParams(extraParams)
 
-      const result = await (config.fetcher
-        ? config.fetcher({ page: pagination.current, pageSize: pagination.pageSize, ...params })
+      // [M1] 未显式传 fetcher 时消费 YAML 的 list.data_source（audit_log 等只读对象）
+      const declared = metaConfig.value?.list?.data_source
+      const fetcher = config.fetcher || (declared ? buildFetcher(declared) : null)
+      const result = await (fetcher
+        ? fetcher({ page: pagination.current, pageSize: pagination.pageSize, ...params })
         : boService.query(objectTypeRef.value, params))
       // [NFR-004] 竞态检查：如果期间又触发了新的 loadList，丢弃本次结果
       if (version !== _loadVersion) {
@@ -813,7 +820,11 @@ export function useMetaList(objectTypeOrRef, options = {}) {
       // 3) 汇总结果
       if (apiResult && apiResult.success) {
         const deletedCount = (apiResult.success_count || existingIds.length) + localRemovedCount
-        const successMsg = i18nT('metaList.deleteSuccess', '成功删除 {count} 条记录', { count: deletedCount })
+        const successMsg = i18nT(
+          'metaList.deleteSuccess',
+          '成功删除 {count} 条记录',
+          { count: deletedCount }
+        )
         console.log('[useMetaList] 批量删除成功:', successMsg, { local: localRemovedCount, api: existingIds.length }, apiResult)
         ElNotification({
           title: i18nT('common.delete', '删除成功'),
@@ -828,7 +839,11 @@ export function useMetaList(objectTypeOrRef, options = {}) {
         await loadList()
       } else if (existingIds.length === 0) {
         // 全部是本地新行, 不需要 loadList
-        const successMsg = i18nT('metaList.deleteSuccess', '成功删除 {count} 条记录', { count: localRemovedCount })
+        const successMsg = i18nT(
+          'metaList.deleteSuccess',
+          '成功删除 {count} 条记录',
+          { count: localRemovedCount }
+        )
         ElMessage.success(successMsg)
         clearAllSelection()
       } else {
@@ -1093,11 +1108,11 @@ export function useMetaList(objectTypeOrRef, options = {}) {
 
     const builtin = _filterRowActionsSvc(
       rowActions.value, row, objectTypeRef.value, config.rowMutability,
-      checkPermission, checkCondition)
+      checkPermission, checkCondition).filter(a => _isActionVisibleSvc(a, row))
     if (!config.extraRowActions || config.extraRowActions.length === 0) return builtin
     const extras = _filterRowActionsSvc(
       config.extraRowActions, row, objectTypeRef.value, config.rowMutability,
-      checkPermission, checkCondition)
+      checkPermission, checkCondition).filter(a => _isActionVisibleSvc(a, row))
     return [...extras, ...builtin]
   }
 
@@ -1190,7 +1205,7 @@ export function useMetaList(objectTypeOrRef, options = {}) {
 
     // [T13-9 2026-11-13] 优先聚合端点 ui-meta；其内部已含失败回退旧 3 端点（§13.8）
     try {
-      const uiMeta = await metaService.getUiMeta(objectTypeRef.value)
+      const uiMeta = await metaService.getUiMeta(objectTypeRef.value, { view: config.viewName })
       if (uiMeta && typeof uiMeta === 'object') {
         metaConfig.value = {
           ...uiMeta,
@@ -1254,6 +1269,7 @@ export function useMetaList(objectTypeOrRef, options = {}) {
     // 转换列定义
     if (listConfig.tableColumns || listConfig.columns) {
       columns.value = _transformColumns(listConfig.tableColumns || listConfig.columns, listConfig)
+        .filter(col => _isVisibleSvc(col, null))
     } else {
       console.warn('[useMetaList] [WARNING] 未找到列定义 (tableColumns/columns)')
     }
@@ -1278,7 +1294,8 @@ export function useMetaList(objectTypeOrRef, options = {}) {
     // 转换操作按钮
     if (listConfig.actions) {
       const allActions = _transformActions(listConfig.actions)
-      toolbarActions.value = allActions.filter(a => a.position === 'toolbar')
+      toolbarActions.value = allActions.filter(
+        a => a.position === 'toolbar' && _isActionVisibleSvc(a, null))
       const EXCLUDED_ROW_ACTIONS = ['view', 'detail', 'edit', 'update']
       rowActions.value = allActions.filter(a => 
         (a.position === 'row' || !a.position) && 
