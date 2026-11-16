@@ -35,6 +35,7 @@ import { AppHeader as TopNavHeader } from './TopNavHeader'
 import { AppShell } from './AppShell'
 import { AppLayout } from './AppLayout'
 import { MetaListPage } from './MetaListPage'
+import MetaResourcePage from './MetaResourcePage.vue'
 import { MetaListV2 } from './MetaListV2'  // [FR-005] 虚拟滚动 wrapper
 import { SubNavTabs } from './SubNavTabs'
 import { ObjectChildSection } from './ObjectChildSection'
@@ -42,6 +43,7 @@ import { PageShell } from './PageShell'
 import { FkLinkField } from './FkLinkField'
 import { default as HierarchicalTreePicker } from './HierarchicalTreePicker'
 import { ConditionRuleBuilder, ConditionRuleRow } from './ConditionRuleBuilder'
+import ApprovalFlowSteps from './ApprovalFlowSteps.vue'
 
 export { AppButton } from './AppButton'
 export { AppInput } from './AppInput'
@@ -68,11 +70,13 @@ export { PermissionDimensionSelector } from './PermissionDimensionSelector'
 export { AppShell } from './AppShell'
 export { AppLayout } from './AppLayout'
 export { MetaListPage } from './MetaListPage'
+export { default as MetaResourcePage } from './MetaResourcePage.vue'
 export { SubNavTabs } from './SubNavTabs'
 export { ObjectChildSection } from './ObjectChildSection'
 export { PageShell } from './PageShell'
 export { FkLinkField } from './FkLinkField'
 export { default as HierarchicalTreePicker } from './HierarchicalTreePicker'
+export { default as ApprovalFlowSteps } from './ApprovalFlowSteps.vue'
 
 export default {
   AppButton,
@@ -113,6 +117,7 @@ export default {
   AppShell,
   AppLayout,
   MetaListPage,
+  MetaResourcePage,
   MetaListV2,  // [FR-005]
   SubNavTabs,
   ObjectChildSection,
@@ -121,5 +126,7 @@ export default {
   HierarchicalTreePicker,
   // [v26 2026-08-26] 通用条件规则配置组件（替代 ConditionRuleDialog 内嵌实现）
   ConditionRuleBuilder,
-  ConditionRuleRow
+  ConditionRuleRow,
+  // [9.13.4.5 2026-11-16] 审批实例流转步骤条（任务抽屉 + 单据侧投影共用）
+  ApprovalFlowSteps
 }
