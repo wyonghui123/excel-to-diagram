@@ -219,13 +219,13 @@ class MetadataResolver:
         cls._cache[cache_key] = result
         return result
 
-    # ── 表名映射 ──
+    # ── 表名/列名映射 ──
 
     @classmethod
-    def get_table_name(cls, entity_name: str) -> str:
-        """从 YAML 元模型获取实体的表名"""
+    def get_table_name(cls, entity_name: str) -> Optional[str]:
+        """SSOT 表名：YAML 声明了 table_name 则返回；未声明返回 None，由调用方回退并留痕。"""
         if not entity_name:
-            return entity_name
+            return None
 
         cache_key = f'table:{entity_name}'
         if cache_key in cls._cache:
@@ -233,14 +233,23 @@ class MetadataResolver:
 
         try:
             obj = registry.get(entity_name)
-            if obj and hasattr(obj, 'table_name') and obj.table_name:
+            if obj and getattr(obj, 'table_name', None):
                 cls._cache[cache_key] = obj.table_name
                 return obj.table_name
         except Exception as e:
             logger.debug("Cannot resolve table name for '%s': %s", entity_name, e)
+        return None
 
-        cls._cache[cache_key] = entity_name
-        return entity_name
+    @classmethod
+    def get_column_name(cls, entity_name: str, field_id: str) -> Optional[str]:
+        """SSOT 列名：返回 field.db_column（缺省用 field_id）；字段未声明返回 None。"""
+        if not entity_name or not field_id:
+            return None
+        obj = registry.get(entity_name)
+        field = obj.get_field(field_id) if obj else None
+        if not field:
+            return None
+        return getattr(field, 'db_column', None) or field.id
 
     # ── 导航启用推断 ──
 

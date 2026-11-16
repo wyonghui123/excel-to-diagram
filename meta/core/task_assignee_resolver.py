@@ -118,11 +118,20 @@ def _resolve_role(participant, ctx, ds) -> Resolution:
             source='user_permission_sets', reason=REASON_NO_MEMBER)
     rows = _query(
         ds,
-        'SELECT DISTINCT u.username AS username FROM users u '
+        'SELECT DISTINCT u.{username} AS username FROM {users} u '
         'JOIN user_permission_sets ups ON ups.user_id = u.id '
-        'JOIN permission_sets ps ON ps.id = ups.permission_set_id '
-        "WHERE ps.code IN ({0}) AND COALESCE(u.status, 'active') = 'active' "
-        'ORDER BY u.username'.format(_placeholders(codes)), codes)
+        'JOIN {permission_sets} ps ON ps.id = ups.permission_set_id '
+        "WHERE ps.{code} IN ({0}) "
+        "AND COALESCE(u.{status}, 'active') = 'active' "
+        'ORDER BY u.{username}'.format(
+            _placeholders(codes),
+            # user_permission_sets 为平台内核表，表名/列名不随 BO 元模型走
+            username=_col('user', 'username'),
+            users=_table('user'),
+            permission_sets=_table('permission_set'),
+            code=_col('permission_set', 'code'),
+            status=_col('user', 'status')),
+        codes)
     candidates = [r['username'] for r in rows if r.get('username')]
     if candidates:
         return Resolution(
@@ -130,8 +139,12 @@ def _resolve_role(participant, ctx, ds) -> Resolution:
             [_evidence('role_code', 'in', codes, candidates, True)],
             'user_permission_sets')
     known = _query(
-        ds, 'SELECT code FROM permission_sets WHERE code IN ({0})'.format(
-            _placeholders(codes)), codes)
+        ds,
+        'SELECT {code} FROM {permission_sets} WHERE {code} IN ({0})'.format(
+            _placeholders(codes),
+            code=_col('permission_set', 'code'),
+            permission_sets=_table('permission_set')),
+        codes)
     reason = REASON_NO_MEMBER if known else REASON_NO_SUCH_ROLE
     return Resolution(
         explain=[_evidence('role_code', 'in', codes,
@@ -149,11 +162,22 @@ def _resolve_group(participant, ctx, ds) -> Resolution:
             source='org_members', reason=REASON_NO_MEMBER)
     rows = _query(
         ds,
-        'SELECT DISTINCT u.username AS username FROM orgs o '
-        'JOIN org_members m ON m.org_id = o.id '
-        'JOIN users u ON u.id = m.user_id '
-        "WHERE o.code IN ({0}) AND COALESCE(u.status, 'active') = 'active' "
-        'ORDER BY u.username'.format(_placeholders(refs)), refs)
+        'SELECT DISTINCT u.{username} AS username FROM {orgs} o '
+        'JOIN {org_members} m ON m.{om_org_id} = o.id '
+        'JOIN {users} u ON u.id = m.{om_user_id} '
+        "WHERE o.{org_code} IN ({0}) "
+        "AND COALESCE(u.{user_status}, 'active') = 'active' "
+        'ORDER BY u.{username}'.format(
+            _placeholders(refs),
+            username=_col('user', 'username'),
+            orgs=_table('org'),
+            org_members=_table('org_member'),
+            om_org_id=_col('org_member', 'org_id'),
+            users=_table('user'),
+            om_user_id=_col('org_member', 'user_id'),
+            org_code=_col('org', 'code'),
+            user_status=_col('user', 'status')),
+        refs)
     candidates = [r['username'] for r in rows if r.get('username')]
     return Resolution(
         candidates,
@@ -173,28 +197,38 @@ def _resolve_org(participant, ctx, ds) -> Resolution:
             explain=[_evidence('approver_ref', 'exists', None, None, False)],
             source='org_members', reason=REASON_NO_MEMBER)
     params = list(refs) + list(refs)  # code 与 id 两处占位
-    match = 'o.code IN ({0}) OR CAST(o.id AS TEXT) IN ({0})'.format(
-        _placeholders(refs))
+    cols = dict(
+        ph=_placeholders(refs),
+        orgs=_table('org'),
+        org_code=_col('org', 'code'),
+        parent_id=_col('org', 'parent_id'),
+        org_members=_table('org_member'),
+        om_org_id=_col('org_member', 'org_id'),
+        om_user_id=_col('org_member', 'user_id'),
+        users=_table('user'),
+        username=_col('user', 'username'),
+        user_status=_col('user', 'status'))
+    match = 'o.{org_code} IN ({ph}) OR CAST(o.id AS TEXT) IN ({ph})'.format(**cols)
     if scope == 'descendants':
         sql = (
             'WITH RECURSIVE scope_orgs(id) AS ('
-            ' SELECT id FROM orgs WHERE ' + match.replace('o.', '') + ' UNION '
-            ' SELECT child.id FROM orgs child '
-            ' JOIN scope_orgs parent ON child.parent_id = parent.id'
+            ' SELECT o.id FROM {orgs} o WHERE ' + match + ' UNION '
+            ' SELECT child.id FROM {orgs} child '
+            ' JOIN scope_orgs parent ON child.{parent_id} = parent.id'
             ') '
-            'SELECT DISTINCT u.username AS username FROM scope_orgs s '
-            'JOIN org_members m ON m.org_id = s.id '
-            'JOIN users u ON u.id = m.user_id '
-            "WHERE COALESCE(u.status, 'active') = 'active' "
-            'ORDER BY u.username')
+            'SELECT DISTINCT u.{username} AS username FROM scope_orgs s '
+            'JOIN {org_members} m ON m.{om_org_id} = s.id '
+            'JOIN {users} u ON u.id = m.{om_user_id} '
+            "WHERE COALESCE(u.{user_status}, 'active') = 'active' "
+            'ORDER BY u.{username}').format(**cols)
     else:
         sql = (
-            'SELECT DISTINCT u.username AS username FROM orgs o '
-            'JOIN org_members m ON m.org_id = o.id '
-            'JOIN users u ON u.id = m.user_id '
+            'SELECT DISTINCT u.{username} AS username FROM {orgs} o '
+            'JOIN {org_members} m ON m.{om_org_id} = o.id '
+            'JOIN {users} u ON u.id = m.{om_user_id} '
             'WHERE (' + match + ') '
-            "AND COALESCE(u.status, 'active') = 'active' "
-            'ORDER BY u.username')
+            "AND COALESCE(u.{user_status}, 'active') = 'active' "
+            'ORDER BY u.{username}').format(**cols)
     rows = _query(ds, sql, params)
     candidates = [r['username'] for r in rows if r.get('username')]
     return Resolution(
@@ -214,11 +248,21 @@ def _resolve_position(participant, ctx, ds) -> Resolution:
             source='employees.position', reason=REASON_NO_MEMBER)
     rows = _query(
         ds,
-        'SELECT DISTINCT u.username AS username FROM employees e '
-        'JOIN users u ON u.id = e.user_id '
-        "WHERE e.position IN ({0}) AND COALESCE(e.status, 'active') = 'active' "
-        "AND COALESCE(u.status, 'active') = 'active' "
-        'ORDER BY u.username'.format(_placeholders(refs)), refs)
+        'SELECT DISTINCT u.{username} AS username FROM {employees} e '
+        'JOIN {users} u ON u.id = e.{employee_user_id} '
+        "WHERE e.{position} IN ({0}) "
+        "AND COALESCE(e.{employee_status}, 'active') = 'active' "
+        "AND COALESCE(u.{user_status}, 'active') = 'active' "
+        'ORDER BY u.{username}'.format(
+            _placeholders(refs),
+            username=_col('user', 'username'),
+            employees=_table('employee'),
+            users=_table('user'),
+            employee_user_id=_col('employee', 'user_id'),
+            position=_col('employee', 'position'),
+            employee_status=_col('employee', 'status'),
+            user_status=_col('user', 'status')),
+        refs)
     candidates = [r['username'] for r in rows if r.get('username')]
     return Resolution(
         candidates,
@@ -235,11 +279,18 @@ def _resolve_job_level(participant, ctx, ds) -> Resolution:
     min_level = _int(routing.get('min_job_level'))
     rows = _query(
         ds,
-        'SELECT e.job_grade AS job_grade, u.username AS username '
-        'FROM employees e JOIN users u ON u.id = e.user_id '
-        "WHERE COALESCE(e.status, 'active') = 'active' "
-        "AND COALESCE(u.status, 'active') = 'active' "
-        'ORDER BY u.username')
+        'SELECT e.{job_grade} AS job_grade, u.{username} AS username '
+        'FROM {employees} e JOIN {users} u ON u.id = e.{employee_user_id} '
+        "WHERE COALESCE(e.{employee_status}, 'active') = 'active' "
+        "AND COALESCE(u.{user_status}, 'active') = 'active' "
+        'ORDER BY u.{username}'.format(
+            job_grade=_col('employee', 'job_grade'),
+            username=_col('user', 'username'),
+            employees=_table('employee'),
+            users=_table('user'),
+            employee_user_id=_col('employee', 'user_id'),
+            employee_status=_col('employee', 'status'),
+            user_status=_col('user', 'status')))
     candidates: List[str] = []
     for row in rows:
         grade = _int(row.get('job_grade'))
@@ -460,9 +511,16 @@ def _org_manager_employee_ids(ds, employees: Dict[str, Any],
     org_id = (employees.get(str(employee_id)) or {}).get('org_id')
     if org_id in (None, ''):
         return []
-    rows = _query(ds, 'SELECT user_id FROM org_members '
-                      'WHERE org_id = ? AND COALESCE(is_manager, 0) = 1',
-                  [org_id])
+    rows = _query(
+        ds,
+        'SELECT {user_id} FROM {org_members} '
+        'WHERE {org_id} = ? AND COALESCE({is_manager}, 0) = 1'.format(
+            # TODO(v088): org_members.is_manager 已 deprecated，后续改用 org.manager_id
+            user_id=_col('org_member', 'user_id'),
+            org_members=_table('org_member'),
+            org_id=_col('org_member', 'org_id'),
+            is_manager=_col('org_member', 'is_manager')),
+        [org_id])
     user_ids = {str(r.get('user_id')) for r in rows if r.get('user_id') is not None}
     if not user_ids:
         return []
@@ -472,8 +530,12 @@ def _org_manager_employee_ids(ds, employees: Dict[str, Any],
 
 def _employee_id_of_user(ds, employees: Dict[str, Any], username: str) -> Any:
     """`start_with='<username>'` 起点：该用户的 employee 节点。"""
-    rows = _query(ds, 'SELECT id FROM users WHERE username = ? LIMIT 1',
-                  [username])
+    rows = _query(
+        ds,
+        'SELECT id FROM {users} WHERE {username} = ? LIMIT 1'.format(
+            users=_table('user'),
+            username=_col('user', 'username')),
+        [username])
     if not rows:
         return None
     user_id = str(rows[0].get('id'))
@@ -530,6 +592,28 @@ def _resolve_initiator_choice(participant, ctx, ds) -> Resolution:
 # ─────────────────────────────────────────────────────────────────────────────
 # 内部工具
 # ─────────────────────────────────────────────────────────────────────────────
+
+#: 元模型未声明的 BO 只告警一次，避免取人时刷日志
+_FALLBACK_WARNED: set = set()
+
+
+def _table(bo: str) -> str:
+    """表名从元模型取（SSOT）；未声明时回退约定复数并留痕。"""
+    from meta.core.metadata_resolver import MetadataResolver
+    name = MetadataResolver.get_table_name(bo)
+    if name:
+        return name
+    if bo not in _FALLBACK_WARNED:
+        _FALLBACK_WARNED.add(bo)
+        logger.warning('[Resolver] 元模型未声明 %s，按约定回退 %ss', bo, bo)
+    return f'{bo}s'
+
+
+def _col(bo: str, field_id: str) -> str:
+    """列名从元模型取（SSOT）；字段未声明时回退 field_id。"""
+    from meta.core.metadata_resolver import MetadataResolver
+    return MetadataResolver.get_column_name(bo, field_id) or field_id
+
 
 def _query(data_source, sql: str, params: Optional[Iterable] = None) -> List[Dict[str, Any]]:
     """查询失败（表未建 / 测试替身缺表）按空集处理，不阻断建任务。"""
@@ -597,8 +681,16 @@ def _evidence(field_name: str, op: str, expected: Any, actual: Any,
 def _employee_snapshot(ds) -> Dict[str, Dict[str, Any]]:
     rows = _query(
         ds,
-        'SELECT id, user_id, manager_employee_id, job_grade, position, '
-        "org_id FROM employees WHERE COALESCE(status, 'active') = 'active'")
+        'SELECT id, {user_id}, {manager_employee_id}, {job_grade}, '
+        '{position}, {org_id} FROM {employees} '
+        "WHERE COALESCE({status}, 'active') = 'active'".format(
+            user_id=_col('employee', 'user_id'),
+            manager_employee_id=_col('employee', 'manager_employee_id'),
+            job_grade=_col('employee', 'job_grade'),
+            position=_col('employee', 'position'),
+            org_id=_col('employee', 'org_id'),
+            employees=_table('employee'),
+            status=_col('employee', 'status')))
     return {str(r.get('id')): dict(r) for r in rows if r.get('id') is not None}
 
 
@@ -614,9 +706,17 @@ def _initiator_employee_id(ctx: Mapping[str, Any], ds,
         employees = _employee_snapshot(ds)
     rows = _query(
         ds,
-        'SELECT e.id AS id FROM employees e JOIN users u ON u.id = e.user_id '
-        "WHERE u.username = ? AND COALESCE(e.status, 'active') = 'active' "
-        'LIMIT 1', [username])
+        'SELECT e.id AS id FROM {employees} e '
+        'JOIN {users} u ON u.id = e.{employee_user_id} '
+        "WHERE u.{username} = ? "
+        "AND COALESCE(e.{employee_status}, 'active') = 'active' "
+        'LIMIT 1'.format(
+            employees=_table('employee'),
+            users=_table('user'),
+            employee_user_id=_col('employee', 'user_id'),
+            username=_col('user', 'username'),
+            employee_status=_col('employee', 'status')),
+        [username])
     if rows:
         return rows[0].get('id')
     # 兜底：发起人本身就是 employee id / employee_no
@@ -644,9 +744,15 @@ def _usernames_of(ds, user_ids: Iterable) -> List[str]:
         return []
     rows = _query(
         ds,
-        "SELECT id, username FROM users WHERE CAST(id AS TEXT) IN ({0}) "
-        "AND COALESCE(status, 'active') = 'active' "
-        'ORDER BY username'.format(_placeholders(ids)), ids)
+        'SELECT id, {username} FROM {users} '
+        'WHERE CAST(id AS TEXT) IN ({0}) '
+        "AND COALESCE({status}, 'active') = 'active' "
+        'ORDER BY {username}'.format(
+            _placeholders(ids),
+            username=_col('user', 'username'),
+            users=_table('user'),
+            status=_col('user', 'status')),
+        ids)
     return [r['username'] for r in rows if r.get('username')]
 
 

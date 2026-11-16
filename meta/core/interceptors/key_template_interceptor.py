@@ -126,7 +126,7 @@ class KeyTemplateInterceptor(Interceptor):
                 parent_id = context.params[parent_field]
                 base_type = ref.replace('_code', '').replace('_no', '')
                 from meta.core.metadata_resolver import MetadataResolver
-                resolved = MetadataResolver.get_table_name(base_type)
+                resolved = MetadataResolver.get_table_name(base_type) or base_type
                 candidate_tables = [resolved] if resolved != base_type else [base_type, base_type + 's', base_type + 'es']
                 # 🆕 2026-06-10 如果是 source_bo_id/target_bo_id，直接查 business_objects 表
                 if parent_field in ('source_bo_id', 'target_bo_id'):

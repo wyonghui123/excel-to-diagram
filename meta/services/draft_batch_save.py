@@ -373,14 +373,9 @@ def _pre_validate_fk_scope(object_type: str, drafts: List[Dict], user_info: Dict
 
 
 def _get_table_name_for_bo(object_type: str) -> str:
-    """获取 BO 类型对应的表名"""
-    _TABLE_NAME_MAP = {
-        'business_object': 'business_objects',
-        'service_module': 'service_modules',
-        'sub_domain': 'sub_domains',
-        'domain': 'domains',
-        'version': 'versions',
-        'product': 'products',
-        'relationship': 'relationship',
-    }
-    return _TABLE_NAME_MAP.get(object_type, f"{object_type}s")
+    """获取 BO 类型对应的表名（元模型优先；层级表由 hierarchies.yaml 派生）。"""
+    from meta.core.hierarchy_loader import get_table_map
+    from meta.core.metadata_resolver import MetadataResolver
+    return (MetadataResolver.get_table_name(object_type)
+            or get_table_map().get(object_type)
+            or f"{object_type}s")

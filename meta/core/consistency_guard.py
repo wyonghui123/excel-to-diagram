@@ -51,6 +51,16 @@ class ConsistencyViolation:
     severity: str = "high"
 
 
+def _resolve_table_name(object_type: str) -> str:
+    """表名解析：元模型优先；未声明时按约定回退并告警。"""
+    from meta.core.metadata_resolver import MetadataResolver
+    name = MetadataResolver.get_table_name(object_type)
+    if name:
+        return name
+    logger.warning('[consistency_guard] 元模型未声明 %s，回退 %ss', object_type, object_type)
+    return f'{object_type}s'
+
+
 class WriteGuard:
     """写入时同步守护
     
@@ -163,13 +173,7 @@ class WriteGuard:
     
     def _get_table_name(self, object_type: str) -> str:
         """获取对象对应的表名"""
-        from meta.core.models import registry as meta_registry
-        
-        meta_obj = meta_registry.get(object_type)
-        if meta_obj and meta_obj.table_name:
-            return meta_obj.table_name
-        
-        return f"{object_type}s"
+        return _resolve_table_name(object_type)
 
 
 class CascadeGuard:
@@ -301,13 +305,7 @@ class CascadeGuard:
     
     def _get_table_name(self, object_type: str) -> str:
         """获取对象对应的表名"""
-        from meta.core.models import registry as meta_registry
-        
-        meta_obj = meta_registry.get(object_type)
-        if meta_obj and meta_obj.table_name:
-            return meta_obj.table_name
-        
-        return f"{object_type}s"
+        return _resolve_table_name(object_type)
 
 
 class ComputedFieldHandler:
@@ -616,10 +614,4 @@ class RedundancyAuditor:
     
     def _get_table_name(self, object_type: str) -> str:
         """获取对象对应的表名"""
-        from meta.core.models import registry as meta_registry
-        
-        meta_obj = meta_registry.get(object_type)
-        if meta_obj and meta_obj.table_name:
-            return meta_obj.table_name
-        
-        return f"{object_type}s"
+        return _resolve_table_name(object_type)

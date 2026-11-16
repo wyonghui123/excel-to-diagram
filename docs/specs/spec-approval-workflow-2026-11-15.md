@@ -1,6 +1,6 @@
 # 审批流 Spec（Approval Workflow P0）
 
-> 版本：v0.11 ｜ 日期：2026-11-15 ｜ 状态：P0 已交付（M1-M3 验收通过）；M4（P2）任务域通用能力已实现并验收（M4-1~M4-5，§8），二次检查与元数据驱动审计见 §8.9；§9 为 M5 设计（通用任务引擎 / Fusion 对标 / 多产品对标），尚未实施
+> 版本：v0.12 ｜ 日期：2026-11-16 ｜ 状态：P0 已交付（M1-M3 验收通过）；M4（P2）任务域通用能力已实现并验收（M4-1~M4-5，§8），二次检查与元数据驱动审计见 §8.9；M5（通用任务引擎）已实施并验收（§9.8）；2026-11-16 完成存量表名/列名规范化（§9.10）
 > 定位：把审批域从「5 个真源半驱动」收敛为「2 个真源 + 派生」，并补齐前端审批动作与策略配置
 > 判尺：单一事实源（SSOT）+ 元数据驱动；不造重型框架、不做超范围重构
 > 复用底座：[`decision_effect.py`](../../meta/core/decision_effect.py)｜[`approval_meta_loader.py`](../../meta/core/approval_meta_loader.py)｜[`document_approval_service.py`](../../meta/services/document_approval_service.py)｜[`task_decision_api.py`](../../meta/api/task_decision_api.py)
@@ -658,7 +658,7 @@ POST /tasks/<id>/decision
 | Fusion 路由参数 | 落到 `routing_json` 的键 | 解析实现（仓内真源） |
 |---|---|---|
 | Approval Chain Of | `approval_chain_of` | 起始主体：`employee` / `position` / `org`；默认取发起人的 employee |
-| Start With | `start_with` | `manager`（直属主管，一跳）/ `position` / `self` / 指定 user；映射 `employee.manager_employee_id`（[employee.yaml L54](file:///d:/filework/excel-to-diagram/meta/schemas/employee.yaml#L54)，自关联汇报线，服务层已校验不成环） |
+| Start With | `start_with` | `manager`（直属主管，一跳）/ `position` / `self` / 指定 user（值口径 = `users.username`，不支持 user id / 显示名）；映射 `employee.manager_employee_id`（[employee.yaml L54](file:///d:/filework/excel-to-diagram/meta/schemas/employee.yaml#L54)，自关联汇报线，服务层已校验不成环） |
 | Number of Approval Levels | `levels` | `1` = 只下一级；`N` = 上溯 N 跳；`0/null` = 到顶 |
 | Minimum Job Level | `min_job_level` | 沿链过滤，职级不足则继续上溯（= Fusion 的跳级） |
 | Top Worker in Hierarchy | `top_worker_id` | 到顶的哨兵（通常是 CEO / 法人负责人），命中即停 |
@@ -709,7 +709,7 @@ ctx = {task_type, object_type, record: Mapping, initiator, org_id, employee_id}
 | `position_hierarchy` | 岗位层级链 | Fusion Position Hierarchy |
 | `job_level` | 按职级阈值过滤 | Fusion Minimum Job Level |
 | `expression` | `rule_predicate.evaluate` | 复用统一谓词，不新写求值器 |
-| `initiator_choice` | 提交时 `inputs.approver_selection` | 发起人自选，服务端校验可见范围 |
+| `initiator_choice` | 提交时 `inputs.approver_selection` | 发起人自选；服务层通道已备（`create_task(approver_selection=…)` → `ctx` → `inputs`），**上游提交入口未接（P3）**；范围校验未实现，按传入名单取人（残差见 §9.8） |
 
 **约束**：
 1. **输出 `explain` 与 `rule_predicate` 同构**（`field/op/expected/actual/passed`）→ 前端可直接展示「为什么是这个人 / 为什么一个人都没有」。
@@ -764,6 +764,14 @@ ctx = {task_type, object_type, record: Mapping, initiator, org_id, employee_id}
 | R14 | resolver 退化为 N+1 | 批量拉 `employee` 后内存上溯；测试断言查询次数 |
 | R15 | 表名与语义不一致（`approval_policies` 存非审批模板） | 文档 + API 层统一称「任务定义」，表名保留；出现真实需求再 rename（D-GT-01） |
 
+**复核残差（2026-11-16，只读审计；均不阻塞 M5 验收）**
+
+| # | 残差 | 现状 |
+|---|---|---|
+| Q1 | `initiator_choice` 生产路径恒空池 | `create_task(approver_selection=…)` → `ctx` → `inputs` 通道已备，但全仓无调用方（提交 API / UI 未接）；`resolve_stage` 不注入 `ctx['record']`，`record.approver_selection` 兜底为死分支；「可见范围校验」未实现 |
+| Q2 | `start_with` 指定用户只认用户名 | `_employee_id_of_user` 仅查 `users.username`；user id / 显示名一律 `missing_manager` |
+| Q3 | `notify` 参与行恒 `pending` | seed 后无终态（跨阶段也不结算）；`remaining` 已按 `VOTING_ROLES` 排除，但 `participations_view.counts` 仍计入 ⇒ 前端计数出现「待处理 1」；参与人列表显示 `notify · 待处理`，与「只读知会」语义不符（展示噪声，按需收敛） |
+
 ### 9.9 二次竞品对标（P：6 家头部产品）
 
 | 产品 | 模型分层 | 下一级 / 多级算法 | 审批 vs 通用任务 |
@@ -778,7 +786,7 @@ ctx = {task_type, object_type, record: Mapping, initiator, org_id, employee_id}
 **六家共识（P，反过来印证 §9.1 的结论）**
 
 1. 「流程定义 → 运行实例 → 每人一条待办」三层骨架，六家一致 → 我们的 `policies/steps` ↔ `tasks` ↔ `task_participations` 同构。
-2. 取人一律**运行期 Resolver**（角色 / 组 / 汇报线 / 岗位 / 脚本），从不硬编码 → §9.5 的插件式 resolver 是行业标准做法。
+2. 取人一律**运行期 Resolver**（角色 / 组 / 汇报线 / 岗位 / 脚本），由 YAML 声明 `approver_type` + `routing_json` 驱动 → §9.5 的插件式 resolver 是行业标准做法。**注意口径**：Resolver 只负责「可能是谁」，其 SQL 触及的 **BO 表名 / 列名必须来自元模型**（`table_name` / `db_column`，未声明时回退并留痕 warning）；平台内核表（如 `user_permission_sets`）直连属正常，见 §9.10。
 3. 多级 = **循环 + 参数化边界**（级数或「终点」），而不是在表里写死 N 行 → §9.3 的 `levels` + `top_worker_id` 正确；也解释了为什么现有 `step_no` 写不下多级。
 4. **Rule（条件）与 Action（需审 / 自动通过 / 仅通知）分离** → 印证 §9.4 的 `action_type` 三态。
 5. 会签 / SLA / 委托 / 加签挂在**任务实例**，不挂流程定义 → 印证 §9.6 的运行时能力已通用。
@@ -816,3 +824,56 @@ ctx = {task_type, object_type, record: Mapping, initiator, org_id, employee_id}
 12. [钉钉｜Process design（流程设计）](https://help.dingtalk.io/approval/admin-process-design)
 
 > 取证说明：Salesforce Flow Orchestration 官方 Help 为 JS 渲染，Stage / Step / Work Guide 结论由官方 PDF 与页面标题交叉确认；SAP 仅引用官方文档门户，Recipient 三分类语义来自公开产品资料，未编造条款。
+
+### 9.10 存量规范化（2026-11-16，S1-S9）
+
+> 起因：M5 复核确认「取人器直连 `employees` / `orgs`」属「YAML 声明表 + 直连 SQL」的合规形态，但全仓审计发现同类问题系统性存在——**BO 表名/列名在代码里靠 `entity + 's'` / `field_id` 猜**，YAML 改名即运行期静默错误。本节记录本轮收敛结果与划界。
+
+**口径**
+
+| 类别 | 判据 | 处置 |
+|---|---|---|
+| BO 业务表（`employees` / `orgs` / `purchase_orders` 等） | YAML 声明了 `table_name` / `db_column` | 必须经 `MetadataResolver` 解析；禁止字面量表名与 `+ 's'` 拼表 |
+| 平台内核表（`users` / `user_permission_sets` / `tasks` / `task_events` / `audit_logs`） | 不属于 BO 元模型 | 允许直连与字面量，代码注释标注「平台内核表」 |
+| 未声明回退 | YAML 未写 `table_name` | 允许约定复数回退，但**必须 warning 留痕**，不得静默 |
+
+**改动清单**
+
+| # | 文件 | 改动要点 |
+|---|---|---|
+| S1 | [`metadata_resolver.py`](../../meta/core/metadata_resolver.py) | 新增 `get_column_name(entity, field_id)`（`db_column` 优先 → `field_id`；未声明返回 None）；`get_table_name` 收敛为**严格语义**（未声明返回 None，由调用方回退留痕），并删除类内重复定义（此前后者覆盖前者导致严格版成为死代码） |
+| S2 | [`task_assignee_resolver.py`](../../meta/core/task_assignee_resolver.py) | 新增 `_table(bo)` / `_col(bo, field)` 助手（未声明时 warning 一次）；11 处 SQL 全部参数化表名/列名（role / group / org / position / job_level / manager / manager_chain / initiator 等）；`user_permission_sets` 保留字面量并注释内核表；`_resolve_org` 去掉 `match.replace('o.', '')` 脆弱替换，统一 `cols` 字典 format |
+| S3 | [`_descendant_subquery.py`](../../meta/core/_descendant_subquery.py) | `_TABLE_MAP = get_table_map()`（`hierarchies.yaml`）；FK 由 `get_hierarchy_chain()` 推导；未声明 warning 并返回 None |
+| S4 | [`consistency_guard.py`](../../meta/core/consistency_guard.py) | 三处重复 `_get_table_name` 收敛为模块级 `_resolve_table_name()` |
+| S5 | [`effective_intent_checker.py`](../../meta/core/effective_intent_checker.py) | 新增 `_table_of(bo)`（hierarchies 映射 → MetadataResolver → 约定回退），L279 / L301 改用 |
+| S6 | [`audit_derived_fields.py`](../../meta/core/audit_derived_fields.py) | `_object_type_to_table_name` 改为 MetadataResolver 优先 + 显式回退映射 |
+| S7 | [`enrichment_engine.py`](../../meta/core/enrichment_engine.py) | `_get_table_name` 改为 MetadataResolver 优先 + warning + 回退 |
+| S8 | [`draft_batch_save.py`](../../meta/services/draft_batch_save.py) | 删除本地 `_TABLE_NAME_MAP`（其中 `relationship` 表名本就有误），改用 `MetadataResolver → get_table_map → {bo}s` |
+| S9 | 本文档 | 回写 §9.9 第 2 条过度声明 + 本节 |
+| 适配 | [`key_template_interceptor.py`](../../meta/core/interceptors/key_template_interceptor.py) | `get_table_name(base_type) or base_type`，保持原「未命中构造候选表」行为不变 |
+
+**测试**
+
+| 用例文件 | 覆盖内容 |
+|---|---|
+| [`test_metadata_resolver.py`](../../meta/tests/test_metadata_resolver.py) | `get_table_name` 未声明返回 None（原「回退实体名」断言已废弃）；`TestGetColumnName` 覆盖 `db_column` 优先 / 缺省 `field_id` / 未知字段或实体返回 None |
+| [`test_task_assignee_resolver.py`](../../meta/tests/test_task_assignee_resolver.py) | 新增「元模型改名」fixture：注入 5 个改名 BO（`people` / `perm_sets` / `units` / `unit_members` / `staff_records`）后 role / group / org(descendants) / position / job_level 取人仍正确；并断言 SQL 不含旧表名（词边界匹配，避免 CTE 名 `scope_orgs` 误报） |
+
+**验收命令**
+
+```
+python d:\filework\test.py --file meta/tests/test_metadata_resolver.py,meta/tests/test_task_assignee_resolver.py
+# → 64 passed
+
+python d:\filework\test.py --file meta/tests/test_effective_intents.py,meta/tests/test_enrichment_engine.py,meta/tests/test_enrichment_engine_cache.py,meta/tests/test_consistency_guard.py,meta/tests/test_key_template_interceptor.py,meta/tests/test_key_template_interceptor_rel.py,meta/tests/test_task_participation.py,meta/tests/test_task_stage_advance.py
+# → 122 passed, 2 skipped
+```
+
+**划界（本轮未纳入的 P1/P2 项）**
+
+| 位置 | 现状 | 未纳入原因 |
+|---|---|---|
+| `meta/core/runtime_dimension_resolver.py:569` | 维度表名走运行期缓存映射 | 属维度域，与任务/审批无耦合，单独排期 |
+| `meta/core/_computed_count_clause.py:136/140/150` | 聚合子查询拼表名 | 属通用查询内核，改动面广，需独立回归 |
+| `meta/core/persistence_interceptor.py:1316/1323` | 写入前表名推导 | 同上 |
+| `meta/core/interceptors/key_template_interceptor.py:130/196` | 候选表 `[t, ts, tes]` 探测 | 属「表不存在时探测候选」逻辑，非 SSOT 解析，保留 |

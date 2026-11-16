@@ -26,9 +26,16 @@ JOIN 链, 末步的 right 表隐式含一个 <top>_id 字段指向顶层对象.
 未来 YAML 可声明 descendant_path, 此模块从 meta_object 读取.
 暂时使用内置注册表 (T-S08-01 YAML 改 schema 后可省略).
 """
+import logging
 from typing import List, Tuple, Optional
 
-from meta.core.hierarchy_loader import get_descendant_paths
+from meta.core.hierarchy_loader import (
+    get_descendant_paths,
+    get_hierarchy_chain,
+    get_table_map,
+)
+
+logger = logging.getLogger(__name__)
 
 # 表别名映射 (显式声明, 不依赖 first-2-chars)
 _TABLE_ALIAS = {
@@ -59,6 +66,11 @@ _DESCENDANT_PATH_REGISTRY: dict = {
     k: v for k, v in get_descendant_paths().items()
     if k in ('domain', 'sub_domain', 'service_module')
 }
+
+# [规范化 2026-11-16] 顶层表名/父外键由 hierarchies.yaml 派生（SSOT），
+# 不再用 object_type + 's' / object_type + '_id' 猜测（拼错即静默空集）。
+_TABLE_MAP = get_table_map()
+_FK_OF_TABLE = {table: fk for _obj, fk, table in get_hierarchy_chain() if fk}
 
 
 def _alias_of(table: str) -> str:
@@ -107,10 +119,16 @@ def build_descendant_exists_sql(
         prev_alias = right_alias
         last_table = right_table
 
-    # 顶层对象
-    top_table = object_type + 's'  # domain → domains, sub_domain → sub_domains, service_module → service_modules
+    # 顶层对象（表名与父外键均取 hierarchies.yaml，不再猜）
+    top_table = _TABLE_MAP.get(object_type)
+    if not top_table:
+        logger.warning('[descendant] %s 未在 hierarchies.yaml 声明，跳过匹配', object_type)
+        return None
+    top_fk = _FK_OF_TABLE.get(last_table)
+    if not top_fk:
+        logger.warning('[descendant] %s 的父外键未声明，跳过匹配', last_table)
+        return None
     top_alias = target_alias or top_table
-    top_fk = object_type + '_id'   # 约定俗成, 与现状一致
     last_alias = _alias_of(last_table)
 
     join_block = ("\n" + "\n".join(join_lines[1:])) if len(join_lines) > 1 else ""

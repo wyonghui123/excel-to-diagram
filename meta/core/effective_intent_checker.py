@@ -39,6 +39,14 @@ from meta.core.hierarchy_loader import get_table_map
 TABLE_MAP = get_table_map()
 
 
+def _table_of(bo_id: str) -> str:
+    """表名解析：hierarchy 映射 → 元模型 → 约定回退（回退留痕）。"""
+    from meta.core.metadata_resolver import MetadataResolver
+    return (TABLE_MAP.get(bo_id)
+            or MetadataResolver.get_table_name(bo_id)
+            or f'{bo_id}s')
+
+
 class EffectiveIntentChecker:
     """Layer 1 权限求值引擎"""
 
@@ -268,7 +276,7 @@ class EffectiveIntentChecker:
     def _get_record(self, bo_id: str, record_id: int) -> Optional[Dict[str, Any]]:
         """获取记录数据"""
         # [A1 2026-10-06] 表名映射已提为模块级 TABLE_MAP（与 IntentScopeAdapter 共用）
-        table = TABLE_MAP.get(bo_id, bo_id + 's')  # 简单复数
+        table = _table_of(bo_id)
 
         try:
             with sqlite3.connect(self._db_path) as conn:
@@ -290,7 +298,7 @@ class EffectiveIntentChecker:
     ) -> bool:
         """检查记录是否匹配 WHERE 条件"""
         # [A1 2026-10-06] 表名映射已提为模块级 TABLE_MAP（与 IntentScopeAdapter 共用）
-        table = TABLE_MAP.get(bo_id, bo_id + 's')
+        table = _table_of(bo_id)
 
         try:
             with sqlite3.connect(self._db_path) as conn:

@@ -450,13 +450,12 @@ class EnrichmentEngine:
         return result
     
     def _get_table_name(self, object_type: str) -> str:
-        """获取对象对应的表名"""
-        from meta.core.models import registry as meta_registry
-        
-        meta_obj = meta_registry.get(object_type)
-        if meta_obj and meta_obj.table_name:
-            return meta_obj.table_name
-        
+        """获取对象对应的表名（元模型优先；缺失回退并告警）"""
+        from meta.core.metadata_resolver import MetadataResolver
+        name = MetadataResolver.get_table_name(object_type)
+        if name:
+            return name
+        logger.warning("[Enrichment] 元模型未声明 %s，回退 %ss", object_type, object_type)
         return f"{object_type}s"
     
     def clear_cache(self):

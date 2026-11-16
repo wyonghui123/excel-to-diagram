@@ -111,7 +111,9 @@ def _object_type_to_table_name(object_type: str) -> str:
         # [Rule Convergence M3 2026-11-07] 层级表名由 hierarchies.yaml 派生（FR-002）
         **get_table_map(),
     }
-    return _fallback_map.get(object_type, object_type + 's')
+    from meta.core.metadata_resolver import MetadataResolver
+    return (MetadataResolver.get_table_name(object_type)
+            or _fallback_map.get(object_type, object_type + 's'))
 
 
 def _chunked(seq: List[Any], size: int):

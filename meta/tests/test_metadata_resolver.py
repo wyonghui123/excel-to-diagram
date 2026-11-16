@@ -223,9 +223,50 @@ class TestGetTableName:
 
         del meta_registry._objects['customer']
 
-    def test_fallback_to_entity_name(self):
+    def test_returns_none_for_undeclared_entity(self):
+        # 严格语义：未声明的实体返回 None，由调用方决定回退（避免静默猜表名）
         table = MetadataResolver.get_table_name('unknown_entity')
-        assert table == 'unknown_entity'
+        assert table is None
+
+    def test_returns_none_for_empty_input(self):
+        assert MetadataResolver.get_table_name('') is None
+        assert MetadataResolver.get_table_name(None) is None
+
+
+class TestGetColumnName:
+
+    def test_returns_db_column_from_field(self):
+        field = MetaField(id='name', name='Name', field_type=FieldType.STRING,
+                          db_column='display_name')
+        obj = MetaObject(id='customer', name='Customer', table_name='customers',
+                         fields=[field])
+        meta_registry._objects['customer'] = obj
+
+        assert MetadataResolver.get_column_name('customer', 'name') == 'display_name'
+
+        del meta_registry._objects['customer']
+
+    def test_falls_back_to_field_id_when_db_column_empty(self):
+        field = MetaField(id='code', name='Code', field_type=FieldType.STRING,
+                          db_column='')
+        obj = MetaObject(id='customer', name='Customer', table_name='customers',
+                         fields=[field])
+        meta_registry._objects['customer'] = obj
+
+        assert MetadataResolver.get_column_name('customer', 'code') == 'code'
+
+        del meta_registry._objects['customer']
+
+    def test_returns_none_for_unknown_field_or_entity(self):
+        obj = MetaObject(id='customer', name='Customer', table_name='customers',
+                         fields=[])
+        meta_registry._objects['customer'] = obj
+
+        assert MetadataResolver.get_column_name('customer', 'missing') is None
+        assert MetadataResolver.get_column_name('unknown_entity', 'name') is None
+        assert MetadataResolver.get_column_name('customer', '') is None
+
+        del meta_registry._objects['customer']
 
 
 class TestIsNavigationEnabled:

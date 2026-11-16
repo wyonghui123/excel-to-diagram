@@ -9,6 +9,7 @@ position_hierarchy / expression / initiator_choice；空池原因；
 
 import json
 import os
+import re
 import sqlite3
 
 os.environ.setdefault('ALLOW_RAW_SQL', '1')
@@ -385,3 +386,132 @@ def test_create_task_writes_stage_quorum_and_completion_mode():
     assert config['completion_mode'] == 'all'
     assert config['quorum_required'] == 2
     connection.close()
+
+
+# ───────────────────────── 元模型改名（表名/列名 SSOT） ─────────────────────────
+
+_RENAMED_SCHEMA = """
+CREATE TABLE people (
+    id INTEGER PRIMARY KEY, username TEXT UNIQUE, status TEXT DEFAULT 'active'
+);
+CREATE TABLE perm_sets (id INTEGER PRIMARY KEY, code TEXT UNIQUE);
+CREATE TABLE user_permission_sets (
+    id INTEGER PRIMARY KEY, user_id INTEGER, permission_set_id INTEGER
+);
+CREATE TABLE units (
+    id INTEGER PRIMARY KEY, code TEXT, parent_id INTEGER, status TEXT DEFAULT 'active'
+);
+CREATE TABLE unit_members (
+    id INTEGER PRIMARY KEY, unit_id INTEGER, person_id INTEGER,
+    is_manager INTEGER DEFAULT 0
+);
+CREATE TABLE staff_records (
+    id INTEGER PRIMARY KEY, person_id INTEGER, manager_employee_id INTEGER,
+    job_grade TEXT, position TEXT, unit_id INTEGER, status TEXT DEFAULT 'active'
+);
+"""
+
+
+def _seed_renamed(connection):
+    connection.executemany(
+        'INSERT INTO people (id, username) VALUES (?, ?)',
+        [(1, 'alice'), (2, 'bob'), (3, 'carol'), (4, 'dave'), (5, 'erin')])
+    connection.executemany(
+        'INSERT INTO units (id, code, parent_id) VALUES (?, ?, ?)',
+        [(1, 'HQ', None), (2, 'SALES', 1), (3, 'SALES_EAST', 2), (4, 'HR', 1)])
+    connection.executemany(
+        'INSERT INTO unit_members (id, unit_id, person_id, is_manager) '
+        'VALUES (?, ?, ?, ?)',
+        [(1, 1, 1, 1), (2, 2, 2, 0), (3, 3, 3, 0), (4, 4, 4, 0)])
+    connection.executemany(
+        'INSERT INTO perm_sets (id, code) VALUES (?, ?)',
+        [(10, 'APPROVER'), (11, 'MANAGER')])
+    connection.executemany(
+        'INSERT INTO user_permission_sets (id, user_id, permission_set_id) '
+        'VALUES (?, ?, ?)', [(1, 1, 10), (2, 2, 11)])
+    connection.executemany(
+        'INSERT INTO staff_records (id, person_id, manager_employee_id, '
+        'job_grade, position, unit_id) VALUES (?, ?, ?, ?, ?, ?)',
+        [(1, 1, 2, '5', 'Clerk', 1), (2, 2, 3, '7', 'Buyer', 2),
+         (3, 3, 4, '9', 'Manager', 3), (4, 4, None, '10', 'Director', 1),
+         (5, 5, 2, '6', 'Buyer', 2)])
+
+
+@pytest.fixture
+def renamed_ds():
+    """把 5 个 BO 的表名/列名换成另一套（people/units/...），验证 SQL 走元模型。"""
+    from meta.core.models import FieldType, MetaField, MetaObject, registry
+    from meta.core.metadata_resolver import MetadataResolver
+
+    saved = dict(registry._objects)
+    MetadataResolver.clear_cache()
+
+    def _field(field_id, db_column):
+        return MetaField(id=field_id, name=field_id,
+                         field_type=FieldType.STRING, db_column=db_column)
+
+    registry._objects.update({
+        'user': MetaObject(id='user', name='User', table_name='people',
+                           fields=[_field('username', 'username'),
+                                   _field('status', 'status')]),
+        'permission_set': MetaObject(
+            id='permission_set', name='PermissionSet', table_name='perm_sets',
+            fields=[_field('code', 'code')]),
+        'org': MetaObject(id='org', name='Org', table_name='units',
+                          fields=[_field('code', 'code'),
+                                  _field('parent_id', 'parent_id')]),
+        'org_member': MetaObject(
+            id='org_member', name='OrgMember', table_name='unit_members',
+            fields=[_field('org_id', 'unit_id'),
+                    _field('user_id', 'person_id'),
+                    _field('is_manager', 'is_manager')]),
+        'employee': MetaObject(
+            id='employee', name='Employee', table_name='staff_records',
+            fields=[_field('user_id', 'person_id'),
+                    _field('org_id', 'unit_id'),
+                    _field('manager_employee_id', 'manager_employee_id'),
+                    _field('job_grade', 'job_grade'),
+                    _field('position', 'position'),
+                    _field('status', 'status')]),
+    })
+
+    connection = sqlite3.connect(':memory:')
+    connection.executescript(_RENAMED_SCHEMA)
+    _seed_renamed(connection)
+    data_source = _DS(connection)
+    yield data_source
+    connection.close()
+    registry._objects = saved
+    MetadataResolver.clear_cache()
+
+
+def test_renamed_tables_are_resolved_from_metamodel(renamed_ds):
+    """BO 表改名后 role/group/org/position/job_level 仍按元模型命中。"""
+    assert resolver.resolve(
+        _step('role', 'APPROVER'), _ctx(renamed_ds)).candidates == ['alice']
+    assert resolver.resolve(
+        _step('group', 'SALES'), _ctx(renamed_ds)).candidates == ['bob']
+    assert resolver.resolve(
+        _step('org', 'SALES', {'org_scope': 'descendants'}),
+        _ctx(renamed_ds)).candidates == ['bob', 'carol']
+    assert resolver.resolve(
+        _step('position', 'Buyer'), _ctx(renamed_ds)).candidates == ['bob', 'erin']
+    assert resolver.resolve(
+        _step('job_level', '9'), _ctx(renamed_ds)).candidates == ['carol']
+
+
+def test_renamed_tables_sql_has_no_hardcoded_bo_names(renamed_ds):
+    """SQL 不得出现旧表名/旧列名（user_permission_sets 为平台内核表，允许）。"""
+    resolver.resolve(_step('role', 'APPROVER'), _ctx(renamed_ds))
+    resolver.resolve(_step('group', 'SALES'), _ctx(renamed_ds))
+    resolver.resolve(_step('org', 'SALES', {'org_scope': 'descendants'}),
+                     _ctx(renamed_ds))
+    resolver.resolve(_step('position', 'Buyer'), _ctx(renamed_ds))
+    resolver.resolve(_step('job_level', '9'), _ctx(renamed_ds))
+    resolver.resolve(_step('manager_chain', None, {'levels': 0}),
+                     _ctx(renamed_ds))
+
+    sql = '\n'.join(renamed_ds.queries)
+    for legacy in ('users', 'orgs', 'org_members', 'employees',
+                   'permission_sets'):
+        assert not re.search(r'\b' + legacy + r'\b', sql), sql
