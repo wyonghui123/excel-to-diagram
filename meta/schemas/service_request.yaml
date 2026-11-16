@@ -578,6 +578,10 @@ ui_view_config:
     page_route: ServiceRequestDetailContent
     layout: tabs
     title: "{record.title} 详情"
+    # [9.13.4.1 2026-11-16] 单据侧只读审批投影（状态区）；不提供单据页决策。
+    approval_progress:
+      enabled: true
+      label: 审批进度
     tabs:
       - id: basic
         label: 基本信息

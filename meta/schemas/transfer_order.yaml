@@ -693,6 +693,12 @@ ui_view_config:
   # 菜单由 v190 迁移手工声明（procurement / transfer-order-management）
   skip_auto_menu: true
   showChangeHistory: true
+  # [9.13.4.1 2026-11-16] 单据侧只读审批投影（状态区），数据来自
+  #   GET /tasks?doc_ref_type=transfer_order&doc_ref_id=<id>；不提供单据页决策。
+  detail:
+    approval_progress:
+      enabled: true
+      label: 审批进度
   list:
     detail_mode: page
     title: 调拨单

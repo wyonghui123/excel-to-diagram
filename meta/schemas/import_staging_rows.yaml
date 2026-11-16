@@ -77,11 +77,11 @@ fields:
       title: 状态
       width: 110
       options:
-        - {value: pending, label: 待校验}
-        - {value: valid, label: 校验通过}
-        - {value: invalid, label: 校验失败}
-        - {value: imported, label: 已导入}
-        - {value: skipped, label: 已跳过}
+        - {value: pending, label: 待校验, color: info}
+        - {value: valid, label: 校验通过, color: warning}
+        - {value: invalid, label: 校验失败, color: danger}
+        - {value: imported, label: 已导入, color: success}
+        - {value: skipped, label: 已跳过, color: gray}
   - id: error_field
     name: 错误字段
     type: string
@@ -123,52 +123,92 @@ indexes:
     name: idx_import_staging_batch
 
 ui_view_config:
-  # 平台事实对象，本期无独立菜单入口（批次详情由集成模块后续里程碑承载）
+  # 平台事实对象：关闭自动菜单，入口由下方 menu 声明 + 静态路由渲染 IntegrationImports.vue
   skip_auto_menu: true
+  # [S4 2026-11-16] 菜单展示字段唯一真源（plan-integration-p1p2 §6.4 S4）
+  menu:
+    code: integration-imports
+    label: 导入交付面
+    route: /system/integration-imports
+    icon: Upload
+    color: '#10b981'
+    sort_order: 60
+    parent: system
   list:
     detail_mode: drawer
-    title: 导入暂存行
-    description: 原始行与行级校验结果（只读）
+    # 注意粒度：本块描述的是「批次聚合」视图（数据源 /api/v2/integrations/imports，
+    # 按 batch_no 反向聚合暂存行），与下方 form/detail 的「单行」粒度是两个视图。
+    title: 导入批次
+    description: 按批次聚合的导入运行面（批次身份由暂存行反向聚合，不建批次表）
+    # [S8] 声明式数据源：批次聚合视图（/imports 按 batch_no 反向聚合），
+    #   object_type 由页面工具栏作为额外查询参数透传（MetaResourcePage extra-params）。
+    data_source:
+      url: /api/v2/integrations/imports
+      method: get
+      items_path: data.items
+      total_path: data.total
+      params_map: {page_size: pageSize, page: page, object_type: object_type}
+    # [S8] 批次下钻是唯一保留的页面级复合视图：动作只声明入口，由页面插槽打开抽屉
+    actions:
+      - id: detail
+        label: 明细
+        position: row
+        dialog: none
     columns:
       - field: batch_no
-        width: 200
-        sortable: true
-      - field: row_no
-        width: 90
-        sortable: true
-      - field: object_type
-        width: 160
-        filterable: true
-        filter_type: select
-      - field: status
-        width: 110
-        filterable: true
-        filter_type: select
-      - field: error_field
-        width: 140
-      - field: error_code
-        width: 140
-        filterable: true
-        filter_type: select
-      - field: error_message
-        width: 240
+        title: 批次号
+        width: 210
+        filterable: false
+      - field: batch_run_id
+        title: 运行 ID
+        width: 170
         type: ellipsis
+        sortable: false
+        filterable: false
       - field: created_at
-        width: 160
+        title: 创建时间
+        width: 170
         format: datetime
-        sortable: true
+        filterable: false
+      - field: expires_at
+        title: 过期时间
+        width: 170
+        format: datetime
+        sortable: false
+        filterable: false
+      - field: total
+        title: 行数
+        width: 90
+        filterable: false
+      - field: pending
+        title: 待提交
+        width: 90
+        filterable: false
+      - field: invalid
+        title: 校验失败
+        width: 100
+        filterable: false
+      - field: imported
+        title: 已导入
+        width: 90
+        filterable: false
+      - field: expired
+        title: 状态
+        width: 90
+        type: boolean
+        filterable: false
+        enum_values:
+          - {value: false, label: 有效, color: success}
+          - {value: true, label: 已过期, color: info}
+      - field: actions
+        title: 操作
+        width: 90
+        sortable: false
+        filterable: false
     selection:
       enabled: false
-    searchFields: [batch_no, error_code, error_message]
-    actions:
-      - id: export
-        label: 导出
-        icon: download
-        type: default
-        permission: import_staging_rows:read
-    defaultSort:
-      field: created_at
-      order: desc
+    searchFields: []
+    defaultSort: null
   form:
     title: 导入暂存行
     layout: vertical

@@ -1,0 +1,345 @@
+# 通知投递记录（投递事实表，只读账本）
+# 依据：docs/specs/spec-integration-module-2026-11-15.md §3 单一事实模型 / §7.1 状态机
+#        docs/specs/plan-integration-p1p2-2026-11-16.md §6.4 S1
+# 纪律：一个 `事件 × 订阅 × 通道` 一行，重试状态机的事实载体；
+#       不新建第二套投递表 / 收件箱，批次汇总一律按 status 实时聚合（无冗余计数列）；
+#       写入由消息中心投递器承担，通用 CRUD 关闭（保留专属运行面端点的 admin 权限语义）。
+id: notification_delivery
+name: 通知投递
+table_name: notification_deliveries
+description: 变更事件的通知投递事实（每 事件×订阅×通道 一行，含重试状态机）
+module: integration
+generic_api_mode: disabled
+
+semantics:
+  meaning: 通知投递记录
+  category: auxiliary
+  aliases: [投递记录, NotificationDelivery, 投递事实]
+
+fields:
+  - id: id
+    name: ID
+    type: integer
+    db_column: id
+    required: true
+    unique: true
+    description: 技术主键
+    semantics:
+      meaning: 自增主键
+      primary_key: true
+      export_visible: false
+  - id: event_id
+    name: 变更事件
+    type: integer
+    db_column: event_id
+    required: true
+    description: change_events.id（事件归属校验与重试去抖的锚点）
+    ui: {widget: number, title: 变更事件, width: 110}
+  - id: subscription_id
+    name: 订阅
+    type: integer
+    db_column: subscription_id
+    required: true
+    description: change_subscriptions.id（订阅内联端点回退来源）
+    ui: {widget: number, title: 订阅, width: 110}
+  - id: user_id
+    name: 接收用户
+    type: integer
+    db_column: user_id
+    description: 人渠道接收者用户 ID（系统渠道为空，弱引用）
+    ui: {widget: number, title: 接收用户, width: 110}
+  - id: connection_id
+    name: 集成连接
+    type: integer
+    db_column: connection_id
+    description: integration_connection.id（有值时投递目标取连接的 endpoint / secret_ref）
+    semantics: {filterable: true, filter_type: enum}
+    ui: {widget: number, title: 集成连接, width: 110}
+  - id: channel
+    name: 通道
+    type: string
+    db_column: channel
+    required: true
+    max_length: 20
+    description: 投递通道（订阅 channel 经 _channel() 归一后落库）
+    semantics: {filterable: true, filter_type: enum}
+    enum_values:
+      - {value: in_app, label: 站内消息}
+      - {value: webhook, label: Webhook}
+      - {value: im, label: 即时通讯}
+      - {value: email, label: 邮件}
+      - {value: sms, label: 短信}
+    ui:
+      widget: select
+      title: 通道
+      width: 110
+      options:
+        - {value: in_app, label: 站内消息}
+        - {value: webhook, label: Webhook}
+        - {value: im, label: 即时通讯}
+        - {value: email, label: 邮件}
+        - {value: sms, label: 短信}
+  - id: target
+    name: 投递目标
+    type: string
+    db_column: target
+    max_length: 500
+    description: 实际投递地址（可能含带 token 的 URL，列表默认脱敏展示）
+    semantics: {sensitive: true, export_visible: false}
+    ui: {widget: text, title: 投递目标, width: 240}
+  - id: target_type
+    name: 目标类型
+    type: string
+    db_column: target_type
+    max_length: 200
+    description: human（面向人渠道）/ system（系统对接渠道），由 v279 回填
+    semantics: {filterable: true, filter_type: enum}
+    ui:
+      widget: select
+      title: 目标类型
+      width: 110
+      options:
+        - {value: human, label: 面向人}
+        - {value: system, label: 面向系统}
+  - id: direction
+    name: 方向
+    type: string
+    db_column: direction
+    max_length: 200
+    description: outbound / inbound（运行面 in/out 过滤）
+    semantics: {filterable: true, filter_type: enum}
+    ui:
+      widget: select
+      title: 方向
+      width: 100
+      options:
+        - {value: outbound, label: 出站}
+        - {value: inbound, label: 入站}
+  - id: status
+    name: 状态
+    type: string
+    db_column: status
+    required: true
+    default: pending
+    max_length: 20
+    description: 投递状态机；终态 = failed 且 next_retry_at 为空（不引入 dead）
+    semantics: {filterable: true, filter_type: enum}
+    enum_values:
+      - {value: pending, label: 待投递, color: info}
+      - {value: sending, label: 投递中, color: warning}
+      - {value: delivered, label: 已投递, color: success}
+      - {value: failed, label: 投递失败, color: danger}
+      - {value: skipped, label: 已跳过, color: gray}
+    ui:
+      widget: select
+      title: 状态
+      width: 110
+      options:
+        - {value: pending, label: 待投递, color: info}
+        - {value: sending, label: 投递中, color: warning}
+        - {value: delivered, label: 已投递, color: success}
+        - {value: failed, label: 投递失败, color: danger}
+        - {value: skipped, label: 已跳过, color: gray}
+  - id: attempts
+    name: 尝试次数
+    type: integer
+    db_column: attempts
+    required: true
+    default: 0
+    ui: {widget: number, title: 尝试次数, width: 100}
+  - id: last_error
+    name: 最近错误
+    type: text
+    db_column: last_error
+    description: 最近一次失败原因（不落 payload）
+    ui: {widget: textarea, title: 最近错误}
+  - id: next_retry_at
+    name: 下次重试时间
+    type: datetime
+    db_column: next_retry_at
+    description: 退避后的重试时刻；为空且 status=failed 即人工重试或放弃
+    ui: {widget: datetime, title: 下次重试时间, width: 170}
+  - id: delivered_at
+    name: 投递时间
+    type: datetime
+    db_column: delivered_at
+    ui: {widget: datetime, title: 投递时间, width: 170}
+  - id: created_at
+    name: 创建时间
+    type: datetime
+    db_column: created_at
+    required: true
+    ui: {widget: datetime, title: 创建时间, width: 170, sortable: true}
+
+indexes:
+  - fields: [status, next_retry_at]
+    name: idx_delivery_status_retry
+    description: 重试扫描（待投递 / 到期重试）
+  - fields: [event_id]
+    name: idx_delivery_event
+    description: 按事件聚合投递状态
+
+relations:
+  - id: event
+    name: 变更事件
+    type: reference
+    target: change_event
+    source_field: event_id
+    target_field: id
+    cardinality: N:1
+    description: 投递所属变更事件
+  - id: subscription
+    name: 订阅
+    type: reference
+    target: change_subscription
+    source_field: subscription_id
+    target_field: id
+    cardinality: N:1
+    description: 产生该投递的订阅
+  - id: connection
+    name: 集成连接
+    type: reference
+    target: integration_connection
+    source_field: connection_id
+    target_field: id
+    cardinality: N:1
+    description: 投递使用的集成连接（弱引用，迁移期可为空）
+
+ui_view_config:
+  # 运行面事实对象：关闭自动菜单，入口由下方 menu 声明 + 静态路由渲染 IntegrationDeliveries.vue
+  skip_auto_menu: true
+  # [S4 2026-11-16] 菜单展示字段唯一真源（plan-integration-p1p2 §6.4 S4）
+  menu:
+    code: integration-deliveries
+    label: 消息运行面
+    route: /system/integration-deliveries
+    icon: Promotion
+    color: '#f59e0b'
+    sort_order: 58
+    parent: system
+  list:
+    detail_mode: drawer
+    title: 通知投递
+    description: 投递事实与重试状态（只读）
+    # [S8] 声明式数据源（投递事实表不是通用 BO 端点）
+    data_source:
+      url: /api/v2/integrations/deliveries
+      method: get
+      items_path: data.items
+      total_path: data.total
+      params_map: {page_size: pageSize, page: page, ordering: ordering}
+    # [S8] 顶部指标条：只声明取值来源，字段（total / by_status / retryable …）由后端聚合
+    stats:
+      url: /api/v2/integrations/deliveries/stats
+      items_from: by_status
+    # [S8] 单条重试：仅 RETRYABLE_STATUSES（failed / skipped）可点，其余置灰
+    actions:
+      - id: retry
+        label: 重试
+        position: row
+        http: {method: post, url: '/api/v2/integrations/deliveries/{row.id}/retry'}
+        success_message: '{data.message}'
+        refresh: true
+        enabled_when: {field: status, in: [failed, skipped]}
+    # 列 / 表头筛选的唯一真源。筛选只声明后端真正支持的参数
+    # （GET /integrations/deliveries 支持 status / direction / target_type /
+    #  connection_id / event_id / subscription_id / since / until），
+    # 只读列（事件、目标、错误信息）不挂筛选。
+    columns:
+      - field: id
+        width: 80
+        sortable: true
+        filterable: false
+      - field: event_type
+        title: 事件
+        width: 150
+        filterable: false
+      - field: object_type
+        title: 业务对象
+        width: 150
+        filterable: false
+      - field: connection_code
+        title: 连接
+        width: 150
+        filterable: false
+      - field: channel
+        width: 100
+        filterable: false
+      - field: target
+        width: 210
+        type: ellipsis
+        filterable: false
+      - field: direction
+        width: 90
+        filterable: true
+        filter_type: select
+      - field: target_type
+        title: 目标类型
+        width: 110
+        filterable: true
+        filter_type: select
+      - field: status
+        width: 110
+        filterable: true
+        filter_type: select
+      - field: attempts
+        width: 90
+        filterable: false
+        sortable: true
+      - field: last_error
+        title: 最近错误
+        width: 220
+        type: ellipsis
+        filterable: false
+      - field: next_retry_at
+        width: 170
+        format: datetime
+        filterable: false
+        sortable: false
+      - field: created_at
+        width: 170
+        format: datetime
+        filterable: false
+        sortable: true
+      # 行内操作列（单条重试）：由本文件 list.actions 的 retry 声明驱动
+      - field: actions
+        title: 操作
+        width: 90
+        sortable: false
+        filterable: false
+    selection:
+      enabled: false
+    # 后端列表不支持 keyword 搜索（target_type/status/direction 走表头筛选）
+    searchFields: []
+    defaultSort:
+      field: id
+      order: desc
+  form:
+    title: 通知投递
+    layout: vertical
+    sections:
+      - title: 定位
+        columns:
+          - fields: [event_id, subscription_id]
+          - fields: [connection_id, channel]
+          - fields: [target_type, direction]
+      - title: 状态机
+        columns:
+          - fields: [status, attempts]
+          - fields: [next_retry_at, delivered_at]
+      - title: 失败信息
+        columns:
+          - fields: [last_error]
+  detail:
+    layout: tabs
+    title: "投递 {record.id}"
+    tabs:
+      - id: basic
+        label: 定位
+        type: fields
+        fields: [id, event_id, subscription_id, connection_id, channel,
+                 target, target_type, direction, created_at]
+      - id: state
+        label: 状态机
+        type: fields
+        fields: [status, attempts, next_retry_at, delivered_at, last_error]

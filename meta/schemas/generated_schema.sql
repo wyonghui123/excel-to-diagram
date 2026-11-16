@@ -1,5 +1,5 @@
 -- 自动生成的 Schema
--- 生成时间: 2026-11-16 09:45:37.074078
+-- 生成时间: 2026-11-16 16:41:53.844898
 
 -- 地址: 结构化地址库（支持对象）：国家 / 省 / 市 / 区 / 街道 / 门牌 / 邮编分列 + 格式化全文；只被引用，不承载用途 / 角色
 CREATE TABLE IF NOT EXISTS addresses (
@@ -1938,6 +1938,28 @@ CREATE TABLE IF NOT EXISTS menu_permissions (
     data_permission_hint TEXT,
     created_at DATETIME,
     updated_at DATETIME
+)
+
+-- 通知投递: 变更事件的通知投递事实（每 事件×订阅×通道 一行，含重试状态机）
+CREATE TABLE IF NOT EXISTS notification_deliveries (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    event_id INTEGER NOT NULL,
+    subscription_id INTEGER NOT NULL,
+    user_id INTEGER,
+    connection_id INTEGER,
+    channel VARCHAR(20) NOT NULL CHECK (channel IN ('in_app', 'webhook', 'im', 'email', 'sms')),
+    target VARCHAR(500),
+    target_type VARCHAR(200),
+    direction VARCHAR(200),
+    status VARCHAR(20) NOT NULL DEFAULT 'pending' CHECK (status IN ('pending', 'sending', 'delivered', 'failed', 'skipped')),
+    attempts INTEGER NOT NULL DEFAULT 0,
+    last_error TEXT,
+    next_retry_at DATETIME,
+    delivered_at DATETIME,
+    created_at DATETIME NOT NULL,
+    FOREIGN KEY (event_id) REFERENCES change_events(id),
+    FOREIGN KEY (subscription_id) REFERENCES change_subscriptions(id),
+    FOREIGN KEY (connection_id) REFERENCES integration_connection(id)
 )
 
 -- 编号序列: 单据编号规则（pattern 单一真源；当前值存平台 _sequences）
@@ -5001,7 +5023,6 @@ CREATE INDEX IF NOT EXISTS idx_hu_transactions_id ON hu_transactions(id)
 -- Indexes for 导入暂存行
 CREATE UNIQUE INDEX IF NOT EXISTS uq_import_staging_row ON import_staging_rows(batch_no, object_type, row_no)
 CREATE INDEX IF NOT EXISTS idx_import_staging_batch ON import_staging_rows(batch_no, status)
-CREATE INDEX IF NOT EXISTS idx_import_staging_rows_created_at ON import_staging_rows(created_at)
 
 -- Indexes for 国际贸易术语
 CREATE UNIQUE INDEX IF NOT EXISTS idx_incoterm_code_edition ON incoterms(code, edition)
@@ -5142,6 +5163,11 @@ CREATE INDEX IF NOT EXISTS idx_locations_name ON locations(name)
 -- Indexes for 查找序列
 CREATE UNIQUE INDEX IF NOT EXISTS idx_lookup_sequence_code ON lookup_sequences(code)
 CREATE INDEX IF NOT EXISTS idx_lookup_sequences_name ON lookup_sequences(name)
+
+-- Indexes for 通知投递
+CREATE INDEX IF NOT EXISTS idx_delivery_status_retry ON notification_deliveries(status, next_retry_at)
+CREATE INDEX IF NOT EXISTS idx_delivery_event ON notification_deliveries(event_id)
+CREATE INDEX IF NOT EXISTS idx_notification_deliveries_id ON notification_deliveries(id)
 
 -- Indexes for 编号序列
 CREATE UNIQUE INDEX IF NOT EXISTS idx_number_sequence_code ON number_sequences(code)

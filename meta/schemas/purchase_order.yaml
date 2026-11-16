@@ -1550,6 +1550,11 @@ ui_view_config:
   # [金额回溯 2026-11-13] 统一只读金额分解分区，共用后端 amount-trace 契约
   # [规则回溯 2026-11-13] 规则推导分区，与销售订单共用 RuleTracePanel / RuleTraceService
   detail:
+    # [9.13.4.1 2026-11-16] 单据侧只读审批投影（状态区）：数据来自
+    #   GET /tasks?doc_ref_type=purchase_order&doc_ref_id=<id>，不做单据页决策。
+    approval_progress:
+      enabled: true
+      label: 审批进度
     rule_trace:
       enabled: true
       label: 规则推导

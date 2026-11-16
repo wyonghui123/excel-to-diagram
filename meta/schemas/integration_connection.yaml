@@ -165,46 +165,122 @@ indexes:
     name: idx_integration_connection_channel
 
 ui_view_config:
-  # 平台配置对象，本期无独立菜单入口（由集成模块后续里程碑提供专属端点/入口）
+  # 平台配置对象：关闭自动菜单，入口由下方 menu 声明 + 静态路由渲染 IntegrationConnections.vue
   skip_auto_menu: true
+  # [S4 2026-11-16] 菜单展示字段唯一真源（plan-integration-p1p2 §6.4 S4）：
+  #   init_menu_permissions.py 只保留权限码与页面结构，label/route/icon/color/sort/parent 一律读本块。
+  menu:
+    code: integration-connections
+    label: 集成连接
+    route: /system/integration-connections
+    icon: Connection
+    color: '#0ea5e9'
+    sort_order: 57
+    parent: system
   list:
     detail_mode: drawer
     title: 集成连接
     description: 外部系统连接配置（密钥只存引用）
+    # [S8] 声明式数据源：本页不是通用 BO 端点（分页/筛选/排序由集成模块端点承担）。
+    #   前端 MetaResourcePage 据此构造 fetcher；params_map = 后端参数名 → 前端参数名。
+    data_source:
+      url: /api/v2/integrations/connections
+      method: get
+      items_path: data.items
+      total_path: data.total
+      params_map: {page_size: pageSize, page: page, ordering: ordering}
+    # [S8] 动作副作用声明：position=row|toolbar；http 占位符只支持 {row.<field>} / {id}。
+    #   dialog=form 表示走通用表单抽屉（字段来自本文件 form 块 / ui-meta.form）。
+    actions:
+      - id: create
+        label: 新建连接
+        icon: plus
+        type: primary
+        position: toolbar
+        dialog: form
+        http: {method: post, url: /api/v2/integrations/connections}
+        refresh: true
+      - id: test
+        label: 测试
+        position: row
+        http: {method: post, url: '/api/v2/integrations/connections/{row.code}/test'}
+        success_message: '{data.message}（{data.elapsed_ms}ms）'
+        refresh: false
+      - id: edit
+        label: 编辑
+        position: row
+        dialog: form
+        http: {method: put, url: '/api/v2/integrations/connections/{row.code}'}
+        refresh: true
+      - id: delete
+        label: 删除
+        position: row
+        confirm: '删除连接 {row.code}？被订阅 / 投递引用时会拒绝。'
+        http: {method: delete, url: '/api/v2/integrations/connections/{row.code}'}
+        refresh: true
+    # 列 / 表头筛选的唯一真源。筛选只声明后端真正支持的参数
+    # （GET /integrations/connections 支持 keyword / channel_type / enabled），
+    # 其余列 filterable: false，避免出现点了没反应的表头筛选。
     columns:
       - field: code
         width: 160
         sortable: true
+        filterable: false
       - field: name
         width: 160
+        filterable: false
       - field: channel_type
         width: 120
         filterable: true
         filter_type: select
       - field: direction
         width: 100
+        filterable: false
       - field: endpoint
         width: 240
         type: ellipsis
+        filterable: false
       - field: auth_type
         width: 120
+        filterable: false
+      - field: has_secret
+        title: 密钥
+        width: 90
+        sortable: false
+        filterable: false
+        type: boolean
+        enum_values:
+          - {value: true, label: 已配置, color: success}
+          - {value: false, label: 未配置, color: info}
+      - field: timeout_ms
+        width: 110
+        filterable: false
+      - field: retry_max
+        width: 100
+        filterable: false
       - field: enabled
         width: 90
         filterable: true
         filter_type: select
+        type: boolean
+        enum_values:
+          - {value: true, label: 启用, color: success}
+          - {value: false, label: 停用, color: info}
       - field: updated_at
         width: 160
         format: datetime
         sortable: true
+        filterable: false
+      # 行内操作列：单元格由 MetaListPage 的 `cell-actions` 插槽渲染，
+      # 动作（测试 / 编辑 / 删除）由本文件 list.actions 的 http 声明驱动。
+      - field: actions
+        title: 操作
+        width: 170
+        sortable: false
+        filterable: false
     selection:
       enabled: false
     searchFields: [code, name, endpoint]
-    actions:
-      - id: create
-        label: 新建连接
-        icon: plus
-        type: primary
-        permission: integration_connection:create
     defaultSort:
       field: updated_at
       order: desc
