@@ -133,6 +133,9 @@ class ImportPreview:
     validation: Dict[str, Any] = field(default_factory=dict)
     import_order: List[str] = field(default_factory=list)
     trace_id: Optional[str] = None
+    #: [M3 2026-11-16] staging 批次号与落行数（预览批次同样落行）
+    batch_no: str = ""
+    staging_rows: int = 0
 
 
 @dataclass
@@ -145,3 +148,6 @@ class ImportResult:
     trace_id: Optional[str] = None
     #: errors 是否因全局硬上限被截断（spec FR-006）。
     errors_truncated: bool = False
+    #: [M3 2026-11-16] staging 批次号与落行数
+    batch_no: str = ""
+    staging_rows: int = 0

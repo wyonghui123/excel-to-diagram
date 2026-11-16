@@ -1198,6 +1198,11 @@ def create_app(db_path=None):
     # [P0-1 2026-11-13] 三方集成凭证收口（app_builder 已登记，生产入口补齐）。
     from meta.api.integration_api import integration_bp
     app.register_blueprint(integration_bp)
+    # [集成模块 M2 2026-11-15] 连接管理 + 投递运行面（app_builder 同址补齐）。
+    from meta.api.integration_module_api import (
+        integration_module_bp, init_integration_module_api)
+    app.register_blueprint(integration_module_bp)
+    init_integration_module_api(data_source)
     # [roadmap v1.32.0 §6.2.4] 任务体系 = 部署级可关闭的平台模块。
     # 不注册 blueprint ⇒ 路由真 404（不只是前端看不见），须与菜单种子同门。
     _tasks_enabled = is_module_enabled('tasks')

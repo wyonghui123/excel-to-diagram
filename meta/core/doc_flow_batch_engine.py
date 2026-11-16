@@ -295,14 +295,15 @@ def derive_batch(app_ds, platform_ds, rule_id: str, items: List[Dict[str, Any]],
                     edge_target_bo=head_obj.id if two_level else None,
                     edge_target_id=head_id if two_level else None,
                     exact_idem=not two_level,
+                    platform_ds=platform_ds,
                 )
-                if not two_level and res.target_id not in heads:
+                if res.applied and not two_level and res.target_id not in heads:
                     heads.append(res.target_id)
                 results.append(res)
 
         return BatchDeriveResult(
             heads=heads,
-            total_edges=sum(1 for r in results if not r.replay),
+            total_edges=sum(1 for r in results if r.applied and not r.replay),
             skipped_replays=sum(1 for r in results if r.replay),
             per_item_open_qty=[r.open_qty for r in results],
             results=results,

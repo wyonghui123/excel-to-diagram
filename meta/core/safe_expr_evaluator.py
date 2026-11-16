@@ -75,6 +75,24 @@ def safe_evaluate(expr, context=None):
         return False
 
 
+def validate_expression(expr):
+    """静态校验表达式（只解析 + 白名单检查，不执行）。
+
+    Returns:
+        None 表示合法；否则返回错误文本（供声明期校验器使用）。
+    """
+    if not expr or not isinstance(expr, str) or not expr.strip():
+        return None
+    try:
+        tree = ast.parse(expr.strip(), mode='eval')
+        _validate_node(tree)
+    except SyntaxError as exc:
+        return '表达式语法错误: {0}'.format(exc)
+    except ValueError as exc:
+        return str(exc)
+    return None
+
+
 def _validate_node(node):
     for child in ast.walk(node):
         if isinstance(child, ast.Name):

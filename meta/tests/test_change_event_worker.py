@@ -367,3 +367,50 @@ def test_publish_writes_db_only_and_worker_dispatches():
         assert len(_inbox(ds, event_id)) == 1
     finally:
         _cleanup(ds, db_path)
+
+
+# ------------------------------------------------------------------ FR-2 连接优先
+
+class _ConnectionDS:
+    """只实现 find_by_id 的极简数据源（FR-2 目标解析用）。"""
+
+    def __init__(self, connections):
+        self._connections = connections
+
+    def find_by_id(self, table, row_id):
+        if table != 'integration_connection':
+            return None
+        return self._connections.get(int(row_id))
+
+
+def test_delivery_target_prefers_connection(monkeypatch):
+    monkeypatch.setenv('TEST_HOOK_SECRET', 's3cr3t')
+    dispatcher = ChangeEventDispatcher(_ConnectionDS({
+        7: {
+            'id': 7,
+            'code': 'feishu-ops',
+            'endpoint': 'https://open.feishu.cn/open-apis/bot/v2/hook/x',
+            'secret_ref': 'env:TEST_HOOK_SECRET',
+            'timeout_ms': 5000,
+        },
+    }))
+    target = dispatcher._delivery_target({
+        'connection_id': 7,
+        'webhook_url': 'https://legacy.example.com/hook',
+        'webhook_secret': 'inline',
+    })
+    assert target['url'] == 'https://open.feishu.cn/open-apis/bot/v2/hook/x'
+    assert target['secret'] == 's3cr3t'
+    assert target['timeout'] == 5
+
+
+def test_delivery_target_falls_back_to_subscription():
+    dispatcher = ChangeEventDispatcher(_ConnectionDS({}))
+    target = dispatcher._delivery_target({
+        'connection_id': 404,
+        'webhook_url': 'https://legacy.example.com/hook',
+        'webhook_secret': 'inline',
+    })
+    assert target['url'] == 'https://legacy.example.com/hook'
+    assert target['secret'] == 'inline'
+    assert target['timeout'] == 30

@@ -536,6 +536,8 @@ class ApplicationBuilder:
         from meta.api.handling_unit_api import handling_unit_bp
         from meta.api.doc_flow_api import doc_flow_bp
         from meta.api.integration_api import integration_bp
+        from meta.api.integration_module_api import (
+            integration_module_bp, init_integration_module_api)
         from meta.api.engineering_change_api import engineering_change_bp
         from meta.api.inventory_aging_api import inventory_aging_bp
         from meta.api.rule_center_api import rule_center_bp, rule_trace_bp
@@ -634,6 +636,9 @@ class ApplicationBuilder:
         app.register_blueprint(doc_flow_bp)
         # [P0-1 2026-11-13] 三方集成凭证收口：密钥只留后端，前端走代理。
         app.register_blueprint(integration_bp)
+        # [集成模块 M2 2026-11-15] 连接管理 + 投递运行面（与 meta/server.py 同址）。
+        app.register_blueprint(integration_module_bp)
+        init_integration_module_api(self._data_source)
         # [FR-009/010/012] 运维可观测端点（与生产入口一致）。
         from meta.api.ops_api import ops_bp
         app.register_blueprint(ops_bp)

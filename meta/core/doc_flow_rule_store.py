@@ -37,6 +37,9 @@ CREATE TABLE IF NOT EXISTS doc_flow_rule (
     create_hook     TEXT,
     field_map       TEXT NOT NULL DEFAULT '{}',
     copied_fields   TEXT NOT NULL DEFAULT '[]',
+    condition       TEXT NOT NULL DEFAULT '',
+    transform       TEXT NOT NULL DEFAULT '{}',
+    lookup_ref      TEXT NOT NULL DEFAULT '{}',
     split_key       TEXT NOT NULL DEFAULT '[]',
     target_line_bo  TEXT NOT NULL DEFAULT '',
     head_fk_field   TEXT NOT NULL DEFAULT '',
@@ -52,6 +55,9 @@ _ADDED_COLUMNS = (
     ("target_qty_field", "TEXT NOT NULL DEFAULT ''"),
     ("field_map", "TEXT NOT NULL DEFAULT '{}'"),
     ("copied_fields", "TEXT NOT NULL DEFAULT '[]'"),
+    ("condition", "TEXT NOT NULL DEFAULT ''"),
+    ("transform", "TEXT NOT NULL DEFAULT '{}'"),
+    ("lookup_ref", "TEXT NOT NULL DEFAULT '{}'"),
     ("split_key", "TEXT NOT NULL DEFAULT '[]'"),
     ("target_line_bo", "TEXT NOT NULL DEFAULT ''"),
     ("head_fk_field", "TEXT NOT NULL DEFAULT ''"),
@@ -62,7 +68,8 @@ _ADDED_COLUMNS = (
 _UPSERT_DECL_FIELDS = (
     "source_bo", "target_bo", "source_qty_field", "target_qty_field", "pool",
     "check_hook", "map_hook", "create_hook",
-    "field_map", "copied_fields", "split_key", "target_line_bo",
+    "field_map", "copied_fields", "condition", "transform", "lookup_ref",
+    "split_key", "target_line_bo",
     "head_fk_field", "display_fields",
 )
 
@@ -112,6 +119,9 @@ def ensure_doc_flow_rule_table(data_source) -> None:
     """
     data_source.execute(RULE_TABLE_DDL)
     _ensure_columns(data_source)
+    # [M4 2026-11-16] 映射码表（lookup_ref 钩子的数据源）同库同入口幂等建表
+    from meta.core.doc_flow_lookup_store import ensure_doc_flow_lookup_table
+    ensure_doc_flow_lookup_table(data_source)
 
 
 def upsert_rules(data_source, rules: List[Dict[str, Any]]) -> int:
@@ -138,9 +148,10 @@ def upsert_rules(data_source, rules: List[Dict[str, Any]]) -> int:
                (rule_id, source_bo, target_bo, source_qty_field,
                 target_qty_field, pool,
                 check_hook, map_hook, create_hook,
-                field_map, copied_fields, split_key, target_line_bo,
+                field_map, copied_fields, condition, transform, lookup_ref,
+                split_key, target_line_bo,
                 head_fk_field, display_fields, status, created_at, updated_at)
-               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?,
+               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?,
                        'active', ?, ?)
                ON CONFLICT(rule_id) DO UPDATE SET
                  source_bo = excluded.source_bo,
@@ -153,6 +164,9 @@ def upsert_rules(data_source, rules: List[Dict[str, Any]]) -> int:
                  create_hook = excluded.create_hook,
                  field_map = excluded.field_map,
                  copied_fields = excluded.copied_fields,
+                 condition = excluded.condition,
+                 transform = excluded.transform,
+                 lookup_ref = excluded.lookup_ref,
                  split_key = excluded.split_key,
                  target_line_bo = excluded.target_line_bo,
                  head_fk_field = excluded.head_fk_field,
@@ -170,6 +184,9 @@ def upsert_rules(data_source, rules: List[Dict[str, Any]]) -> int:
                 rule.get("create_hook") or None,
                 _as_json_text(rule.get("field_map"), "{}"),
                 _as_json_text(rule.get("copied_fields"), "[]"),
+                rule.get("condition") or "",
+                _as_json_text(rule.get("transform"), "{}"),
+                _as_json_text(rule.get("lookup_ref"), "{}"),
                 _as_json_text(rule.get("split_key"), "[]"),
                 rule.get("target_line_bo") or "",
                 rule.get("head_fk_field") or "",
@@ -198,6 +215,8 @@ def get_rule(data_source, rule_id: str) -> Optional[Dict[str, Any]]:
     rule = dict(zip(RULE_COLUMNS, rows[0]))
     rule["field_map"] = _loads(rule.get("field_map"), {})
     rule["copied_fields"] = _loads(rule.get("copied_fields"), [])
+    rule["transform"] = _loads(rule.get("transform"), {})
+    rule["lookup_ref"] = _loads(rule.get("lookup_ref"), {})
     rule["split_key"] = _loads(rule.get("split_key"), [])
     rule["display_fields"] = _loads(rule.get("display_fields"), [])
     return rule
@@ -222,6 +241,8 @@ def list_rules(data_source, status: Optional[str] = None) -> List[Dict[str, Any]
         rule = dict(zip(RULE_COLUMNS, row))
         rule["field_map"] = _loads(rule.get("field_map"), {})
         rule["copied_fields"] = _loads(rule.get("copied_fields"), [])
+        rule["transform"] = _loads(rule.get("transform"), {})
+        rule["lookup_ref"] = _loads(rule.get("lookup_ref"), {})
         rule["split_key"] = _loads(rule.get("split_key"), [])
         rule["display_fields"] = _loads(rule.get("display_fields"), [])
         rules.append(rule)

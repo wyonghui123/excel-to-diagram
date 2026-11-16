@@ -1,0 +1,204 @@
+# 导入 staging 行（事实表，只读账本）
+# 依据：docs/specs/spec-integration-module-2026-11-15.md §3 单一事实模型 / §4.2 DDL / §11 M1
+# 纪律：批次身份复用 task_runs.id（batch_run_id 弱引用，不建批次表）；
+#       批次汇总按 status 实时聚合，不落冗余计数列；原始行与行级错误只在此处落一份。
+id: import_staging_rows
+name: 导入暂存行
+table_name: import_staging_rows
+description: 批量导入的原始行与行级校验结果（批次 = task_runs 一行；只读账本）
+module: integration
+generic_api_mode: read_only
+
+semantics:
+  meaning: 批量导入暂存行
+  category: auxiliary
+  aliases: [导入暂存行, ImportStagingRow, 导入明细]
+
+fields:
+  - id: id
+    name: ID
+    type: integer
+    db_column: id
+    required: true
+    unique: true
+    description: 技术主键
+    semantics:
+      meaning: 自增主键
+      primary_key: true
+      export_visible: false
+  - id: batch_run_id
+    name: 批次作业
+    type: integer
+    db_column: batch_run_id
+    description: task_runs.id（同步 preview 为空，弱引用不建 FK）
+    ui: {widget: number, title: 批次作业, width: 110}
+  - id: batch_no
+    name: 批次号
+    type: string
+    db_column: batch_no
+    required: true
+    max_length: 200
+    description: 对外批次号（preview 批次也有）
+    ui: {widget: text, title: 批次号, width: 200, sortable: true}
+  - id: object_type
+    name: 目标对象
+    type: string
+    db_column: object_type
+    required: true
+    max_length: 200
+    description: 导入目标 BO 对象 id
+    semantics: {filterable: true, filter_type: enum}
+    ui: {widget: select, title: 目标对象, width: 160}
+  - id: row_no
+    name: 行号
+    type: integer
+    db_column: row_no
+    required: true
+    description: 文件行序（表头偏移由导入器修正，可直接跳到 Excel 行）
+    ui: {widget: number, title: 行号, width: 90, sortable: true}
+  - id: raw_payload
+    name: 原始行
+    type: json
+    db_column: raw_payload
+    required: true
+    description: JSON，原始行内容（不被覆盖，保证可追溯）
+    ui: {widget: textarea, title: 原始行}
+  - id: status
+    name: 状态
+    type: string
+    db_column: status
+    required: true
+    default: pending
+    max_length: 200
+    description: pending / valid / invalid / imported / skipped
+    semantics: {filterable: true, filter_type: enum}
+    ui:
+      widget: select
+      title: 状态
+      width: 110
+      options:
+        - {value: pending, label: 待校验}
+        - {value: valid, label: 校验通过}
+        - {value: invalid, label: 校验失败}
+        - {value: imported, label: 已导入}
+        - {value: skipped, label: 已跳过}
+  - id: error_field
+    name: 错误字段
+    type: string
+    db_column: error_field
+    max_length: 200
+    ui: {widget: text, title: 错误字段, width: 140}
+  - id: error_code
+    name: 错误码
+    type: string
+    db_column: error_code
+    max_length: 200
+    description: 词表化错误码，供前端分组统计
+    semantics: {filterable: true, filter_type: enum}
+    ui: {widget: text, title: 错误码, width: 140}
+  - id: error_message
+    name: 错误信息
+    type: text
+    db_column: error_message
+    ui: {widget: textarea, title: 错误信息}
+  - id: target_record_id
+    name: 目标记录
+    type: integer
+    db_column: target_record_id
+    description: 导入成功后的业务主键
+    ui: {widget: number, title: 目标记录, width: 120}
+  - id: created_at
+    name: 创建时间
+    type: datetime
+    db_column: created_at
+    required: true
+    ui: {widget: datetime, title: 创建时间, width: 160}
+
+indexes:
+  # [M3 2026-11-16] 唯一键含 object_type：多 sheet 工作簿的 Excel 行号会重复
+  - fields: [batch_no, object_type, row_no]
+    unique: true
+    name: uq_import_staging_row
+  - fields: [batch_no, status]
+    name: idx_import_staging_batch
+
+ui_view_config:
+  # 平台事实对象，本期无独立菜单入口（批次详情由集成模块后续里程碑承载）
+  skip_auto_menu: true
+  list:
+    detail_mode: drawer
+    title: 导入暂存行
+    description: 原始行与行级校验结果（只读）
+    columns:
+      - field: batch_no
+        width: 200
+        sortable: true
+      - field: row_no
+        width: 90
+        sortable: true
+      - field: object_type
+        width: 160
+        filterable: true
+        filter_type: select
+      - field: status
+        width: 110
+        filterable: true
+        filter_type: select
+      - field: error_field
+        width: 140
+      - field: error_code
+        width: 140
+        filterable: true
+        filter_type: select
+      - field: error_message
+        width: 240
+        type: ellipsis
+      - field: created_at
+        width: 160
+        format: datetime
+        sortable: true
+    selection:
+      enabled: false
+    searchFields: [batch_no, error_code, error_message]
+    actions:
+      - id: export
+        label: 导出
+        icon: download
+        type: default
+        permission: import_staging_rows:read
+    defaultSort:
+      field: created_at
+      order: desc
+  form:
+    title: 导入暂存行
+    layout: vertical
+    sections:
+      - title: 批次与定位
+        columns:
+          - fields: [batch_no, batch_run_id]
+          - fields: [object_type, row_no]
+          - fields: [status, target_record_id]
+      - title: 原始行
+        columns:
+          - fields: [raw_payload]
+      - title: 错误定位
+        columns:
+          - fields: [error_field, error_code]
+          - fields: [error_message]
+  detail:
+    layout: tabs
+    title: "导入行 {record.batch_no} #{record.row_no}"
+    tabs:
+      - id: basic
+        label: 批次与定位
+        type: fields
+        fields: [batch_no, batch_run_id, object_type, row_no, status,
+                 target_record_id, created_at]
+      - id: payload
+        label: 原始行
+        type: fields
+        fields: [raw_payload]
+      - id: error
+        label: 错误定位
+        type: fields
+        fields: [error_field, error_code, error_message]

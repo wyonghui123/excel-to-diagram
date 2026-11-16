@@ -5817,13 +5817,43 @@ class ImportExportService:
         logger.info(f"[Import] sheets: {[s['object_type'] for s in sheets]}")
         logger.info(f"[Import] import_order: {import_order}")
 
+        # [M3 2026-11-16] 导入三段式第 1 段：原始行落 staging 账本。
+        # 失败只告警，不阻断导入（staging 是旁路事实，不是导入的前置条件）。
+        staging_service = None
+        staging_batch_no = ''
+        staging_rows = 0
+        try:
+            from meta.services.import_staging_service import ImportStagingService
+
+            staging_service = ImportStagingService(self.data_source)
+            staging_batch_no = staging_service.new_batch_no()
+            staged = staging_service.stage_workbook(
+                staging_batch_no, file_path, sheets,
+                batch_run_id=(context or {}).get('_batch_run_id'),
+            )
+            staging_rows = int(staged.get('staged_rows') or 0)
+            logger.info("[Import] staging batch=%s rows=%s",
+                        staging_batch_no, staging_rows)
+        except Exception as _staging_err:
+            staging_service = None
+            logger.warning("[Import] staging 落行失败（不影响导入）: %s", _staging_err)
+
         if mode == "preview":
             validation = self._validate_sheets(sheets, context)
+            # [M3] 预览阶段的校验报错回写 staging 行（其余行保持 pending）
+            if staging_service and staging_batch_no:
+                try:
+                    staging_service.apply_preview(
+                        staging_batch_no, validation, sheets)
+                except Exception as _staging_err:
+                    logger.warning("[Import] staging 预览回写失败: %s", _staging_err)
             return ImportPreview(
                 sheets=sheets,
                 validation=validation,
                 import_order=import_order,
                 trace_id=self._get_current_trace_id(),
+                batch_no=staging_batch_no,
+                staging_rows=staging_rows,
             )
         
         results = {}
@@ -5967,12 +5997,28 @@ class ImportExportService:
             # audit 写失败不影响 ImportResult 返回
             logger.warning("[V007.20] BATCH_IMPORT summary audit failed (non-fatal): %s", _audit_err)
 
+        # [M3] 导入三段式第 2/3 段：执行结果回写 staging + 生成错误报告。
+        # `error_report_path` 从本里程碑起真正赋值（此前恒为空串）。
+        error_report_path = ''
+        if staging_service and staging_batch_no:
+            try:
+                staging_service.apply_result(staging_batch_no, results)
+                if all_errors:
+                    error_report_path = staging_service.write_error_report(
+                        staging_batch_no)
+            except Exception as _staging_err:
+                logger.warning("[Import] staging 结果回写/报告生成失败: %s",
+                               _staging_err)
+
         return ImportResult(
             success=len(all_errors) == 0,
             results=results,
             errors=all_errors,
             trace_id=self._get_current_trace_id(),
             errors_truncated=all_errors_truncated,
+            error_report_path=error_report_path,
+            batch_no=staging_batch_no,
+            staging_rows=staging_rows,
         )
 
     def _sheet_name_to_object_type(self, sheet_name: str) -> Optional[str]:

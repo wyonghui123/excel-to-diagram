@@ -41,9 +41,9 @@ from __future__ import annotations
 
 import logging
 import uuid
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from datetime import datetime
-from typing import Any, Dict, Optional, Tuple
+from typing import Any, Dict, List, Optional, Tuple
 
 logger = logging.getLogger(__name__)
 
@@ -85,6 +85,10 @@ class DeriveResult:
     source_item: str = ""
     target_item: str = ""
     quantity: float = 0.0
+    #: [M4 2026-11-16] 规则级 condition 不成立 ⇒ applied=False（不写边、不消耗池）
+    applied: bool = True
+    #: [M4 2026-11-16] 字段级钩子错误（transform / lookup），不阻断整行
+    errors: List[Dict[str, Any]] = field(default_factory=list)
 
 
 def _num(value: Any) -> float:
@@ -239,7 +243,8 @@ def _derive_core(app_ds, rule, source_obj, target_obj, source_id, source_item,
                  edge_target_bo: Optional[str] = None,
                  edge_target_id: Any = None,
                  exact_idem: bool = True,
-                 derive_key: str = "") -> DeriveResult:
+                 derive_key: str = "",
+                 platform_ds=None) -> DeriveResult:
     """事务内单行派生核心（**不含事务装饰**——调用方负责事务边界）。
 
     两种模式（同一份映射/边/Σ 逻辑，差异只在"目标身份从哪来"）：
@@ -295,9 +300,31 @@ def _derive_core(app_ds, rule, source_obj, target_obj, source_id, source_item,
                 and target_obj.get_field(tgt_fid) is not None):
             rename_pairs.append((src_fid, tgt_fid))
 
+    # transform / lookup_ref 目标字段（§5.2 第 3、4 环）：同一目标字段只允许
+    # 声明一种钩子，且须存在于目标 BO；数量字段由第 6 环权威派生，跳过。
+    hook_targets: Dict[str, List[str]] = {"transform": [], "lookup_ref": []}
+    for hook_name in ("transform", "lookup_ref"):
+        for tgt_fid in sorted((rule.get(hook_name) or {}).keys()):
+            if target_qty_field is not None and tgt_fid == target_qty_field.id:
+                continue
+            if target_obj.get_field(tgt_fid) is None:
+                raise DocFlowDeriveError(
+                    "HOOK_FIELD_MISSING",
+                    "%s 声明的目标字段 %r 不存在于目标 %s"
+                    % (hook_name, tgt_fid, target_bo_id),
+                )
+            if tgt_fid in _COPY_NEVER:
+                continue          # status/line_no/remark/source_line_id 永不写入
+            hook_targets[hook_name].append(tgt_fid)
+    hooks_declared = bool(str(rule.get("condition") or "").strip()) or any(
+        hook_targets.values())
+
     read_field_ids = tuple(
         set(copy_field_ids) | {rule["source_qty_field"]}
         | {src for src, _ in rename_pairs}
+        # 钩子表达式按 `source.<字段>` 求值 ⇒ 整行可读（单行读取，成本不变）
+        | ({f.id for f in source_obj.get_persistent_fields()}
+           if hooks_declared else set())
     )
 
     # ── 1. check：源行存在 + 读数量/映射源 ───────────────────────────────
@@ -317,6 +344,31 @@ def _derive_core(app_ds, rule, source_obj, target_obj, source_id, source_item,
             "INVALID_QUANTITY",
             f"派生数量必须 > 0（红字冲销是专用入口），实际: {qty}",
         )
+
+    # ── 1.5 condition：规则级前置判定（不成立 ⇒ 不写边、不消耗池）─────────
+    hooks = None
+    hook_ctx: Dict[str, Any] = {}
+    hook_errors: List[Dict[str, Any]] = []
+    if hooks_declared:
+        from meta.core.doc_flow_mapping_hooks import DocFlowMappingHooks
+        hooks = DocFlowMappingHooks(platform_ds)
+        hook_ctx = DocFlowMappingHooks.build_context(
+            source_vals,
+            {"bo": edge_target_bo, "id": edge_target_id}
+            if edge_target_bo is not None else {},
+            derived_by,
+            now,
+        )
+        if not hooks.eval_condition(rule.get("condition"), hook_ctx):
+            consumed = _consumed_in_pool(
+                app_ds, source_bo_id, source_id, source_item, rule["pool"]
+            )
+            return DeriveResult(
+                edge_id="", target_id=None, replay=False, applied=False,
+                source_qty=source_qty, consumed_qty=consumed,
+                open_qty=source_qty - consumed,
+                source_id=source_id, source_item=source_item, quantity=qty,
+            )
 
     # ── 2. 目标身份 + 幂等重放预查 ───────────────────────────────────────
     attach_target_id = None
@@ -377,7 +429,25 @@ def _derive_core(app_ds, rule, source_obj, target_obj, source_id, source_item,
         for src_fid, tgt_fid in rename_pairs:            # ② field_map 改名
             if src_fid in source_vals:
                 row_data[target_obj.get_field(tgt_fid).db_column] = source_vals[src_fid]
-        for fid in target_field_ids:                     # ③ target_data 覆盖
+        for tgt_fid in hook_targets["transform"]:         # ③ transform 表达式
+            value, err = hooks.eval_transform(
+                tgt_fid, (rule.get("transform") or {}).get(tgt_fid), hook_ctx)
+            if err:
+                hook_errors.append(err)
+            elif value is not None:
+                row_data[target_obj.get_field(tgt_fid).db_column] = value
+        for tgt_fid in hook_targets["lookup_ref"]:        # ④ lookup_ref 码表
+            col = target_obj.get_field(tgt_fid).db_column
+            current = row_data.get(col, source_vals.get(tgt_fid))
+            mapped, err = hooks.apply_lookup(
+                tgt_fid, (rule.get("lookup_ref") or {}).get(tgt_fid), current)
+            if err:
+                hook_errors.append(err)
+                if col not in row_data and current is not None:
+                    row_data[col] = current   # 未命中保留原值，错误留给调用方
+            else:
+                row_data[col] = mapped
+        for fid in target_field_ids:                     # ⑤ target_data 覆盖
             if fid in target_data:
                 row_data[target_obj.get_field(fid).db_column] = target_data[fid]
         if qty_col is not None and qty_col not in row_data:
@@ -465,6 +535,7 @@ def _derive_core(app_ds, rule, source_obj, target_obj, source_id, source_item,
         source_item=source_item,
         target_item=ed_item,
         quantity=qty,
+        errors=hook_errors,
     )
 
 
@@ -534,4 +605,5 @@ def derive(app_ds, platform_ds, rule_id: str, source_id: Any,
             app_ds, rule, source_obj, target_obj, source_id, source_item,
             _num(quantity), target_data, derived_by, now, exact_idem=True,
             derive_key=derive_key,
+            platform_ds=platform_ds,
         )

@@ -871,14 +871,20 @@ def import_data():
             return ok({
                 "sheets": result.sheets,
                 "validation": result.validation,
-                "import_order": result.import_order
+                "import_order": result.import_order,
+                # [M3 2026-11-16] staging 批次号与落行数
+                "batch_no": result.batch_no,
+                "staging_rows": result.staging_rows
             })
         else:
             return jsonify({
                 "success": result.success,
                 "data": {
                     "results": result.results,
-                    "errors": result.errors
+                    "errors": result.errors,
+                    "error_report_path": result.error_report_path,
+                    "batch_no": result.batch_no,
+                    "staging_rows": result.staging_rows
                 }
             })
     
@@ -1050,6 +1056,9 @@ def import_data_async():
                 if _manage_service:
                     _manage_service.set_audit_user(audit_user_id, audit_user_name, audit_ip, audit_ua)
                 service = get_import_export_service()
+                # [M3 2026-11-16] staging 批次身份复用 task_runs.id
+                if run_id is not None:
+                    context['_batch_run_id'] = run_id
                 result = service.import_cascade(
                     file_path, 'execute', conflict_strategy, context,
                     progress_callback=_on_progress,
@@ -1061,6 +1070,10 @@ def import_data_async():
                     'results': result.results,
                     'errors': result.errors,
                     'errors_truncated': bool(getattr(result, 'errors_truncated', False)),
+                    # [M3 2026-11-16] staging 批次与错误报告
+                    'error_report_path': result.error_report_path,
+                    'batch_no': result.batch_no,
+                    'staging_rows': result.staging_rows,
                 }
                 if task:
                     task['status'] = 'completed'

@@ -31,6 +31,7 @@ from meta.core.rule_combine_mode import validate_combine_mode
 from meta.core.rule_constraint_evaluator import KEY_SEVERITIES
 from meta.core.rule_hit_policy import normalize_hit_policy, validate_hit_policy
 from meta.core.rule_keys import bo_yaml_key
+from meta.core.safe_expr_evaluator import validate_expression
 
 
 @dataclass(frozen=True)
@@ -270,6 +271,34 @@ def validate_doc_flow_rules(
                     'DOC_FLOW_COPIED_FIELD_MISSING', rule_id,
                     'copied_fields %r 须同时存在于 %s 与 %s 字段'
                     % (fid, source_bo, target_bo)))
+
+        # [M4 2026-11-16] 映射三钩子：目标字段须在目标 BO，表达式须静态合法
+        target_names = _field_names(known[target_bo])
+        for key in ('transform', 'lookup_ref'):
+            mapping = rule.get(key) or {}
+            if not isinstance(mapping, dict):
+                errors.append(DeclarationError(
+                    'DOC_FLOW_HOOK_INVALID', rule_id,
+                    '%s 须为 {目标字段: 值} 对象' % key))
+                continue
+            for tgt_fid in sorted(mapping):
+                if tgt_fid not in target_names:
+                    errors.append(DeclarationError(
+                        'DOC_FLOW_HOOK_TARGET_MISSING', rule_id,
+                        '%s 目标字段 %r 不在 %s 字段'
+                        % (key, tgt_fid, target_bo)))
+        for tgt_fid, expr in sorted((rule.get('transform') or {}).items()):
+            invalid = validate_expression(expr)
+            if invalid:
+                errors.append(DeclarationError(
+                    'DOC_FLOW_TRANSFORM_INVALID', rule_id,
+                    'transform[%s]=%r 不合法: %s' % (tgt_fid, expr, invalid)))
+        condition = str(rule.get('condition') or '')
+        invalid = validate_expression(condition)
+        if invalid:
+            errors.append(DeclarationError(
+                'DOC_FLOW_CONDITION_INVALID', rule_id,
+                'condition=%r 不合法: %s' % (condition, invalid)))
     return errors
 
 

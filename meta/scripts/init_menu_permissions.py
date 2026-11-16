@@ -461,6 +461,60 @@ def init_menu_permissions(db_path):
             'data_permission_hint': None
         },
         {
+            # [集成模块 M5 2026-11-16] 配置面：连接定义 + 连通性测试。
+            #   page_type=custom_page ⇒ 无自动菜单, 由静态路由
+            #   /system/integration-connections 渲染 IntegrationConnections.vue。
+            #   形态与 platform-ops-jobs 同口径: 无 BO 绑定, 权限门槛 ['*']（集成
+            #   连接的 secret_ref / 端点属管理员职责）, 与前端 meta.requiresAdmin 一致。
+            'menu_code': 'integration-connections',
+            'menu_name': '集成连接',
+            'menu_path': '/system/integration-connections',
+            'icon': 'Connection',
+            'color': '#0ea5e9',
+            'sort_order': 57,
+            'parent_menu': 'system',
+            'page_type': 'custom_page',
+            'primary_object_type': '',
+            'object_types': json.dumps([]),
+            'bo_bindings': json.dumps([]),
+            'required_permissions': json.dumps(['*']),
+            'data_permission_hint': None
+        },
+        {
+            # [集成模块 M5 2026-11-16] 运行面：in/out messages 投递事实 + 单条重试。
+            #   数据源是 notification_deliveries（既有投递事实表），不新建收件箱。
+            'menu_code': 'integration-deliveries',
+            'menu_name': '消息运行面',
+            'menu_path': '/system/integration-deliveries',
+            'icon': 'Promotion',
+            'color': '#f59e0b',
+            'sort_order': 58,
+            'parent_menu': 'system',
+            'page_type': 'custom_page',
+            'primary_object_type': '',
+            'object_types': json.dumps([]),
+            'bo_bindings': json.dumps([]),
+            'required_permissions': json.dumps(['*']),
+            'data_permission_hint': None
+        },
+        {
+            # [集成模块 M5 2026-11-16] 交付面：导入批次聚合 + 行级错误 + 错误报告下载。
+            #   批次身份由 import_staging_rows 反向聚合（无批次表）。
+            'menu_code': 'integration-imports',
+            'menu_name': '导入交付面',
+            'menu_path': '/system/integration-imports',
+            'icon': 'Upload',
+            'color': '#10b981',
+            'sort_order': 60,
+            'parent_menu': 'system',
+            'page_type': 'custom_page',
+            'primary_object_type': '',
+            'object_types': json.dumps([]),
+            'bo_bindings': json.dumps([]),
+            'required_permissions': json.dumps(['*']),
+            'data_permission_hint': None
+        },
+        {
             # [MOMP 通用化 2026-08-30] 组织管理页（org 单类型 MOMP）
             #   - menu_path=/org-management 对应前端路由 name=org-management
             #   - [FIX 2026-09-01 v2] 改为 user-permission 父菜单下的子菜单 (parent_menu='user-permission'),

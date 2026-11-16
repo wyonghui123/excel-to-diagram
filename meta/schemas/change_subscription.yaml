@@ -103,6 +103,16 @@ fields:
     ui:
       visible: false
 
+  - id: connection_id
+    name: 集成连接
+    type: integer
+    db_column: connection_id
+    description: 引用的 integration_connection.id；有值时优先于 webhook_url（v280）
+    semantics:
+      meaning: 投递所用的集成连接（配置对象）引用
+    ui:
+      visible: false
+
   - id: enabled
     name: 是否启用
     type: boolean
@@ -157,6 +167,10 @@ indexes:
     name: idx_change_subscriptions_enabled
     description: 按启用状态索引
 
+  - fields: [connection_id]
+    name: idx_change_subscriptions_connection_id
+    description: 按集成连接索引
+
 relations:
   - id: user
     name: 用户
@@ -166,6 +180,15 @@ relations:
     target_field: id
     cardinality: N:1
     description: 订阅用户
+
+  - id: connection
+    name: 集成连接
+    type: reference
+    target: integration_connection
+    source_field: connection_id
+    target_field: id
+    cardinality: N:1
+    description: 订阅使用的集成连接（v280 起由 webhook_url 迁移）
 
 rules:
   - id: enable_subscription

@@ -1,5 +1,5 @@
 -- 自动生成的 Schema
--- 生成时间: 2026-11-15 17:44:17.307621
+-- 生成时间: 2026-11-16 09:45:37.074078
 
 -- 地址: 结构化地址库（支持对象）：国家 / 省 / 市 / 区 / 街道 / 门牌 / 邮编分列 + 格式化全文；只被引用，不承载用途 / 角色
 CREATE TABLE IF NOT EXISTS addresses (
@@ -508,9 +508,11 @@ CREATE TABLE IF NOT EXISTS change_subscriptions (
     filter_condition TEXT,
     webhook_url VARCHAR(200),
     webhook_secret VARCHAR(200),
+    connection_id INTEGER,
     enabled INTEGER NOT NULL DEFAULT 1 CHECK (enabled IN ('1', '0')),
     created_at DATETIME NOT NULL DEFAULT 'NOW()',
-    FOREIGN KEY (user_id) REFERENCES users(id)
+    FOREIGN KEY (user_id) REFERENCES users(id),
+    FOREIGN KEY (connection_id) REFERENCES integration_connection(id)
 )
 
 -- 配置实例: 配置实例头（模型版本 / 状态 / hash / 求解上下文）
@@ -1397,6 +1399,22 @@ CREATE TABLE IF NOT EXISTS hu_transactions (
     FOREIGN KEY (child_hu_id) REFERENCES handling_units(id)
 )
 
+-- 导入暂存行: 批量导入的原始行与行级校验结果（批次 = task_runs 一行；只读账本）
+CREATE TABLE IF NOT EXISTS import_staging_rows (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    batch_run_id INTEGER,
+    batch_no VARCHAR(200) NOT NULL,
+    object_type VARCHAR(200) NOT NULL,
+    row_no INTEGER NOT NULL,
+    raw_payload TEXT NOT NULL,
+    status VARCHAR(200) NOT NULL DEFAULT 'pending',
+    error_field VARCHAR(200),
+    error_code VARCHAR(200),
+    error_message TEXT,
+    target_record_id INTEGER,
+    created_at DATETIME NOT NULL
+)
+
 -- 国际贸易术语: 国际贸易术语（Incoterms）字典——风险转移点与买卖双方责任划分
 CREATE TABLE IF NOT EXISTS incoterms (
     created_by VARCHAR(200),
@@ -1416,6 +1434,25 @@ CREATE TABLE IF NOT EXISTS incoterms (
     status VARCHAR(200) NOT NULL DEFAULT 'active' CHECK (status IN ('active', 'inactive')),
     description TEXT,
     created_at DATETIME
+)
+
+-- 集成连接: 外部系统连接配置（渠道 / 方向 / 端点 / 认证引用；密钥只存引用不存明文）
+CREATE TABLE IF NOT EXISTS integration_connection (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    code VARCHAR(200) NOT NULL,
+    name VARCHAR(200) NOT NULL,
+    channel_type VARCHAR(200) NOT NULL,
+    direction VARCHAR(200) NOT NULL DEFAULT 'outbound',
+    endpoint VARCHAR(500) NOT NULL,
+    auth_type VARCHAR(200) NOT NULL DEFAULT 'none',
+    secret_ref VARCHAR(500),
+    header_template TEXT,
+    timeout_ms INTEGER NOT NULL DEFAULT 15000,
+    retry_max INTEGER NOT NULL DEFAULT 5,
+    enabled INTEGER NOT NULL DEFAULT 1,
+    owner_user_id INTEGER,
+    created_at DATETIME NOT NULL,
+    updated_at DATETIME NOT NULL
 )
 
 -- 库存调整单: 库存调整单头（数量调整 / 报废 / 状态变更 / 盘点差异）
@@ -4731,6 +4768,7 @@ CREATE UNIQUE INDEX IF NOT EXISTS uq_crl_cr_line_field ON change_request_lines(c
 CREATE INDEX IF NOT EXISTS idx_change_subscriptions_user_id ON change_subscriptions(user_id)
 CREATE INDEX IF NOT EXISTS idx_change_subscriptions_object_type ON change_subscriptions(object_type)
 CREATE INDEX IF NOT EXISTS idx_change_subscriptions_enabled ON change_subscriptions(enabled)
+CREATE INDEX IF NOT EXISTS idx_change_subscriptions_connection_id ON change_subscriptions(connection_id)
 
 -- Indexes for 配置实例
 CREATE INDEX IF NOT EXISTS idx_configuration_structure_hash ON configurations(structure_id, config_hash)
@@ -4960,9 +4998,19 @@ CREATE INDEX IF NOT EXISTS idx_hu_tx_serial_at ON hu_transactions(serial_id, txn
 CREATE INDEX IF NOT EXISTS idx_hu_tx_doc ON hu_transactions(doc_type, doc_id)
 CREATE INDEX IF NOT EXISTS idx_hu_transactions_id ON hu_transactions(id)
 
+-- Indexes for 导入暂存行
+CREATE UNIQUE INDEX IF NOT EXISTS uq_import_staging_row ON import_staging_rows(batch_no, object_type, row_no)
+CREATE INDEX IF NOT EXISTS idx_import_staging_batch ON import_staging_rows(batch_no, status)
+CREATE INDEX IF NOT EXISTS idx_import_staging_rows_created_at ON import_staging_rows(created_at)
+
 -- Indexes for 国际贸易术语
 CREATE UNIQUE INDEX IF NOT EXISTS idx_incoterm_code_edition ON incoterms(code, edition)
 CREATE INDEX IF NOT EXISTS idx_incoterms_name ON incoterms(name)
+
+-- Indexes for 集成连接
+CREATE UNIQUE INDEX IF NOT EXISTS uq_integration_connection_code ON integration_connection(code)
+CREATE INDEX IF NOT EXISTS idx_integration_connection_channel ON integration_connection(channel_type, enabled)
+CREATE INDEX IF NOT EXISTS idx_integration_connection_updated_at ON integration_connection(updated_at)
 
 -- Indexes for 库存调整单
 CREATE INDEX IF NOT EXISTS idx_inventory_adjustments_org_id ON inventory_adjustments(org_id)

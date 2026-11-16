@@ -78,5 +78,26 @@ export default [
     name: 'print-platform',
     component: () => import('@/views/SystemManagement/PrintPlatform.vue'),
     meta: { title: '打印模板', requiresAuth: true }
+  },
+  {
+    // 集成模块·配置面（spec-integration-module §8 视图一）：连接定义 + 连通性测试
+    path: '/system/integration-connections',
+    name: 'integration-connections',
+    component: () => import('@/views/SystemManagement/IntegrationConnections.vue'),
+    meta: { title: '集成连接', requiresAuth: true, requiresAdmin: true }
+  },
+  {
+    // 集成模块·运行面（§8 视图二）：in/out messages 投递事实 + 单条重试
+    path: '/system/integration-deliveries',
+    name: 'integration-deliveries',
+    component: () => import('@/views/SystemManagement/IntegrationDeliveries.vue'),
+    meta: { title: '消息运行面', requiresAuth: true, requiresAdmin: true }
+  },
+  {
+    // 集成模块·交付面（§8 视图三）：导入批次聚合 + 行级错误 + 错误报告下载
+    path: '/system/integration-imports',
+    name: 'integration-imports',
+    component: () => import('@/views/SystemManagement/IntegrationImports.vue'),
+    meta: { title: '导入交付面', requiresAuth: true, requiresAdmin: true }
   }
 ]

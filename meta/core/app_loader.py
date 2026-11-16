@@ -150,6 +150,12 @@ class DocFlowRuleDecl:
     create_hook: str = ""                # Phase 1 留空列位
     field_map: Dict[str, str] = field(default_factory=dict)   # 源字段 → 目标字段
     copied_fields: List[str] = field(default_factory=list)    # 显式直拷白名单
+    #: [M4 2026-11-16] 规则级前置判定表达式（空 = 恒成立）
+    condition: str = ""
+    #: [M4 2026-11-16] 字段转换表达式 {目标字段: 表达式}
+    transform: Dict[str, str] = field(default_factory=dict)
+    #: [M4 2026-11-16] 码表转换 {目标字段: lookup_code}
+    lookup_ref: Dict[str, str] = field(default_factory=dict)
     split_key: List[str] = field(default_factory=list)        # 分单键字段名
     target_line_bo: str = ""             # 明细行 BO；空 = 单表模式
     head_fk_field: str = ""              # 明细行→单头 外键字段（显式声明优先）
@@ -168,6 +174,9 @@ class DocFlowRuleDecl:
             "create_hook": self.create_hook,
             "field_map": dict(self.field_map),
             "copied_fields": list(self.copied_fields),
+            "condition": self.condition,
+            "transform": dict(self.transform),
+            "lookup_ref": dict(self.lookup_ref),
             "split_key": list(self.split_key),
             "target_line_bo": self.target_line_bo,
             "head_fk_field": self.head_fk_field,
@@ -394,6 +403,9 @@ def _parse_doc_flow(raw: Dict[str, Any], app_id: str) -> tuple:
             field_map=_parse_field_map(item, ctx),
             copied_fields=_parse_str_list(
                 item, "copied_fields", ctx, "显式直拷字段名"),
+            condition=_optional_str(item, "condition"),
+            transform=_parse_str_map(item, "transform", ctx, "字段转换表达式"),
+            lookup_ref=_parse_str_map(item, "lookup_ref", ctx, "码表编码"),
             split_key=_parse_split_key(item, ctx),
             target_line_bo=_optional_str(item, "target_line_bo"),
             head_fk_field=_optional_str(item, "head_fk_field"),
@@ -430,6 +442,26 @@ def _parse_field_map(item: Dict[str, Any], ctx: str) -> Dict[str, str]:
 def _parse_split_key(item: Dict[str, Any], ctx: str) -> List[str]:
     """解析 split_key（分单键字段名数组）；缺省 = 空 list（每行自成一组）。"""
     return _parse_str_list(item, "split_key", ctx, "分单键字段名")
+
+
+def _parse_str_map(item: Dict[str, Any], key: str, ctx: str,
+                   label: str) -> Dict[str, str]:
+    """解析 {目标字段: 字符串} 声明（transform / lookup_ref 共用）。"""
+    value = item.get(key)
+    if value is None:
+        return {}
+    if not isinstance(value, dict):
+        raise AppManifestError(
+            f"{ctx} {key} 需为映射对象（目标字段: {label}）")
+    result: Dict[str, str] = {}
+    for tgt, text in value.items():
+        if (not isinstance(tgt, str) or not tgt
+                or not isinstance(text, str) or not text):
+            raise AppManifestError(
+                f"{ctx} {key} 的键与值均需为非空字符串（实际: {tgt!r} → {text!r}）"
+            )
+        result[tgt] = text
+    return result
 
 
 def _parse_str_list(item: Dict[str, Any], key: str, ctx: str,

@@ -1,0 +1,243 @@
+# 集成连接（外部系统连接配置）
+# 依据：docs/specs/spec-integration-module-2026-11-15.md §3 单一事实模型 / §4.1 DDL / §11 M1
+# 纪律：密钥只存引用（secret_ref = env:INTEGRATION_SECRET_<id>），API 永不回显解析值；
+#       写入由集成模块专属端点承担，通用 CRUD 关闭（M1 只落数据层，本期无独立菜单）。
+id: integration_connection
+name: 集成连接
+table_name: integration_connection
+description: 外部系统连接配置（渠道 / 方向 / 端点 / 认证引用；密钥只存引用不存明文）
+module: integration
+generic_api_mode: disabled
+
+semantics:
+  meaning: 集成连接配置
+  category: auxiliary
+  aliases: [集成连接, IntegrationConnection, 连接配置]
+
+fields:
+  - id: id
+    name: ID
+    type: integer
+    db_column: id
+    required: true
+    unique: true
+    description: 技术主键
+    semantics:
+      meaning: 自增主键
+      primary_key: true
+      export_visible: false
+  - id: code
+    name: 连接编码
+    type: string
+    db_column: code
+    required: true
+    max_length: 200
+    description: 稳定标识，被订阅/映射引用（webhook 回填为 wh_<短hash>）；唯一性由 uq_integration_connection_code 索引承载
+    ui: {widget: text, title: 连接编码, width: 160}
+  - id: name
+    name: 连接名称
+    type: string
+    db_column: name
+    required: true
+    max_length: 200
+    ui: {widget: text, title: 连接名称, width: 160}
+  - id: channel_type
+    name: 渠道类型
+    type: string
+    db_column: channel_type
+    required: true
+    max_length: 200
+    description: webhook / rest / file / b2b
+    semantics: {filterable: true, filter_type: enum}
+    ui:
+      widget: select
+      title: 渠道类型
+      width: 120
+      options:
+        - {value: webhook, label: Webhook}
+        - {value: rest, label: REST 接口}
+        - {value: file, label: 文件交换}
+        - {value: b2b, label: B2B 网关}
+  - id: direction
+    name: 方向
+    type: string
+    db_column: direction
+    required: true
+    default: outbound
+    max_length: 200
+    description: outbound / inbound / both
+    ui:
+      widget: select
+      title: 方向
+      width: 110
+      options:
+        - {value: outbound, label: 出站}
+        - {value: inbound, label: 入站}
+        - {value: both, label: 双向}
+  - id: endpoint
+    name: 端点
+    type: string
+    db_column: endpoint
+    required: true
+    max_length: 500
+    description: URL / 目录 / 接口名
+    ui: {widget: text, title: 端点, width: 240}
+  - id: auth_type
+    name: 认证方式
+    type: string
+    db_column: auth_type
+    required: true
+    default: none
+    max_length: 200
+    description: none / api_key / basic / bearer / oauth2_cc / hmac
+    ui:
+      widget: select
+      title: 认证方式
+      width: 120
+      options:
+        - {value: none, label: 无认证}
+        - {value: api_key, label: API Key}
+        - {value: basic, label: Basic}
+        - {value: bearer, label: Bearer}
+        - {value: oauth2_cc, label: OAuth2 客户端凭证}
+        - {value: hmac, label: HMAC 签名}
+  - id: secret_ref
+    name: 密钥引用
+    type: string
+    db_column: secret_ref
+    max_length: 500
+    description: 只存引用（env key / vault key），永不存明文
+    semantics: {export_visible: false, import_visible: false}
+    ui: {widget: text, title: 密钥引用, width: 200}
+  - id: header_template
+    name: 请求头模板
+    type: json
+    db_column: header_template
+    description: JSON，可选；值中的 ${secret} 由运行时替换
+    ui: {widget: textarea, title: 请求头模板}
+  - id: timeout_ms
+    name: 超时(ms)
+    type: integer
+    db_column: timeout_ms
+    required: true
+    default: 15000
+    ui: {widget: number, title: 超时(ms), width: 110}
+  - id: retry_max
+    name: 最大重试
+    type: integer
+    db_column: retry_max
+    required: true
+    default: 5
+    description: 上限 10（对齐 resubmit 上限），超过即拒
+    ui: {widget: number, title: 最大重试, width: 100}
+  - id: enabled
+    name: 是否启用
+    type: integer
+    db_column: enabled
+    required: true
+    default: 1
+    semantics: {filterable: true, filter_type: enum}
+    ui: {widget: switch, title: 启用, width: 90}
+  - id: owner_user_id
+    name: 负责人
+    type: integer
+    db_column: owner_user_id
+    description: 连接负责人用户 ID（弱引用）
+    ui: {widget: number, title: 负责人, width: 120}
+  - id: created_at
+    name: 创建时间
+    type: datetime
+    db_column: created_at
+    required: true
+    ui: {visible: false}
+  - id: updated_at
+    name: 更新时间
+    type: datetime
+    db_column: updated_at
+    required: true
+    ui: {visible: false}
+
+indexes:
+  - fields: [code]
+    unique: true
+    name: uq_integration_connection_code
+  - fields: [channel_type, enabled]
+    name: idx_integration_connection_channel
+
+ui_view_config:
+  # 平台配置对象，本期无独立菜单入口（由集成模块后续里程碑提供专属端点/入口）
+  skip_auto_menu: true
+  list:
+    detail_mode: drawer
+    title: 集成连接
+    description: 外部系统连接配置（密钥只存引用）
+    columns:
+      - field: code
+        width: 160
+        sortable: true
+      - field: name
+        width: 160
+      - field: channel_type
+        width: 120
+        filterable: true
+        filter_type: select
+      - field: direction
+        width: 100
+      - field: endpoint
+        width: 240
+        type: ellipsis
+      - field: auth_type
+        width: 120
+      - field: enabled
+        width: 90
+        filterable: true
+        filter_type: select
+      - field: updated_at
+        width: 160
+        format: datetime
+        sortable: true
+    selection:
+      enabled: false
+    searchFields: [code, name, endpoint]
+    actions:
+      - id: create
+        label: 新建连接
+        icon: plus
+        type: primary
+        permission: integration_connection:create
+    defaultSort:
+      field: updated_at
+      order: desc
+  form:
+    title: 集成连接
+    layout: vertical
+    sections:
+      - title: 基本信息
+        columns:
+          - fields: [code, name]
+          - fields: [channel_type, direction]
+      - title: 端点与认证
+        columns:
+          - fields: [endpoint]
+          - fields: [auth_type, secret_ref]
+          - fields: [header_template]
+      - title: 运行参数
+        columns:
+          - fields: [timeout_ms, retry_max]
+          - fields: [enabled, owner_user_id]
+  detail:
+    layout: tabs
+    title: "集成连接 {record.code}"
+    tabs:
+      - id: basic
+        label: 基本信息
+        type: fields
+        fields: [code, name, channel_type, direction, enabled, owner_user_id]
+      - id: endpoint
+        label: 端点与认证
+        type: fields
+        fields: [endpoint, auth_type, secret_ref, header_template]
+      - id: runtime
+        label: 运行参数
+        type: fields
+        fields: [timeout_ms, retry_max, created_at, updated_at]

@@ -61,6 +61,13 @@ LAST_ERROR_LIMIT = 500
 
 #: notification_deliveries.channel CHECK 允许值
 DELIVERY_CHANNELS = ('in_app', 'webhook', 'im', 'email', 'sms')
+
+#: 集成连接（spec FR-2/FR-3）：订阅可改引用连接，投递落库带 connection_id
+CONNECTIONS_TABLE = 'integration_connection'
+#: 面向人的渠道 ⇒ target_type='human'，其余（系统对接）⇒ 'system'
+HUMAN_CHANNELS = ('in_app', 'email', 'sms', 'im')
+#: 连接 retry_max 硬上限（与 integration_connection_service.RETRY_MAX_LIMIT 对齐）
+RETRY_MAX_CAP = 10
 _CHANNEL_ALIASES = {'mail': 'email', 'websocket': 'in_app'}
 
 #: P1-d 通道限速：外部通道同通道串行 + 每秒最多 N 条；in_app 不限速
@@ -273,7 +280,7 @@ class ChangeEventDispatcher:
         normalized = self.normalize_event(event)
         for row in rows:
             attempts = int(row.get('attempts') or 0)
-            if not force and attempts >= MAX_DELIVERY_ATTEMPTS:
+            if not force and attempts >= self._max_attempts(row):
                 continue
             sub = None
             if row.get('subscription_id') is not None:
@@ -326,7 +333,7 @@ class ChangeEventDispatcher:
 
         selected: List[Dict[str, Any]] = []
         for row in rows:
-            if int(row.get('attempts') or 0) >= MAX_DELIVERY_ATTEMPTS:
+            if int(row.get('attempts') or 0) >= self._max_attempts(row):
                 continue
             due = self._parse_time(row.get('next_retry_at'))
             if due is None or due > current_dt:
@@ -473,6 +480,79 @@ class ChangeEventDispatcher:
             return None
         return rows[0] if rows else None
 
+    def _resolve_connection(
+        self, source: Optional[Dict[str, Any]]
+    ) -> Optional[Dict[str, Any]]:
+        """按订阅行的 connection_id 读取连接；缺失或异常返回 None（fail-open）。
+
+        只读不写：连接不存在时投递仍按订阅内的 webhook_url 走旧路径。
+        """
+        if not isinstance(source, dict) or self.ds is None:
+            return None
+        connection_id = source.get('connection_id')
+        if not connection_id:
+            return None
+        try:
+            return self.ds.find_by_id(CONNECTIONS_TABLE, int(connection_id))
+        except Exception as e:
+            logger.warning(
+                "[change_event] 读取连接失败: connection=%s err=%s",
+                connection_id, e,
+            )
+            return None
+
+    def _delivery_target(self, sub: Dict[str, Any]) -> Dict[str, Any]:
+        """解析投递目标（spec FR-2）：优先连接 endpoint/secret_ref/timeout_ms，回落订阅内联字段。
+
+        订阅只给 connection_id 时以连接为准；连接缺失或不含 endpoint 时仍走旧路径。
+        secret_ref 仅在运行时解析使用，不写回、不回显。
+        """
+        connection = self._resolve_connection(sub) or {}
+        url = (connection.get('endpoint') or sub.get('webhook_url') or '').strip()
+        secret = ''
+        if connection.get('secret_ref'):
+            try:
+                from meta.services.integration_connection_service import resolve_secret
+                secret = (resolve_secret(connection.get('secret_ref')) or '').strip()
+            except Exception as e:
+                logger.warning(
+                    "[change_event] 解析 secret_ref 失败: connection=%s err=%s",
+                    connection.get('code'), e,
+                )
+        if not secret:
+            secret = (sub.get('webhook_secret') or '').strip()
+        try:
+            timeout = max(1, int(connection.get('timeout_ms')) // 1000)
+        except (TypeError, ValueError):
+            timeout = 30
+        return {'url': url, 'secret': secret, 'timeout': timeout}
+
+    def _max_attempts(self, delivery: Dict[str, Any]) -> int:
+        """按连接的 retry_max 计算重试上限；缺省 5，硬上限 10（spec FR-3）。"""
+        connection = self._resolve_connection(
+            {'connection_id': delivery.get('connection_id')})
+        if not connection:
+            return MAX_DELIVERY_ATTEMPTS
+        try:
+            value = int(connection.get('retry_max') or MAX_DELIVERY_ATTEMPTS)
+        except (TypeError, ValueError):
+            return MAX_DELIVERY_ATTEMPTS
+        return max(1, min(value, RETRY_MAX_CAP))
+
+    def _delivery_columns_ok(self) -> bool:
+        """投递表是否已具备 v279 扩展列（未迁移环境回落旧列，避免投递整体失败）。"""
+        cached = getattr(self, '_delivery_ext_cols', None)
+        if cached is not None:
+            return cached
+        ok = False
+        try:
+            cursor = self.ds.execute('PRAGMA table_info(%s)' % DELIVERIES_TABLE)
+            ok = 'connection_id' in {row[1] for row in cursor.fetchall()}
+        except Exception:
+            ok = False
+        self._delivery_ext_cols = ok
+        return ok
+
     def _create_delivery(
         self, sub: Dict[str, Any], event: Dict[str, Any], channel: str
     ) -> Optional[int]:
@@ -483,20 +563,33 @@ class ChangeEventDispatcher:
         subscription_id = sub.get('id')
         if not event_id or subscription_id is None:
             return None
-        try:
-            return self.ds.insert(DELIVERIES_TABLE, {
-                'event_id': event_id,
-                'subscription_id': int(subscription_id),
-                'user_id': sub.get('user_id'),
-                'channel': channel,
-                'target': (sub.get('webhook_url') or None),
-                'status': STATUS_PENDING,
-                'attempts': 0,
-                'last_error': None,
-                'next_retry_at': None,
-                'delivered_at': None,
-                'created_at': datetime.now().isoformat(),
+        # spec FR-3：落投递时写 connection_id / target_type / direction
+        connection = self._resolve_connection(sub)
+        direction = (connection or {}).get('direction') or 'outbound'
+        if direction == 'both':
+            direction = 'outbound'
+        payload: Dict[str, Any] = {
+            'event_id': event_id,
+            'subscription_id': int(subscription_id),
+            'user_id': sub.get('user_id'),
+            'channel': channel,
+            'target': ((connection or {}).get('endpoint')
+                       or sub.get('webhook_url') or None),
+            'status': STATUS_PENDING,
+            'attempts': 0,
+            'last_error': None,
+            'next_retry_at': None,
+            'delivered_at': None,
+            'created_at': datetime.now().isoformat(),
+        }
+        if self._delivery_columns_ok():
+            payload.update({
+                'connection_id': (connection or {}).get('id'),
+                'target_type': 'human' if channel in HUMAN_CHANNELS else 'system',
+                'direction': direction,
             })
+        try:
+            return self.ds.insert(DELIVERIES_TABLE, payload)
         except Exception as e:
             logger.warning(
                 "[change_event] 投递记录写入失败: event_id=%s subscription=%s err=%s",
@@ -671,9 +764,10 @@ class ChangeEventDispatcher:
         return 'delivered'
 
     def _deliver_webhook(self, sub: Dict[str, Any], event: Dict[str, Any]) -> str:
-        url = (sub.get('webhook_url') or '').strip()
+        target = self._delivery_target(sub)
+        url = target['url']
         if not url:
-            logger.debug("[change_event] subscription=%s 缺 webhook_url，跳过", sub.get('id'))
+            logger.debug("[change_event] subscription=%s 缺投递地址，跳过", sub.get('id'))
             return 'skipped'
         # P1-d 限速：外部通道（含飞书群机器人 / 应用 IM）同通道串行 + 每秒上限
         self.rate_limiter.acquire('webhook')
@@ -681,7 +775,7 @@ class ChangeEventDispatcher:
         if im_chat_id is not None:
             return self._deliver_feishu_im(sub, event, im_chat_id)
         if is_feishu_bot_url(url):
-            return self._deliver_feishu_bot(sub, event, url)
+            return self._deliver_feishu_bot(sub, event, url, target['secret'])
         from meta.services.webhook_service import (
             WebhookConfig, WebhookPayload, WebhookService,
         )
@@ -695,7 +789,8 @@ class ChangeEventDispatcher:
             new_values=event.get('new_values') or {},
             timestamp=event.get('created_at') or '',
         )
-        config = WebhookConfig(url=url, secret=sub.get('webhook_secret') or '')
+        config = WebhookConfig(
+            url=url, secret=target['secret'], timeout=target['timeout'])
         # 单次投递，不在此处叠加指数退避重试（重试由 POST /events/<id>/retry 触发）
         result = WebhookService(self.ds).deliver(config, payload)
         return 'delivered' if result.success else 'failed'
@@ -748,14 +843,18 @@ class ChangeEventDispatcher:
         return 'delivered'
 
     def _deliver_feishu_bot(
-        self, sub: Dict[str, Any], event: Dict[str, Any], url: str
+        self,
+        sub: Dict[str, Any],
+        event: Dict[str, Any],
+        url: str,
+        secret: Optional[str] = None,
     ) -> str:
-        """投递到飞书自定义群机器人（无需应用凭证，仅需 webhook 地址）。"""
+        """投递到飞书自定义群机器人（无需应用凭证，仅需 webhook 地址 + 可选签名密钥）。"""
         body: Dict[str, Any] = {
             'msg_type': 'text',
             'content': {'text': self._feishu_text(event)},
         }
-        secret = (sub.get('webhook_secret') or '').strip()
+        secret = (secret or sub.get('webhook_secret') or '').strip()
         if secret:
             timestamp = str(int(time.time()))
             body['timestamp'] = timestamp
