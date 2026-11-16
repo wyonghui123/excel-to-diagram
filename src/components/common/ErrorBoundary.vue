@@ -17,7 +17,12 @@
   <slot v-if="!error" />
   <div v-else class="error-boundary">
     <div class="error-boundary__container">
-      <div class="error-boundary__icon">⚠️</div>
+      <div class="error-boundary__icon" aria-hidden="true">
+        <svg viewBox="0 0 24 24" width="40" height="40" fill="none" stroke="currentColor" stroke-width="2">
+          <path d="M12 3 2 21h20L12 3z" stroke-linejoin="round" />
+          <path d="M12 9v5M12 17.5v.5" stroke-linecap="round" />
+        </svg>
+      </div>
       <h2 class="error-boundary__title">页面出错了</h2>
       <p class="error-boundary__message">{{ errorMessage }}</p>
       <details v-if="showStack" class="error-boundary__stack">

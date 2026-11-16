@@ -2,7 +2,7 @@
 // DO NOT EDIT MANUALLY — 重新生成: node scripts/generate_error_codes.cjs
 // Date: 2026-11-14T02:02:48.878Z
 //
-// ⚠️ 命名约定：
+// 注意：命名约定
 //   - `ErrorCodes`（带 s）是运行时枚举值（lowercase snake_case）
 //   - `ErrorCode`（无 s）是 TypeScript 类型（值联合）
 //   - 与 '@/utils/httpClient' 的 ErrorCode（HTTP 传输层，UPPER_SNAKE）不同源

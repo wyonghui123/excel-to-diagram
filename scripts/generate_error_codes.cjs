@@ -65,7 +65,7 @@ function generate({ codes, statuses }) {
   ts += `// DO NOT EDIT MANUALLY — 重新生成: node scripts/generate_error_codes.cjs\n`;
   ts += `// Date: ${new Date().toISOString()}\n`;
   ts += `//\n`;
-  ts += `// ⚠️ 命名约定：\n`;
+  ts += `// 注意：命名约定\n`;
   ts += `//   - \`ErrorCodes\`（带 s）是运行时枚举值（lowercase snake_case）\n`;
   ts += `//   - \`ErrorCode\`（无 s）是 TypeScript 类型（值联合）\n`;
   ts += `//   - 与 '@/utils/httpClient' 的 ErrorCode（HTTP 传输层，UPPER_SNAKE）不同源\n`;
