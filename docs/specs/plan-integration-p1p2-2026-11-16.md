@@ -342,3 +342,44 @@ list:
 
 **明确不做**：不把 `notification_deliveries` / `import_staging_rows` 开放为通用 BO；不为导入下钻新增子资源模型（后续单独评估）；不引入前端表达式语言（只支持现有 `when` 与占位符子集）。
 
+---
+
+## 元数据驱动 UI（M0–M3）落地记录
+
+- 详细契约：`docs/specs/spec-meta-driven-ui-2026-11-16.md`（§4.7–§4.10）；任务清单：`docs/specs/tasks-meta-driven-ui-2026-11-16.md`（T1–T28 全部完成）。
+- 原则：M0 只加地基不改页面；M1/M2 逐对象声明式收敛；M3 仅前端本地个性化；YAML 仍是唯一真源，未引入前端表达式语言。
+
+**M0 地基（已落地）**
+
+- 文法 v1.1：可选 `version/variants`、列/动作 `visible_when/roles`、字段 `readonly_when`；合并语义与封闭条件文法见 spec §4.1。
+- 后端：`view_config_service` 支持 `variants` 合并与环检测；`ui-meta` 新增 `meta:{warnings,effective_view,schema_version}`，`?explain=1` 附 `sources`；结构错误运行期降级为 `warnings`。
+- 校验：`lint_metamodel.py --ui-config` 覆盖 R-UI-01..08 并纳入 `--all`。
+- 前端：`metaResourceService` 新增 `evalCondition/isVisible/isActionVisible/isFieldReadonly/mergeFieldPolicies/warnOnce`；未知条件降级为可见/可编辑且只告警一次。
+- 验收：集成三页行为零变化；新增后端用例与 `metaResourceService.conditions.spec.js` 全绿；`lint --ui-config` 零违规。
+
+**M1 `audit_log` 收敛（已落地）**
+
+- `meta/schemas/audit_log.yaml` 增加 `list.data_source`（`/api/v1/audit/logs`，`items_path: data`、`total_path: total`）与 `version: 2`；列/筛选/枚举由 YAML 下发。
+- 删除 `src/views/SystemManagement/meta/auditLogMeta.js` 与其单测；`AuditLogManagement.vue` 保留行点击详情抽屉（唯一合法差异）。
+- 前端补齐 `resolveRequest`（v1/v2 命名空间）、`applyOrderingBridge`、`httpClient` 透传 `total`；`useMetaList` 消费 `data_source` 且显式 fetcher 优先。
+- 验收：表头/筛选/枚举与迁移前逐项一致；导出与详情抽屉可用；新增 `test_ui_meta_audit_log.py` 与 `metaResourceService.dataSource.spec.js` 通过。
+
+**M2 `task_run` 收敛（已落地，commit `6a66c107`）**
+
+- `meta/schemas/task_run.yaml` 增加 `data_source` 与行级动作 `cancel`/`retry`（`enabled_when` 取后端 capabilities 同源值，`refresh: true`）；`job/progress` 仍为页面级复合列。
+- `TaskRuns.vue` 改为消费声明式数据源与行动作，保留轮询、URL 深链、日志抽屉；唯一预期差异：行级动作由「隐藏」变「置灰」。
+- 范围修正：`handling_unit`（扫码工作台/联接行查询）与 `print_template`（`/api/print` 命名空间 + 复合列）本里程碑不动，见 spec §4.9.3。
+- 验收：新增 `test_ui_meta_task_run.py` 5 passed；vitest 11 passed；eslint、`vite build`、Playwright 冒烟通过。
+
+**M3 列表个性化（已落地，commit `713510bc`）**
+
+- 新增 `src/composables/useListPreferences.js`：键 `meta-ui:list:<object_type>:<schema_version>`，持久化列序/隐藏/列宽/每页条数/筛选；`schema_version` 变化整条丢弃；非法数据与仓储异常静默降级。
+- `MetaListPage.vue` 消费偏好并新增「列设置」popover（显示/隐藏、上下移序、恢复默认）；列宽由 `header-dragend` 写回；仅整页列表启用，embedded/dialog 跳过。
+- 验收：新增单测 10 passed、MetaListPage 既有回归 92 passed、`vite build` 成功、Playwright smoke 4 passed（隐藏列刷新后保持、恢复默认、embedded 无入口）。
+
+**遗留（明确未做）**
+
+- `variants` 能力已就绪（`?view=` + 合并 + lint），但尚无对象声明变体；`handling_unit` / `print_template` 收敛列为后续候选。
+- 个性化不做后端同步、不写 URL、不改 `keyword`/排序/页码。
+
+

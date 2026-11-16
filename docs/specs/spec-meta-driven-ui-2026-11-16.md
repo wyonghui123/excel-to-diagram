@@ -670,4 +670,4 @@ ui_view_config:
 - [x] 未知条件/字段/动作在浏览器控制台有一次性 warning，页面不白屏
 - [x] `variants` 切换（`?view=`）生效，未声明对象行为不变
 - [x] 个性化在 `schema_version` 变更后自动失效
-- [ ] 文档回填：plan 文档追加 M0–M3 落地记录
+- [x] 文档回填：plan 文档追加 M0–M3 落地记录
