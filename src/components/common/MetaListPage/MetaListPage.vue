@@ -97,6 +97,50 @@
           />
         </div>
         <div v-if="isPageMode && !hideToolbar" class="toolbar-right">
+          <!-- [M3 2026-11-16] 列设置：仅整页列表；embedded 与 dialog 不启用个性化 -->
+          <el-popover
+            v-if="isPreferencesEnabled"
+            trigger="click"
+            placement="bottom-end"
+            :width="260"
+            popper-class="column-settings-popper"
+          >
+            <template #reference>
+              <el-button type="default" size="small">
+                <el-icon><Setting /></el-icon>
+                列设置
+              </el-button>
+            </template>
+            <div class="column-settings">
+              <div class="column-settings__header">
+                <span>列显示与顺序</span>
+                <el-button link type="primary" size="small" @click="resetColumnPreferences">恢复默认</el-button>
+              </div>
+              <div class="column-settings__list">
+                <div
+                  v-for="(column, index) in orderedColumns"
+                  :key="column.prop"
+                  class="column-settings__item"
+                >
+                  <el-checkbox
+                    :model-value="!isColumnHidden(column.prop)"
+                    :disabled="!isColumnHidden(column.prop) && preferredColumns.length <= 1"
+                    @update:model-value="(checked) => toggleColumnHidden(column.prop, checked)"
+                  >
+                    {{ column.label }}
+                  </el-checkbox>
+                  <span class="column-settings__order">
+                    <el-button link size="small" title="前移" :disabled="index === 0" @click="moveColumn(index, -1)">
+                      <el-icon><ArrowUp /></el-icon>
+                    </el-button>
+                    <el-button link size="small" title="后移" :disabled="index === orderedColumns.length - 1" @click="moveColumn(index, 1)">
+                      <el-icon><ArrowDown /></el-icon>
+                    </el-button>
+                  </span>
+                </div>
+              </div>
+            </div>
+          </el-popover>
           <!-- Inline Edit 模式切换按钮 -->
           <el-button
             v-if="inlineEditConfig?.enabled && !inlineEditMode && !isExternallyControlled"
@@ -352,6 +396,7 @@
             :height="tableHeight"
             :max-height="tableMaxHeight"
             @sort-change="handleSortChange"
+            @header-dragend="onHeaderDragEnd"
             @selection-change="onTableSelectionChange"
             @row-click="handleRowClick"
             @row-dblclick="handleRowDblClick"
@@ -673,6 +718,7 @@ import { ref, computed, watch, nextTick, onMounted, onUnmounted, onActivated, ma
 import { useRouter } from 'vue-router'
 import { ArrowDown, ArrowUp, ArrowRight, View, Edit, Delete, List, Plus, Upload, Download, Setting, Lock, MoreFilled, Document, CopyDocument, Promotion, CaretTop, CaretBottom, Sort, FolderOpened } from '@element-plus/icons-vue'
 import { useMetaList, formatDate } from '@/composables/useMetaList'
+import { useListPreferences, applyColumnOrder, filterHiddenColumns, resolvePageSize } from '@/composables/useListPreferences'
 import { useAssociationNavigation } from '@/composables/useAssociationNavigation'
 import { useBreakpoints } from '@/composables/useBreakpoints'
 import { useMenuPermissions } from '@/composables/useMenuPermissions'
@@ -981,6 +1027,79 @@ const {
   initialFilters: props.initialFilters
 })
 
+/* ==========================================================================
+   [M3 2026-11-16] 列表个性化（spec §4.10）
+   - 仅整页列表启用：embedded / dialog 复用同一 object_type，读写会互相污染
+   - 恢复时机：metaConfig.schema_version 可用后一次；恢复值影响查询时补一次 loadList
+   ========================================================================== */
+const listPreferences = useListPreferences({
+  objectType: computed(() => props.objectType),
+  schemaVersion: computed(() => metaConfig.value?.schema_version),
+  enabled: computed(() => props.displayMode === 'page')
+})
+
+const isPreferencesEnabled = computed(() => listPreferences.storageKey.value !== '')
+const orderedColumns = computed(() =>
+  applyColumnOrder(visibleColumns.value, listPreferences.prefs.value.columnOrder)
+)
+const preferredColumns = computed(() =>
+  filterHiddenColumns(orderedColumns.value, listPreferences.prefs.value.hidden)
+)
+const hiddenColumnSet = computed(() => new Set(listPreferences.prefs.value.hidden))
+
+let restoredStorageKey = ''
+watch(
+  () => listPreferences.storageKey.value,
+  (key) => {
+    if (!key || key === restoredStorageKey) return
+    restoredStorageKey = key
+    const restored = listPreferences.load()
+    if (!restored) return
+
+    let needsReload = false
+    const nextPageSize = resolvePageSize(
+      restored.pageSize,
+      paginationConfig.value?.pageSizes,
+      pagination.pageSize
+    )
+    if (nextPageSize !== pagination.pageSize) {
+      pagination.pageSize = nextPageSize
+      pagination.current = 1
+      needsReload = true
+    }
+    if (Object.keys(restored.filters.panel).length > 0) {
+      filterValues.value = { ...filterValues.value, ...restored.filters.panel }
+      needsReload = true
+    }
+    if (Object.keys(restored.filters.header).length > 0) {
+      headerFilterValues.value = { ...headerFilterValues.value, ...restored.filters.header }
+      needsReload = true
+    }
+    if (needsReload && props.options.autoLoad !== false) loadList()
+  },
+  { immediate: true }
+)
+
+watch(
+  () => pagination.pageSize,
+  (size) => {
+    if (!isPreferencesEnabled.value || !Number.isInteger(size) || size <= 0) return
+    listPreferences.setPageSize(size)
+  }
+)
+
+watch(
+  [filterValues, headerFilterValues],
+  () => {
+    if (!isPreferencesEnabled.value) return
+    listPreferences.setFilters({
+      panel: filterValues.value || {},
+      header: headerFilterValues.value || {}
+    })
+  },
+  { deep: true }
+)
+
 // 内置批量动作 + 父组件注入的外部动作（如单据流派生）
 const visibleBatchActions = computed(() => [
   ...(batchActions.value || []),
@@ -1032,12 +1151,14 @@ const searchPlaceholder = computed(() => {
 })
 
 const tableColumns = computed(() => {
-  if (!isMobile.value) return visibleColumns.value
-  const keep = visibleColumns.value.filter(c => c.importance === 'high')
+  // [M3] 整页列表使用个性化列序/隐藏；embedded/dialog 的 prefs 为空，等价 visibleColumns
+  const columns = preferredColumns.value
+  if (!isMobile.value) return columns
+  const keep = columns.filter(c => c.importance === 'high')
   // 无high 列时不降级，否则表格会被清空
-  return keep.length > 0 && keep.length < visibleColumns.value.length
+  return keep.length > 0 && keep.length < columns.length
     ? keep
-    : visibleColumns.value
+    : columns
 })
 
 /* ==========================================================================
@@ -1095,16 +1216,17 @@ const showPagination = computed(() =>
 
 const cardPrimaryColumn = computed(() => {
   // 主标题优先取 businessKey(语义最准)，退化到 importance=high，再退化到第一列
-  const highs = visibleColumns.value.filter(c => c.importance === 'high')
-  return visibleColumns.value.find(c => isBusinessKeyColumn(c)) ||
+  const columns = preferredColumns.value
+  const highs = columns.filter(c => c.importance === 'high')
+  return columns.find(c => isBusinessKeyColumn(c)) ||
     highs[0] ||
-    visibleColumns.value[0] || null
+    columns[0] || null
 })
 
 const cardColumns = computed(() => {
   const primary = cardPrimaryColumn.value
   if (!useCardView.value || !primary) return []
-  return visibleColumns.value.filter(c => c.prop !== primary.prop)
+  return preferredColumns.value.filter(c => c.prop !== primary.prop)
 })
 
 function cardPrimary(row) {
@@ -1192,14 +1314,14 @@ const enableDetailPage = computed(() => {
    注意：不可用 `semantics.business_key` 来"造"入口 —— 该标记同时驱动
    action_executor._validate_business_key_uniqueness，会误加唯一约束。 */
 const hasBusinessKeyColumn = computed(() =>
-  visibleColumns.value.some(c => isBusinessKeyColumn(c))
+  preferredColumns.value.some(c => isBusinessKeyColumn(c))
 )
 
 const showDetailEntryColumn = computed(() =>
   enableDetailPage.value &&
   !inlineEditConfig?.enabled &&
   !hasBusinessKeyColumn.value &&
-  visibleColumns.value.length > 0
+  preferredColumns.value.length > 0
 )
 
 const cardTitleOpensDetail = computed(() =>
@@ -1312,11 +1434,51 @@ const computedActionWidth = computed(() => {
 })
 
 function getColumnWidth(column) {
+  // [M3] 用户拖拽后的实际宽度优先；不能再叠加排序/筛选图标补偿，否则每次拖拽都会变宽
+  const saved = listPreferences.prefs.value.width[column.prop]
+  if (Number.isFinite(saved) && saved > 0) return saved
   const base = column.width || column.minWidth || 120
   let extra = 0
   if (column.sortable) extra += 22
   if (column.filterable) extra += 18
   return base + extra
+}
+
+/* [M3 2026-11-16] 列设置：显示/隐藏、上下移序、恢复默认 */
+function onHeaderDragEnd(newWidth, _oldWidth, column) {
+  if (!isPreferencesEnabled.value) return
+  const prop = column?.property || column?.prop
+  if (!prop || !Number.isFinite(newWidth) || newWidth <= 0) return
+  listPreferences.setWidth(prop, Math.round(newWidth))
+}
+
+function isColumnHidden(prop) {
+  return hiddenColumnSet.value.has(prop)
+}
+
+function toggleColumnHidden(prop, visible) {
+  const next = new Set(listPreferences.prefs.value.hidden)
+  if (visible) {
+    next.delete(prop)
+  } else {
+    // 至少保留一列，否则表格没有任何数据列
+    if (preferredColumns.value.length <= 1) return
+    next.add(prop)
+  }
+  listPreferences.setHidden([...next])
+}
+
+function moveColumn(index, delta) {
+  const order = orderedColumns.value.map(c => c.prop)
+  const target = index + delta
+  if (target < 0 || target >= order.length) return
+  const [moved] = order.splice(index, 1)
+  order.splice(target, 0, moved)
+  listPreferences.setColumnOrder(order)
+}
+
+function resetColumnPreferences() {
+  listPreferences.patch({ columnOrder: [], hidden: [], width: {} })
 }
 
 // ========== [FIX 2026-06-10] 自定义列头排序指示器 ==========
@@ -3022,5 +3184,41 @@ defineExpose({
       padding: 6px 0;
     }
   }
+}
+
+/* [M3 2026-11-16] 列设置 popover */
+.column-settings__header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: var(--spacing-xs, 4px);
+  font-size: 13px;
+  color: var(--color-text-secondary, #606266);
+}
+
+.column-settings__list {
+  max-height: 320px;
+  overflow-y: auto;
+}
+
+.column-settings__item {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  padding: 2px 0;
+}
+
+.column-settings__item .el-checkbox {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.column-settings__order {
+  display: inline-flex;
+  align-items: center;
+  flex-shrink: 0;
 }
 </style>

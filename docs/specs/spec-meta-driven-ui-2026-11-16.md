@@ -552,6 +552,72 @@ ui_view_config:
 
 ---
 
+### 4.10 M3 实施契约：列表个性化（decision-complete）
+
+> 范围只回填 §4.5。§4.6 的 `warnings` / `explain=1` 已在 M0 落地（后端 `?explain=1` + 前端 `warnOnce`），M3 不扩后端、不改 YAML。
+
+#### 4.10.1 决策
+
+| # | 决策 | 理由 |
+|---|---|---|
+| M3-D1 | 存储键 `meta-ui:list:<object_type>:<schema_version>`；值 `{columnOrder: string[], hidden: string[], width: Record<string, number>, pageSize: number\|null, filters: {panel: object, header: object}}` | `schema_version` 是 schema 目录 hash，天然作为失效键 |
+| M3-D2 | 仅 `displayMode==='page'` 生效；`embedded` / `dialog` 复用同一 object_type，读写会互相污染，故直接跳过 | 个性化属于"用户看整页列表"的偏好；嵌入/弹窗由宿主页面决定列 |
+| M3-D3 | 读取时机：`metaConfig.schema_version` 可用后一次性加载；若恢复值影响查询（pageSize / filters），补一次 `loadList()` | 首次渲染前拿不到版本号；仅"确有存量偏好"时才多一次请求 |
+| M3-D4 | 列序：`columnOrder` 已知列前置，未知列丢弃，新增列按元数据顺序追加末尾；隐藏列与元数据 `visible`/`visible_when` 过滤取交集 | 元数据变更后不出现空白/错位列 |
+| M3-D5 | 列宽：`el-table` 的 `header-dragend` 写回实际渲染宽度；渲染时优先用保存值（不再叠加排序/筛选图标补偿） | 避免每次拖拽把补偿值重复累加 |
+| M3-D6 | 筛选持久化 `filterValues`（面板）与 `headerFilterValues`（表头），不含 `keyword` | keyword 属临时搜索，且页面可能已用 URL 同步 |
+| M3-D7 | 不做列设置以外的 UI 改造；新增一个「列设置」popover（勾选显示 + 上下移序 + 恢复默认） | 没有入口时列序/隐藏无法被用户改变，功能等同空转 |
+| M3-D8 | 仓储异常（隐私模式 / 配额 / 非法 JSON）一律静默降级为默认值，不写 console.error | 个性化失败不得影响列表可用性 |
+
+#### 4.10.2 精确改动
+
+**A. 新文件 `src/composables/useListPreferences.js`**
+
+导出：
+
+| 名称 | 说明 |
+|---|---|
+| `buildStorageKey(objectType, schemaVersion)` | `meta-ui:list:<type>:<version>` |
+| `createDefaultPreferences()` | `{columnOrder:[],hidden:[],width:{},pageSize:null,filters:{panel:{},header:{}}}` |
+| `normalizePreferences(raw)` | 清洗：去重字符串数组、丢弃非正数宽度、pageSize 仅接受 1–200 整数、filters 仅保留普通对象 |
+| `applyColumnOrder(columns, columnOrder)` | 纯函数，未知列丢弃、新增列追加末尾；空 order 原样返回 |
+| `filterHiddenColumns(columns, hidden)` | 纯函数 |
+| `resolvePageSize(saved, allowed, fallback)` | 不在 `allowed` 内回退默认 |
+| `useListPreferences({objectType, schemaVersion, enabled, storage})` | 返回 `{prefs, storageKey, load, patch, setColumnOrder, setHidden, setWidth, setPageSize, setFilters, reset}` |
+
+**B. `src/components/common/MetaListPage/MetaListPage.vue`**
+
+1. `preferredColumns = applyColumnOrder(filterHiddenColumns(visibleColumns, prefs.hidden), prefs.columnOrder)`；`tableColumns`、`cardPrimaryColumn`、`cardColumns`、`hasBusinessKeyColumn` 改用它。
+2. `getColumnWidth` 优先返回 `prefs.width[prop]`。
+3. `<el-table @header-dragend="onHeaderDragEnd">` → `setWidth(prop, Math.round(newWidth))`。
+4. `watch(storageKey)`：`load()` 后同步 `pagination.pageSize` / `filterValues` / `headerFilterValues`，有变化则 `loadList()`。
+5. `watch(pagination.pageSize)` 与 `watch([filterValues, headerFilterValues], deep)` → 持久化。
+6. 工具栏右侧（`isPageMode && !hideToolbar`）新增「列设置」`el-popover`：复选显示/隐藏、上下移序、恢复默认。
+
+**C. 新增 `src/composables/__tests__/useListPreferences.spec.js`**
+
+覆盖：键格式 / 非法值清洗 / 列序（未知列丢弃、新增列末尾）/ 隐藏过滤 / pageSize 白名单回退 / 存取往返 / 非法 JSON → null / `schema_version` 变化不串号。
+
+#### 4.10.3 明确不做
+
+- 不写后端、不跨设备同步、不写 URL。
+- 不给 `embedded` / `dialog` 做偏好隔离（直接不启用）。
+- 不持久化 `keyword`、排序、页码（页码每次回到第 1 页是既有行为）。
+
+#### 4.10.4 验证
+
+1. `npx vitest run src/composables/__tests__/useListPreferences.spec.js`
+2. `npx eslint src/composables/useListPreferences.js src/components/common/MetaListPage/MetaListPage.vue src/composables/__tests__/useListPreferences.spec.js`
+3. `npx vite build`
+4. 冒烟（FE 3006）：任一对象列表 → 列设置隐藏/移序 → 拖列宽 → 改每页条数 → 刷新，均保持；篡改 localStorage 中 `schema_version` 段 → 偏好失效回默认；审计页（embedded）不出现「列设置」。
+
+#### 4.10.5 回滚
+
+- 删除 `useListPreferences.js` 与 MetaListPage 中的接线即可；`localStorage` 残留键无副作用（不被读取）。
+- 不影响后端、YAML 与其他页面。
+
+---
+
 ## 6. 兼容与回滚
 
 - 所有新增键可选；`data_source` 缺省仍为 `null` → 旧 fetcher 路径不变。
@@ -579,8 +645,8 @@ ui_view_config:
 |---|---|---|
 | **M0 地基** | 4.1 文法 + 4.2 后端 + 4.3 lint + 4.4 前端条件消费（不改任何页面） | 集成三页行为零变化；lint 通过；新增单测绿 |
 | **M1 audit_log** | 5.1 | 页面功能与迁移前一致；`auditLogMeta.js` 删除 |
-| **M2 task_run + handling_unit + print_template** | 5.2 / 5.3 | 各自列表声明式，复合抽屉保留 |
-| **M3 个性化 + explain** | 4.5 / 4.6 | 列序/列宽刷新后保留；schema 变更自动失效 |
+| **M2 task_run** | 5.2（范围修正见 §4.9.3：`handling_unit` / `print_template` 不动，列 M2.5 候选） | task_run 的 `data_source`/`actions` 声明式；轮询/深链/抽屉保留；动作「隐藏→置灰」为唯一预期差异 |
+| **M3 个性化 + explain** | 4.5 + 4.10（explain 已由 M0 覆盖，不扩范围） | 列序/隐藏/列宽/每页条数/筛选刷新后保留；`schema_version` 变更自动失效；embedded/dialog 不启用 |
 
 ---
 
@@ -598,10 +664,10 @@ ui_view_config:
 
 ## 10. 验收 Checklist
 
-- [ ] `ui-meta` 新增键不破坏现有三页（回归 E2E 全绿）
-- [ ] `lint_metamodel.py --ui-config` 覆盖 R-UI-01..08 并有测试
-- [ ] `audit_log` 列表/筛选/枚举/导出/详情全部由 YAML 驱动，`auditLogMeta.js` 已删
-- [ ] 未知条件/字段/动作在浏览器控制台有一次性 warning，页面不白屏
-- [ ] `variants` 切换（`?view=`）生效，未声明对象行为不变
-- [ ] 个性化在 `schema_version` 变更后自动失效
+- [x] `ui-meta` 新增键不破坏现有三页（回归 E2E 全绿）
+- [x] `lint_metamodel.py --ui-config` 覆盖 R-UI-01..08 并有测试
+- [x] `audit_log` 列表/筛选/枚举/导出/详情全部由 YAML 驱动，`auditLogMeta.js` 已删
+- [x] 未知条件/字段/动作在浏览器控制台有一次性 warning，页面不白屏
+- [x] `variants` 切换（`?view=`）生效，未声明对象行为不变
+- [x] 个性化在 `schema_version` 变更后自动失效
 - [ ] 文档回填：plan 文档追加 M0–M3 落地记录

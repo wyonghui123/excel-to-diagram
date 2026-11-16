@@ -168,3 +168,41 @@
 - 结果：新增后端 5 passed、既有 data_source 后端通过、lint 0 违规、vitest 11 passed、eslint 通过、`vite build` 成功、Playwright 冒烟通过（ui-meta 契约 + 列表首屏 data_source 请求 + 无 console error）
 - 交付：汇报差异，提交前征询用户
 
+---
+
+# Tasks：M3 列表个性化
+
+- 来源：`docs/specs/spec-meta-driven-ui-2026-11-16.md` §4.10（decision-complete）
+- 范围：仅 §4.5；§4.6 explain 已由 M0 覆盖，不扩后端/YAML
+
+## [x] T24 useListPreferences
+
+- 文件：`src/composables/useListPreferences.js`（新建）
+- 内容：`buildStorageKey/createDefaultPreferences/normalizePreferences/applyColumnOrder/filterHiddenColumns/resolvePageSize/useListPreferences`
+- 完成：纯函数无 Vue 依赖可单测；composable 仅 `page` 模式读写；仓储异常静默降级
+
+## [x] T25 MetaListPage 接线
+
+- 文件：`src/components/common/MetaListPage/MetaListPage.vue`
+- 改动：`preferredColumns` 替换 `tableColumns/cardPrimaryColumn/cardColumns/hasBusinessKeyColumn` 的列源；`getColumnWidth` 优先保存宽度；`@header-dragend` 写回；storageKey watch 恢复 pageSize/filters 并补一次 `loadList`；pageSize/filters 变化持久化
+- 完成：无存量偏好时行为与现状逐项一致（列集合/宽度/首屏请求数不变）
+
+## [x] T26 列设置入口
+
+- 文件：`src/components/common/MetaListPage/MetaListPage.vue`
+- 改动：`isPageMode && !hideToolbar` 时工具栏右侧新增「列设置」popover（显示/隐藏、上下移序、恢复默认）
+- 完成：embedded/dialog 不渲染；隐藏最后一列被阻止；恢复默认清空 order/hidden/width
+
+## [x] T27 单测
+
+- 文件：`src/composables/__tests__/useListPreferences.spec.js`（新建）
+- 完成：§4.10.2-C 全部用例通过（10 tests）
+
+## [x] T28 验证与汇报
+
+- 顺序：§4.10.4 的 1–3 → 冒烟 4
+- 结果：vitest 10 passed；MetaListPage 既有回归 92 passed；eslint 新增文件 0 error（MetaListPage 仅存量 error/warn，已用 HEAD 基线比对）；`vite build` 成功；Playwright smoke 4 passed（隐藏列刷新后保持 / 恢复默认 / embedded 无入口）
+- 交付：汇报结果，提交前征询用户
+
+
+
