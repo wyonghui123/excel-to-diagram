@@ -75,10 +75,10 @@ def _platform_ds():
 
 
 def _actor(user) -> str:
-    """当前用户 id（惯例：user_id 优先，缺省退 username）。"""
+    """当前用户 id（惯例：user_id 优先，缺省退 username；统一转字符串）。"""
     if not user:
         return None
-    return user.get('user_id') or user.get('username')
+    return str(user.get('user_id') or user.get('username') or '') or None
 
 
 @task_inbox_bp.route('/api/v1/task-inbox', methods=['GET'])

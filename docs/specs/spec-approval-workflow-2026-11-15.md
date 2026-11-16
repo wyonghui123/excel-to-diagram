@@ -1,6 +1,6 @@
 # 审批流 Spec（Approval Workflow P0）
 
-> 版本：v0.16 ｜ 日期：2026-11-16 ｜ 状态：P0 已交付（M1-M3 验收通过）；M4（P2）任务域通用能力已实现并验收（M4-1~M4-5，§8），二次检查与元数据驱动审计见 §8.9；M5（通用任务引擎）已实施并验收（§9.8）；2026-11-16 完成存量表名/列名规范化（§9.10）、取人解析行业复核（§9.11）、全仓运行期表名收口（§9.12）与任务域二次检查 + Fusion/SAP 头部对标（§9.13）；同日完成 §9.13.6 全部 6 步（动作表/REST、cancel·hold·resume、withdraw 回退、单据侧只读投影、批量护栏、策略条件构建器 + 实例三步态）
+> 版本：v0.18 ｜ 日期：2026-11-16 ｜ 状态：P0 已交付（M1-M3 验收通过）；M4（P2）任务域通用能力已实现并验收（M4-1~M4-5，§8），二次检查与元数据驱动审计见 §8.9；M5（通用任务引擎）已实施并验收（§9.8）；2026-11-16 完成存量表名/列名规范化（§9.10）、取人解析行业复核（§9.11）、全仓运行期表名收口（§9.12）与任务域二次检查 + Fusion/SAP 头部对标（§9.13）；同日完成 §9.13.6 全部 6 步（动作表/REST、cancel·hold·resume、withdraw 回退、单据侧只读投影、批量护栏、策略条件构建器 + 实例三步态），收口 G-13-6（快照结构版本 + 写入期校验，§9.13.6.5），并完成 live 3010 手工冒烟与 6 项缺陷修复（§9.13.6.6）
 > 定位：把审批域从「5 个真源半驱动」收敛为「2 个真源 + 派生」，并补齐前端审批动作与策略配置
 > 判尺：单一事实源（SSOT）+ 元数据驱动；不造重型框架、不做超范围重构
 > 复用底座：[`decision_effect.py`](../../meta/core/decision_effect.py)｜[`approval_meta_loader.py`](../../meta/core/approval_meta_loader.py)｜[`document_approval_service.py`](../../meta/services/document_approval_service.py)｜[`task_decision_api.py`](../../meta/api/task_decision_api.py)
@@ -1029,7 +1029,7 @@ python d:\filework\test.py --file meta/tests/test_receipt_service.py,...（22 �
 | G-13-3 | P1 | 批量审批无权限预判 / 无进度 / 无数量上限 | 批量里 403/409/502 混在一起，只显示计数，用户无法定位 |
 | G-13-4 | P2 | 条件配置仅裸 JSON，无字段选择与即时校验 | 配置门槛高，错 JSON 只在保存时暴露 |
 | G-13-5 | P2 | 流转详情不标当前步、无三步态；`hit_policy=false` 无原因 | 与 Oracle Approval History 差距最大的一点 |
-| G-13-6 | P2 | `policy_snapshot` 无 schema 字段，仅约定写入 `inputs` | 结构靠约定，缺校验 |
+| G-13-6 | P2 | `policy_snapshot` 无 schema 字段，仅约定写入 `inputs`（2026-11-16 已实施，见 §9.13.6.5） | 结构靠约定，缺校验 |
 
 #### 9.13.4 细化方案
 
@@ -1181,6 +1181,49 @@ python d:\filework\test.py --file meta/tests/test_task_state_machine.py,meta/tes
 | 4 | 批量预判口径 | 已核实 `task_actions_service` 按「状态 × 类型 × 权限」过滤（`{bo}:approve` 需 `doc_ref_type` 且用户有该 BO 权限），预判结果与 decision 端点的 403 同源，可放心前置 |
 | 5 | 条件 JSON 往返 | 后端同时接受 `value` / `value_text` / `value_number` / `value_json`，原样回存不丢值；仅在无丢弃项时归一输出，`droppedCount>0` 保留原文并停留 JSON 模式 |
 | 6 | 回归 | 6 个前端测试文件 **124 passed**（`taskService` 48、`approvalPolicyConditions` 22、`TaskDetailDrawer` 26、`TaskInboxPanel` 11、`useTaskInbox` 12、`ApprovalFlowSteps` 5）；`npm run build` exit 0（chunk-cycles OK） |
+
+**9.13.6.5 G-13-6 收口（2026-11-16，`policy_snapshot` 结构版本 + 写入期校验）**
+
+| 项 | 结果 |
+|---|---|
+| 新增 | `meta/core/policy_snapshot.py`：`SNAPSHOT_SCHEMA_VERSION = 1`、`validate_snapshot(snapshot) -> list[str]`、`snapshot_problems_for_log()`、`build_snapshot_header()`。校验层只覆盖**消费方依赖的键**（`schema_version/object_type/trigger_action/policy_id/hit_policy/amount/steps/conditions/conditions_explain/metrics/resolved_at`）与步骤级（`step_no/stage_no` ≥1 整数、`approve_mode ∈ any/all/serial`、`approver_type/approver_ref` 存在），不把整棵结构声明成重型 schema |
+| 写入侧 | `document_approval_service.py` 快照字典首键写 `schema_version`；快照构建完成后调 `snapshot_problems_for_log()`，有问题 `logger.warning` 但**不阻断建任务**（fail-open，与「审批不可因校验失败阻断业务提交」一致）。**不新增** `policy_snapshot` schema 元数据键（延续 D-AP-05 的门禁优于新机制） |
+| 测试 | 新增 `meta/tests/test_policy_snapshot_schema.py` **22 passed**（合法/缺键/类型错/steps 级/版本常量/压行），`test_approval_policy_admin.py` 17 passed 无回归；`test_document_approval.py` + `test_approval_status_projection.py` **33 passed**（快照多一个 `schema_version` 键未破坏既有断言） |
+| lint | `ruff --select E9,F` 三个文件 All checks passed |
+| 未做 | 历史在途任务快照**不回填** `schema_version`（D-AP-07：在途按发起时规则走完）；消费方（`buildApprovalFlow` / 投影）不读该键，仅作未来迁移依据 |
+
+
+**9.13.6.6 live 3010 手工冒烟记录（2026-11-16，四场景 + 6 项缺陷修复）**
+
+冒烟环境：FE `3006` + BE `3010`（`launch_detached.ps1` 脱管启动），账号 `admin`（id=1）与 `adminfin`（id=1047，`*` 权限）。
+
+| # | 场景 | 结果 | 证据 |
+|---|---|---|---|
+| 1 | 单据页审批进度投影 | **通过** | PO14 详情页 `.op-approval-progress` 可见；head =「已通过 / 处理人：待分发 / 第 2 / 2 阶段 / 冒烟-采购订单金额审批」；`[data-test="flow-step"]` 2 步均 `afs-step--done`；事件流含 `status_changed 1047` |
+| 2 | 批量护栏 | **通过（含 1 次瞬时 500，见已知限制 ③）** | 3 条待办：预判排除生效、>50 拦截生效、确认框展示「成功 / 失败」逐条明细、失败可重试；四眼 409 文案可读 |
+| 3 | 策略条件构建器保存 → 回读 | **通过** | 规则中心「审批策略」页签 → 编辑抽屉；JSON 模式回读含 `"operator": "ge"`；保存提示「审批策略已保存（版本 5）」，列表版本列 4 → 5，条件仍为 `gross_amount ge 100.0`（不退化） |
+| 4 | 任务抽屉 `approval-chain` 三态 | **通过** | 抽屉内第 1 步「已完成」、第 2 步「进行中」，阶段推进后重开三态正确 |
+
+冒烟期间发现并修复的缺陷（均已 live 验证）：
+
+| # | 缺陷 | 根因 | 修复 |
+|---|---|---|---|
+| 1 | `GET /api/v1/approval-policies` 返回 410 `API Moved` | `meta/server.py` 的 v1 sunset 中间件白名单未含 `approval-policies`（独立 Blueprint，非 BO CRUD） | `V1_SPECIAL_PREFIXES` 补 `approval-policies` |
+| 2 | 批量审批预判把全部选中项判为「不可决策」 | `/tasks/{id}/actions` 返回通用 `decision` 动作，前端 `actionAllowedFromPayload` 精确匹配 `approve`/`reject` | 识别 `decision` 同时覆盖通过/驳回，并补单测（真实 payload 形状） |
+| 3 | 通过第 1 阶段后任务直接 `done`、不推进阶段 | `_actor()` 返回 int `user_id`，与参与流水 `participant`（字符串）精确比较失配 → 走 admin 短路 `decide_and_apply` | 5 个 task API 的 `_actor` 统一 `str(...)`；live 返回 `stage_advanced`、`stage_no=2` |
+| 4 | 单据页整页被错误边界接管（`capabilities.value.filter is not a function`） | `GET /api/print/printable` 返回 `{items, page, ...}` 对象，`PrintPanel` 按数组消费 | `capabilities.value = Array.isArray(payload) ? payload : (payload?.items || [])` |
+| 5 | 审批投影分区永不挂载（`detail.approval_progress` 丢失） | `UIDetailViewConfig` dataclass 与 `yaml_loader.parse_ui_detail_view_config` 均无该字段，YAML 声明在加载期被静默丢弃 | 两处补 `approval_progress` 透传字段；`/ui-config` 回读含该键后方可渲染 |
+| 6 | 多阶段任务第 2 阶段决策被当作 replay 静默忽略，任务永远 `waiting_approval` | `build_effect_key` 仅 `{task_id}:{attempt}`，`_load_task` 也未取 `stage_no` → 第 2 阶段命中第 1 阶段幂等记录 | `build_effect_key(task_id, attempt, stage_no)`：`stage_no>1` 追加 `:s{stage}`（首阶段保持旧格式）；`_TASK_COLUMNS` 补 `stage_no`；单测补键口径 |
+
+多阶段收口 live 证据：`adminfin`（≠ 提交人 1）通过 PO14 第 2 阶段 → `effect_key="ba84459d…:1:s2"`、`replayed=false`、`task_status=done`、`receipt.approval_status=approved`、单据 `status=confirmed`；同账号（admin）在末阶段仍被四眼 409 拦截（设计如此）。两条并发决策（PO6 / PO9 第 2 阶段）均 200 完成，未复现并发异常。
+
+已知限制（不阻断交付）：
+
+1. 参与流水与阶段推进路径**不写 `task_events`**，已完成步骤的 `flow-step-actor` 为空或显示 `user_id`（如 `1`）而非姓名；事件流仅能反映 `status_changed` 类事件。
+2. 已通过单据投影 head 仍显示「处理人：待分发」——`approverLabel` 在任务终态未回落提交人/末位审批人，属文案层面改进项。
+3. 批量并发曾出现一次 500 `not an error`（逐条明细可见、重试/幂等 replay 后数据一致）。疑与平台 `get_data_source` 共享 sqlite 连接的并发写有关；本次未能稳定复现（2 条并发写全部 200），暂不调整批量并发策略（并发 4 / D-AP-12），留作平台层共享连接治理的输入。
+
+回归：后端 `test_decision_effect` / `test_task_stage_advance` / `test_task_decision_api` / `test_task_participation` / `test_approval_policy_admin` / `test_approval_status_projection` **83 passed**（键口径新增后单跑 29 passed）；前端 `taskService.spec.js` **49 passed**；`npm run build` exit 0（chunk-cycles OK）。
 
 
 #### 9.13.7 证据来源

@@ -24,6 +24,7 @@ from datetime import datetime
 from typing import Any, Dict, List, Optional, Tuple
 
 from meta.core.approval_meta_loader import get_approval_meta
+from meta.core.policy_snapshot import SNAPSHOT_SCHEMA_VERSION, snapshot_problems_for_log
 from meta.core.rule_decisions import ApprovalRequirement
 from meta.core.rule_hit_policy import (
     DEFAULT_HIT_POLICY, order_by_sql, select, sort_key)
@@ -127,6 +128,8 @@ class DocumentApprovalResolver:
         eval_record = metrics.enrich(
             record, [c.get('field_id') for c in matched_conditions])
         snapshot = {
+            # G-13-6：快照结构版本（写入期校验见 meta.core.policy_snapshot）
+            'schema_version': SNAPSHOT_SCHEMA_VERSION,
             'object_type': object_type,
             'trigger_action': trigger_action,
             'policy_id': policy_id,
@@ -149,6 +152,11 @@ class DocumentApprovalResolver:
             'metrics': metrics.snapshot(),
             'resolved_at': datetime.now().isoformat(timespec='seconds'),
         }
+        # G-13-6：写入期校验 fail-open（只记 warning，不阻断建任务）
+        problems = snapshot_problems_for_log(snapshot)
+        if problems:
+            logger.warning('[approval] 快照结构异常（%s id=%s）：%s',
+                           object_type, record_id, problems)
         return {
             'required': True,
             'policy_id': policy_id,

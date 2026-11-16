@@ -40,7 +40,8 @@ def _platform_ds():
 def _actor(user) -> str:
     if not user:
         return ''
-    return user.get('user_id') or user.get('username') or ''
+    # 统一字符串：与 task_participations.participant 的比较口径一致（见 task_decision_api）
+    return str(user.get('user_id') or user.get('username') or '')
 
 
 def task_participate_service(task_id: str, *, user,

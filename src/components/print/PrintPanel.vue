@@ -82,7 +82,12 @@ async function loadCapability() {
   if (!props.objectType) return
   try {
     const response = await fetchPrintable()
-    if (response.success) capabilities.value = response.data || []
+    if (response.success) {
+      // 契约：GET /api/print/printable 返回 { items, page, page_size, total }（对象），
+      // 历史实现按数组消费导致 capabilities.value.filter 抛错、整页被错误边界接管。
+      const payload = response.data
+      capabilities.value = Array.isArray(payload) ? payload : (payload?.items || [])
+    }
   } catch {
     // 清单加载失败时静默隐藏入口，打印能力不可用时不影响单据页其他功能
     capabilities.value = []

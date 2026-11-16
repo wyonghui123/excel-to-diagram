@@ -184,6 +184,11 @@ export function runWithConcurrency(items, limit, worker) {
  * 动作预判：`GET /tasks/{id}/actions` 的 actions 是否含该决策动作。
  * 三态：true（含）/ false（响应成功但缺该动作）/ null（响应失败或结构异常，无法判定）。
  * 无法判定时由服务端兜底，不做前端拦截（fail-open）。
+ *
+ * 注意：后端把通过/驳回统一暴露为 `decision` 动作（POST /tasks/{id}/decision，
+ * 决策值在请求体 decision 字段），并不会分别返回 `approve` / `reject`。
+ * 因此按 action 名精确匹配会把可决策任务全部误判为不可决策（live 冒烟发现），
+ * 这里对 approve/reject 额外认 `decision`。
  * @param {{success?:boolean,data?:Object}|null} res
  * @param {'approve'|'reject'} decision
  * @returns {boolean|null}
@@ -192,7 +197,12 @@ export function actionAllowedFromPayload(res, decision) {
   if (!res || res.success !== true || !res.data) return null
   const actions = res.data.actions
   if (!Array.isArray(actions)) return null
-  return actions.some(item => !!item && item.action === decision)
+  const isDecision = decision === 'approve' || decision === 'reject'
+  return actions.some(item => {
+    if (!item) return false
+    if (item.action === decision) return true
+    return isDecision && item.action === 'decision'
+  })
 }
 
 function _qs(params) {

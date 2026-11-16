@@ -176,6 +176,16 @@ describe('批量护栏（§9.13.4.3：上限 / 并发池 / 动作预判）', () 
     expect(actionAllowedFromPayload({ success: true, data: {} }, 'approve')).toBeNull()
     expect(actionAllowedFromPayload(null, 'reject')).toBeNull()
   })
+
+  it('actionAllowedFromPayload：后端通用 decision 动作同时覆盖通过/驳回', () => {
+    // 真实 payload 形状（GET /tasks/{id}/actions）：通过/驳回统一为 decision
+    const real = { success: true, data: { actions: [
+      { action: 'decision', label: '审批决策' }, { action: 'participate' }] } }
+    expect(actionAllowedFromPayload(real, 'approve')).toBe(true)
+    expect(actionAllowedFromPayload(real, 'reject')).toBe(true)
+    const noDecision = { success: true, data: { actions: [{ action: 'participate' }] } }
+    expect(actionAllowedFromPayload(noDecision, 'approve')).toBe(false)
+  })
 })
 
 describe('API 封装', () => {

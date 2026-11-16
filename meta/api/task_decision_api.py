@@ -46,7 +46,9 @@ _FORBIDDEN_BODY_KEYS = ('submitter_id', 'four_eyes', 'reviewer_permission')
 def _actor(user) -> str:
     if not user:
         return ''
-    return user.get('user_id') or user.get('username') or ''
+    # 统一字符串：user_id 为 int 时与参与流水的 participant（字符串）精确比较会失败，
+    # 导致误入 admin 短路分支、多阶段永不推进（live 冒烟发现）。
+    return str(user.get('user_id') or user.get('username') or '')
 
 
 def _task_object_type(data_source, task_id: str) -> str:

@@ -36,7 +36,8 @@ def _platform_ds():
 def _actor(user) -> str:
     if not user:
         return ""
-    return user.get('user_id') or user.get('username') or ""
+    # 统一字符串，避免 int user_id 与字符串 assignee/created_by 比较失配
+    return str(user.get('user_id') or user.get('username') or "")
 
 
 def _target_review_permitted(data_source, to_user, object_type) -> bool:

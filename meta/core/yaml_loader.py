@@ -1304,6 +1304,9 @@ def parse_ui_detail_view_config(data: Dict[str, Any]) -> UIDetailViewConfig:
         rule_trace=data.get("rule_trace", {}) or {},
         # [金额回溯 2026-11-13] detail.amount_trace：金额分解分区声明（原样透传）。
         amount_trace=data.get("amount_trace", {}) or {},
+        # [9.13.4.1 2026-11-16] detail.approval_progress：单据侧只读审批投影声明
+        #   （原样透传；dataclass 缺字段时会被静默丢弃）。
+        approval_progress=data.get("approval_progress", {}) or {},
         # [2026-11-12] detail.actions：业务动作 / 声明式动作的原样声明。
         #   前端按 permission / visible_when 门控，含 action 的项派发 BO Action。
         actions=data.get("actions", []) or [],

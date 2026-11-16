@@ -66,9 +66,19 @@ class EffectNotAppliedError(Exception):
 # 口径与归一化
 # ─────────────────────────────────────────────────────────────────────────────
 
-def build_effect_key(task_id: str, attempt: int = 1) -> str:
-    """§9.7 规范 2：BO 侧幂等键 = `{task_id}:{attempt}`。"""
-    return f"{task_id}{EFFECT_KEY_SEP}{int(attempt or 1)}"
+def build_effect_key(task_id: str, attempt: int = 1, stage_no: int = 1) -> str:
+    """§9.7 规范 2：BO 侧幂等键 = `{task_id}:{attempt}`。
+
+    [审批 M5 2026-11-16] 多阶段任务的每个阶段是一次独立决策/独立生效，幂等键必须带阶段
+    （`{task_id}:{attempt}:s{stage_no}`）；否则第 2 阶段的决策会命中第 1 阶段的幂等记录，
+    被当作 replay 静默忽略 → 任务永远停在 `waiting_approval`（live 冒烟发现）。
+    首阶段保持旧格式，既有契约与调用方无需变更。
+    """
+    key = f"{task_id}{EFFECT_KEY_SEP}{int(attempt or 1)}"
+    stage = int(stage_no or 1)
+    if stage > 1:
+        key += f"{EFFECT_KEY_SEP}s{stage}"
+    return key
 
 
 def normalize_decision(decision: str) -> str:
@@ -147,6 +157,8 @@ _TASK_COLUMNS = (
     "id", "type", "status", "inputs", "outputs", "attempt", "executor_config",
     "workflow_run_id", "trace_id", "agent_session_id", "doc_ref", "line_refs",
     "created_by",
+    # [审批 M5 2026-11-16] 多阶段幂等键需感知阶段（见 build_effect_key）。
+    "stage_no",
 )
 
 
@@ -165,6 +177,7 @@ def _load_task(data_source, task_id: str) -> Dict[str, Any]:
         "workflow_run_id": r[7] or "", "trace_id": r[8] or "",
         "agent_session_id": r[9] or "", "doc_ref": r[10] or "",
         "line_refs": _load_json(r[11], None), "created_by": r[12] or "",
+        "stage_no": r[13] or 1,
     }
 
 
@@ -253,7 +266,8 @@ class DecisionEffectProtocol:
         decision = normalize_decision(decision)
         action_id = resolve_decision_action(task["executor_config"], decision)
         attempt = int(task["attempt"] or 1)
-        effect_key = build_effect_key(task["id"], attempt)
+        # 多阶段任务：幂等键带 stage_no，避免第 N 阶段决策命中第 1 阶段幂等记录。
+        effect_key = build_effect_key(task["id"], attempt, task.get("stage_no") or 1)
         target_state = _decision_target(decision, allow_rework)
         receipt_key = (task["executor_config"] or {}).get("effect_receipt_key") or DEFAULT_RECEIPT_KEY
 

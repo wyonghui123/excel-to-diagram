@@ -43,7 +43,8 @@ def _platform_ds():
 def _actor(user) -> str:
     if not user:
         return ''
-    return user.get('user_id') or user.get('username') or ''
+    # 统一字符串，避免 int user_id 与字符串 participant/created_by 比较失配
+    return str(user.get('user_id') or user.get('username') or '')
 
 
 def _authorize_row(row: Dict[str, Any], user) -> bool:

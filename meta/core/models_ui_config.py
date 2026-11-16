@@ -163,6 +163,10 @@ class UIDetailViewConfig:
     #   {enabled, label, permission}；此前 dataclass 缺该字段 ⇒ YAML
     #   detail.amount_trace 被加载时静默丢弃，前端无法挂载金额分解面板。
     amount_trace: Dict[str, Any] = field(default_factory=dict)
+    # [9.13.4.1 2026-11-16] 单据侧只读审批投影声明（原样透传给前端 DetailPage）：
+    #   {enabled, label}；此前 dataclass 缺该字段 ⇒ YAML detail.approval_progress
+    #   在加载时被静默丢弃，前端永远不挂载审批进度分区（live 冒烟发现）。
+    approval_progress: Dict[str, Any] = field(default_factory=dict)
     # [2026-11-12] 详情页业务动作声明（原样透传给前端 DetailPage）：
     #   [{id, label, icon, variant, permission, action, params, confirm_message,
     #     visible_when, input_fields}]；含 action 的项由前端派发 BO Action，

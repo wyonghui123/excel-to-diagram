@@ -132,6 +132,9 @@ class TestContract:
     def test_TC_B3_001_生效键口径(self):
         assert build_effect_key("T-1", 2) == "T-1:2"
         assert build_effect_key("T-1") == "T-1:1"
+        # 多阶段任务：第 2 阶段起键带阶段号，避免命中前阶段幂等记录被当作 replay
+        assert build_effect_key("T-1", 1, 2) == "T-1:1:s2"
+        assert build_effect_key("T-1", 1, 1) == "T-1:1"
 
     def test_TC_B3_002_决策值校验(self):
         assert normalize_decision("APPROVE") == "approve"

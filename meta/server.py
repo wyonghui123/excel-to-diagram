@@ -1400,6 +1400,9 @@ def create_app(db_path=None):
         # (实测: GET /api/v1/task-inbox → 410, 报文指向的 /api/v2/bo/task-inbox 并非真实 BO)
         'task-inbox',   # /api/v1/task-inbox (/counts) — 统一任务收件箱
         'tasks',        # /api/v1/tasks/* — 详情/事件流/认领/监控/决策
+        # [审批 M3 2026-11-16] 审批策略配置是独立 Blueprint（CRUD + 试算），
+        # 非 BO CRUD；缺白名单会被本中间件误判为 410（实测 GET /api/v1/approval-policies → 410）。
+        'approval-policies',  # /api/v1/approval-policies/*（列表/选项/试算/详情/保存）
         'platform',     # /api/v1/platform/tick — 平台心跳（派工/回收/告警）
         # [供应来源 2026-10-24] 独立 Blueprint（非 BO 资源）；不列入会被本中间件
         # 按"其他 v1 路径"误判为 410。
