@@ -203,16 +203,19 @@ visible_when: {field: secret_ref, not_empty: true}
 - **实现前置动作**：用 `grep` 复核 `/api/v1/audit/logs` 的返回结构后再回填 `items_path/total_path`（勿凭猜测）。
 - **验收**：表头/筛选/枚举与迁移前逐项一致；导出与详情抽屉可用；`auditLogMeta.spec.js` 删除或改测 YAML 下发。
 
-### 5.2 `task_run`（P1）
+### 5.2 `task_run`（P1，M2 落地口径见 §4.9）
 
-- 端点：`GET /api/v2/jobs/runs`；动作 `POST /api/v2/jobs/runs/{id}/retry`、`/cancel`（`jobService.js`）。
-- `enabled_when: {field: status, in: [failed, timeout]}`（retry）/ `in: [running, queued]`（cancel）。
-- 页面 `TaskRuns.vue` 收敛为薄壳；保留日志查看抽屉。
+- 端点：`GET /api/v2/jobs/runs`；动作 `POST /api/v2/jobs/runs/{run_id}/retry`、`/cancel`。
+- `enabled_when` 取后端 `capabilities` 同源值：cancel `in: [pending, claimed, running]`、retry `in: [failed, dead, cancelled]`（`timeout/queued` 不是本对象状态，原文作废）。
+- 列保持页面级：`job`（job_name+job_code 复合）与 `progress` 不是 schema 字段，纳入 YAML 会触发 R-UI-06。
+- 页面 `TaskRuns.vue` 消费 `data_source` + `actions`，保留轮询 / URL 同步 / 日志抽屉。
 
-### 5.3 `handling_unit` / `print_template`（P2）
+### 5.3 `handling_unit` / `print_template`（P2，**已修正：本里程碑不收敛**）
 
-- `handling_unit`：用 `variants.docs` / `variants.seal` 表达两种列表，替代两个页面各写一份列；单据生成抽屉保留。
-- `print_template`：只收敛列表；模板编辑器（`PrintPlatform` 内的编辑器）保留。
+> 事实复核后本节原文作废，决策见 §4.9.3。
+
+- `handling_unit`：`HandlingUnitDocs.vue` / `HandlingUnitSeal.vue` 实为「联接行查询页 + 扫码封箱工作台」，不是 `handling_unit` 对象列表 ⇒ 不适用 `variants`。
+- `print_template`：唯一数据入口 `/api/print/templates` 走 `apiRoot` 命名空间，现有 `resolveRequest` 只认 `/api/v1`、`/api/v2`；且列表列含复合/派生（`template`、`scope`）⇒ 需先补命名空间与 computed 列，本里程碑保持手写。
 
 ### 5.4 明确不动
 
@@ -441,6 +444,113 @@ ui_view_config:
 - 删除 `audit_log.yaml` 的 `data_source` 块 → `useMetaList` 回退 `boService.query`（D5 分支不触发），前端其余改动对无声明对象零影响。
 - `resolveRequest` / `total` 透传 / 白名单追加均为纯增量，可单独回滚。
 - 删除的两个前端文件可由 git 恢复；不涉及数据迁移。
+
+### 4.9 M2 实施契约：`task_run` 收敛（decision-complete）
+
+#### 4.9.1 事实复核（2026-11-16 实测）
+
+| 事实 | 证据 |
+|---|---|
+| `GET /api/v2/jobs/runs` 返回 `{success, data:{items,total,page,page_size,has_more,meta.filters}}`；`httpClient` 已把 `body.data` 提到 `result.data` ⇒ `items_path: items` / `total_path: total` | [job_admin_api.py](file:///d:/filework/excel-to-diagram/meta/api/job_admin_api.py#L782-L801)、[httpClient.js](file:///d:/filework/excel-to-diagram/src/utils/httpClient.js#L474-L498) |
+| 能力位与 `enabled_when` 同源：`can_cancel` = `pending/claimed/running`；`can_retry` = `failed/dead/cancelled` | [job_admin_api.py](file:///d:/filework/excel-to-diagram/meta/api/job_admin_api.py#L201-L209) |
+| `_action_to_dict` 原样拷贝 YAML 动作 dict ⇒ `enabled_when/http/success_message/refresh` 均会下发 | [meta_api.py](file:///d:/filework/excel-to-diagram/meta/api/meta_api.py#L421-L442)、[meta_api.py](file:///d:/filework/excel-to-diagram/meta/api/meta_api.py#L535-L548) |
+| `useMetaList.loadList` 的 fetcher 参数为 `{page, pageSize, ...params}`，经 `params_map` 反查后发请求 | [useMetaList.js](file:///d:/filework/excel-to-diagram/src/composables/useMetaList.js#L511-L531) |
+| `buildFetcher` 只回 `{items,total}`，丢弃响应 `meta.filters` ⇒ 页面会丢动态筛选选项 | [metaResourceService.js](file:///d:/filework/excel-to-diagram/src/services/metaResourceService.js#L104-L138) |
+| `HandlingUnitDocs/Seal` 查询/封箱工作台，数据是 `document_hu_links` 联接行，字段不在 `handling_unit` schema | [HandlingUnitDocs.vue](file:///d:/filework/excel-to-diagram/src/views/HandlingUnitDocs.vue#L186-L263)、[HandlingUnitSeal.vue](file:///d:/filework/excel-to-diagram/src/views/HandlingUnitSeal.vue#L133-L236) |
+| `print_template` 数据入口 `/api/print/templates`（`apiRoot`），YAML 仅 `skip_auto_menu`，列含派生 `scope`/复合 `template` | [printService.js](file:///d:/filework/excel-to-diagram/src/services/printService.js#L19-L34)、[print_template.yaml](file:///d:/filework/excel-to-diagram/meta/schemas/print_template.yaml#L157-L159) |
+
+#### 4.9.2 决策
+
+| # | 决策 | 理由 |
+|---|---|---|
+| M2-D1 | `task_run` 只收敛 `data_source` + `actions`；列 / 筛选 / 轮询 / URL 同步 / 详情抽屉保留页面实现 | 复合列与动态筛选选项无法满足 R-UI-06；避免行为回归 |
+| M2-D2 | 动作由「`capabilities` 显隐」改为「YAML `enabled_when` 置灰」；后端 409 兜底 | 与 spec §4.1 动作文法一致；E2E 判据即「重试置灰」 |
+| M2-D3 | `buildFetcher` 返回值新增 `meta`（透传响应 `data.meta`），纯增量 | 页面需要 `meta.filters` 维持动态筛选选项 |
+| M2-D4 | `ui-meta` 拉取失败或对象未声明 `data_source` 时，页面回退 `jobService.fetchRuns` 并 `console.warn` 一次 | 运行期降级，页面不白屏（与 §4.2 错误分级一致） |
+| M2-D5 | `handling_unit` 两页与 `print_template` 列表本里程碑不动（§4.9.3） | spec 原假设与代码事实不符；强行收敛会引入新渲染器 = 非目标 |
+
+#### 4.9.3 范围修正
+
+- `handling_unit`：不做 `variants.docs/seal`。两页分别是「单据↔容器联接行查询」和「扫码封箱工作台」，无 `handling_unit` 对象列表；`variants` 只 patch 对象视图，无法表达联接行聚合与扫码队列。归入 §5.4「明确不动」。
+- `print_template`：不做列表收敛。前置条件缺失：① `resolveRequest` 只识别 `/api/v1`、`/api/v2`，`/api/print` 会被拼成 `/api/v2/api/print/...`；② `template`/`scope` 为复合/派生列，YAML 列文法未声明 computed 形态。列为 M2.5 候选（先扩命名空间 + computed 列），本里程碑保持手写。
+
+#### 4.9.4 精确改动
+
+**A. `meta/schemas/task_run.yaml`**（`ui_view_config.list` 内追加，保留现有 `columns/selection/searchFields/defaultSort`）
+
+```yaml
+    data_source:
+      url: /api/v2/jobs/runs
+      method: get
+      items_path: items
+      total_path: total
+      params_map:
+        page: page
+        page_size: page_size
+        job_code: job_code
+        status: status
+        source: source
+        from: from
+        to: to
+    actions:
+      - id: cancel
+        label: 取消
+        position: row
+        http:
+          method: post
+          url: /api/v2/jobs/runs/{row.id}/cancel
+        enabled_when: {field: status, in: [pending, claimed, running]}
+        success_message: 已提交取消
+        refresh: true
+      - id: retry
+        label: 重试
+        position: row
+        http:
+          method: post
+          url: /api/v2/jobs/runs/{row.id}/retry
+        enabled_when: {field: status, in: [failed, dead, cancelled]}
+        success_message: 已提交重试
+        refresh: true
+```
+
+> 注：`run_id` 是响应别名，不在 `task_run` schema；R-UI-05 只接受 schema 字段，故占位符写 `{row.id}`，页面在 `executeRowAction` 内把 `run_id → id` 归一后再调 `runAction`。
+
+**B. `meta/tools/lint_metamodel.py`**：`UI_PARAMS_ALLOWED` 追加 `job_code`、`status`、`source`、`from`、`to`。R-UI-03 仍硬校验，其他规则不改。
+
+**C. `src/services/metaResourceService.js`**：`buildFetcher` 返回 `data` 内**仅当响应含 `result.data.meta` 时**附加 `meta` 键（不改 `items/total` 语义，无 `meta` 时返回结构与现状逐键一致）。
+
+**D. `src/services/__tests__/metaResourceService.dataSource.spec.js`**：新增用例「响应含 meta 时透传 / 不含时无 `meta` 键」，既有断言不动。
+
+**E. `src/views/TaskCenter/TaskRuns.vue`**
+
+1. 移除 `fetchRuns/retryRun/cancelRun` 的硬编码调用与 `onCancel/onRetry/readableError/runAction` 本地实现（保留 `fetchRuns` 仅作降级）。
+2. 新增：`uiMeta`、`rowActions`（`list.actions` 且 `position==='row'`）、`dataFetcher`（`buildFetcher(uiMeta.list.data_source, () => buildRequestParams())`）。
+3. `loadRuns`：有 `dataFetcher` 用之，否则回退 `fetchRuns(buildRequestParams())`；`filtersMeta` 改从 `data.meta?.filters` 取（无则不覆盖）。
+4. `#cell-actions` 插槽：按 `rowActions` 渲染（cancel → retry → 详情），`:disabled="!isActionEnabled(action, row)"`，点击 `@click.stop` 调 `executeRowAction`。
+5. `executeRowAction(action,row)`：先把 `run_id → id` 归一（`{...row, id: row.run_id}`），再 `runAction(action,{row})` → 失败 `error(message)`；成功 `success(result.message)` → `loadRuns({silent:true})` → 抽屉打开则同步 `loadDetail(silent)` → `ensurePolling()`。
+6. 不变：`FilterBar`、动态筛选选项、3s 静默轮询、`QUERY_KEYS`/`syncQuery`、`?run=` 深链、`Drawer` 详情与日志区、`MetaTable` 列定义。
+
+**F. `meta/tests/api/test_ui_meta_task_run.py`**（新建）：`GET /api/v1/meta/task_run/ui-meta` 断言 `list.data_source`（url/items_path/total_path/params_map 键）、`list.actions`（顺序 cancel→retry、http.url、enabled_when.in 集合）。
+
+#### 4.9.5 验证（L1 唯一入口）
+
+1. `python d:\filework\test.py --file meta/tests/api/test_ui_meta_task_run.py --force`
+2. `python d:\filework\test.py --file meta/tests/api/test_ui_meta_data_source.py --force`
+3. `python meta/tools/lint_metamodel.py --ui-config`
+4. `npx vitest run src/services/__tests__/metaResourceService.dataSource.spec.js`
+5. `npx eslint src/views/TaskCenter/TaskRuns.vue src/services/metaResourceService.js`
+6. `npx vite build`
+7. 手工冒烟 `/system/task-runs`：列表/筛选/分页；cancel/retry 置灰与提交；详情抽屉；`?run=<id>` 深链；有活跃 run 时 3s 轮询。
+
+判据：以上 1–6 全绿；冒烟项与改动前一致，唯一预期差异是动作按钮由「隐藏」变「置灰」。
+
+#### 4.9.6 回滚
+
+- 删除 YAML `data_source`/`actions` → 页面走 `fetchRuns` 降级路径且不渲染行级动作（代码保留降级分支）。
+- `buildFetcher` 的 `meta` 为新增键，回滚无副作用。
+- 不涉及后端端点、数据库与既有页面。
+
+---
 
 ## 6. 兼容与回滚
 

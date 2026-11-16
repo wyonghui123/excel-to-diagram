@@ -1087,6 +1087,8 @@ UI_PARAMS_ALLOWED = {
     # M1 audit_log：筛选/日期区间/排序桥接的前端参数名
     "action", "user_name", "created_at_start", "created_at_end",
     "sort_field", "sort_direction",
+    # M2 task_run：作业执行记录筛选参数
+    "job_code", "status", "source", "from", "to",
 }
 _UI_CONDITION_OPS = ("in", "equals", "not_empty")
 _UI_PLACEHOLDER_RE = re.compile(r"\{([^{}]+)\}")

@@ -75,19 +75,14 @@
       <template #cell-actions="{ row }">
         <div class="row-actions">
           <AppButton
-            v-if="row.capabilities && row.capabilities.can_cancel"
+            v-for="action in rowActions"
+            :key="action.id"
             variant="text"
             size="xs"
+            :disabled="!isActionEnabled(action, row)"
             :loading="actionLoading && actionRunId === row.run_id"
-            @click.stop="onCancel(row)"
-          >取消</AppButton>
-          <AppButton
-            v-if="row.capabilities && row.capabilities.can_retry"
-            variant="text"
-            size="xs"
-            :loading="actionLoading && actionRunId === row.run_id"
-            @click.stop="onRetry(row)"
-          >重试</AppButton>
+            @click.stop="executeRowAction(action, row)"
+          >{{ action.label }}</AppButton>
           <AppButton variant="text" size="xs" @click.stop="openDetail(row)">详情</AppButton>
         </div>
       </template>
@@ -263,18 +258,18 @@
       <template #footer>
         <div class="drawer-footer">
           <AppButton
-            v-if="detail && detail.capabilities && detail.capabilities.can_cancel"
+            v-if="cancelAction && detail && detail.capabilities && detail.capabilities.can_cancel"
             variant="danger"
             size="sm"
             :loading="actionLoading"
-            @click="onCancel(detail)"
+            @click="executeRowAction(cancelAction, detail)"
           >取消执行</AppButton>
           <AppButton
-            v-if="detail && detail.capabilities && detail.capabilities.can_retry"
+            v-if="retryAction && detail && detail.capabilities && detail.capabilities.can_retry"
             variant="primary"
             size="sm"
             :loading="actionLoading"
-            @click="onRetry(detail)"
+            @click="executeRowAction(retryAction, detail)"
           >重试</AppButton>
           <AppButton variant="secondary" size="sm" @click="closeDrawer">关闭</AppButton>
         </div>
@@ -288,7 +283,9 @@ import { ref, computed, onMounted, onBeforeUnmount, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { PageShell, FilterBar, MetaTable, Drawer, AppButton, AppAlert } from '@/components/common'
 import { useMessage } from '@/composables/useMessage'
-import { fetchRuns, fetchRun, retryRun, cancelRun } from '@/services/jobService'
+import { fetchRuns, fetchRun } from '@/services/jobService'
+import { metaService } from '@/services/metaService'
+import { buildFetcher, isActionEnabled, runAction } from '@/services/metaResourceService'
 import { statusLabel, statusTone, sourceLabel } from '@/utils/jobRunStatus'
 import { toEpochSeconds } from '@/utils/jobParams'
 
@@ -317,6 +314,12 @@ const actionLoading = ref(false)
 const actionRunId = ref(null)
 
 let pollTimer = null
+
+// ui-meta 声明的行级动作（data_source/actions 见 meta/schemas/task_run.yaml）
+const rowActions = ref([])
+const dataFetcher = ref(null)
+const cancelAction = computed(() => rowActions.value.find(action => action.id === 'cancel') || null)
+const retryAction = computed(() => rowActions.value.find(action => action.id === 'retry') || null)
 
 const columns = [
   { key: 'run_id', label: 'ID', width: '84px' },
@@ -501,7 +504,10 @@ function buildRequestParams() {
 async function loadRuns(options = {}) {
   const silent = options.silent === true
   if (!silent) loading.value = true
-  const res = await fetchRuns(buildRequestParams())
+  const params = buildRequestParams()
+  const res = dataFetcher.value
+    ? await dataFetcher.value(params)
+    : await fetchRuns(params)
   if (!silent) loading.value = false
   if (!res.success) {
     loadError.value = res.message || '执行记录加载失败'
@@ -635,36 +641,42 @@ function onDrawerClosed() {
   ensurePolling()
 }
 
-function readableError(res) {
-  if (res && res.httpStatus === 409) return res.message || '当前状态不允许该操作（409）'
-  return (res && res.message) || '操作失败'
+async function initMeta() {
+  try {
+    const uiMeta = await metaService.getUiMeta('task_run')
+    const list = uiMeta?.list || {}
+    if (list.data_source) {
+      dataFetcher.value = buildFetcher(list.data_source, () => buildRequestParams())
+    } else {
+      console.warn('[task-runs] ui-meta 未声明 list.data_source，回退 jobService.fetchRuns')
+    }
+    rowActions.value = Array.isArray(list.actions)
+      ? list.actions.filter(action => (action.position || 'row') === 'row')
+      : []
+  } catch (err) {
+    console.warn('[task-runs] ui-meta 加载失败，回退 jobService.fetchRuns', err)
+  }
 }
 
-async function runAction(runId, action, doneText) {
-  if (runId === undefined || runId === null) return
+async function executeRowAction(action, row) {
+  if (!action || !row || row.run_id === undefined || row.run_id === null) return
+  // 列表/详情行以 run_id 暴露主键，动作 URL 占位符统一写 {row.id}
+  const actionRow = row.id === undefined ? { ...row, id: row.run_id } : row
   actionLoading.value = true
-  actionRunId.value = runId
-  const res = await action(runId)
+  actionRunId.value = row.run_id
+  const res = await runAction(action, { row: actionRow })
   actionLoading.value = false
   actionRunId.value = null
-  if (!res.success) {
-    error(readableError(res))
+  if (!res.ok) {
+    if (!res.canceled) error(res.message || '操作失败')
     return
   }
-  success(doneText)
+  success(res.message || action.success_message || '操作成功')
   await loadRuns({ silent: true })
-  if (drawerVisible.value && currentRunId.value === runId) {
-    await loadDetail(runId, { silent: true })
+  if (drawerVisible.value && currentRunId.value === row.run_id) {
+    await loadDetail(row.run_id, { silent: true })
   }
   ensurePolling()
-}
-
-function onCancel(target) {
-  runAction(target && target.run_id, cancelRun, '已提交取消')
-}
-
-function onRetry(target) {
-  runAction(target && target.run_id, retryRun, '已提交重试')
 }
 
 async function copyText(text, doneText) {
@@ -764,6 +776,7 @@ onMounted(async () => {
   page.value = pageFromQuery()
   pageSize.value = pageSizeFromQuery()
   document.addEventListener('visibilitychange', onVisibilityChange)
+  await initMeta()
   await loadRuns()
   const deepLinkRun = Number(route.query.run)
   if (route.query.run && Number.isFinite(deepLinkRun)) await openDetailById(deepLinkRun)

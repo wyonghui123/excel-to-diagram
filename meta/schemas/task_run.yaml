@@ -141,6 +141,38 @@ ui_view_config:
     detail_mode: drawer
     title: 后台任务执行记录
     description: 每次执行尝试的状态、耗时与失败原因（只读）
+    data_source:
+      url: /api/v2/jobs/runs
+      method: get
+      items_path: items
+      total_path: total
+      params_map:
+        page: page
+        page_size: page_size
+        job_code: job_code
+        status: status
+        source: source
+        from: from
+        to: to
+    actions:
+      - id: cancel
+        label: 取消
+        position: row
+        http:
+          method: post
+          url: /api/v2/jobs/runs/{row.id}/cancel
+        enabled_when: {field: status, in: [pending, claimed, running]}
+        success_message: 已提交取消
+        refresh: true
+      - id: retry
+        label: 重试
+        position: row
+        http:
+          method: post
+          url: /api/v2/jobs/runs/{row.id}/retry
+        enabled_when: {field: status, in: [failed, dead, cancelled]}
+        success_message: 已提交重试
+        refresh: true
     columns:
       - field: status
         width: 110

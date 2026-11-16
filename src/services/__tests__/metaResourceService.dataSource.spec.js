@@ -117,4 +117,46 @@ describe('buildFetcher（声明式 data_source）', () => {
     })
     expect(result.data).toEqual({ items: [{ a: 1 }], total: 3 })
   })
+
+  it('响应含 meta 时透传（jobs/runs 动态筛选选项）', async () => {
+    apiV2.get.mockResolvedValue({
+      success: true,
+      data: {
+        items: [{ run_id: 1 }],
+        total: 1,
+        meta: { filters: { statuses: ['running'] } },
+      },
+    })
+    const fetcher = buildFetcher({
+      url: '/api/v2/jobs/runs',
+      items_path: 'items',
+      total_path: 'total',
+      params_map: { page: 'page', page_size: 'page_size' },
+    })
+
+    const result = await fetcher({ page: 1, page_size: 20 })
+
+    expect(apiV2.get).toHaveBeenCalledWith('/jobs/runs', {
+      params: { page: 1, page_size: 20 },
+    })
+    expect(result.data).toEqual({
+      items: [{ run_id: 1 }],
+      total: 1,
+      meta: { filters: { statuses: ['running'] } },
+    })
+  })
+
+  it('响应无 meta 时不附加 meta 键', async () => {
+    apiV2.get.mockResolvedValue({ success: true, data: { items: [], total: 0 } })
+    const fetcher = buildFetcher({
+      url: '/api/v2/jobs/runs',
+      items_path: 'items',
+      total_path: 'total',
+    })
+
+    const result = await fetcher({ page: 1, page_size: 20 })
+
+    expect(result.data).toEqual({ items: [], total: 0 })
+    expect('meta' in result.data).toBe(false)
+  })
 })

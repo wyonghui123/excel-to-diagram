@@ -129,9 +129,15 @@ export function buildFetcher(dataSource, extraParams = {}) {
     const items = pathGet(root, itemsPath) ?? pathGet(result?.data, itemsPath)
     const total = pathGet(root, totalPath) ?? pathGet(result?.data, totalPath) ?? result?.total
     const list = Array.isArray(items) ? items : []
+    const meta = result?.data?.meta
     return {
       success: !!result && result.success !== false,
-      data: { items: list, total: total === undefined ? list.length : total },
+      data: {
+        items: list,
+        total: total === undefined ? list.length : total,
+        // 仅当响应含 meta（如 /api/v2/jobs/runs 的 meta.filters）时附加，供页面维持动态筛选选项。
+        ...(meta ? { meta } : {}),
+      },
       message: result?.message || '',
     }
   }

@@ -123,3 +123,48 @@
 - 顺序：新增后端 → 既有后端 → `lint --ui-config` → vitest → eslint 改动文件 → `vite build` → Playwright 审计页冒烟
 - 完成：§4.8.4 全绿；汇报结果，不 commit
 
+---
+
+# Tasks：M2 task_run 收敛
+
+- 来源：`docs/specs/spec-meta-driven-ui-2026-11-16.md` §4.9（decision-complete）
+- 范围修正：`handling_unit` / `print_template` 本里程碑不动（§4.9.3）
+- 原则：页面行为等价；唯一预期差异 = 行级动作由「隐藏」变「置灰」
+- 测试唯一入口：`python d:\filework\test.py --file <path> --force`
+
+## [x] T18 task_run YAML 声明
+
+- 文件：`meta/schemas/task_run.yaml`
+- 改动：`ui_view_config.list` 追加 `data_source`（§4.9.4-A 原文）与 `actions`（cancel `in: [pending, claimed, running]`、retry `in: [failed, dead, cancelled]`，`refresh: true`）；列/筛选/详情不动
+- 完成：YAML 可解析；占位符 `{row.id}`（`run_id` 为响应别名，`{row.id}` 才过 R-UI-05）；动作顺序 cancel → retry
+
+## [x] T19 lint 白名单
+
+- 文件：`meta/tools/lint_metamodel.py`
+- 改动：`UI_PARAMS_ALLOWED` 追加 `job_code/status/source/from/to`
+- 完成：`lint_metamodel.py --ui-config` 零违规（实测退出码 0）
+
+## [x] T20 buildFetcher 透传 meta
+
+- 文件：`src/services/metaResourceService.js`
+- 改动：仅当响应含 `result.data.meta` 时在 `data` 内附加 `meta` 键
+- 完成：既有 dataSource 断言零改动通过（11 passed）
+
+## [x] T21 TaskRuns 接线
+
+- 文件：`src/views/TaskCenter/TaskRuns.vue`
+- 改动：按 §4.9.4-E 六条执行（data_source fetcher + 降级 fetchRuns、rowActions 渲染、`run_id → id` 归一后 executeRowAction、filtersMeta 改取 `data.meta.filters`）
+- 完成：`retryRun/cancelRun` 导入已删；`onCancel/onRetry/readableError/runAction` 已移除；FilterBar/轮询/`?run=` 深链/详情抽屉保留；eslint 与 `vite build` 通过
+
+## [x] T22 测试
+
+- 新增：`meta/tests/api/test_ui_meta_task_run.py`（5 passed）
+- 扩展：`src/services/__tests__/metaResourceService.dataSource.spec.js` 新增 meta 透传/无 meta 两用例
+- 完成：两条用例独立通过
+
+## [x] T23 验证与汇报
+
+- 顺序：§4.9.5 的 1–6 → 冒烟 7
+- 结果：新增后端 5 passed、既有 data_source 后端通过、lint 0 违规、vitest 11 passed、eslint 通过、`vite build` 成功、Playwright 冒烟通过（ui-meta 契约 + 列表首屏 data_source 请求 + 无 console error）
+- 交付：汇报差异，提交前征询用户
+
