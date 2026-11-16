@@ -77,7 +77,7 @@
 
 <script setup>
 import { ref, onMounted, computed } from 'vue'
-import { useRouter } from 'vue-router'
+import { useRoute, useRouter } from 'vue-router'
 import { AppIcon } from './common/AppIcon'
 import FrequentProductsSection from './FrequentProductsSection.vue'
 import StatsOverview from './StatsOverview.vue'
@@ -141,6 +141,7 @@ const menuIconComponent = (iconName) => {
 }
 
 const router = useRouter()
+const route = useRoute()
 const authStore = useAuthStore()
 
 const isDesktop = ref(false)
@@ -212,6 +213,15 @@ onMounted(async () => {
   // 实例展示名（页脚 + 桌面标题栏）；失败静默兜底，不阻塞工作台渲染
   loadInstanceInfo()
   await loadMenuPermissions()
+  // [9.13.4.1 2026-11-16] 单据详情页「查看审批任务」的跳转落点：/ ?task=<id>
+  //   打开后清掉 query，避免刷新/返回时重复弹抽屉。
+  const taskFromQuery = route.query?.task
+  if (taskFromQuery) {
+    openTaskDetail(String(taskFromQuery))
+    const nextQuery = { ...route.query }
+    delete nextQuery.task
+    router.replace({ path: route.path, query: nextQuery })
+  }
 })
 </script>
 

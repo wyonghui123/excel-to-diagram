@@ -32,6 +32,7 @@ _STATUS_CONFIRMED = 'confirmed'
 _STATUS_DRAFT = 'draft'
 _APPROVAL_APPROVED = 'approved'
 _APPROVAL_REJECTED = 'rejected'
+_APPROVAL_NOT_REQUIRED = 'not_required'
 
 
 def _envelope_error(message: str, code: str = None) -> Dict[str, Any]:
@@ -162,3 +163,80 @@ def purchase_order_reject_handler(params: Dict[str, Any],
     return _decide(params, target_status=_STATUS_DRAFT,
                    approval_status=_APPROVAL_REJECTED,
                    message='采购订单已驳回')
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# 撤回（withdraw）：任务侧 POST /tasks/{id}/withdraw 的单据回退副作用
+# ─────────────────────────────────────────────────────────────────────────────
+
+def withdraw_approval(object_type: str, record_id: Any) -> Dict[str, Any]:
+    """撤回审批：单据回退到草稿（幂等：已在草稿 → 同值 no-op success）。
+
+    只有采购订单提供回退处理器；其余可审批单据 fail-closed（返回
+    `WITHDRAW_NOT_SUPPORTED`），由任务侧拒绝撤回，避免「任务已取消但单据
+    仍挂 submitted」的悬挂。回执沿用决策信封（`success` + `data.new_status`）。
+    """
+    if str(object_type or '') != OBJECT_TYPE:
+        return _envelope_error(
+            '单据类型 {0} 未提供撤回回退处理器'.format(object_type),
+            'WITHDRAW_NOT_SUPPORTED',
+        )
+    if record_id in (None, ''):
+        return _envelope_error('缺少 purchase_order_id')
+
+    _set_user_context()
+    table = _po_table()
+    try:
+        ds = _get_ds()
+        rows = ds.query(
+            'SELECT id, status FROM {0} WHERE id = ?'.format(table), [record_id])
+        if not rows:
+            return _envelope_error('采购订单不存在: {0}'.format(record_id), 'NOT_FOUND')
+        current_status = str(rows[0].get('status') or '')
+        if current_status == _STATUS_DRAFT:
+            # 同值 no-op：重复撤回不重复推进（幂等）
+            return {
+                'success': True,
+                'data': {
+                    'new_status': _STATUS_DRAFT,
+                    'purchase_order_id': record_id,
+                    'approval_status': _APPROVAL_NOT_REQUIRED,
+                    'idempotent': True,
+                },
+                'message': '采购订单已撤回（重复请求）',
+            }
+        if current_status != _STATUS_SUBMITTED:
+            return _envelope_error(
+                '当前状态 {0} 不允许撤回（只接受 submitted）'.format(current_status),
+                'INVALID_STATUS',
+            )
+
+        result = _execute_update(record_id, _STATUS_DRAFT, _APPROVAL_NOT_REQUIRED)
+    except Exception as error:  # noqa: BLE001 - 统一转为失败信封
+        logger.exception('[document_approval] 采购订单撤回失败: %s', error)
+        return _envelope_error('撤回失败: {0}'.format(error))
+
+    if not getattr(result, 'success', False):
+        return _envelope_error(
+            getattr(result, 'message', None) or '撤回未生效',
+            getattr(result, 'error', None),
+        )
+
+    # 复核落库结果（与决策同口径，不只信返回值）
+    rows = ds.query('SELECT status FROM {0} WHERE id = ?'.format(table), [record_id])
+    actual_status = rows[0].get('status') if rows else None
+    if str(actual_status) != _STATUS_DRAFT:
+        return _envelope_error(
+            '撤回未生效（单据状态仍为 {0}）'.format(actual_status),
+            'EFFECT_NOT_APPLIED',
+        )
+
+    return {
+        'success': True,
+        'data': {
+            'new_status': _STATUS_DRAFT,
+            'purchase_order_id': record_id,
+            'approval_status': _APPROVAL_NOT_REQUIRED,
+        },
+        'message': '采购订单已撤回审批',
+    }

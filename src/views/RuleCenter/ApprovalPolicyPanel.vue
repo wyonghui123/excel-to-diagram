@@ -140,7 +140,32 @@
           <el-input v-model="form.description" type="textarea" :rows="2" />
         </el-form-item>
         <el-form-item :label="fieldLabel('conditions_json')">
-          <el-input v-model="form.conditionsText" type="textarea" :rows="7" spellcheck="false" />
+          <div class="condition-mode">
+            <el-radio-group
+              v-model="form.conditionMode"
+              size="small"
+              data-test="condition-mode-toggle"
+              @change="onConditionModeChange"
+            >
+              <el-radio-button label="builder">构建器</el-radio-button>
+              <el-radio-button label="json">JSON</el-radio-button>
+            </el-radio-group>
+          </div>
+          <ConditionRuleBuilder
+            v-if="form.conditionMode === 'builder'"
+            v-model:tree="form.conditionTree"
+            :field-metadata="conditionFieldMetadata"
+            :resource-type="form.scope_bo"
+            :picker-ctx="{ form }"
+            :show-preview="false"
+          />
+          <el-input
+            v-else
+            v-model="form.conditionsText"
+            type="textarea"
+            :rows="7"
+            spellcheck="false"
+          />
           <div class="form-hint">{{ conditionFieldsHint }}</div>
         </el-form-item>
       </el-form>
@@ -150,6 +175,13 @@
         <el-button size="small" @click="addStep">{{ msg('step_add') }}</el-button>
       </div>
       <el-table :data="form.steps" size="small" border :empty-text="msg('steps_empty')">
+        <!-- [2026-11-16] 暴露 stage_no：同 stage 为并行审批人，stage 递增为串行推进；
+             任务三态（ApprovalFlowSteps）按 stage_no 判定，缺列会让多步全部落在第 1 阶段。 -->
+        <el-table-column :label="meta.fields?.stage_no || meta.columns?.stage_no || '阶段'" width="80">
+          <template #default="{ row }">
+            <el-input-number v-model="row.stage_no" :min="1" :controls="false" size="small" />
+          </template>
+        </el-table-column>
         <el-table-column :label="fieldLabel('step_no')" width="72">
           <template #default="{ row }">
             <el-input-number v-model="row.step_no" :min="1" :controls="false" size="small" />
@@ -306,8 +338,14 @@
 </template>
 
 <script setup>
-import { computed, onMounted, reactive, ref } from 'vue'
+import { computed, onMounted, reactive, ref, watch } from 'vue'
 import { useMessage } from '@/composables/useMessage'
+import { ConditionRuleBuilder } from '@/components/common/ConditionRuleBuilder'
+import {
+  conditionsToTree,
+  treeToConditions,
+  validateSteps,
+} from './approvalPolicyConditions'
 import {
   createApprovalPolicy,
   getApprovalPolicy,
@@ -364,7 +402,9 @@ const form = reactive({
   description: '',
   effective_from: '',
   effective_to: '',
+  conditionMode: 'builder',
   conditionsText: '[]',
+  conditionTree: conditionsToTree([]),
   steps: [],
 })
 
@@ -382,8 +422,52 @@ const conditionFieldsHint = computed(() => {
   const obj = objectChoices.value.find(item => item.object_type === form.scope_bo)
   const fields = obj?.fields || []
   if (!fields.length) return ''
-  return fields.map(field => (field.name ? `${field.id}(${field.name})` : field.id)).join(' · ')
+  return fields.map(field => {
+    const key = field.db_column || field.id
+    return field.name ? `${key}(${field.name})` : String(key)
+  }).join(' · ')
 })
+
+// 审批条件字段元数据 → ConditionRuleBuilder 的 fieldMetadata
+const conditionFieldMetadata = computed(() => {
+  const obj = objectChoices.value.find(item => item.object_type === form.scope_bo)
+  return (obj?.fields || []).map(field => ({
+    id: field.id,
+    name: field.name || field.db_column || String(field.id),
+    db_column: field.db_column || String(field.id),
+    field_type: field.field_type || 'string',
+    is_foreign_key: field.is_foreign_key,
+    relation_object: field.relation_object,
+    is_business_key: field.is_business_key,
+    is_enum: field.is_enum,
+    enum_values: field.enum_values,
+    enum_ref: field.enum_ref,
+    allowed_operators: field.allowed_operators,
+  }))
+})
+
+// 构建器树 → JSON 文本（保存路径仍读 conditionsText，天然同步）
+watch(
+  () => form.conditionTree,
+  (tree) => {
+    if (form.conditionMode !== 'builder' || !tree) return
+    form.conditionsText = JSON.stringify(treeToConditions(tree), null, 2)
+  },
+  { deep: true }
+)
+
+function onConditionModeChange(mode) {
+  if (mode !== 'builder') return
+  try {
+    const parsed = JSON.parse(form.conditionsText || '[]')
+    if (!Array.isArray(parsed)) throw new Error('conditions must be an array')
+    form.conditionTree = conditionsToTree(parsed, conditionFieldMetadata.value)
+  } catch {
+    // 解析失败：停留在 JSON 模式，不静默丢数据
+    form.conditionMode = 'json'
+    message.error(msg('conditions_invalid'))
+  }
+}
 
 function statusTone(status) {
   if (status === 'active') return 'success'
@@ -438,7 +522,9 @@ function emptyForm() {
     description: '',
     effective_from: '',
     effective_to: '',
+    conditionMode: 'builder',
     conditionsText: '[]',
+    conditionTree: conditionsToTree([]),
     steps: [],
   }
 }
@@ -453,7 +539,23 @@ function applyForm(policy) {
   form.description = policy.description || ''
   form.effective_from = policy.effective_from || ''
   form.effective_to = policy.effective_to || ''
-  form.conditionsText = JSON.stringify(policy.conditions || [], null, 2)
+  const conditions = Array.isArray(policy.conditions) ? policy.conditions : []
+  // 先锁 JSON 模式，避免 tree 监听回写覆盖原始文本
+  form.conditionMode = 'json'
+  const tree = conditionsToTree(conditions, conditionFieldMetadata.value)
+  // 详情行可能带 value_text / value_number / value_json；无丢弃项时归一成落库契约
+  // {field_id, operator, value}，避免 JSON 模式下原样回存造成字段冗余与误读
+  form.conditionsText = JSON.stringify(
+    tree.droppedCount > 0 ? conditions : treeToConditions(tree),
+    null,
+    2
+  )
+  form.conditionTree = tree
+  // 有无法用构建器表达的条件项 → 停留在 JSON 模式，避免静默丢数据
+  form.conditionMode = tree.droppedCount > 0 ? 'json' : 'builder'
+  if (tree.droppedCount > 0) {
+    message.warning(`有 ${tree.droppedCount} 条条件无法用构建器编辑，已切换到 JSON 模式`)
+  }
   form.steps = (policy.steps || []).map(step => ({ ...step }))
 }
 
@@ -477,7 +579,10 @@ async function openEdit(row) {
 }
 
 function addStep() {
+  // 新增步骤默认接在最后一阶段之后（串行链），需要并行时手动改成同一 stage_no
+  const maxStage = form.steps.reduce((max, step) => Math.max(max, Number(step.stage_no) || 0), 0)
   form.steps.push({
+    stage_no: maxStage + 1,
     step_no: form.steps.length + 1,
     approver_type: 'role',
     approver_ref: '',
@@ -492,8 +597,8 @@ function buildPayload() {
   let conditions
   try {
     conditions = JSON.parse(form.conditionsText || '[]')
-  } catch (_) {
-    throw new Error(msg('conditions_invalid'))
+  } catch (error) {
+    throw new Error(msg('conditions_invalid'), { cause: error })
   }
   if (!Array.isArray(conditions)) throw new Error(msg('conditions_invalid'))
   return {
@@ -515,6 +620,11 @@ function buildPayload() {
 }
 
 async function submit() {
+  const stepsCheck = validateSteps(form.steps)
+  if (!stepsCheck.ok) {
+    message.error(stepsCheck.errors[0])
+    return
+  }
   let payload
   try {
     payload = buildPayload()
@@ -616,6 +726,10 @@ onMounted(async () => {
   font-size: 12px;
   line-height: 1.5;
   word-break: break-all;
+}
+
+.condition-mode {
+  margin-bottom: 6px;
 }
 
 .steps-header {

@@ -254,6 +254,55 @@
       />
     </template>
 
+    <!-- [9.13.4.1 2026-11-16] 单据侧只读审批投影（状态区）：不提供通过/驳回，
+         决策入口仍在任务抽屉（D-AP-16）。 -->
+    <div v-else-if="isApprovalProgress" v-loading="approvalLoading" class="op-approval-progress">
+      <template v-if="approvalProjection">
+        <div class="op-approval-head">
+          <el-tag :type="approvalTagType(approvalProjection.tone)" size="small">
+            {{ approvalProjection.statusLabel }}
+          </el-tag>
+          <span class="op-approval-meta">
+            处理人：{{ approvalProjection.assignee || '待分发' }}
+          </span>
+          <span class="op-approval-meta">
+            第 {{ approvalProjection.stage }} / {{ approvalProjection.stageTotal }} 阶段
+          </span>
+          <span v-if="approvalProjection.policyName" class="op-approval-meta">
+            {{ approvalProjection.policyName }}
+          </span>
+          <span class="op-approval-spacer" />
+          <el-button
+            v-if="!approvalProjection.legacyRef"
+            link
+            type="primary"
+            @click="openApprovalTask"
+          >查看审批任务</el-button>
+        </div>
+        <div v-if="approvalProjection.legacyRef" class="op-approval-hint">
+          历史审批任务未关联单据引用，暂不支持跳转
+        </div>
+        <!-- [9.13.4.5 2026-11-16] 实例流转三步态：与任务抽屉共用 ApprovalFlowSteps -->
+        <ApprovalFlowSteps
+          v-if="approvalProjection.flow?.steps?.length"
+          class="op-approval-flow"
+          :steps="approvalProjection.flow.steps"
+          :miss-reason="approvalProjection.flow.missReason"
+        />
+        <ul v-if="approvalProjection.events.length" class="op-approval-events">
+          <li v-for="event in approvalProjection.events" :key="event.id" class="op-approval-event">
+            <span class="op-approval-event-type">{{ event.event_type }}</span>
+            <span class="op-approval-event-actor">{{ event.actor || 'system' }}</span>
+            <span class="op-approval-event-time">{{ event.occurred_at || '' }}</span>
+          </li>
+        </ul>
+      </template>
+      <div v-else-if="!approvalLoading" class="op-empty-state">
+        <AppIcon name="check" size="lg" />
+        <p>暂无审批任务</p>
+      </div>
+    </div>
+
     <!-- [G1 审批闭环 2026-10-29] 变更申请只读分区：BO 详情页的「审批中」可见性。
          数据由 target_object_type + target_object_id 精确过滤（见下方自定义取数器），
          不复用平台 associationFilters（其过滤列写死 `{父对象类型}_id`，会返回全量）。 -->
@@ -351,6 +400,7 @@
 
 <script setup>
 import { ref, computed, watch, shallowRef, inject, onMounted } from 'vue'
+import { useRouter } from 'vue-router'
 import { ElMessageBox } from 'element-plus'
 import MetaListPage from '../MetaListPage/MetaListPage.vue'
 import AppIcon from '../AppIcon/AppIcon.vue'
@@ -358,6 +408,7 @@ import AppButton from '../AppButton/AppButton.vue'
 import MetaDialog from '../MetaDialog.vue'
 import MetaForm from '../MetaForm.vue'
 import FkLinkField from '../FkLinkField/FkLinkField.vue'
+import ApprovalFlowSteps from '../ApprovalFlowSteps.vue'
 import boService from '@/services/boService'
 import metaService from '@/services/metaService'
 import { useAuthStore } from '@/stores/authStore'
@@ -367,6 +418,7 @@ import * as annotationService from '@/services/annotationService'
 import EnumService from '@/services/enumService'
 import { useCrudMessage } from '@/composables/useCrudMessage'
 import { useBreakpoints } from '@/composables/useBreakpoints'
+import { fetchTasks, fetchTaskDetail, fetchTaskEvents, buildApprovalProjection } from '@/services/taskService'
 
 const props = defineProps({
   section: {
@@ -1049,6 +1101,85 @@ async function loadTargetChangeRequests() {
       changeRequestsLoading.value = false
     }
   }
+}
+
+// [9.13.4.1 单据侧只读审批投影 2026-11-16] 状态区只读块：单据侧不提供通过/驳回
+//   （D-AP-16 单一决策入口），只展示状态徽标 / 处理人 / 阶段 / 最近 3 条事件 +
+//   跳任务抽屉。数据 = GET /tasks?doc_ref_* + GET /tasks/{id}/events。
+const isApprovalProgress = computed(() => {
+  return props.section.customFetcher === 'approval_progress'
+})
+
+const approvalProjection = ref(null)
+const approvalLoading = ref(false)
+let _approvalVersion = 0
+
+const router = useRouter()
+
+// el-tag 只认 success/info/warning/danger；muted 用默认主题色（空字符串）
+const APPROVAL_TAG_TYPES = {
+  success: 'success', info: 'info', warning: 'warning', danger: 'danger'
+}
+
+function approvalTagType(tone) {
+  return APPROVAL_TAG_TYPES[tone] || ''
+}
+
+async function loadApprovalProgress() {
+  if (!hasRealObjectId.value || !props.objectType) {
+    approvalProjection.value = null
+    approvalLoading.value = false
+    return
+  }
+  const version = ++_approvalVersion
+  approvalLoading.value = true
+  try {
+    const res = await fetchTasks({
+      type: 'approval',
+      docRefType: props.objectType,
+      docRefId: String(props.objectId),
+      pageSize: 20
+    })
+    if (version !== _approvalVersion) return
+    const items = Array.isArray(res?.data?.items) ? res.data.items : []
+    // 防御：后端已按 updated_at DESC 排序，此处再稳定取最新一条
+    const task = items.slice().sort((a, b) => {
+      return String(b.updated_at || '').localeCompare(String(a.updated_at || ''))
+    })[0] || null
+    let events = []
+    // [9.13.4.5] GET /tasks 行投影不含 inputs，审批链步骤需再取详情（失败回落行数据）
+    let fullTask = task
+    if (task?.id) {
+      try {
+        const detailRes = await fetchTaskDetail(task.id)
+        if (version !== _approvalVersion) return
+        fullTask = detailRes?.success && detailRes?.data ? detailRes.data : task
+      } catch (e) {
+        console.error('[AssociationSection] 审批任务详情加载失败:', e)
+      }
+      try {
+        const eventRes = await fetchTaskEvents(task.id)
+        if (version !== _approvalVersion) return
+        events = Array.isArray(eventRes?.data) ? eventRes.data : []
+      } catch (e) {
+        console.error('[AssociationSection] 审批活动流加载失败:', e)
+      }
+    }
+    approvalProjection.value = buildApprovalProjection(fullTask, events)
+  } catch (e) {
+    if (version !== _approvalVersion) return
+    console.error('[AssociationSection] loadApprovalProgress 失败:', e)
+    approvalProjection.value = null
+  } finally {
+    if (version === _approvalVersion) approvalLoading.value = false
+  }
+}
+
+// 跳工作台任务抽屉（/system/task-management 为 admin-only，普通用户落点在 `/`）
+function openApprovalTask() {
+  const taskId = approvalProjection.value?.id
+  if (!taskId) return
+  router.push({ path: '/', query: { task: String(taskId) } })
 }
 
 const relationAccountFormVisible = ref(false)
@@ -1840,6 +1971,8 @@ watch(() => props.objectId, (newVal, oldVal) => {
     loadRelationAccounts()
   } else if (isTargetChangeRequests.value) {
     loadTargetChangeRequests()
+  } else if (isApprovalProgress.value) {
+    loadApprovalProgress()
   }
 }, { immediate: true })
 
@@ -1847,11 +1980,12 @@ function refresh() {
   if (isPartyRelations.value) { loadPartyRelations(); return }
   if (isRelationAccounts.value) { loadRelationAccounts(); return }
   if (isTargetChangeRequests.value) { loadTargetChangeRequests(); return }
+  if (isApprovalProgress.value) { loadApprovalProgress(); return }
   if (isMergedRelationships.value) { loadMergedRelationships(); return }
   metaListRef.value?.refresh?.()
 }
 
-defineExpose({ refresh, loadMergedRelationships, loadPartyRelations, loadRelationAccounts, loadTargetChangeRequests })
+defineExpose({ refresh, loadMergedRelationships, loadPartyRelations, loadRelationAccounts, loadTargetChangeRequests, loadApprovalProgress })
 </script>
 
 <style scoped>
@@ -1872,6 +2006,61 @@ defineExpose({ refresh, loadMergedRelationships, loadPartyRelations, loadRelatio
 
 .op-merged-relations {
   padding: var(--spacing-sm) 0;
+}
+
+/* [9.13.4.1 2026-11-16] 单据侧只读审批投影（状态区） */
+.op-approval-progress {
+  padding: var(--spacing-sm) 0;
+  min-height: 72px;
+}
+
+.op-approval-head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--spacing-md);
+}
+
+.op-approval-meta {
+  font-size: var(--font-size-sm);
+  color: var(--color-text-secondary);
+}
+
+.op-approval-spacer {
+  flex: 1 1 auto;
+}
+
+.op-approval-hint {
+  margin-top: var(--spacing-xs);
+  font-size: var(--font-size-xs);
+  color: var(--color-text-secondary);
+}
+
+.op-approval-events {
+  margin: var(--spacing-sm) 0 0;
+  padding: 0;
+  list-style: none;
+}
+
+.op-approval-flow {
+  margin-top: var(--spacing-sm);
+}
+
+.op-approval-event {
+  display: flex;
+  gap: var(--spacing-md);
+  padding: 2px 0;
+  font-size: var(--font-size-xs);
+  color: var(--color-text-secondary);
+}
+
+.op-approval-event-type {
+  min-width: 96px;
+  color: var(--color-text-primary);
+}
+
+.op-approval-event-time {
+  margin-left: auto;
 }
 
 .op-party-relations-toolbar {

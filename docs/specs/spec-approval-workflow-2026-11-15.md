@@ -1,6 +1,6 @@
 # 审批流 Spec（Approval Workflow P0）
 
-> 版本：v0.14 ｜ 日期：2026-11-16 ｜ 状态：P0 已交付（M1-M3 验收通过）；M4（P2）任务域通用能力已实现并验收（M4-1~M4-5，§8），二次检查与元数据驱动审计见 §8.9；M5（通用任务引擎）已实施并验收（§9.8）；2026-11-16 完成存量表名/列名规范化（§9.10）、取人解析行业复核（§9.11）与二次审计后的全仓运行期表名收口（§9.12）
+> 版本：v0.16 ｜ 日期：2026-11-16 ｜ 状态：P0 已交付（M1-M3 验收通过）；M4（P2）任务域通用能力已实现并验收（M4-1~M4-5，§8），二次检查与元数据驱动审计见 §8.9；M5（通用任务引擎）已实施并验收（§9.8）；2026-11-16 完成存量表名/列名规范化（§9.10）、取人解析行业复核（§9.11）、全仓运行期表名收口（§9.12）与任务域二次检查 + Fusion/SAP 头部对标（§9.13）；同日完成 §9.13.6 全部 6 步（动作表/REST、cancel·hold·resume、withdraw 回退、单据侧只读投影、批量护栏、策略条件构建器 + 实例三步态）
 > 定位：把审批域从「5 个真源半驱动」收敛为「2 个真源 + 派生」，并补齐前端审批动作与策略配置
 > 判尺：单一事实源（SSOT）+ 元数据驱动；不造重型框架、不做超范围重构
 > 复用底座：[`decision_effect.py`](../../meta/core/decision_effect.py)｜[`approval_meta_loader.py`](../../meta/core/approval_meta_loader.py)｜[`document_approval_service.py`](../../meta/services/document_approval_service.py)｜[`task_decision_api.py`](../../meta/api/task_decision_api.py)
@@ -995,3 +995,197 @@ python d:\filework\test.py --file meta/tests/test_receipt_service.py,...（22 �
 | `condition_parser.py` / `hierarchy_loader.py` | 静态兜底 | 解析器引导层，刻意保留 |
 
 **结论**：BO 业务表的运行期表名/列名已全部经 `MetadataResolver`（或层级声明）解析，字面量仅作为「未声明」兜底且均带可读回退；平台内核表（`users` / `user_permission_sets` / `tasks` / `audit_logs` / `approval_policies`）保有直连注释，符合 §9.10 三分类口径。
+
+### 9.13 任务域二次检查与头部产品对标（2026-11-16）
+
+> 触发：对「流转规则配置 / 实例流转详情 / 审批专属 UI / 批量单据任务处理 / task 对象模型的动作与服务」做二次检查，并以 Oracle Fusion、SAP 为主参照细化方案。本节为设计，**不改代码**。
+
+#### 9.13.1 仓内现状（C）
+
+| # | 检查点 | 现状 | 证据 |
+|---|---|---|---|
+| 1 | 流转规则配置 | 规则中心「审批策略」页签可编辑：元数据表单 + **裸 JSON 条件** + 行内步骤表（`step_no/approver_type/approver_ref/approve_mode/min_amount/max_amount/sla_hours`）+ 命中试算 | `src/views/RuleCenter/ApprovalPolicyPanel.vue:83-209,220-304`；挂载 `RuleCenterPage.vue:274-280` |
+| 2 | 实例流转详情 | `TaskDetailDrawer` 只读消费 `inputs.policy_snapshot`：审批链 `<ol>`、阶段 chip、`conditions_explain`、取人依据、`task_events` 活动流 | `TaskDetailDrawer.vue:12-15,145-258,349-362,494-503` |
+| 3 | 审批专属 UI | 仅任务抽屉内 `v-if="isApproval"` 块（通过/驳回/退回修改、审批链、条件解释、单据跳转）；**无独立审批中心**；单据详情页无审批区，`approval_status` 仅作普通列 | `TaskDetailDrawer.vue:145,155-233`；`src/router/modules/system.js:48`；`purchase_order.yaml:166,1110,1484` |
+| 4 | 批量处理 | 收件箱 `for-await` **串行**逐条调 `POST /tasks/:id/decision`；502 标可重试并汇总「成功 N/失败 M」；**无权限预判、无进度、无上限**；任务域无批量端点 | `useTaskInbox.js:87-107`；`taskService.js:126-139`；`TaskInboxPanel.vue:24-75,142` |
+| 5 | 任务动作/服务 | 11 态 / 5 type / 18 条迁移；动作全走专属路由、未进 action registry；**cancel 无端点**、`hold/release` 无 REST、`claimed` 无退出路径 | `meta/core/task_state_machine.py:54-82`；`task_hold.py:319`；`meta/api/task_inbox_api.py` |
+
+#### 9.13.2 头部对标矩阵（F / S / P）
+
+| 维度 | Oracle Fusion | SAP | ServiceNow / Salesforce | 对本次的结论 |
+|---|---|---|---|---|
+| 规则配置 | Transaction Console → **Approval Rules** 页签 → Configure Rules（参与者、路由规则、金额区间）`F` | Flexible Workflow 在 Fiori 应用内配置步骤/条件/升级与委托 `S` | ServiceNow Flow Designer `Ask for Approval`；Salesforce `ApprovalProcess` 元数据（steps / entry criteria / allowRecall / allowedSubmitters）`P` | 我们的「策略 = 条件 + 串行步骤 + 金额分段」结构对齐；差在**条件编辑体验**，不在模型 |
+| 实例流转详情 | Approval History 同时给出「已审批人 + 当前处理人 + 后续审批人」；Document History 记录 Submitted/Approved/Rejected/Returned/Reassigned `F` | My Inbox 按后端下发 decision options 渲染动作；Workflow Instance Monitor 看实例 `S` | Salesforce 记录页 Approval History / Flow 的 Approval Trace 组件 `P` | 我们缺**三步态标记**（已完成/进行中/待处理）与「谁在何时批的」合并视图 |
+| 决策入口位置 | 决策在 BPM Worklist / 通知，**单据页只给历史与当前处理人** `F` | 决策在 My Inbox，单据页展示审批状态 `S` | Salesforce 例外：记录页内直接 Approve/Reject（其为 record-centric 架构）`P` | 单据页应做**只读投影 + 跳任务**，不做第二决策入口 |
+| 批量 | 单据侧无批量审批，管理员用 Transaction Console 处理卡单 `F` | My Inbox 多选能力弱，主流逐条 `S` | ServiceNow My Approvals「Actions on selected rows」把 sys_ids 交服务端批量处理；也可「分组审批」聚合为一条 `P` | 小批量前端串行可接受；但需**上限 + 权限预判 + 逐条结果** |
+| 任务动作 | 系统动作 escalate / reassign / delegate / pushback / withdraw / suspend / resume；**动作随状态收窄**（suspended 仅 resume/withdraw；组任务须先 claim）`F` | My Inbox 标准动作 claim / release / forward `S` | — | 动作必须**由状态机声明并下发**，前端不得按 type 硬编码 |
+
+#### 9.13.3 差距判定
+
+| ID | 等级 | 差距 | 影响 |
+|---|---|---|---|
+| G-13-1 | P1 | 单据详情页无审批上下文（`approval_status` 投影无消费方） | 用户看到「审批中」却不知道谁在批、批到第几步，必须去待办里找 |
+| G-13-2 | P1 | 动作不由状态机声明：cancel 无端点、`hold/release` 无 REST、`claimed` 无退出 | 状态机有迁移但无入口；领取后弃单只能等超时回收 |
+| G-13-3 | P1 | 批量审批无权限预判 / 无进度 / 无数量上限 | 批量里 403/409/502 混在一起，只显示计数，用户无法定位 |
+| G-13-4 | P2 | 条件配置仅裸 JSON，无字段选择与即时校验 | 配置门槛高，错 JSON 只在保存时暴露 |
+| G-13-5 | P2 | 流转详情不标当前步、无三步态；`hit_policy=false` 无原因 | 与 Oracle Approval History 差距最大的一点 |
+| G-13-6 | P2 | `policy_snapshot` 无 schema 字段，仅约定写入 `inputs` | 结构靠约定，缺校验 |
+
+#### 9.13.4 细化方案
+
+**9.13.4.1 P1-1 单据侧只读审批投影**
+
+- 位置：BO 详情页状态区（`ObjectPage` 顶部），新增只读块；不新增独立页面、不新增审批中心（延续 N-AP-02）。
+- 数据：`GET /tasks?doc_ref_type={bo}&doc_ref_id={id}`（若 `task_query.list_tasks` 不支持这两参数则补两个过滤参数）+ `inputs.policy_snapshot` + `GET /tasks/{id}/events`。**不新增资源端点**。
+- 展示：审批状态徽标（读投影列）、当前处理人、阶段 n/总量、最近 3 条事件、「查看审批任务」跳任务抽屉。
+- 不做：单据页直接通过/驳回（保持单一决策入口，避免绕过四眼与 `effect_key` 幂等）。
+- 前端复用：`AssociationSection` 的分区外壳 + `taskStatus.js` 文案；不新建审批专用组件目录。
+
+**9.13.4.1.1 实施设计（2026-11-16 已实施）**
+
+> 判尺：零新增资源端点（只补 `GET /tasks` 过滤参数）+ 不新建审批组件目录（复用 `AssociationSection` 自定义取数器分支）+ 可见性 fail-closed 且**管理员不是可见性后门**。
+
+**后端（2 文件 + 2 测试）**
+
+| # | 文件 | 改动 |
+|---|---|---|
+| B1 | `meta/core/task_query.py` | `list_tasks()` 增参 `doc_ref_type` / `doc_ref_id` / `actor`；`_TASK_COLUMNS` 追加 `executor_candidates, assign_policy, doc_ref_type, doc_ref_id`（尾部四列，`_row()` 同步追加下标）；WHERE 追加两列等值条件；`actor` 非空时用 `meta.core.task_inbox._visible(task, actor=..., role_apps=None, actor_roles=None, data_source=ds)` 逐行过滤，`total` 取过滤后条数（单据维度量级 ≤ 200，不下推 SQL） |
+| B2 | `meta/api/task_inbox_api.py` | `task_monitor_service()` 增 `doc_ref_type/doc_ref_id`：`is_admin` → 原全量口径；非 admin → **必须**同时提供两参数（缺一 403），且 `actor=_actor(user)` 走行级可见性；`task_monitor_route` 读取 `request.args` 两参数 |
+| B3 | `meta/tests/test_task_query_read.py` | 新增：doc_ref 命中/不命中；`doc_ref_type` 为空的历史任务不被命中；`actor` 可见性三通道（assignee / created_by / 候选）命中、无关用户为空 |
+| B4 | `meta/tests/test_task_api.py` | 新增：非 admin 无 doc_ref → 403；非 admin + doc_ref 但不可见 → 空 items；admin 走全量；非 admin 只给一个参数 → 403 |
+
+**前端（4 文件 + 1 单测）**
+
+| # | 文件 | 改动 |
+|---|---|---|
+| F1 | `src/services/taskService.js` | `fetchTasks()` 透传 `docRefType/docRefId`；新增纯函数 `buildApprovalProjection(task, events)`（输出 `{statusLabel, tone, assignee, stage, stageTotal, events: 最近3条倒序, legacyRef}`）便于单测 |
+| F2 | `src/components/common/ObjectPage/AssociationSection.vue` | 新增分支 `customFetcher === 'approval_progress'`（与 `target_change_requests` 同构）：`fetchTasks({type:'approval', docRefType: objectType, docRefId: String(objectId), pageSize: 20})` 取 `updated_at` 最新一条；`fetchTaskEvents(task.id)`（默认 200，升序）后 `slice(-3).reverse()`；模板块：状态徽标（`statusTone` → el-tag：muted→default / info→info / warning→warning / danger→danger / success→success）、当前处理人 `task.assignee || '待分发'`、`第 {{stage}} / {{stageTotal}} 阶段`（`stageTotal` = `inputs.policy_snapshot.steps` 的 `stage_no` 去重数，缺省 1）、最近 3 条事件（`event_type` + `actor` + `occurred_at`）、「查看审批任务」按钮；历史兜底：`!task.doc_ref_type || !task.doc_ref_id` ⇒ 隐藏按钮 + 提示「历史审批任务未关联单据引用」；空任务 ⇒ 「暂无审批任务」；在 `watch(() => props.objectId, …, {immediate:true})` 与 `refresh()` 各加一条分支 |
+| F3 | `src/components/common/DetailPage/DetailPage.vue` | `computedSections` 在 form sections 之后、`rule_trace` 之前 push：`detailConfig.approval_progress.enabled` 时 `{key:'approval_progress', label, icon:'check', type:'association', association:'approval_progress', assocName:'approval_progress', customFetcher:'approval_progress', readonly:true, display:'always', pageSize:1}`（= ObjectPage 顶部状态区；未声明该键的 BO 零影响） |
+| F4 | `src/components/ArchWorkspaceNew.vue` | `onMounted` 读 `route.query.task` ⇒ `openTaskDetail(id)`，随后 `router.replace` 清 query（`/system/task-management` 为 admin-only，普通用户跳转落点只能是工作台 `/`） |
+| F5 | `src/services/__tests__/taskService.spec.js` | `fetchTasks` doc_ref 透传断言 + `buildApprovalProjection` 用例（状态文案/阶段总数/事件截取倒序/历史兜底） |
+
+**YAML（4 文件）**：`purchase_order` / `transfer_order` / `requisition` / `service_request` 的 `ui_view_config.detail` 增 `approval_progress: {enabled: true, label: 审批进度}`。
+
+**验证**
+
+```powershell
+python d:\filework\test.py --file meta/tests/test_task_query_read.py,meta/tests/test_task_api.py,meta/tests/test_task_state_machine.py
+npx vitest run src/services/__tests__/taskService.spec.js
+```
+
+三场景：① 采购订单 `submitted` → 详情页顶部见「审批中 + 处理人 + 阶段 n/总量 + 最近 3 条事件」；② 点击「查看审批任务」→ 工作台打开同一任务抽屉；③ 撤回后单据回退 `draft` 且任务 `cancelled`，投影块转为终态文案。
+
+**9.13.4.2 P1-2 动作表 + 端点补齐**
+
+1. `meta/core/task_state_machine.py` 新增 `TASK_ACTIONS`（**静态声明，非注册表**）：
+
+```
+action → {allowed_from: [...], permission: 'task:claim'|'{bo}:approve'|..., endpoint: 'POST /tasks/{id}/claim'}
+claim / release / start / decision / participate / reassign / delegate
+/ hold / resume / cancel / withdraw
+```
+
+2. 新端点 `GET /tasks/{id}/actions`：按 `status + type + 当前用户权限` 返回可用动作；前端按返回渲染按钮（替代 `TaskDetailDrawer` 与 `TaskInboxPanel` 的 type 硬编码）。
+3. 补 `POST /tasks/{id}/cancel`：`created_by` 或 admin；允许 `pending/ready/claimed/in_progress/failed/waiting_approval` → `cancelled`（**已实施**：迁移表补 `ready/claimed/failed/waiting_approval → cancelled` 四行）。
+4. 审批走 `POST /tasks/{id}/withdraw`（不叫 cancel）：仅 `created_by` 且**无任何有效 approve** 时允许；任务 → `cancelled`，单据 `approval_status` 回退（副作用落 `document_approval_decision`，沿用幂等键语义）。**已实施**：见 §9.13.6 第 3 条。
+5. `hold/release` 暴露 REST（`task_hold.py` 已有实现，加两个薄端点；**已实施**：`POST /tasks/{id}/hold` 与 `POST /tasks/{id}/resume`）。
+6. 实施顺序：先 2（零副作用）→ 3/5 → 4（有单据副作用，单独测试）。
+
+**9.13.4.3 P1-3 批量护栏（不新增批量端点，延续 D-AP-12）**（2026-11-16 已实施，见 §9.13.6.2）
+
+- 选中 > 50 条时禁止批量并提示分批（避免串行长时间占用）。
+- 批量前用 `GET /tasks/{id}/actions`（或一次性拉当前用户可审批 BO 集合）过滤掉不可决策项，403 在点击前就消失。
+- 并发上限 4（简单 Promise pool），保留逐条结果明细：成功 / 失败原因（403/409/502）/ 可重试。
+- 幂等仍由后端 `{task_id}:{attempt}` 保证，重试不产生双生效。
+
+**9.13.4.4 P2 条件配置复用现有构建器**（2026-11-16 已实施，见 §9.13.6.3）
+
+- `ApprovalPolicyPanel` 条件区接 `ConditionRuleBuilder`（已存在，系统管理页在用），输出契约不变（同一 JSON 落 `approval_policy_conditions`），并保留「切到 JSON」开关。
+- 步骤区补两项校验：相邻步 `min_amount/max_amount` 不重叠且不断档；`step_no` 连续。都在保存前本地校验，不新增后端规则。
+
+**9.13.4.5 P2 实例流转三步态**（2026-11-16 已实施，见 §9.13.6.3）
+
+- 数据源：`policy_snapshot.steps` + `task_events` + `task_participation.participations_view`；**不新增 API**。
+- 渲染：每步 `已完成 / 进行中 / 待处理` 三态，已完成步附实际处理人与时间（来自参与流水/事件），当前步高亮；`hit_policy=false` 显示「未命中策略，回落默认链」等具体原因。
+- 与 9.13.4.1 的只读投影共用同一渲染片段（一个组件两处用，避免第三份审批链实现）。
+
+#### 9.13.5 决策
+
+| ID | 决策 | 备选 | 理由 |
+|---|---|---|---|
+| **D-AP-16** | 单据页只做只读审批投影，不做第二决策入口 | 单据页加通过/驳回按钮 | Oracle/SAP 均把决策留在 worklist；双入口会绕过四眼与 `effect_key` 幂等 |
+| **D-AP-17** | 动作由 `TASK_ACTIONS` 声明并下发 `GET /tasks/{id}/actions` | 前端按 `type` 硬编码按钮 | Oracle BPM 动作随状态收窄；硬编码在新增动作/状态时必漏改 |
+| **D-AP-18** | 审批用 `withdraw`（撤回）而非 `cancel` | 直接复用 cancel | Salesforce `allowRecall` / Oracle BPM withdraw 语义；撤回要带单据回退副作用，取消不承诺 |
+| **D-AP-19** | 批量保留前端串行，加 50 条上限 + 并发 4 + 权限预判 | 新增服务端批量端点 | ServiceNow 服务端 bulk 属产品级批量控件场景；当前量级不需要第二套错误语义 |
+| **D-AP-20** | 条件配置复用 `ConditionRuleBuilder`，保留 JSON 开关 | 新写条件构建器 | 同契约组件已存在，避免第二实现 |
+| **D-AP-21** | `TASK_ACTIONS` 用静态表，不进 action registry | 注册进 `bo_action_registrations` | 任务动作是引擎内建，注册表是 BO 动作的机制；混用会让任务动作被 BO 权限体系误管 |
+
+不采纳（延续或新增）：BPMN 画布（N-AP-01）、独立审批中心（N-AP-02）、服务端批量审批端点（当前量级）、会签多任务实例（N-AP-03）。
+
+#### 9.13.6 实施顺序与验收
+
+1. `TASK_ACTIONS` + `GET /tasks/{id}/actions`（无副作用；单测覆盖「状态 × 动作」矩阵）——**已实施（2026-11-16）**：声明在 [`task_state_machine.py`](../../meta/core/task_state_machine.py)（`TaskAction` / `TASK_ACTIONS` / `applicable_actions`，`available=False` 表示已声明未上线，默认不返回），REST 在 [`task_inbox_api.py`](../../meta/api/task_inbox_api.py)（`task_actions_service` + `_action_allowed`：`admin` 短路、`owner`、`{bo}:approve` fail-closed、`task.claim` 走候选池）；测试 `TC-TSM-050~054`、`TC-P1-040~044`
+2. `cancel` / `hold` / `resume` REST（无单据副作用）——**已实施（2026-11-16）**：`cancel` 走新增 [`task_control.py`](../../meta/core/task_control.py)（`require_transition` + 条件 UPDATE + `record_transition`，只写终态时间 `finished_at`）；`hold` / `resume` 薄包装 [`task_hold.py`](../../meta/core/task_hold.py) 的 `hold_task` / `release_task`（只写事件、不改状态列，严格交替）。REST 在 `task_inbox_api.py`（`task_cancel_service` / `task_hold_service` / `task_resume_service`，权限码 `owner_or_admin` / `task.hold`）；同时按本节第 3 条校正 `cancel.allowed_from` 为 `pending/ready/claimed/in_progress/failed/waiting_approval`，迁移表补 `ready/claimed/failed/waiting_approval → cancelled` 四行（18 → 22 条）；测试 `TC-TSM-002/051/054`、`TC-P1-045~050`
+3. `withdraw` + 单据回退（有副作用，单独测试 + 幂等回归）——**已实施（2026-11-16）**：任务侧新增 [`task_withdraw.py`](../../meta/core/task_withdraw.py)（`withdraw_task`：严格 `created_by` → 「无任何有效 approve」（查 `tasks.outputs.decision='approve'` 且 done，不读单据 `approval_status`）→ 单据回退（`run_idempotent`，键 `{task_id}:{attempt}:withdraw`，失败回滚可重试）→ `cancel_task` 归位）；单据回退副作用在 [`document_approval_decision.py`](../../meta/services/document_approval_decision.py)（`withdraw_approval` / `purchase_order_withdraw_handler`：`submitted → draft` + `approval_status=not_required`，草稿态幂等 no-op；其余单据类型 `WITHDRAW_NOT_SUPPORTED` fail-closed）；REST `POST /api/v1/tasks/{id}/withdraw`（`task_withdraw_service`，权限码 `owner`）；测试 `TC-P1-051~055`（含回退失败可重试、已有 approve 拒绝）+ `test_document_approval.py` 撤回 4 例
+4. 单据侧只读投影块（前端，可能补 `doc_ref_*` 过滤参数）——**已实施（2026-11-16）**：见 §9.13.4.1.1 与下方验收记录（后端 `list_tasks` 补 `doc_ref_type/doc_ref_id/actor`；非管理员仅允许按单据查询并按行级可见性收敛；前端复用 `AssociationSection` 自定义取数器分支，跳转落点 = 工作台 `/`）
+5. 批量护栏（前端 only）——**已实施（2026-11-16）**：见 §9.13.6.2（上限 50 / 预判 `GET /tasks/{id}/actions` / 并发 4 / 逐条明细）
+6. P2：条件构建器复用 → 三步态渲染——**已实施（2026-11-16）**：见 §9.13.6.3（条件树↔JSON 双向同步 + 步骤校验；`ApprovalFlowSteps` 一个组件两处用）
+
+验收：
+
+```powershell
+python d:\filework\test.py --file meta/tests/test_task_state_machine.py,meta/tests/test_approval_task_service.py,meta/tests/test_task_decision.py,meta/tests/test_document_approval_service.py
+```
+
+前端三场景：单据页看到「审批中 + 当前处理人 + 当前步」；收件箱批量 3 条含 1 条无权限 → 点击前即不可选；撤回后单据状态回退且任务 cancelled。
+
+**9.13.6.1 第 4 步验收记录（2026-11-16，单据侧只读审批投影）**
+
+| 项 | 结果 |
+|---|---|
+| 后端测试 | `test_task_query_read.py` + `test_task_state_machine.py` + `test_task_inbox.py` ⇒ **92 passed**（新增 `TC-P1-024~026` 单据过滤/历史任务/可见性三通道、`TC-P1-037/038` 非管理员按单据查询与缺参 403）；`test_task_api.py` 3 passed |
+| 后端 lint | `ruff --select E9,F`（`task_query.py` / `task_inbox_api.py` / `test_task_query_read.py`）全过 |
+| 前端测试 | `taskService.spec.js` ⇒ **35 passed**（新增 doc_ref 透传 + `buildApprovalProjection` 4 例：状态/阶段/事件截取/历史兜底） |
+| 构建/lint | `npm run build` 通过（chunk-cycles OK）；`eslint` 无新增错误（2 个 `fetch` 报错与既有 warning 均为基线） |
+| 元模型门禁 | `python -m meta.tools.lint_metamodel` exit 0（relations 220 / actions 23 / permissions 24 / capabilities 219，0 violation） |
+| 实现口径 | ① `list_tasks` 的 `actor` 分支复用 `task_inbox._row_to_task` + `_visible`（与详情同源，避免第二套可见性）；`stage_no` 按列存在性探测（旧库未迁移不 500）。② 非管理员无 `doc_ref_*` 一律 403（阻止越权全量扫描），admin 口径不变。③ 前端投影块为 `AssociationSection` 的 `customFetcher='approval_progress'` 分支，空态「暂无审批任务」、历史任务隐藏跳转并提示。④ 跳转落点 = 工作台 `/`（`/system/task-management` 为 admin-only），`ArchWorkspaceNew` 读 `?task=` 打开抽屉后 `router.replace` 清 query |
+| 未做 | live 3010 手工三场景冒烟（需种子审批任务 + 真实用户权限）；已由 92 + 35 例单测覆盖契约与派生逻辑 |
+
+**9.13.6.2 第 5 步验收记录（2026-11-16，批量护栏）**
+
+| 项 | 结果 |
+|---|---|
+| 前端测试 | `taskService.spec.js` **47 passed**（新增 5：`BATCH_MAX_SIZE=50`/`BATCH_CONCURRENCY=4`、`runWithConcurrency` 并发峰值 ≤4 且同序、单项抛错隔离、`actionAllowedFromPayload` 三态、`fetchTaskActions` 路径）；`useTaskInbox.spec.js` **12 passed**（新增 2：缺 approve 动作判 blocked、端点失败 fail-open）；`TaskInboxPanel.spec.js` **11 passed**（新增 2：51 项拦截「超过批量上限」、预判排除提示「已排除 N 项不可决策」） |
+| 构建/lint | `npm run build` exit 0（chunk-cycles OK）；`eslint` 无新增问题（`useTaskInbox` 的 `max-lines-per-function` 与各处 `no-unused-vars` 均为改动前基线） |
+| 实现口径 | ① **50 上限**：`BATCH_MAX_SIZE` 在 `taskService.js`，UI 层两处拦截——全选截断前 50 并提示分批、`runBatch` >50 直接报错不弹确认框。② **预判 fail-open**：`precheckDecidable` 并发 4 调 `GET /tasks/{id}/actions`，仅「响应成功且明确缺该 action」判 blocked；端点失败/结构异常保留在可决策集合（由服务端兜底），避免端点故障时整批不可用。③ **并发 4**：`runWithConcurrency` 为结果同序的简单 Promise 池（`min(limit, n)`，非法 limit 回落 1），`submitBatch` 与 `precheckDecidable` 共用。④ **逐条明细**：`batchFailedList` 渲染每条失败原因 + HTTP 状态码（403/409/502）+「可重试」标记，重试仍只重试 `retryableIds`（502） |
+| 未做 | live 手工批量冒烟（需贴批）；幂等仍由后端 `{task_id}:{attempt}` 保证，重试不双生效 |
+
+**9.13.6.3 第 6 步验收记录（2026-11-16，P2 条件构建器 + 实例三步态）**
+
+| 项 | 结果 |
+|---|---|
+| 前端测试 | 新增 `src/views/RuleCenter/__tests__/approvalPolicyConditions.spec.js` **22 passed**（op 归一、条件数组 ↔ 树往返、`operator`/`value_*` 兼容、`validateSteps` 五类用例）；新增 `src/components/common/__tests__/ApprovalFlowSteps.spec.js` **5 passed**（三态标签 / missReason / 无 actor 不伪造 / 空 steps）；`taskService.spec.js` 新增 7 例 `buildApprovalFlow`（三态序列、同阶段并行、全 done、事件归属取最新、无匹配空串、`hit_policy=false` 原因、缺 `inputs` 不抛）；`TaskDetailDrawer.spec.js` **26 passed**（`approval-chain` 的 `procurement_manager` 断言保持） |
+| 构建/lint | `npm run build` exit 0（chunk-cycles OK）；`eslint` 无新增问题（基线：`AssociationSection` 5 warning、`TaskDetailDrawer` 2、`taskService` `URLSearchParams` no-undef 1、`TaskInboxPanel` `_` 1） |
+| 条件区口径 | `ApprovalPolicyPanel` 条件区改「构建器 / JSON」双模（`data-test="condition-mode-toggle"`）：构建器为 `ConditionRuleBuilder`（`v-model:tree` + `field-metadata`），树变更即序列化回 `conditionsText`，保存路径与落库契约（`[{field_id, operator, value}]`）不变；JSON → 构建器解析失败则 `message.error` 并停留 JSON，不静默丢数据。转换与校验抽为纯模块 `approvalPolicyConditions.js`（`normalizeOp` / `conditionsToTree` / `treeToConditions` / `validateSteps`），无法用构建器表达的条目计入 `droppedCount` 并自动停在 JSON 模式 |
+| 步骤校验 | 保存前本地校验四类：`step_no` 排序后必须连续 1..n；单步 `min_amount > max_amount`；相邻步金额区间须首尾相接（空 = 无界，两侧都无界跳过，仅一侧有界即报重叠/断档）；`approver_type` / `approver_ref` 必填。失败 `message.error(errors[0])` 阻止提交，不新增后端规则 |
+| 三步态口径 | 新增 `src/components/common/ApprovalFlowSteps.vue`（原语组件，无状态推理），两处复用：`TaskDetailDrawer` 的 `approval-chain` 与 `AssociationSection` 单据侧投影。状态推导集中在 `taskService.buildApprovalFlow`：`status='done'` → 全 `done`；否则按 `stage_no` 与当前阶段比较（小于 → `done`、等于 → `active`、大于 → `pending`，同阶段并行步同时 `active`）；已完成步的处理人/时间**只在事件 `payload.step_no` / `payload.stage_no` 命中时归属**（取 `occurred_at` 最新一条），无匹配留空不伪造；`hit_policy=false` 渲染「未命中策略，回落默认链」 |
+| 实现偏离 | 9.13.4.5 原列的 `task_participation.participations_view` 未纳入归属判定：该视图无 `step_no` 归属键，按事件 payload 归属更准确；参与流水仍可在任务抽屉的原分区查看。单据侧 `GET /tasks` 行投影不含 `inputs`，故 `AssociationSection.loadApprovalProgress` 追加一次 `fetchTaskDetail`（失败回落行数据） |
+
+**9.13.6.4 二次检查（2026-11-16，对照后端契约复核）**
+
+| # | 复核项 | 结论 / 处置 |
+|---|---|---|
+| 1 | 条件落库键名 | **已修正**：后端 `_condition_row` 只读 `operator`，原实现写 `op` 会被静默回落为 `=`（所有条件退化成等值比较）。`treeToConditions` 改输出 `{field_id, operator, value}`，读取兼容 `op` 别名与 `value_text / value_number / value_json` 三列；`applyForm` 载入时把详情行归一成落库契约再展示 |
+| 2 | 三步态的阶段域 | **已修正**：原实现拿 `step_no` 与 `stage_no` 比较（跨域），同阶段并行的多个审批人会被误判为 `pending`。改为按 `stage_no` 判态、按 `(stage_no, step_no)` 排序；旧快照无 `stage_no` 时回落 `step_no`（保持并串行语义） |
+| 3 | 策略步骤阶段可配 | **已补齐**：步骤表新增「阶段」列（`stage_no`，min=1，默认取当前最大阶段 +1），否则多步策略全部落在第 1 阶段，串行推进永不触发。后端 `_step_row` 同口径（默认 1、必须 ≥1） |
+| 4 | 批量预判口径 | 已核实 `task_actions_service` 按「状态 × 类型 × 权限」过滤（`{bo}:approve` 需 `doc_ref_type` 且用户有该 BO 权限），预判结果与 decision 端点的 403 同源，可放心前置 |
+| 5 | 条件 JSON 往返 | 后端同时接受 `value` / `value_text` / `value_number` / `value_json`，原样回存不丢值；仅在无丢弃项时归一输出，`droppedCount>0` 保留原文并停留 JSON 模式 |
+| 6 | 回归 | 6 个前端测试文件 **124 passed**（`taskService` 48、`approvalPolicyConditions` 22、`TaskDetailDrawer` 26、`TaskInboxPanel` 11、`useTaskInbox` 12、`ApprovalFlowSteps` 5）；`npm run build` exit 0（chunk-cycles OK） |
+
+
+#### 9.13.7 证据来源
+
+- Oracle：[Transaction Console（HCM 审批监控）](http://docs.oracle.com/en/cloud/saas/human-resources/faucf/how-you-manage-hcm-approval-transactions.html)、[Manage Workflow Transactions（审批历史含当前处理人）](http://docs.oracle.com/en/cloud/saas/procurement/24d/oapro/manage-workflow-transactions.html)、[Document History for Purchasing Documents](https://docs.oracle.com/en/cloud/saas/procurement/24b/oaprc/document-history-for-purchasing-documents.html)、[Approval Rules 配置（Transaction Console → Configure Rules）](http://docs.oracle.com/en/cloud/saas/readiness/scm/26b/inv26b/26B-inventory-wn-f43054.htm)、[BPM Worklist（状态与先 claim 约束）](http://docs.oracle.com/cd/E25178_01/dev.1111/e10224/bp_worklist.htm)、[Task Actions（reassign/delegate/pushback/escalate）](http://docs.oracle.com/en/middleware/soa-suite/soa/14.1.2/develop/task-actions.html)、[System Actions（suspend/resume 权限）](https://docs.cloud.oracle.com/en/middleware/soa-suite/soa/14.1.2/develop/system-actions.html)
+- SAP：[My Inbox（F0862：后端下发 decision options，标准动作 claim/release/forward）](https://fioriappslibrary.hana.ondemand.com/sap/fix/externalViewer/#/detail/Apps('F0862')/S21OP)、[Flexible Workflow 配置（步骤/升级/委托）](https://www.corepath.es/blog/sap-release-strategy-vs-fiori-workflow_fr.html)
+- ServiceNow：[My Approvals 批量通过/驳回（sys_ids 交服务端）](https://www.servicenow.com/community/developer-blog/enhancing-the-servicenow-my-approvals-widget-implementation-amp/ba-p/3587131)、[分组审批（多条聚合为一条）](https://www.servicenow.com/community/spm-forum/send-consolidated-approval-email-for-multiple-demands-projects/m-p/3410224)
+- Salesforce：[ApprovalProcess 元数据（allowRecall / allowedSubmitters / steps）](https://developer.salesforce.com/docs/atlas.en-us.242.0.api_meta.meta/api_meta/meta_approvalprocess.htm)、[Approval History → Approval Trace 组件](https://salesforcedictionary.com/blogs/classic-approval-processes-to-flow-approvals-2026)

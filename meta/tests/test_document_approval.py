@@ -23,6 +23,7 @@ from meta.services.approval_task_service import ApprovalTaskService
 from meta.services.document_approval_decision import (
     purchase_order_approve_handler,
     purchase_order_reject_handler,
+    withdraw_approval,
 )
 from meta.services.document_approval_service import DocumentApprovalResolver
 
@@ -417,3 +418,60 @@ def test_decide_detects_effect_not_applied(conn, ds, monkeypatch):
     result = purchase_order_approve_handler({'purchase_order_id': 1}, {})
     assert result['success'] is False
     assert result['code'] == 'EFFECT_NOT_APPLIED'
+
+
+# ---------------- 撤回（withdraw） ----------------
+
+def test_withdraw_moves_submitted_back_to_draft(conn, ds, monkeypatch):
+    _insert_order(conn, status='submitted')
+    conn.execute("UPDATE purchase_orders SET approval_status = 'pending'")
+    _patch_ds(monkeypatch, ds)
+    _patch_update(conn, monkeypatch)
+
+    result = withdraw_approval('purchase_order', 1)
+
+    assert result['success'] is True
+    assert result['data']['new_status'] == 'draft'
+    row = ds.query('SELECT status, approval_status FROM purchase_orders WHERE id=1')[0]
+    assert row['status'] == 'draft'
+    assert row['approval_status'] == 'not_required'
+
+
+def test_withdraw_is_idempotent_on_draft(conn, ds, monkeypatch):
+    """重复撤回：已在草稿 → 同值 no-op success，不再写库。"""
+    _insert_order(conn, status='draft')
+    _patch_ds(monkeypatch, ds)
+    called = []
+
+    def fake_update(record_id, status, approval_status):
+        called.append(record_id)
+        return _ok_result()
+
+    monkeypatch.setattr(document_approval_decision, '_execute_update', fake_update)
+
+    result = withdraw_approval('purchase_order', 1)
+
+    assert result['success'] is True
+    assert result['data']['idempotent'] is True
+    assert called == []
+
+
+def test_withdraw_rejects_other_object_types(conn, ds, monkeypatch):
+    """未提供回退处理器的单据类型 fail-closed（任务侧据此拒绝撤回）。"""
+    _insert_order(conn, status='submitted')
+    _patch_ds(monkeypatch, ds)
+
+    result = withdraw_approval('transfer_order', 1)
+
+    assert result['success'] is False
+    assert result['code'] == 'WITHDRAW_NOT_SUPPORTED'
+
+
+def test_withdraw_rejects_non_submitted_status(conn, ds, monkeypatch):
+    _insert_order(conn, status='confirmed')
+    _patch_ds(monkeypatch, ds)
+
+    result = withdraw_approval('purchase_order', 1)
+
+    assert result['success'] is False
+    assert result['code'] == 'INVALID_STATUS'

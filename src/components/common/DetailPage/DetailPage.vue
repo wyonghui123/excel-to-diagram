@@ -1204,6 +1204,26 @@ const computedSections = computed(() => {
     }
   }
 
+  // [9.13.4.1 单据侧只读审批投影 2026-11-16] 位置 = ObjectPage 顶部状态区
+  //   （基本信息之后、子表与规则推导之前）；由 BO YAML 的
+  //   ui_view_config.detail.approval_progress 声明，未声明的 BO 零影响。
+  //   只读：不做单据页决策（D-AP-16），决策入口仍在任务抽屉。
+  const approvalSection = detailConfig?.approval_progress
+  if (approvalSection?.enabled && !isAddMode) {
+    sections.push({
+      key: 'approval_progress',
+      label: approvalSection.label || '审批进度',
+      icon: 'check',
+      type: 'association',
+      association: 'approval_progress',
+      assocName: 'approval_progress',
+      customFetcher: 'approval_progress',
+      readonly: true,
+      display: 'always',
+      pageSize: 1
+    })
+  }
+
   const childSections = entityMeta.value?.ui_view_config?.child_sections || []
   for (const cs of childSections) {
     if (cs.child_object === 'annotation') {
